@@ -1,0 +1,3 @@
+add_executable(RunWithSimplePrompt.integrationtest RunWithSimplePromptTest.cpp)
+target_link_libraries(RunWithSimplePrompt.integrationtest PRIVATE LLMCommunicator HTTPClient Logger nlohmann_json::nlohmann_json)
+target_compile_features(RunWithSimplePrompt.integrationtest PRIVATE cxx_std_17)

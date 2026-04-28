@@ -1,0 +1,3 @@
+add_executable(HTTPClient.OllamaLocalEndpoint.integrationtest HTTPClientOllamaLocalEndpointTest.cpp)
+target_link_libraries(HTTPClient.OllamaLocalEndpoint.integrationtest PRIVATE HTTPClient Logger nlohmann_json::nlohmann_json)
+target_compile_features(HTTPClient.OllamaLocalEndpoint.integrationtest PRIVATE cxx_std_17)

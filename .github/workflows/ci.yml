@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Linux
+        run: .github/scripts/build-linux.sh
+      - name: Run tests
+        run: .github/scripts/run-tests-linux.sh
+        env:
+          HAISOS_ENDPOINT: ${{ secrets.HAISOS_ENDPOINT }}
+          HAISOS_MODEL: ${{ secrets.HAISOS_MODEL }}
+          HAISOS_API_KEY: ${{ secrets.HAISOS_API_KEY }}
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: output/linux/
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Windows
+        shell: cmd
+        run: .github\scripts\build-windows.bat
+      - name: Run tests
+        shell: cmd
+        run: .github\scripts\run-tests-windows.bat
+        env:
+          HAISOS_ENDPOINT: ${{ secrets.HAISOS_ENDPOINT }}
+          HAISOS_MODEL: ${{ secrets.HAISOS_MODEL }}
+          HAISOS_API_KEY: ${{ secrets.HAISOS_API_KEY }}
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: output/windows/
+
+  package:
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-build
+          path: output/linux/
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-build
+          path: output/windows/
+      - name: Package
+        run: .github/scripts/package-for-ci.sh
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-package
+          path: haisos.*.zip

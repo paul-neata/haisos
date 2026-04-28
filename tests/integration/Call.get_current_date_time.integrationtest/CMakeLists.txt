@@ -1,0 +1,3 @@
+add_executable(Call.get_current_date_time.integrationtest CallGetCurrentDateTimeTest.cpp)
+target_link_libraries(Call.get_current_date_time.integrationtest PRIVATE HaisosEngine Factory LLMCommunicator HTTPClient Logger nlohmann_json::nlohmann_json)
+target_compile_features(Call.get_current_date_time.integrationtest PRIVATE cxx_std_17)

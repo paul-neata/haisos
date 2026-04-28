@@ -1,0 +1,3 @@
+add_executable(HaisosEngine.unittests HaisosEngineTest.cpp)
+target_link_libraries(HaisosEngine.unittests PRIVATE gtest_main gmock HaisosEngine Factory)
+target_compile_features(HaisosEngine.unittests PRIVATE cxx_std_17)

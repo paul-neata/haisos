@@ -1,0 +1,3 @@
+add_executable(ToolFactory.unittests ToolFactoryTest.cpp)
+target_link_libraries(ToolFactory.unittests PRIVATE gtest_main gmock ToolFactory)
+target_compile_features(ToolFactory.unittests PRIVATE cxx_std_17)

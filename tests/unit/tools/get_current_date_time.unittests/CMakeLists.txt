@@ -1,0 +1,3 @@
+add_executable(get_current_date_time.unittests GetCurrentDateTimeTest.cpp)
+target_link_libraries(get_current_date_time.unittests PRIVATE gtest_main gmock GetCurrentDateTime)
+target_compile_features(get_current_date_time.unittests PRIVATE cxx_std_17)

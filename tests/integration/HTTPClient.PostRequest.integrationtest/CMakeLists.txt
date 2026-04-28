@@ -1,0 +1,3 @@
+add_executable(HTTPClient.PostRequest.integrationtest HTTPClientPostRequestTest.cpp)
+target_link_libraries(HTTPClient.PostRequest.integrationtest PRIVATE HTTPClient Logger nlohmann_json::nlohmann_json)
+target_compile_features(HTTPClient.PostRequest.integrationtest PRIVATE cxx_std_17)

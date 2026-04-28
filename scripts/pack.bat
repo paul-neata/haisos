@@ -4,7 +4,7 @@ setlocal EnableDelayedExpansion
 set "REPO_ROOT=%~dp0.."
 
 rem Read version (strip quotes)
-for /f "usebackq delims=" %%a in ("%REPO_ROOT%\VERSION") do set "VERSION=%%~a"
+for /f "usebackq delims=" %%a in ("%REPO_ROOT%\HAISOS_VERSION") do set "VERSION=%%~a"
 
 rem Get branch name
 if defined GITHUB_REF_NAME (

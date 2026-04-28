@@ -6,7 +6,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 # Read version (strip quotes)
-VERSION=$(tr -d '"' < "$REPO_ROOT/VERSION")
+VERSION=$(tr -d '"' < "$REPO_ROOT/HAISOS_VERSION")
 
 # Get branch name
 if [ -n "$GITHUB_REF_NAME" ]; then

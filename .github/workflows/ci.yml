@@ -2,7 +2,6 @@ name: CI
 
 on:
   push:
-  pull_request:
 
 jobs:
   build-linux:
@@ -42,20 +41,6 @@ jobs:
         with:
           name: windows-build
           path: output/windows/
-
-  build-wasm:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Emscripten
-        uses: mymindstorm/setup-emsdk@v14
-      - name: Build WASM
-        run: .github/scripts/build-wasm.sh
-      - name: Upload WASM artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: wasm-build
-          path: output/wasm/
 
   package:
     needs: [build-linux, build-windows]

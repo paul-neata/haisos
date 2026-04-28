@@ -34,7 +34,7 @@ TEST(VirtualConsoleTest, ThreadSafety) {
 
     std::vector<std::thread> threads;
     for (int t = 0; t < numThreads; ++t) {
-        threads.emplace_back([&console, t]() {
+        threads.emplace_back([&console, t, messagesPerThread]() {
             for (int i = 0; i < messagesPerThread; ++i) {
                 console.Write("Thread " + std::to_string(t) + " Message " + std::to_string(i));
             }

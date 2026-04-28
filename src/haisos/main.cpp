@@ -19,9 +19,10 @@
 
 using namespace Haisos;
 
-constexpr const char* VERSION_STRING =
-#include "../../VERSION.inc"
-;
+#ifndef HAISOS_VERSION
+#define HAISOS_VERSION "unknown"
+#endif
+constexpr const char* VERSION_STRING = HAISOS_VERSION;
 
 std::string GetCurrentTimestamp() {
     auto now = std::chrono::system_clock::now();

@@ -7,6 +7,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Read version from VERSION file
+file(READ "${CMAKE_SOURCE_DIR}/VERSION" PROJECT_VERSION)
+string(STRIP "${PROJECT_VERSION}" PROJECT_VERSION)
+add_compile_definitions(HAISOS_VERSION="${PROJECT_VERSION}")
+
 # Platform detection (must be before output directory settings)
 if(WIN32)
     set(PLATFORM_NAME "windows")

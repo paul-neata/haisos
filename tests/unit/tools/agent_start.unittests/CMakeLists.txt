@@ -1,0 +1,3 @@
+add_executable(AgentStartTool.unittests AgentStartToolTest.cpp)
+target_link_libraries(AgentStartTool.unittests PRIVATE gtest_main gmock AgentStartTool)
+target_compile_features(AgentStartTool.unittests PRIVATE cxx_std_17)

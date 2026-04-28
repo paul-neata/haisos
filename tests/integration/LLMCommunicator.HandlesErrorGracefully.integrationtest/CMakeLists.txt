@@ -1,0 +1,3 @@
+add_executable(LLMCommunicator.HandlesErrorGracefully.integrationtest LLMCommunicatorHandlesErrorGracefullyTest.cpp)
+target_link_libraries(LLMCommunicator.HandlesErrorGracefully.integrationtest PRIVATE LLMCommunicator HTTPClient Logger nlohmann_json::nlohmann_json)
+target_compile_features(LLMCommunicator.HandlesErrorGracefully.integrationtest PRIVATE cxx_std_17)

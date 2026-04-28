@@ -1,0 +1,3 @@
+add_executable(Agent.PostAndProcess.integrationtest AgentPostAndProcessTest.cpp)
+target_link_libraries(Agent.PostAndProcess.integrationtest PRIVATE Factory LLMCommunicator HTTPClient Logger nlohmann_json::nlohmann_json)
+target_compile_features(Agent.PostAndProcess.integrationtest PRIVATE cxx_std_17)

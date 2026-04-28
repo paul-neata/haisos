@@ -1,0 +1,3 @@
+add_executable(RawCall.get_current_date_time.integrationtest get_current_date_timeTest.cpp)
+target_link_libraries(RawCall.get_current_date_time.integrationtest PRIVATE Factory Logger nlohmann_json::nlohmann_json)
+target_compile_features(RawCall.get_current_date_time.integrationtest PRIVATE cxx_std_17)

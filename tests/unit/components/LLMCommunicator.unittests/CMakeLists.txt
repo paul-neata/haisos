@@ -1,0 +1,3 @@
+add_executable(LLMCommunicator.unittests LLMCommunicatorTest.cpp)
+target_link_libraries(LLMCommunicator.unittests PRIVATE gtest_main gmock LLMCommunicator HTTPClient)
+target_compile_features(LLMCommunicator.unittests PRIVATE cxx_std_17)

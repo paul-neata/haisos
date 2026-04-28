@@ -1,0 +1,3 @@
+add_executable(AgentWaitToFinishTool.unittests AgentWaitToFinishToolTest.cpp)
+target_link_libraries(AgentWaitToFinishTool.unittests PRIVATE gtest_main gmock AgentWaitToFinishTool)
+target_compile_features(AgentWaitToFinishTool.unittests PRIVATE cxx_std_17)

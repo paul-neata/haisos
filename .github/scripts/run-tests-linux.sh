@@ -7,7 +7,7 @@ PROXY_PORT=11435
 
 # Always run unit tests
 echo "Running unit tests..."
-./scripts/test_linux.sh L U
+bash ./scripts/test_linux.sh L U
 
 # Check if cache database has recordings
 HAS_RECORDINGS=0
@@ -34,10 +34,10 @@ if [ "$HAS_RECORDINGS" -eq 1 ]; then
     export HAISOS_ENDPOINT="http://localhost:${PROXY_PORT}/api/chat"
 
     echo "Running integration tests..."
-    ./scripts/test_linux.sh L I
+    bash ./scripts/test_linux.sh L I
 
     echo "Running haisos tests..."
-    ./scripts/test_linux.sh L H
+    bash ./scripts/test_linux.sh L H
 
     # Stop proxy
     if [ -n "$PROXY_PID" ]; then

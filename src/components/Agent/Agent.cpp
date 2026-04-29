@@ -102,27 +102,23 @@ Agent::Agent(
     std::shared_ptr<IConsole> console,
     const std::vector<std::string>& systemPrompts,
     const std::string& name,
-    const std::string& color,
     std::shared_ptr<IAgent> parent,
-    std::shared_ptr<IVirtualConsole> virtualConsole,
     const std::string& startTime,
     const JsonSendReceiveCallbacks& callbacks)
-    : m_llmCommunicator(llmCommunicator)
-    , m_toolFactory(toolFactory)
-    , m_console(console)
-    , m_virtualConsole(std::move(virtualConsole))
+    : m_llmCommunicator(std::move(llmCommunicator))
+    , m_toolFactory(std::move(toolFactory))
+    , m_console(std::move(console))
     , m_systemPrompts(systemPrompts)
     , m_name(name)
-    , m_color(color)
     , m_startTime(startTime)
-    , m_parent(parent)
+    , m_parent(std::move(parent))
     , m_callbacks(callbacks)
 {
     m_thread = std::thread(&Agent::RunThread, this);
 }
 
 Agent::~Agent() {
-    Stop();
+    Stop(0);
     WaitToFinish();
 }
 
@@ -134,13 +130,17 @@ void Agent::Send(const std::string& command) {
     m_commandQueue.Send(command);
 }
 
-void Agent::Stop() {
+bool Agent::Stop(unsigned timeoutMs) {
     m_commandQueue.Close();
+    if (timeoutMs > 0) {
+        return WaitToFinish(timeoutMs);
+    }
+    return false;
 }
 
 void Agent::Kill() {
     m_killed = true;
-    Stop();
+    Stop(0);
 }
 
 std::shared_ptr<IAgent> Agent::GetParent() const {
@@ -151,11 +151,8 @@ std::string Agent::Name() const {
     return m_name;
 }
 
-std::string Agent::Color() const {
-    return m_color;
-}
-
 void Agent::WaitToFinish() {
+    std::lock_guard<std::mutex> joinLock(m_joinMutex);
     if (m_thread.joinable()) {
         m_thread.join();
     }
@@ -165,8 +162,11 @@ bool Agent::WaitToFinish(uint64_t timeout_ms) {
     std::unique_lock<std::mutex> lock(m_finishedMutex);
     bool finished = m_finishedCv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [this] { return m_finished.load(); });
     lock.unlock();
-    if (finished && m_thread.joinable()) {
-        m_thread.join();
+    if (finished) {
+        std::lock_guard<std::mutex> joinLock(m_joinMutex);
+        if (m_thread.joinable()) {
+            m_thread.join();
+        }
     }
     return finished;
 }
@@ -188,9 +188,13 @@ std::vector<std::shared_ptr<IAgent>> Agent::GetChildren() const {
 }
 
 nlohmann::json Agent::GetHistory() const {
-    std::lock_guard<std::mutex> lock(m_historyMutex);
+    std::vector<LLMMessage> localHistory;
+    {
+        std::lock_guard<std::mutex> lock(m_historyMutex);
+        localHistory = m_history;
+    }
     nlohmann::json historyArray = nlohmann::json::array();
-    for (const auto& msg : m_history) {
+    for (const auto& msg : localHistory) {
         nlohmann::json entry;
         entry["role"] = msg.role;
         entry["content"] = msg.content;
@@ -204,6 +208,10 @@ nlohmann::json Agent::GetHistory() const {
     return historyArray;
 }
 
+std::string Agent::GetConsoleOutput() const {
+    return m_messageBuffer.GetContents();
+}
+
 bool Agent::IsFinished() const {
     return m_finished.load();
 }
@@ -214,10 +222,6 @@ bool Agent::IsKilled() const {
 
 std::string Agent::GetStartTime() const {
     return m_startTime;
-}
-
-std::shared_ptr<IVirtualConsole> Agent::GetVirtualConsole() const {
-    return m_virtualConsole;
 }
 
 int Agent::GetDepth() const {
@@ -290,9 +294,7 @@ std::vector<std::tuple<std::string, std::string, std::string>> Agent::ExecuteToo
             if (m_console) {
                 m_console->Write(*this, "Error: Unknown tool - " + toolName);
             }
-            if (m_virtualConsole) {
-                m_virtualConsole->Write(*this, "Error: Unknown tool - " + toolName);
-            }
+            m_messageBuffer.Append("[" + m_name + "] Error: Unknown tool - " + toolName + "\n");
             toolResults.emplace_back(toolName, "Error: Unknown tool - " + toolName, toolCallId);
         }
     }
@@ -366,9 +368,7 @@ void Agent::RunThread() {
                     if (m_console) {
                         m_console->Write(*this, response.message.content);
                     }
-                    if (m_virtualConsole) {
-                        m_virtualConsole->Write(*this, response.message.content);
-                    }
+                    m_messageBuffer.Append("[" + m_name + "] " + response.message.content + "\n");
                 }
 
                 // ALWAYS push assistant response to history

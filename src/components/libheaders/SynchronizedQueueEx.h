@@ -8,7 +8,7 @@ namespace Haisos {
 template <typename T>
 struct SynchronizedQueueExItem {
     T data;
-    std::shared_ptr<std::promise<void>> popped_promise;
+    std::shared_ptr<std::promise<void>> poppedPromise;
 };
 
 template <typename T>
@@ -25,8 +25,8 @@ public:
         if (!m_queue.Pop(wrapper)) {
             return false;
         }
-        if (wrapper.popped_promise) {
-            wrapper.popped_promise->set_value();
+        if (wrapper.poppedPromise) {
+            wrapper.poppedPromise->set_value();
         }
         item = std::move(wrapper.data);
         return true;
@@ -41,7 +41,7 @@ public:
         auto future = promise->get_future();
         SynchronizedQueueExItem<T> wrapper;
         wrapper.data = std::move(item);
-        wrapper.popped_promise = std::move(promise);
+        wrapper.poppedPromise = std::move(promise);
         m_queue.Post(std::move(wrapper));
         future.wait();
     }

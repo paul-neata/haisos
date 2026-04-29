@@ -21,7 +21,7 @@ TEST(AgentQueryToolTest, QueryOnRunningAgent) {
     auto callerAgent = std::make_shared<MockAgent>();
     auto child = std::make_shared<MockAgent>();
     child->SetName("child1");
-    callerAgent->RegisterChild(child);
+    callerAgent->AddChild(child);
 
     AgentQueryTool tool;
 
@@ -44,7 +44,7 @@ TEST(AgentQueryToolTest, QueryWithReturnConsoleOnFinishedAgent) {
     auto child = std::make_shared<MockAgent>();
     child->SetName("child1");
     child->SetFinished(true);
-    callerAgent->RegisterChild(child);
+    callerAgent->AddChild(child);
 
     AgentQueryTool tool;
 
@@ -68,7 +68,7 @@ TEST(AgentQueryToolTest, QueryWithReturnMessages) {
     child->SetName("child1");
     nlohmann::json history = nlohmann::json::array({{{"role", "user"}, {"content", "Hello"}}});
     child->SetHistory(history);
-    callerAgent->RegisterChild(child);
+    callerAgent->AddChild(child);
 
     AgentQueryTool tool;
 

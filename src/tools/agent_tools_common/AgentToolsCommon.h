@@ -78,7 +78,6 @@ inline std::shared_ptr<IAgent> CreateAndStartSubagent(
     std::string name = GenerateAgentName();
     std::string startTime = GetCurrentTimestamp();
 
-    auto virtualConsole = factory.CreateVirtualConsole();
     auto httpClient = factory.CreateHTTPClient();
     auto toolFactory = factory.CreateToolFactory(factory);
     auto console = factory.CreateConsole(false);
@@ -98,9 +97,7 @@ inline std::shared_ptr<IAgent> CreateAndStartSubagent(
         std::move(console),
         systemPrompts,
         name,
-        "",
         parent,
-        std::move(virtualConsole),
         startTime);
 
     agent->Post(userPrompt);
@@ -115,8 +112,8 @@ inline nlohmann::json BuildStartResult(std::shared_ptr<IAgent> agent, bool finis
     result["finished"] = finished;
 
     if (finished) {
-        if (returnConsole && agent->GetVirtualConsole()) {
-            result["console_result"] = agent->GetVirtualConsole()->GetContents();
+        if (returnConsole) {
+            result["console_result"] = agent->GetConsoleOutput();
         }
         if (returnMessages) {
             result["messages_result"] = agent->GetHistory();
@@ -133,8 +130,8 @@ inline nlohmann::json BuildWaitResult(std::shared_ptr<IAgent> agent, bool return
     result["finished"] = agent->IsFinished();
     if (agent->IsFinished()) {
         result["end_time"] = GetCurrentTimestampISO8601();
-        if (returnConsole && agent->GetVirtualConsole()) {
-            result["console_result"] = agent->GetVirtualConsole()->GetContents();
+        if (returnConsole) {
+            result["console_result"] = agent->GetConsoleOutput();
         }
         if (returnMessages) {
             result["messages_result"] = agent->GetHistory();
@@ -149,8 +146,7 @@ inline nlohmann::json BuildQueryResult(std::shared_ptr<IAgent> agent, bool retur
     result["killed"] = agent->IsKilled();
     result["finished"] = agent->IsFinished();
     if (returnConsole) {
-        auto vc = agent->GetVirtualConsole();
-        result["console_result"] = vc ? vc->GetContents() : "";
+        result["console_result"] = agent->GetConsoleOutput();
     }
     if (returnMessages) {
         result["messages_result"] = agent->GetHistory();

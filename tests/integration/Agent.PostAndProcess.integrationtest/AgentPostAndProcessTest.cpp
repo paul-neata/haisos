@@ -29,14 +29,12 @@ bool TestAgentPostAndProcess() {
         std::move(console),
         std::vector<std::string>{"You are a helpful AI assistant."},
         "integration_agent",
-        "",
-        nullptr,
         nullptr,
         "",
         callbacks);
 
     agent->Post("What is 2+2?");
-    agent->Stop();
+    agent->Stop(0);
     agent->WaitToFinish();
 
     bool success = true;

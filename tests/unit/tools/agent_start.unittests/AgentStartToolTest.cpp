@@ -6,7 +6,6 @@
 #include "interfaces/ILLMCommunicator.h"
 #include "interfaces/IToolFactory.h"
 #include "interfaces/IConsole.h"
-#include "interfaces/IVirtualConsole.h"
 #include "interfaces/IHTTPClient.h"
 #include "interfaces/IHaisosEngine.h"
 
@@ -15,18 +14,6 @@ using namespace Haisos::Tools;
 using namespace Haisos::Mocks;
 
 namespace {
-
-class MockVirtualConsole : public IVirtualConsole {
-public:
-    void Write(const std::string& message) override { m_contents += message + "\n"; }
-    void Write(const IAgent& agent, const std::string& message) override { m_contents += "[" + agent.Name() + "] " + message + "\n"; }
-    void Start() override {}
-    void Stop() override {}
-    std::string GetContents() const override { return m_contents; }
-    void Clear() override { m_contents.clear(); }
-private:
-    std::string m_contents;
-};
 
 class DummyConsole : public IConsole {
 public:
@@ -64,20 +51,18 @@ public:
 class TestFactory : public IFactory {
 public:
     std::unique_ptr<IConsole> CreateConsole(bool) override { return std::make_unique<DummyConsole>(); }
-    std::unique_ptr<IVirtualConsole> CreateVirtualConsole() override { return std::make_unique<MockVirtualConsole>(); }
     std::unique_ptr<IHTTPClient> CreateHTTPClient() override { return std::make_unique<DummyHTTPClient>(); }
     std::unique_ptr<ILLMCommunicator> CreateLLMCommunicator(std::unique_ptr<IHTTPClient>, const std::string&, const std::string&, const std::string&) override {
         return std::make_unique<DummyLLMCommunicator>();
     }
     std::unique_ptr<IToolFactory> CreateToolFactory(IFactory&) override { return std::make_unique<DummyToolFactory>(); }
-    std::shared_ptr<IAgent> CreateAgent(std::unique_ptr<ILLMCommunicator>, std::unique_ptr<IToolFactory>, std::unique_ptr<IConsole>, const std::vector<std::string>&, const std::string& name, const std::string&, std::shared_ptr<IAgent> parent, std::shared_ptr<IVirtualConsole> virtualConsole, const std::string& startTime, const JsonSendReceiveCallbacks&) override {
+    std::shared_ptr<IAgent> CreateAgent(std::unique_ptr<ILLMCommunicator>, std::unique_ptr<IToolFactory>, std::unique_ptr<IConsole>, const std::vector<std::string>&, const std::string& name, std::shared_ptr<IAgent> parent, const std::string& startTime, const JsonSendReceiveCallbacks&) override {
         auto agent = std::make_shared<MockAgent>();
         agent->SetName(name);
         agent->SetStartTime(startTime);
-        agent->SetVirtualConsole(std::move(virtualConsole));
         m_lastAgent = agent;
         if (parent) {
-            parent->RegisterChild(agent);
+            parent->AddChild(agent);
         }
         return agent;
     }

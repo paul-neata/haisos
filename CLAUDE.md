@@ -27,6 +27,8 @@ haisos/
 ├── src/
 │   ├── components/
 │   │   ├── Agent/          - Agent orchestration with parent/child support
+│   │   │   ├── AgentMessageBuffer.h  - Internal per-agent message storage
+│   │   │   └── AgentMessageBuffer.cpp
 │   │   ├── Console/        - Asynchronous console output
 │   │   ├── Factory/        - Dependency injection factory
 │   │   ├── HaisosEngine/   - Main orchestration engine
@@ -40,11 +42,16 @@ haisos/
 │   │   └── ToolFactory/    - Tool creation and management
 │   ├── tools/
 │   │   ├── get_current_date_time/ - Date/time retrieval tool
-│   │   └── subagent_ctl/   - Subagent lifecycle control tool
+│   │   ├── agent_start/    - Start a subagent
+│   │   ├── agent_stop/     - Stop a subagent
+│   │   ├── agent_query/    - Query a subagent status
+│   │   ├── agent_wait_to_finish/ - Wait for a subagent to finish
+│   │   ├── agent_list_running/ - List running subagents
+│   │   └── agent_tools_common/ - Shared helpers for agent tools
 │   └── haisos/
 │       ├── main.cpp        - Entry point
 │       └── CliParser.cpp   - Command-line argument parser
-├── interfaces/             - Component interfaces (IAgent.h, IConsole.h, IFactory.h, IHTTPClient.h, ILLMCommunicator.h, IHaisosEngine.h, IToolFactory.h, IVirtualConsole.h, JsonSendReceiveCallbacks.h)
+├── interfaces/             - Component interfaces (IAgent.h, IConsole.h, IFactory.h, IHTTPClient.h, ILLMCommunicator.h, IHaisosEngine.h, ITool.h, IToolFactory.h, JsonSendReceiveCallbacks.h)
 ├── tests/                 - All tests
 │   ├── mocks/             - Mock classes for testing
 │   ├── unit/              - Unit tests (Google Test)
@@ -53,7 +60,6 @@ haisos/
 │   └── haisos/            - Haisos JS-based tests
 ├── scripts/               - Build scripts
 ├── extern/                - External dependencies (nlohmann_json, googletest)
-├── .ci/                   - CI/CD scripts
 ├── .claude/               - Claude Code configuration
 │   └── skills/            - Custom Claude Code skills
 ├── build/temp_<platform>/ - CMake build files (temporary, e.g., temp_linux, temp_linux_debug)
@@ -120,7 +126,7 @@ node ./output/wasm/haisos.js
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `HAISOS_ENDPOINT` | LLM API endpoint URL | `http://localhost:11434/api/chat` |
-| `HAISOS_MODEL` | Model name | `llama3` |
+| `HAISOS_MODEL` | Model name | `kimi-k2.6:cloud` |
 | `HAISOS_API_KEY` | API key (optional for local Ollama) | (empty) |
 
 ## Command-Line Arguments
@@ -182,9 +188,9 @@ ctest --output-on-failure
 ## Architecture
 
 1. **HaisosEngine** - Main coordinator, reads markdown files and orchestrates LLM calls
-2. **Agent** - Manages LLM conversations with parent/child agent relationships; supports subagents via `subagent_ctl`
+2. **Agent** - Manages LLM conversations with parent/child agent relationships; supports subagents via agent tools
 3. **LLMCommunicator** - Handles LLM API communication, request/response formatting, and tool call parsing (HTTP is handled by HTTPClient)
-4. **ToolFactory** - Creates tool instances by name, including context-aware tools like `subagent_ctl`
+4. **ToolFactory** - Creates tool instances by name, including context-aware tools like `agent_start`
 5. **Console** - Async message queue for output
 6. **Logger** - Thread-safe logging with configurable receivers
 
@@ -192,8 +198,22 @@ ctest --output-on-failure
 
 | Tool | Description |
 |------|-------------|
-| `get_current_date_time` | Returns the current date and time in ISO 8601 format |
-| `subagent_ctl` | Controls subagent lifecycle: `start`, `run`, `wait_to_finish`, `query`, `stop`, `list_running` |
+| `get_current_date_time` | Returns the current date and time |
+| `agent_start` | Starts a subagent with a given prompt |
+| `agent_stop` | Stops a running subagent |
+| `agent_query` | Queries a subagent's status and output |
+| `agent_wait_to_finish` | Waits for a subagent to finish |
+| `agent_list_running` | Lists all running subagents |
+
+## Automatic Development Rules
+
+When performing automatic development (where a single prompt drives all implementation work):
+
+1. **Build only on the local platform** to verify compilation. Do not cross-compile.
+2. **Never automatically commit** unless the prompt explicitly instructs to commit.
+3. **Never automatically push** to remote repositories unless explicitly instructed.
+4. **Default to release builds** unless debug is explicitly requested.
+5. **Run unit tests** after building to verify correctness before considering work complete.
 
 ## Platform Support
 

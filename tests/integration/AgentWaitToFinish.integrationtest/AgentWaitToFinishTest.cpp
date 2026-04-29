@@ -29,14 +29,12 @@ bool TestAgentWaitToFinish() {
         std::move(console),
         std::vector<std::string>{"You are a helpful AI assistant."},
         "integration_agent",
-        "",
-        nullptr,
         nullptr,
         "",
         callbacks);
 
     agent->Post("Start a subagent with prompt 'What is 3+3?', then wait for it to finish with timeout 30000.");
-    agent->Stop();
+    agent->Stop(0);
     agent->WaitToFinish();
 
     bool success = true;

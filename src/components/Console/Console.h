@@ -19,14 +19,15 @@ public:
     void Write(const std::string& message) override;
     void Write(const IAgent& agent, const std::string& message) override;
 
-    void Start();
-    void Stop();
+    void Start() override;
+    void Stop() override;
 
 private:
     void ProcessQueue();
 
     SynchronizedQueue<std::string> m_queue;
     std::thread m_backgroundThread;
+    int m_logReceiverToken = -1;
 };
 
 }

@@ -49,7 +49,7 @@ std::string AgentStopTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohm
             if (kill) {
                 target->Kill();
             } else {
-                target->Stop();
+                target->Stop(0);
             }
             result = BuildStopResult(target);
         }

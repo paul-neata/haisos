@@ -13,7 +13,6 @@ public:
 
     // IFactory interface
     std::unique_ptr<IConsole> CreateConsole(bool registerAsLogMessageReceiver) override;
-    std::unique_ptr<IVirtualConsole> CreateVirtualConsole() override;
     std::unique_ptr<IHTTPClient> CreateHTTPClient() override;
     std::unique_ptr<ILLMCommunicator> CreateLLMCommunicator(
         std::unique_ptr<IHTTPClient> httpClient,
@@ -27,9 +26,7 @@ public:
         std::unique_ptr<IConsole> console,
         const std::vector<std::string>& systemPrompts,
         const std::string& name,
-        const std::string& color,
         std::shared_ptr<IAgent> parent,
-        std::shared_ptr<IVirtualConsole> virtualConsole = nullptr,
         const std::string& startTime = "",
         const JsonSendReceiveCallbacks& callbacks = {}) override;
     std::unique_ptr<IHaisosEngine> CreateHaisosEngine(IFactory& factory) override;

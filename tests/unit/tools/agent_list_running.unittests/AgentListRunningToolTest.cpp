@@ -21,7 +21,7 @@ TEST(AgentListRunningToolTest, ListRunningReturnsAgent) {
     auto child = std::make_shared<MockAgent>();
     child->SetName("child1");
     child->SetStartTime("2026-04-28 12:00:00");
-    callerAgent->RegisterChild(child);
+    callerAgent->AddChild(child);
 
     AgentListRunningTool tool;
 
@@ -40,7 +40,7 @@ TEST(AgentListRunningToolTest, ListRunningEmptyAfterStop) {
     auto child = std::make_shared<MockAgent>();
     child->SetName("child1");
     child->SetFinished(true);
-    callerAgent->RegisterChild(child);
+    callerAgent->AddChild(child);
 
     AgentListRunningTool tool;
 
@@ -57,12 +57,12 @@ TEST(AgentListRunningToolTest, ListRunningWithNameFilter) {
     auto child1 = std::make_shared<MockAgent>();
     child1->SetName("alpha");
     child1->SetStartTime("2026-04-28 12:00:00");
-    callerAgent->RegisterChild(child1);
+    callerAgent->AddChild(child1);
 
     auto child2 = std::make_shared<MockAgent>();
     child2->SetName("beta");
     child2->SetStartTime("2026-04-28 12:01:00");
-    callerAgent->RegisterChild(child2);
+    callerAgent->AddChild(child2);
 
     AgentListRunningTool tool;
 

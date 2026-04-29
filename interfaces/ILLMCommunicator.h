@@ -3,7 +3,7 @@
 #include <memory>
 #include <vector>
 #include <nlohmann/json.hpp>
-#include "JsonSendReceiveCallbacks.h"
+#include "SystemCallbacks.h"
 
 namespace Haisos {
 
@@ -16,6 +16,7 @@ struct LLMMessage {
     std::string thinking;
     std::string tool_call_id;
     std::vector<json> toolCallsJson;
+    bool is_error = false;
 };
 
 struct LLMResponse {
@@ -31,7 +32,7 @@ public:
     virtual LLMResponse Call(
         const std::vector<LLMMessage>& messages,
         const std::vector<std::tuple<std::string, std::string, nlohmann::json>>& availableTools,
-        const JsonSendReceiveCallbacks& callbacks) = 0;
+        const SystemCallbacks& callbacks) = 0;
 };
 
 }

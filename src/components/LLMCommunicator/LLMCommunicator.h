@@ -20,7 +20,7 @@ public:
     LLMResponse Call(
         const std::vector<LLMMessage>& messages,
         const std::vector<std::tuple<std::string, std::string, nlohmann::json>>& availableTools,
-        const JsonSendReceiveCallbacks& callbacks) override;
+        const SystemCallbacks& callbacks) override;
 
     static std::string BuildRequestJson(
         const std::string& modelName,
@@ -30,7 +30,7 @@ public:
     IHTTPClient* GetHttpClient() const { return m_httpClient.get(); }
 
 private:
-    LLMResponse ParseResponseJson(const std::string& jsonResponse, const JsonSendReceiveCallbacks& callbacks);
+    LLMResponse ParseResponseJson(const std::string& jsonResponse, const SystemCallbacks& callbacks);
 
     std::unique_ptr<IHTTPClient> m_httpClient;
     std::string m_endpoint;

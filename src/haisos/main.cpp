@@ -66,8 +66,34 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    // Apply test environment variables for logging
+    if (const char* envLevel = std::getenv("HAISOS_TEST_LOG_LEVEL")) {
+        result.options.logLevel = ParseLogLevel(envLevel);
+    }
+
     // Set minimum log level
     LogSetMinimumLevel(result.options.logLevel);
+
+    // Set up file logging if requested via CLI or environment
+    std::unique_ptr<std::ofstream> logFileStream;
+    if (!result.options.logFilePath.empty()) {
+        logFileStream = std::make_unique<std::ofstream>(result.options.logFilePath, std::ios::out | std::ios::trunc);
+    } else if (const char* envFile = std::getenv("HAISOS_TEST_LOG_FILE")) {
+        logFileStream = std::make_unique<std::ofstream>(envFile, std::ios::out | std::ios::app);
+    }
+
+    if (logFileStream && logFileStream->is_open()) {
+        LogRegisterMessageReceiver([&logFileStream](const LogMessage& msg) {
+            const char* levelStr =
+                msg.level == LogLevel::VerboseDebug ? "VERBOSE_DEBUG" :
+                msg.level == LogLevel::Debug ? "DEBUG" :
+                msg.level == LogLevel::Trace ? "TRACE" :
+                msg.level == LogLevel::Info ? "INFO" :
+                msg.level == LogLevel::Warning ? "WARNING" :
+                msg.level == LogLevel::Error ? "ERROR" : "UNKNOWN";
+            *logFileStream << "[" << msg.timestamp << "][" << levelStr << "] " << msg.message << "\n" << std::flush;
+        });
+    }
 
     LogInfo("Haisos starting with model from environment");
 
@@ -78,7 +104,7 @@ int main(int argc, char* argv[]) {
     auto engine = factory->CreateHaisosEngine(*factory);
 
     // Prepare callbacks
-    JsonSendReceiveCallbacks callbacks;
+    SystemCallbacks callbacks;
     std::unique_ptr<std::ofstream> tempJsonLog;
 
     if (result.options.logJsonInTemp) {

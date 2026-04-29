@@ -8,7 +8,7 @@
 #include "ILLMCommunicator.h"
 #include "IHaisosEngine.h"
 #include "IToolFactory.h"
-#include "JsonSendReceiveCallbacks.h"
+#include "SystemCallbacks.h"
 
 namespace Haisos {
 
@@ -31,8 +31,11 @@ public:
         const std::string& name,
         std::shared_ptr<IAgent> parent,
         const std::string& startTime = "",
-        const JsonSendReceiveCallbacks& callbacks = {}) = 0;
+        bool longRunning = true) = 0;
     virtual std::unique_ptr<IHaisosEngine> CreateHaisosEngine(IFactory& factory) = 0;
+
+    virtual SystemCallbacks GetSystemCallbacks() const = 0;
+    virtual void SetSystemCallbacks(const SystemCallbacks& callbacks) = 0;
 };
 
 std::unique_ptr<IFactory> CreateFactory();

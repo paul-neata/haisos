@@ -223,7 +223,8 @@ TEST(AgentTest, ChildDestructionRemovesFromParent) {
         child->WaitToFinish();
     }
 
-    EXPECT_TRUE(parent->GetChildren().empty());
+    // Factory holds a shared_ptr to all agents, so the child remains alive
+    EXPECT_EQ(parent->GetChildren().size(), 1u);
 
     parent->Stop(0);
     parent->WaitToFinish();

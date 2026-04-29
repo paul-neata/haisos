@@ -90,10 +90,14 @@ inline std::string PrettyPrintJson(const std::string& jsonStr) {
     }
 }
 
-inline std::function<void(const std::string&)> MakeLLMJsonLogger(const std::string& direction) {
-    return [direction](const std::string& json) {
+inline std::function<void(const std::string&)> MakeLLMJsonLogger(const std::string& direction, const std::string& agentName = "") {
+    return [direction, agentName](const std::string& json) {
         ConsoleLock lock;
-        std::cout << "---- " << direction << " ---- " << GetCurrentTimestamp() << "\n";
+        std::cout << "---- " << direction << " ---- " << GetCurrentTimestamp();
+        if (!agentName.empty()) {
+            std::cout << " @ " << agentName;
+        }
+        std::cout << "\n";
         std::cout << PrettyPrintJson(json) << "\n\n" << std::flush;
     };
 }

@@ -3,6 +3,7 @@
 #include "src/components/Logger/Logger.h"
 #include "tests/integration/helpers/IntegrationTestHelpers.h"
 #include "tests/integration/helpers/IntegrationTestLogCapture.h"
+#include <nlohmann/json.hpp>
 #include <chrono>
 #include <sstream>
 #include <iomanip>
@@ -29,19 +30,21 @@ bool TestToolCallIntegration() {
     }
 
     auto testStartTime = std::chrono::system_clock::now();
-    std::string result = tool->Call(nullptr, {});
+    ToolResult result = tool->Call(nullptr, {});
     auto testEndTime = std::chrono::system_clock::now();
 
-    if (result.empty()) {
+    if (result.content.empty()) {
         LogError("Tool result was empty");
         return false;
     }
 
+    std::string content = result.content;
+
     std::tm tm_buf = {};
-    std::istringstream iss(result);
+    std::istringstream iss(content);
     iss >> std::get_time(&tm_buf, "%Y-%m-%d %H:%M:%S");
     if (iss.fail()) {
-        LogError("Failed to parse tool result as date/time: %s", result.c_str());
+        LogError("Failed to parse tool result as date/time: %s", content.c_str());
         return false;
     }
 
@@ -50,11 +53,11 @@ bool TestToolCallIntegration() {
     auto elapsedAfter = std::chrono::duration_cast<std::chrono::seconds>(testEndTime - toolTime).count();
 
     if (elapsedBefore < -20 || elapsedAfter > 20) {
-        LogError("Tool time %s is more than 20 seconds away from test time", result.c_str());
+        LogError("Tool time %s is more than 20 seconds away from test time", content.c_str());
         return false;
     }
 
-    LogInfo("Tool result: %s", result.c_str());
+    LogInfo("Tool result: %s", content.c_str());
     return true;
 }
 

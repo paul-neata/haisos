@@ -1,36 +1,32 @@
 #include "GetCurrentDateTime.h"
-#include <chrono>
-#include <iomanip>
-#include <sstream>
-#include <ctime>
+#include "src/tools/agent_tools_common/AgentToolsCommon.h"
 
 namespace Haisos::Tools {
 
 const std::string GetCurrentDateTime::ToolName = "get_current_date_time";
-const std::string GetCurrentDateTime::ToolDefaultDescription = "Returns the current date and time in ISO 8601 format (YYYY-MM-DD HH:MM:SS)";
+const std::string GetCurrentDateTime::ToolDefaultDescription = "Returns the current date and time. When get_gmt is true, returns GMT/UTC time in ISO 8601 format (YYYY-MM-DDTHH:MM:SSZ). Otherwise returns local time (YYYY-MM-DD HH:MM:SS).";
 
 nlohmann::json GetCurrentDateTime::GetDefaultParametersSchema() {
     return nlohmann::json{
         {"type", "object"},
-        {"properties", nlohmann::json::object()}
+        {"properties", nlohmann::json{
+            {"get_gmt", nlohmann::json{
+                {"type", "boolean"},
+                {"description", "If true, return GMT/UTC time in ISO 8601 format. If false or omitted, return local time."}
+            }}
+        }}
     };
 }
 
-std::string GetCurrentDateTime::Call(std::shared_ptr<IAgent> /*callerAgent*/, const nlohmann::json& /*args*/) {
-    auto now = std::chrono::system_clock::now();
-    std::time_t time = std::chrono::system_clock::to_time_t(now);
+ToolResult GetCurrentDateTime::Call(std::shared_ptr<IAgent> /*callerAgent*/, const nlohmann::json& args) {
+    bool getGmt = false;
+    if (args.contains("get_gmt") && args["get_gmt"].is_boolean()) {
+        getGmt = args["get_gmt"].get<bool>();
+    }
 
-    std::tm tm_buf;
-#ifdef _WIN32
-    localtime_s(&tm_buf, &time);
-#else
-    localtime_r(&time, &tm_buf);
-#endif
+    std::string timestamp = getGmt ? GetCurrentTimestampISO8601() : GetCurrentTimestamp();
 
-    std::ostringstream oss;
-    oss << std::put_time(&tm_buf, "%Y-%m-%d %H:%M:%S");
-
-    return oss.str();
+    return ToolResult{timestamp, false};
 }
 
 }

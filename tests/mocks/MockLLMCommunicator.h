@@ -16,7 +16,7 @@ public:
     LLMResponse Call(
         const std::vector<LLMMessage>& messages,
         const std::vector<std::tuple<std::string, std::string, nlohmann::json>>& /*availableTools*/,
-        const JsonSendReceiveCallbacks& /*callbacks*/) override
+        const SystemCallbacks& /*callbacks*/) override
     {
         m_lastMessages = messages;
         ++m_callCount;

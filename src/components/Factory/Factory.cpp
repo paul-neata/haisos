@@ -40,12 +40,13 @@ std::shared_ptr<IAgent> Factory::CreateAgent(
     const std::string& name,
     std::shared_ptr<IAgent> parent,
     const std::string& startTime,
-    const JsonSendReceiveCallbacks& callbacks)
+    bool longRunning)
 {
-    auto agent = std::make_shared<Agent>(std::move(llmCommunicator), std::move(toolFactory), std::move(console), systemPrompts, name, parent, startTime, callbacks);
+    auto agent = std::make_shared<Agent>(std::move(llmCommunicator), std::move(toolFactory), std::move(console), systemPrompts, name, parent, startTime, m_systemCallbacks, longRunning);
     if (parent) {
         parent->AddChild(agent);
     }
+    m_agents.push_back(agent);
     return agent;
 }
 

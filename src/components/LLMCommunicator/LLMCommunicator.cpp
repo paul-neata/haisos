@@ -35,11 +35,17 @@ std::string LLMCommunicator::BuildRequestJson(
         json message;
         message["role"] = msg.role;
         message["content"] = msg.content;
+        if (!msg.thinking.empty()) {
+            message["thinking"] = msg.thinking;
+        }
         if (!msg.name.empty()) {
             message["name"] = msg.name;
         }
         if (msg.role == "tool" && !msg.tool_call_id.empty()) {
             message["tool_call_id"] = msg.tool_call_id;
+        }
+        if (msg.role == "tool") {
+            message["is_error"] = msg.is_error;
         }
         if (!msg.toolCallsJson.empty()) {
             message["tool_calls"] = msg.toolCallsJson;
@@ -67,7 +73,7 @@ std::string LLMCommunicator::BuildRequestJson(
     return request.dump();
 }
 
-LLMResponse LLMCommunicator::ParseResponseJson(const std::string& jsonResponse, const JsonSendReceiveCallbacks& /*callbacks*/) {
+LLMResponse LLMCommunicator::ParseResponseJson(const std::string& jsonResponse, const SystemCallbacks& /*callbacks*/) {
     LLMResponse response;
     response.done = true;
 
@@ -168,7 +174,7 @@ LLMResponse LLMCommunicator::ParseResponseJson(const std::string& jsonResponse, 
 LLMResponse LLMCommunicator::Call(
     const std::vector<LLMMessage>& messages,
     const std::vector<std::tuple<std::string, std::string, nlohmann::json>>& availableTools,
-    const JsonSendReceiveCallbacks& callbacks)
+    const SystemCallbacks& callbacks)
 {
     LogInfo("LLMCommunicator::Call - Endpoint: %s", m_endpoint.c_str());
 

@@ -21,6 +21,7 @@ TEST(AgentQueryToolTest, QueryOnRunningAgent) {
     auto callerAgent = std::make_shared<MockAgent>();
     auto child = std::make_shared<MockAgent>();
     child->SetName("child1");
+    child->SetStartTime("2026-04-29 12:00:00");
     callerAgent->AddChild(child);
 
     AgentQueryTool tool;
@@ -28,15 +29,16 @@ TEST(AgentQueryToolTest, QueryOnRunningAgent) {
     nlohmann::json args;
     args["names"] = nlohmann::json::array({"child1"});
 
-    std::string resultStr = tool.Call(callerAgent, args);
-    auto result = nlohmann::json::parse(resultStr);
+    auto result = tool.Call(callerAgent, args);
+    auto parsed = nlohmann::json::parse(result.content);
 
-    ASSERT_TRUE(result.is_array());
-    ASSERT_EQ(result.size(), 1u);
-    EXPECT_EQ(result[0]["name"], "child1");
-    EXPECT_EQ(result[0]["finished"], false);
-    EXPECT_EQ(result[0]["killed"], false);
-    EXPECT_FALSE(result[0].contains("error"));
+    ASSERT_TRUE(parsed.is_array());
+    ASSERT_EQ(parsed.size(), 1u);
+    EXPECT_EQ(parsed[0]["name"], "child1");
+    EXPECT_EQ(parsed[0]["starting_time"], "2026-04-29 12:00:00");
+    EXPECT_EQ(parsed[0]["finished"], false);
+    EXPECT_EQ(parsed[0]["killed"], false);
+    EXPECT_FALSE(parsed[0].contains("error"));
 }
 
 TEST(AgentQueryToolTest, QueryWithReturnConsoleOnFinishedAgent) {
@@ -44,6 +46,7 @@ TEST(AgentQueryToolTest, QueryWithReturnConsoleOnFinishedAgent) {
     auto child = std::make_shared<MockAgent>();
     child->SetName("child1");
     child->SetFinished(true);
+    child->SetConsoleOutput("console output");
     callerAgent->AddChild(child);
 
     AgentQueryTool tool;
@@ -52,14 +55,14 @@ TEST(AgentQueryToolTest, QueryWithReturnConsoleOnFinishedAgent) {
     args["names"] = nlohmann::json::array({"child1"});
     args["return_console"] = true;
 
-    std::string resultStr = tool.Call(callerAgent, args);
-    auto result = nlohmann::json::parse(resultStr);
+    auto result = tool.Call(callerAgent, args);
+    auto parsed = nlohmann::json::parse(result.content);
 
-    ASSERT_TRUE(result.is_array());
-    ASSERT_EQ(result.size(), 1u);
-    EXPECT_EQ(result[0]["name"], "child1");
-    EXPECT_TRUE(result[0].contains("console_result"));
-    EXPECT_FALSE(result[0].contains("error"));
+    ASSERT_TRUE(parsed.is_array());
+    ASSERT_EQ(parsed.size(), 1u);
+    EXPECT_EQ(parsed[0]["name"], "child1");
+    EXPECT_TRUE(parsed[0].contains("console_result"));
+    EXPECT_FALSE(parsed[0].contains("error"));
 }
 
 TEST(AgentQueryToolTest, QueryWithReturnMessages) {
@@ -76,15 +79,15 @@ TEST(AgentQueryToolTest, QueryWithReturnMessages) {
     args["names"] = nlohmann::json::array({"child1"});
     args["return_messages"] = true;
 
-    std::string resultStr = tool.Call(callerAgent, args);
-    auto result = nlohmann::json::parse(resultStr);
+    auto result = tool.Call(callerAgent, args);
+    auto parsed = nlohmann::json::parse(result.content);
 
-    ASSERT_TRUE(result.is_array());
-    ASSERT_EQ(result.size(), 1u);
-    EXPECT_EQ(result[0]["name"], "child1");
-    EXPECT_TRUE(result[0].contains("messages_result"));
-    EXPECT_TRUE(result[0]["messages_result"].is_array());
-    EXPECT_FALSE(result[0].contains("error"));
+    ASSERT_TRUE(parsed.is_array());
+    ASSERT_EQ(parsed.size(), 1u);
+    EXPECT_EQ(parsed[0]["name"], "child1");
+    EXPECT_TRUE(parsed[0].contains("messages_result"));
+    EXPECT_TRUE(parsed[0]["messages_result"].is_array());
+    EXPECT_FALSE(parsed[0].contains("error"));
 }
 
 TEST(AgentQueryToolTest, QueryOnNonExistentAgent) {
@@ -94,12 +97,50 @@ TEST(AgentQueryToolTest, QueryOnNonExistentAgent) {
     nlohmann::json args;
     args["names"] = nlohmann::json::array({"nonexistent"});
 
-    std::string resultStr = tool.Call(callerAgent, args);
-    auto result = nlohmann::json::parse(resultStr);
+    auto result = tool.Call(callerAgent, args);
+    EXPECT_TRUE(result.isError);
+    auto parsed = nlohmann::json::parse(result.content);
 
-    ASSERT_TRUE(result.is_array());
-    ASSERT_EQ(result.size(), 1u);
-    EXPECT_EQ(result[0]["name"], "nonexistent");
-    EXPECT_TRUE(result[0].contains("error"));
-    EXPECT_EQ(result[0]["error"], "agent nonexistent not found");
+    ASSERT_TRUE(parsed.is_array());
+    ASSERT_EQ(parsed.size(), 1u);
+    EXPECT_EQ(parsed[0]["name"], "nonexistent");
+    EXPECT_EQ(parsed[0]["found"], false);
+    EXPECT_FALSE(parsed[0].contains("error"));
+}
+
+TEST(AgentQueryToolTest, QueryMixedFoundAndNotFound) {
+    auto callerAgent = std::make_shared<MockAgent>();
+    auto child = std::make_shared<MockAgent>();
+    child->SetName("child1");
+    child->SetStartTime("2026-04-29 12:00:00");
+    callerAgent->AddChild(child);
+
+    AgentQueryTool tool;
+
+    nlohmann::json args;
+    args["names"] = nlohmann::json::array({"child1", "missing"});
+
+    auto result = tool.Call(callerAgent, args);
+    auto parsed = nlohmann::json::parse(result.content);
+
+    ASSERT_TRUE(parsed.is_array());
+    ASSERT_EQ(parsed.size(), 2u);
+    EXPECT_EQ(parsed[0]["name"], "child1");
+    EXPECT_TRUE(parsed[0].contains("starting_time"));
+    EXPECT_EQ(parsed[1]["name"], "missing");
+    EXPECT_EQ(parsed[1]["found"], false);
+    EXPECT_FALSE(parsed[1].contains("error"));
+}
+
+TEST(AgentQueryToolTest, QueryMissingNamesReturnsError) {
+    auto callerAgent = std::make_shared<MockAgent>();
+    AgentQueryTool tool;
+
+    nlohmann::json args;
+    // no "names" field
+
+    auto result = tool.Call(callerAgent, args);
+
+    EXPECT_TRUE(result.isError);
+    EXPECT_EQ(result.content, "Missing required field: names");
 }

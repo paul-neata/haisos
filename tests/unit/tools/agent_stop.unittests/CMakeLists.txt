@@ -1,3 +1,3 @@
 add_executable(AgentStopTool.unittests AgentStopToolTest.cpp)
-target_link_libraries(AgentStopTool.unittests PRIVATE gtest_main gmock AgentStopTool)
+target_link_libraries(AgentStopTool.unittests PRIVATE gtest_main gmock AgentStopTool Logger)
 target_compile_features(AgentStopTool.unittests PRIVATE cxx_std_17)

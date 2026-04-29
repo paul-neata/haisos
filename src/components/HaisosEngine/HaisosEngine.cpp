@@ -119,7 +119,7 @@ std::string HaisosEngine::ReadFile(const std::string& filePath) {
     return content;
 }
 
-void HaisosEngine::Run(const RunConfig& config, const JsonSendReceiveCallbacks& callbacks) {
+void HaisosEngine::Run(const RunConfig& config, const SystemCallbacks& callbacks) {
     LogInfo("HaisosEngine starting with file: %s", config.userPrompt.c_str());
 
     std::string content;
@@ -155,6 +155,7 @@ void HaisosEngine::Run(const RunConfig& config, const JsonSendReceiveCallbacks& 
         systemPrompts.push_back("You are a helpful AI assistant.");
     }
 
+    m_factory.SetSystemCallbacks(callbacks);
     auto agent = m_factory.CreateAgent(
         std::move(llmCommunicator),
         std::move(toolFactory),
@@ -163,7 +164,7 @@ void HaisosEngine::Run(const RunConfig& config, const JsonSendReceiveCallbacks& 
         "console_agent",
         nullptr,
         "",
-        callbacks);
+        false);
 
     content = SanitizeUserInput(content);
     agent->Send(content);

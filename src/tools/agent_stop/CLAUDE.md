@@ -1,6 +1,6 @@
 # agent_stop
 
-Stop or kill one or more named subagents.
+Initiate graceful stop or force-kill on named subagents. On success, returns an empty string. Stopping an already stopped agent is not an error. Use agent_wait_to_finish to confirm completion.
 
 ## Use cases
 
@@ -15,13 +15,8 @@ Stop or kill one or more named subagents.
 | `names` | `array[string]` | Yes | List of agent names to stop. |
 | `kill` | `boolean` | No | If `true`, kill the agents instead of stopping them gracefully. Default is `false`. |
 
-## Outputs
+## Output format
 
-For each agent in the `names` array, the result contains:
+On success, returns an empty string.
 
-| Name | Type | Description |
-|------|------|-------------|
-| `name` | `string` | The agent name. |
-| `killed` | `boolean` | Whether the agent was killed. |
-| `finished` | `boolean` | Whether the agent has finished. |
-| `error` | `string` | Error message if the agent was not found. |
+If the `names` argument is missing, also returns an empty string (this tool never produces an error).

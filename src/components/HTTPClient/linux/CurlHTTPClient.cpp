@@ -3,6 +3,7 @@
 #include <sstream>
 #include <cstring>
 #include <memory>
+#include "src/components/Logger/Logger.h"
 
 namespace Haisos {
 
@@ -39,6 +40,9 @@ HTTPResponse CurlHTTPClient::Post(const std::string& url, const std::string& bod
 
 HTTPResponse CurlHTTPClient::PerformRequest(const std::string& url, const std::string& method, const std::string& body, const std::vector<HTTPHeader>& headers) {
     HTTPResponse response;
+
+    LogDebug("HTTPClient %s %s starting", method.c_str(), url.c_str());
+
 
     if (!m_handle->curl) {
         response.statusCode = 0;
@@ -90,6 +94,12 @@ HTTPResponse CurlHTTPClient::PerformRequest(const std::string& url, const std::s
 
     if (curlHeaders) {
         curl_slist_free_all(curlHeaders);
+    }
+
+    if (res != CURLE_OK) {
+        LogDebug("HTTPClient %s %s failed: curl_error=%s", method.c_str(), url.c_str(), response.error.c_str());
+    } else {
+        LogDebug("HTTPClient %s %s completed: status=%d, body_len=%zu", method.c_str(), url.c_str(), response.statusCode, response.body.size());
     }
 
     return response;

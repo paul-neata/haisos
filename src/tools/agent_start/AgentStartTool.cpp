@@ -4,10 +4,50 @@
 namespace Haisos::Tools {
 
 const std::string AgentStartTool::ToolName = "agent_start";
-const std::string AgentStartTool::ToolDefaultDescription = "Start a new subagent with a user prompt. Optionally wait for it to finish and return results.";
+const std::string AgentStartTool::ToolDefaultDescription = "Start a new subagent with a user prompt and return immediately. On success, returns only the agent name string. For an agent that normally does a job it was delegated and then finishes, pass long_running=false (this is the common choice and the default). If you need the subagent to keep running and wait for more commands, pass long_running=true. This tool ONLY starts the agent and does NOT wait for it to finish. If you need to wait for results, use agent_wait_to_finish afterward.";
 
 AgentStartTool::AgentStartTool(IFactory& factory)
     : m_factory(factory) {}
+
+std::shared_ptr<IAgent> CreateAndStartSubagent(
+    IFactory& factory,
+    std::shared_ptr<IAgent> parent,
+    const std::string& userPrompt,
+    const std::vector<std::string>& systemPrompts,
+    bool longRunning)
+{
+    std::string name = GenerateAgentName();
+    std::string startTime = GetCurrentTimestamp();
+
+    LogDebug("CreateAndStartSubagent: creating subagent '%s' with prompt '%s' longRunning=%d", name.c_str(), userPrompt.c_str(), longRunning ? 1 : 0);
+
+    auto httpClient = factory.CreateHTTPClient();
+    auto toolFactory = factory.CreateToolFactory(factory);
+    auto console = factory.CreateConsole(false);
+    std::string endpoint = std::getenv("HAISOS_ENDPOINT") ? std::getenv("HAISOS_ENDPOINT") : "http://localhost:11434/api/chat";
+    std::string model = std::getenv("HAISOS_MODEL") ? std::getenv("HAISOS_MODEL") : "llama3";
+    std::string apiKey = std::getenv("HAISOS_API_KEY") ? std::getenv("HAISOS_API_KEY") : "";
+
+    auto llmCommunicator = factory.CreateLLMCommunicator(
+        std::move(httpClient),
+        endpoint,
+        model,
+        apiKey);
+
+    auto agent = factory.CreateAgent(
+        std::move(llmCommunicator),
+        std::move(toolFactory),
+        std::move(console),
+        systemPrompts,
+        name,
+        parent,
+        startTime,
+        longRunning);
+
+    agent->Post(userPrompt);
+    LogDebug("CreateAndStartSubagent: subagent '%s' posted prompt", name.c_str());
+    return agent;
+}
 
 nlohmann::json AgentStartTool::GetDefaultParametersSchema() {
     return nlohmann::json{
@@ -21,30 +61,18 @@ nlohmann::json AgentStartTool::GetDefaultParametersSchema() {
                 {"type", "string"},
                 {"description", "Optional system prompt for the subagent"}
             }},
-            {"wait_to_finish", {
+            {"long_running", {
                 {"type", "boolean"},
-                {"description", "If true, block until the subagent finishes before returning"}
-            }},
-            {"wait_to_finish_timeout_ms", {
-                {"type", "integer"},
-                {"description", "Timeout in milliseconds when wait_to_finish is true (0 = poll current status, omit = block forever)"}
-            }},
-            {"return_console", {
-                {"type", "boolean"},
-                {"description", "Whether to include the subagent's console output in the result"}
-            }},
-            {"return_messages", {
-                {"type", "boolean"},
-                {"description", "Whether to include the subagent's message history in the result"}
+                {"description", "If true, the subagent keeps running and waits for more commands. If false (default), the subagent finishes after processing its initial task."}
             }}
         }},
         {"required", nlohmann::json::array({"user_prompt"})}
     };
 }
 
-std::string AgentStartTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) {
+ToolResult AgentStartTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) {
     if (!args.contains("user_prompt") || !args["user_prompt"].is_string()) {
-        return nlohmann::json({{"error", "Missing required field: user_prompt"}}).dump();
+        return ToolResult{"Missing required field: user_prompt", true};
     }
 
     std::string userPrompt = args["user_prompt"];
@@ -53,52 +81,25 @@ std::string AgentStartTool::Call(std::shared_ptr<IAgent> callerAgent, const nloh
         systemPrompts.push_back(args["system_prompt"]);
     }
 
-    bool waitToFinish = false;
-    if (args.contains("wait_to_finish") && args["wait_to_finish"].is_boolean()) {
-        waitToFinish = args["wait_to_finish"];
-    }
-
-    bool hasTimeout = false;
-    uint64_t timeout_ms = 0;
-    if (args.contains("wait_to_finish_timeout_ms") && !args["wait_to_finish_timeout_ms"].is_null()) {
-        hasTimeout = true;
-        try {
-            timeout_ms = args["wait_to_finish_timeout_ms"].get<uint64_t>();
-        } catch (const nlohmann::json::exception&) {
-            return nlohmann::json({{"error", "Invalid wait_to_finish_timeout_ms: must be a non-negative integer"}}).dump();
-        }
-        constexpr uint64_t MAX_TIMEOUT_MS = 24ULL * 60 * 60 * 1000;
-        if (timeout_ms > MAX_TIMEOUT_MS) {
-            return nlohmann::json({{"error", "wait_to_finish_timeout_ms exceeds maximum allowed value of 86400000 ms (24 hours)"}}).dump();
-        }
-    }
-
-    bool returnConsole = false;
-    if (args.contains("return_console") && args["return_console"].is_boolean()) {
-        returnConsole = args["return_console"];
-    }
-
-    bool returnMessages = false;
-    if (args.contains("return_messages") && args["return_messages"].is_boolean()) {
-        returnMessages = args["return_messages"];
+    bool longRunning = false;
+    if (args.contains("long_running") && args["long_running"].is_boolean()) {
+        longRunning = args["long_running"].get<bool>();
     }
 
     constexpr int MAX_SUBAGENT_DEPTH = 5;
     if (callerAgent && callerAgent->GetDepth() >= MAX_SUBAGENT_DEPTH) {
-        return nlohmann::json({{"error", "Subagent recursion depth limit exceeded"}}).dump();
+        return ToolResult{"Subagent recursion depth limit exceeded", true};
     }
 
-    auto agent = CreateAndStartSubagent(m_factory, callerAgent, userPrompt, systemPrompts);
+    auto agent = CreateAndStartSubagent(m_factory, callerAgent, userPrompt, systemPrompts, longRunning);
 
-    if (waitToFinish) {
-        if (!hasTimeout) {
-            agent->WaitToFinish();
-        } else if (timeout_ms > 0) {
-            agent->WaitToFinish(timeout_ms);
-        }
+    if (longRunning) {
+        LogDebug("AgentStartTool: subagent '%s' started as long-running", agent->Name().c_str());
+    } else {
+        LogDebug("AgentStartTool: subagent '%s' started as short-running", agent->Name().c_str());
     }
 
-    return BuildStartResult(agent, waitToFinish, returnConsole, returnMessages).dump();
+    return ToolResult{agent->Name(), false};
 }
 
 } // namespace Haisos::Tools

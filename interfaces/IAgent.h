@@ -25,6 +25,7 @@ public:
     virtual bool IsKilled() const = 0;
     virtual std::string GetStartTime() const = 0;
     virtual int GetDepth() const = 0;
+    virtual bool IsLongRunning() const = 0;
     virtual void AddChild(std::shared_ptr<IAgent> child) = 0;
 };
 

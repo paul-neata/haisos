@@ -1,3 +1,3 @@
 add_executable(AgentListRunningTool.unittests AgentListRunningToolTest.cpp)
-target_link_libraries(AgentListRunningTool.unittests PRIVATE gtest_main gmock AgentListRunningTool)
+target_link_libraries(AgentListRunningTool.unittests PRIVATE gtest_main gmock AgentListRunningTool Logger)
 target_compile_features(AgentListRunningTool.unittests PRIVATE cxx_std_17)

@@ -13,7 +13,7 @@ public:
     ~HaisosEngine() override;
 
     // IHaisosEngine interface
-    void Run(const RunConfig& config, const JsonSendReceiveCallbacks& callbacks = {}) override;
+    void Run(const RunConfig& config, const SystemCallbacks& callbacks = {}) override;
 
 private:
     std::string ReadFile(const std::string& filePath);

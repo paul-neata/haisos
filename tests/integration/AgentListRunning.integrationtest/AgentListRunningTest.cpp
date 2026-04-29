@@ -19,9 +19,10 @@ bool TestAgentListRunning() {
     auto llmCommunicator = factory.CreateLLMCommunicator(
         std::move(httpClient), endpoint, model, apiKey);
 
-    JsonSendReceiveCallbacks callbacks;
-    callbacks.on_send = IntegrationTest::MakeLLMJsonLogger("send");
-    callbacks.on_received = IntegrationTest::MakeLLMJsonLogger("receive");
+    SystemCallbacks callbacks;
+    callbacks.on_send = IntegrationTest::MakeLLMJsonLogger("send", "integration_agent");
+    callbacks.on_received = IntegrationTest::MakeLLMJsonLogger("receive", "integration_agent");
+    factory.SetSystemCallbacks(callbacks);
 
     auto agent = factory.CreateAgent(
         std::move(llmCommunicator),
@@ -29,11 +30,9 @@ bool TestAgentListRunning() {
         std::move(console),
         std::vector<std::string>{"You are a helpful AI assistant."},
         "integration_agent",
-        nullptr,
-        "",
-        callbacks);
+        nullptr);
 
-    agent->Post("Start a subagent with prompt 'What is 5+5?', list running agents, then stop it.");
+    agent->Post("Start a subagent with prompt 'What is 5+5?' and wait for it to finish, then list running agents, then stop it.");
     agent->Stop(0);
     agent->WaitToFinish();
 

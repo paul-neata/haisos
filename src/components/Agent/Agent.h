@@ -11,7 +11,7 @@
 #include "interfaces/ILLMCommunicator.h"
 #include "interfaces/IToolFactory.h"
 #include "interfaces/IConsole.h"
-#include "interfaces/JsonSendReceiveCallbacks.h"
+#include "interfaces/SystemCallbacks.h"
 #include "src/components/libheaders/SynchronizedQueueEx.h"
 #include "AgentMessageBuffer.h"
 
@@ -27,7 +27,8 @@ public:
         const std::string& name,
         std::shared_ptr<IAgent> parent,
         const std::string& startTime = "",
-        const JsonSendReceiveCallbacks& callbacks = {});
+        const SystemCallbacks& callbacks = {},
+        bool longRunning = true);
 
     ~Agent() override;
 
@@ -47,13 +48,14 @@ public:
     bool IsKilled() const override;
     std::string GetStartTime() const override;
     int GetDepth() const override;
+    bool IsLongRunning() const override;
 
 protected:
     void AddChild(std::shared_ptr<IAgent> child) override;
 
 private:
     void RunThread();
-    std::vector<std::tuple<std::string, std::string, std::string>> ExecuteToolCalls(const LLMMessage& message);
+    std::vector<std::tuple<std::string, std::string, std::string, bool>> ExecuteToolCalls(const LLMMessage& message);
 
     std::shared_ptr<ILLMCommunicator> m_llmCommunicator;
     std::shared_ptr<IToolFactory> m_toolFactory;
@@ -62,7 +64,8 @@ private:
     std::string m_name;
     std::string m_startTime;
     std::shared_ptr<IAgent> m_parent;
-    JsonSendReceiveCallbacks m_callbacks;
+    SystemCallbacks m_callbacks;
+    bool m_longRunning;
     mutable std::mutex m_historyMutex;
     std::vector<LLMMessage> m_history;
 

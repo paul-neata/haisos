@@ -1,3 +1,3 @@
 add_executable(AgentQueryTool.unittests AgentQueryToolTest.cpp)
-target_link_libraries(AgentQueryTool.unittests PRIVATE gtest_main gmock AgentQueryTool)
+target_link_libraries(AgentQueryTool.unittests PRIVATE gtest_main gmock AgentQueryTool Logger)
 target_compile_features(AgentQueryTool.unittests PRIVATE cxx_std_17)

@@ -4,7 +4,7 @@
 namespace Haisos::Tools {
 
 const std::string AgentQueryTool::ToolName = "agent_query";
-const std::string AgentQueryTool::ToolDefaultDescription = "Query the status of one or more named subagents.";
+const std::string AgentQueryTool::ToolDefaultDescription = "Query the status of named subagents. On success, returns a JSON array of agent status objects. Each object includes the agent's name, starting_time, killed, finished, and long_running status.";
 
 nlohmann::json AgentQueryTool::GetDefaultParametersSchema() {
     return nlohmann::json{
@@ -28,9 +28,9 @@ nlohmann::json AgentQueryTool::GetDefaultParametersSchema() {
     };
 }
 
-std::string AgentQueryTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) {
+ToolResult AgentQueryTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) {
     if (!args.contains("names") || !args["names"].is_array()) {
-        return nlohmann::json({{"error", "Missing required field: names"}}).dump();
+        return ToolResult{"Missing required field: names", true};
     }
 
     bool returnConsole = false;
@@ -44,6 +44,7 @@ std::string AgentQueryTool::Call(std::shared_ptr<IAgent> callerAgent, const nloh
     }
 
     nlohmann::json results = nlohmann::json::array();
+    size_t foundCount = 0;
     for (const auto& name : args["names"]) {
         if (!name.is_string()) continue;
         std::string agentName = name;
@@ -51,16 +52,32 @@ std::string AgentQueryTool::Call(std::shared_ptr<IAgent> callerAgent, const nloh
         auto target = FindChildByName(callerAgent, agentName);
 
         nlohmann::json result;
-        result["name"] = agentName;
         if (!target) {
-            result["error"] = "agent " + agentName + " not found";
+            LogWarning("AgentQueryTool: agent '%s' not found", agentName.c_str());
+            result["name"] = agentName;
+            result["found"] = false;
         } else {
-            result = BuildQueryResult(target, returnConsole, returnMessages);
+            LogVerboseDebug("AgentQueryTool: querying agent '%s' (finished=%d, killed=%d)", agentName.c_str(), target->IsFinished() ? 1 : 0, target->IsKilled() ? 1 : 0);
+            result["name"] = target->Name();
+            result["starting_time"] = target->GetStartTime();
+            result["killed"] = target->IsKilled();
+            result["finished"] = target->IsFinished();
+            result["long_running"] = target->IsLongRunning();
+            if (returnConsole) {
+                result["console_result"] = target->GetConsoleOutput();
+            }
+            if (returnMessages) {
+                result["messages_result"] = target->GetHistory();
+            }
+            ++foundCount;
         }
         results.push_back(result);
     }
 
-    return results.dump();
+    if (foundCount == 0) {
+        return ToolResult{results.dump(), true};
+    }
+    return ToolResult{results.dump(), false};
 }
 
 } // namespace Haisos::Tools

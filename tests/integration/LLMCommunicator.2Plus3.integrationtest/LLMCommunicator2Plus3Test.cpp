@@ -27,9 +27,9 @@ bool TestCallLocalOllama() {
     std::string toolCalled;
     std::string toolInput;
 
-    JsonSendReceiveCallbacks callbacks;
-    callbacks.on_send = IntegrationTest::MakeLLMJsonLogger("send");
-    callbacks.on_received = IntegrationTest::MakeLLMJsonLogger("receive");
+    SystemCallbacks callbacks;
+    callbacks.on_send = IntegrationTest::MakeLLMJsonLogger("send", "");
+    callbacks.on_received = IntegrationTest::MakeLLMJsonLogger("receive", "");
 
     std::vector<LLMMessage> messages;
     LLMMessage systemMsg;

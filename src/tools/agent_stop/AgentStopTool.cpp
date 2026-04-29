@@ -4,7 +4,7 @@
 namespace Haisos::Tools {
 
 const std::string AgentStopTool::ToolName = "agent_stop";
-const std::string AgentStopTool::ToolDefaultDescription = "Stop or kill one or more named subagents.";
+const std::string AgentStopTool::ToolDefaultDescription = "Initiate graceful stop or force-kill on named subagents. On success, returns an empty string. Stopping an already stopped agent is not an error. Use agent_wait_to_finish to confirm completion.";
 
 nlohmann::json AgentStopTool::GetDefaultParametersSchema() {
     return nlohmann::json{
@@ -24,9 +24,9 @@ nlohmann::json AgentStopTool::GetDefaultParametersSchema() {
     };
 }
 
-std::string AgentStopTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) {
+ToolResult AgentStopTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) {
     if (!args.contains("names") || !args["names"].is_array()) {
-        return nlohmann::json({{"error", "Missing required field: names"}}).dump();
+        return ToolResult{"", false};
     }
 
     bool kill = false;
@@ -34,29 +34,25 @@ std::string AgentStopTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohm
         kill = args["kill"];
     }
 
-    nlohmann::json results = nlohmann::json::array();
     for (const auto& name : args["names"]) {
         if (!name.is_string()) continue;
         std::string agentName = name;
 
         auto target = FindChildByName(callerAgent, agentName);
 
-        nlohmann::json result;
-        result["name"] = agentName;
         if (!target) {
-            result["error"] = "agent " + agentName + " not found";
+            LogWarning("AgentStopTool: agent '%s' not found", agentName.c_str());
         } else {
+            LogDebug("AgentStopTool: %s agent '%s' (finished=%d)", kill ? "killing" : "stopping", agentName.c_str(), target->IsFinished() ? 1 : 0);
             if (kill) {
                 target->Kill();
             } else {
                 target->Stop(0);
             }
-            result = BuildStopResult(target);
         }
-        results.push_back(result);
     }
 
-    return results.dump();
+    return ToolResult{"", false};
 }
 
 } // namespace Haisos::Tools

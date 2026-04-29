@@ -29,14 +29,11 @@ TEST(AgentStopToolTest, StopOnExistingAgent) {
     nlohmann::json args;
     args["names"] = nlohmann::json::array({"child1"});
 
-    std::string resultStr = tool.Call(callerAgent, args);
-    auto result = nlohmann::json::parse(resultStr);
+    auto result = tool.Call(callerAgent, args);
 
-    ASSERT_TRUE(result.is_array());
-    ASSERT_EQ(result.size(), 1u);
-    EXPECT_EQ(result[0]["name"], "child1");
-    EXPECT_EQ(result[0]["killed"], false);
-    EXPECT_FALSE(result[0].contains("error"));
+    EXPECT_TRUE(result.content.empty());
+    EXPECT_FALSE(result.isError);
+    EXPECT_TRUE(child->WasStopped());
 }
 
 TEST(AgentStopToolTest, KillOnExistingAgent) {
@@ -51,11 +48,74 @@ TEST(AgentStopToolTest, KillOnExistingAgent) {
     args["names"] = nlohmann::json::array({"child1"});
     args["kill"] = true;
 
-    std::string resultStr = tool.Call(callerAgent, args);
-    auto result = nlohmann::json::parse(resultStr);
+    auto result = tool.Call(callerAgent, args);
 
-    ASSERT_TRUE(result.is_array());
-    ASSERT_EQ(result.size(), 1u);
-    EXPECT_EQ(result[0]["name"], "child1");
-    EXPECT_FALSE(result[0].contains("error"));
+    EXPECT_TRUE(result.content.empty());
+    EXPECT_FALSE(result.isError);
+    EXPECT_TRUE(child->IsKilled());
+}
+
+TEST(AgentStopToolTest, StopOnNotFoundAgent) {
+    auto callerAgent = std::make_shared<MockAgent>();
+
+    AgentStopTool tool;
+
+    nlohmann::json args;
+    args["names"] = nlohmann::json::array({"missing"});
+
+    auto result = tool.Call(callerAgent, args);
+
+    EXPECT_TRUE(result.content.empty());
+    EXPECT_FALSE(result.isError);
+}
+
+TEST(AgentStopToolTest, StopOnAlreadyStoppedAgentIsNotError) {
+    auto callerAgent = std::make_shared<MockAgent>();
+    auto child = std::make_shared<MockAgent>();
+    child->SetName("child1");
+    child->SetFinished(true);
+    callerAgent->AddChild(child);
+
+    AgentStopTool tool;
+
+    nlohmann::json args;
+    args["names"] = nlohmann::json::array({"child1"});
+
+    auto result = tool.Call(callerAgent, args);
+
+    EXPECT_TRUE(result.content.empty());
+    EXPECT_FALSE(result.isError);
+}
+
+TEST(AgentStopToolTest, StopMultipleAgentsMixedFoundAndNotFound) {
+    auto callerAgent = std::make_shared<MockAgent>();
+    auto child1 = std::make_shared<MockAgent>();
+    child1->SetName("agent1");
+    callerAgent->AddChild(child1);
+    auto child2 = std::make_shared<MockAgent>();
+    child2->SetName("agent2");
+    child2->SetKilled(true);
+    callerAgent->AddChild(child2);
+
+    AgentStopTool tool;
+
+    nlohmann::json args;
+    args["names"] = nlohmann::json::array({"agent1", "missing", "agent2"});
+
+    auto result = tool.Call(callerAgent, args);
+
+    EXPECT_TRUE(result.content.empty());
+    EXPECT_FALSE(result.isError);
+}
+
+TEST(AgentStopToolTest, MissingNamesReturnsEmptyString) {
+    auto callerAgent = std::make_shared<MockAgent>();
+
+    AgentStopTool tool;
+
+    nlohmann::json args;
+    auto result = tool.Call(callerAgent, args);
+
+    EXPECT_TRUE(result.content.empty());
+    EXPECT_FALSE(result.isError);
 }

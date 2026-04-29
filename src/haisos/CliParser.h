@@ -25,6 +25,8 @@ struct ParseResult {
     std::string error;
 };
 
+LogLevel ParseLogLevel(const std::string& level);
+
 ParseResult ParseArguments(int argc, char* argv[]);
 
 std::string FormatUsage(const char* programName);

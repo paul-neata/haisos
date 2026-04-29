@@ -20,17 +20,20 @@ TEST(ToolFactoryTest, GetCurrentDateTimeToolReturnsValidFormat) {
     auto tool = factory.CreateTool("get_current_date_time");
     ASSERT_NE(tool, nullptr);
 
-    std::string result = tool->Call(nullptr, {});
+    ToolResult result = tool->Call(nullptr, {});
 
-    // Should return non-empty string
-    EXPECT_FALSE(result.empty());
+    // Should return non-empty content
+    EXPECT_FALSE(result.content.empty());
+    EXPECT_FALSE(result.isError);
+
+    std::string content = result.content;
 
     // Should contain space separator (date and time)
-    EXPECT_NE(result.find(' '), std::string::npos);
+    EXPECT_NE(content.find(' '), std::string::npos);
 
     // Format: YYYY-MM-DD HH:MM:SS
     // Check length (19 chars for format "2024-01-15 12:30:45")
-    EXPECT_EQ(result.length(), 19);
+    EXPECT_EQ(content.length(), 19);
 }
 
 TEST(ToolFactoryTest, GetAvailableTools) {

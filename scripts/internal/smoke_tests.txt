@@ -1,0 +1,2 @@
+# Smoke tests - one test name per line
+# Integration and haisos tests only; unit tests are never smoke tests

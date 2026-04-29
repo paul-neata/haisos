@@ -18,6 +18,19 @@ TEST(AgentWaitToFinishToolTest, GetParametersSchemaIsValid) {
     EXPECT_TRUE(schema["properties"].contains("timeout_ms"));
 }
 
+TEST(AgentWaitToFinishToolTest, WaitToFinish_MissingNames_ReturnsError) {
+    auto callerAgent = std::make_shared<MockAgent>();
+    AgentWaitToFinishTool tool;
+
+    nlohmann::json args;
+    // missing "names"
+
+    auto result = tool.Call(callerAgent, args);
+
+    EXPECT_TRUE(result.isError);
+    EXPECT_EQ(result.content, "Missing required field: names");
+}
+
 TEST(AgentWaitToFinishToolTest, WaitToFinish_ImmediateCheck) {
     auto callerAgent = std::make_shared<MockAgent>();
     auto child = std::make_shared<MockAgent>();
@@ -30,16 +43,10 @@ TEST(AgentWaitToFinishToolTest, WaitToFinish_ImmediateCheck) {
     args["names"] = nlohmann::json::array({"child1"});
     args["timeout_ms"] = 0;
 
-    std::string resultStr = tool.Call(callerAgent, args);
-    auto result = nlohmann::json::parse(resultStr);
+    auto result = tool.Call(callerAgent, args);
 
-    ASSERT_TRUE(result.is_array());
-    ASSERT_EQ(result.size(), 1u);
-    EXPECT_EQ(result[0]["name"], "child1");
-    EXPECT_EQ(result[0]["finished"], false);
-    EXPECT_EQ(result[0]["killed"], false);
-    EXPECT_FALSE(result[0].contains("error"));
-    EXPECT_FALSE(result[0].contains("end_time"));
+    EXPECT_TRUE(result.content.empty());
+    EXPECT_FALSE(result.isError);
 }
 
 TEST(AgentWaitToFinishToolTest, WaitToFinish_WithTimeout_Succeeds) {
@@ -55,16 +62,10 @@ TEST(AgentWaitToFinishToolTest, WaitToFinish_WithTimeout_Succeeds) {
     args["names"] = nlohmann::json::array({"child1"});
     args["timeout_ms"] = 5000;
 
-    std::string resultStr = tool.Call(callerAgent, args);
-    auto result = nlohmann::json::parse(resultStr);
+    auto result = tool.Call(callerAgent, args);
 
-    ASSERT_TRUE(result.is_array());
-    ASSERT_EQ(result.size(), 1u);
-    EXPECT_EQ(result[0]["name"], "child1");
-    EXPECT_EQ(result[0]["finished"], true);
-    EXPECT_EQ(result[0]["killed"], false);
-    EXPECT_TRUE(result[0].contains("end_time"));
-    EXPECT_FALSE(result[0].contains("error"));
+    EXPECT_TRUE(result.content.empty());
+    EXPECT_FALSE(result.isError);
 }
 
 TEST(AgentWaitToFinishToolTest, WaitToFinish_ReturnsConsoleAndMessages) {
@@ -84,17 +85,10 @@ TEST(AgentWaitToFinishToolTest, WaitToFinish_ReturnsConsoleAndMessages) {
     args["return_console"] = true;
     args["return_messages"] = true;
 
-    std::string resultStr = tool.Call(callerAgent, args);
-    auto result = nlohmann::json::parse(resultStr);
+    auto result = tool.Call(callerAgent, args);
 
-    ASSERT_TRUE(result.is_array());
-    ASSERT_EQ(result.size(), 1u);
-    EXPECT_EQ(result[0]["name"], "child1");
-    EXPECT_EQ(result[0]["finished"], true);
-    EXPECT_TRUE(result[0].contains("console_result"));
-    EXPECT_TRUE(result[0].contains("messages_result"));
-    EXPECT_TRUE(result[0]["messages_result"].is_array());
-    EXPECT_FALSE(result[0].contains("error"));
+    EXPECT_TRUE(result.content.empty());
+    EXPECT_FALSE(result.isError);
 }
 
 TEST(AgentWaitToFinishToolTest, WaitToFinish_Forever) {
@@ -109,16 +103,10 @@ TEST(AgentWaitToFinishToolTest, WaitToFinish_Forever) {
     nlohmann::json args;
     args["names"] = nlohmann::json::array({"child1"});
 
-    std::string resultStr = tool.Call(callerAgent, args);
-    auto result = nlohmann::json::parse(resultStr);
+    auto result = tool.Call(callerAgent, args);
 
-    ASSERT_TRUE(result.is_array());
-    ASSERT_EQ(result.size(), 1u);
-    EXPECT_EQ(result[0]["name"], "child1");
-    EXPECT_EQ(result[0]["finished"], true);
-    EXPECT_EQ(result[0]["killed"], false);
-    EXPECT_TRUE(result[0].contains("end_time"));
-    EXPECT_FALSE(result[0].contains("error"));
+    EXPECT_TRUE(result.content.empty());
+    EXPECT_FALSE(result.isError);
 }
 
 TEST(AgentWaitToFinishToolTest, WaitToFinish_AgentNotFound) {
@@ -128,12 +116,8 @@ TEST(AgentWaitToFinishToolTest, WaitToFinish_AgentNotFound) {
     nlohmann::json args;
     args["names"] = nlohmann::json::array({"nonexistent"});
 
-    std::string resultStr = tool.Call(callerAgent, args);
-    auto result = nlohmann::json::parse(resultStr);
+    auto result = tool.Call(callerAgent, args);
 
-    ASSERT_TRUE(result.is_array());
-    ASSERT_EQ(result.size(), 1u);
-    EXPECT_EQ(result[0]["name"], "nonexistent");
-    EXPECT_TRUE(result[0].contains("error"));
-    EXPECT_EQ(result[0]["error"], "agent nonexistent not found");
+    EXPECT_TRUE(result.isError);
+    EXPECT_EQ(result.content, "nonexistent not found");
 }

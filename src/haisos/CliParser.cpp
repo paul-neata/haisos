@@ -22,7 +22,7 @@ std::string FormatUsage(const char* programName) {
         "  HAISOS_API_KEY     API key (optional for local Ollama)\n";
 }
 
-static LogLevel ParseLogLevel(const std::string& level) {
+LogLevel ParseLogLevel(const std::string& level) {
     if (level == "verbose_debug") return LogLevel::VerboseDebug;
     if (level == "debug") return LogLevel::Debug;
     if (level == "trace") return LogLevel::Trace;

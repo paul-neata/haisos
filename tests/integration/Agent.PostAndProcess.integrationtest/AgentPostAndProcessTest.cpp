@@ -19,9 +19,10 @@ bool TestAgentPostAndProcess() {
     auto llmCommunicator = factory.CreateLLMCommunicator(
         std::move(httpClient), endpoint, model, apiKey);
 
-    JsonSendReceiveCallbacks callbacks;
-    callbacks.on_send = IntegrationTest::MakeLLMJsonLogger("send");
-    callbacks.on_received = IntegrationTest::MakeLLMJsonLogger("receive");
+    SystemCallbacks callbacks;
+    callbacks.on_send = IntegrationTest::MakeLLMJsonLogger("send", "integration_agent");
+    callbacks.on_received = IntegrationTest::MakeLLMJsonLogger("receive", "integration_agent");
+    factory.SetSystemCallbacks(callbacks);
 
     auto agent = factory.CreateAgent(
         std::move(llmCommunicator),
@@ -29,9 +30,7 @@ bool TestAgentPostAndProcess() {
         std::move(console),
         std::vector<std::string>{"You are a helpful AI assistant."},
         "integration_agent",
-        nullptr,
-        "",
-        callbacks);
+        nullptr);
 
     agent->Post("What is 2+2?");
     agent->Stop(0);

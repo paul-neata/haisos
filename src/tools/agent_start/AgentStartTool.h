@@ -13,12 +13,19 @@ public:
     static const std::string ToolDefaultDescription;
 
     AgentStartTool(IFactory& factory);
-    std::string Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) override;
+    ToolResult Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) override;
     static nlohmann::json GetDefaultParametersSchema();
     nlohmann::json GetParametersSchema() const override { return GetDefaultParametersSchema(); }
 
 private:
     IFactory& m_factory;
 };
+
+std::shared_ptr<IAgent> CreateAndStartSubagent(
+    IFactory& factory,
+    std::shared_ptr<IAgent> parent,
+    const std::string& userPrompt,
+    const std::vector<std::string>& systemPrompts,
+    bool longRunning = true);
 
 } // namespace Haisos::Tools

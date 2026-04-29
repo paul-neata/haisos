@@ -32,7 +32,7 @@ public:
 
 class DummyLLMCommunicator : public ILLMCommunicator {
 public:
-    LLMResponse Call(const std::vector<LLMMessage>&, const std::vector<std::tuple<std::string, std::string, nlohmann::json>>&, const JsonSendReceiveCallbacks&) override {
+    LLMResponse Call(const std::vector<LLMMessage>&, const std::vector<std::tuple<std::string, std::string, nlohmann::json>>&, const SystemCallbacks&) override {
         LLMResponse response;
         response.message.role = "assistant";
         response.message.content = "";
@@ -56,10 +56,11 @@ public:
         return std::make_unique<DummyLLMCommunicator>();
     }
     std::unique_ptr<IToolFactory> CreateToolFactory(IFactory&) override { return std::make_unique<DummyToolFactory>(); }
-    std::shared_ptr<IAgent> CreateAgent(std::unique_ptr<ILLMCommunicator>, std::unique_ptr<IToolFactory>, std::unique_ptr<IConsole>, const std::vector<std::string>&, const std::string& name, std::shared_ptr<IAgent> parent, const std::string& startTime, const JsonSendReceiveCallbacks&) override {
+    std::shared_ptr<IAgent> CreateAgent(std::unique_ptr<ILLMCommunicator>, std::unique_ptr<IToolFactory>, std::unique_ptr<IConsole>, const std::vector<std::string>&, const std::string& name, std::shared_ptr<IAgent> parent, const std::string& startTime, bool longRunning) override {
         auto agent = std::make_shared<MockAgent>();
         agent->SetName(name);
         agent->SetStartTime(startTime);
+        agent->SetLongRunning(longRunning);
         m_lastAgent = agent;
         if (parent) {
             parent->AddChild(agent);
@@ -68,9 +69,13 @@ public:
     }
     std::unique_ptr<IHaisosEngine> CreateHaisosEngine(IFactory&) override { return nullptr; }
 
+    SystemCallbacks GetSystemCallbacks() const override { return m_callbacks; }
+    void SetSystemCallbacks(const SystemCallbacks& callbacks) override { m_callbacks = callbacks; }
+
     std::shared_ptr<MockAgent> GetLastAgent() const { return m_lastAgent; }
 private:
     std::shared_ptr<MockAgent> m_lastAgent;
+    SystemCallbacks m_callbacks;
 };
 
 } // namespace
@@ -83,11 +88,14 @@ TEST(AgentStartToolTest, GetParametersSchemaIsValid) {
     EXPECT_TRUE(schema.contains("properties"));
     EXPECT_TRUE(schema.contains("required"));
     EXPECT_TRUE(schema["properties"].contains("user_prompt"));
-    EXPECT_TRUE(schema["properties"].contains("wait_to_finish"));
-    EXPECT_TRUE(schema["properties"].contains("wait_to_finish_timeout_ms"));
+    EXPECT_TRUE(schema["properties"].contains("system_prompt"));
+    EXPECT_FALSE(schema["properties"].contains("wait_to_finish"));
+    EXPECT_FALSE(schema["properties"].contains("wait_to_finish_timeout_ms"));
+    EXPECT_FALSE(schema["properties"].contains("return_console"));
+    EXPECT_FALSE(schema["properties"].contains("return_messages"));
 }
 
-TEST(AgentStartToolTest, StartReturnsNameAndNotFinished) {
+TEST(AgentStartToolTest, StartReturnsName) {
     TestFactory factory;
     auto callerAgent = std::make_shared<MockAgent>();
     AgentStartTool tool(factory);
@@ -95,32 +103,24 @@ TEST(AgentStartToolTest, StartReturnsNameAndNotFinished) {
     nlohmann::json args;
     args["user_prompt"] = "Hello";
 
-    std::string resultStr = tool.Call(callerAgent, args);
-    auto result = nlohmann::json::parse(resultStr);
+    auto result = tool.Call(callerAgent, args);
 
-    EXPECT_TRUE(result.contains("name"));
-    EXPECT_FALSE(result["name"].get<std::string>().empty());
-    EXPECT_TRUE(result.contains("finished"));
-    EXPECT_EQ(result["finished"], false);
-    EXPECT_TRUE(result.contains("start_time"));
-    EXPECT_TRUE(result.contains("killed"));
-    EXPECT_EQ(result["killed"], false);
+    EXPECT_FALSE(result.content.empty());
+    EXPECT_EQ(result.content, factory.GetLastAgent()->Name());
 }
 
-TEST(AgentStartToolTest, WaitToFinishReturnsFinished) {
+TEST(AgentStartToolTest, StartWithSystemPrompt) {
     TestFactory factory;
     auto callerAgent = std::make_shared<MockAgent>();
     AgentStartTool tool(factory);
 
     nlohmann::json args;
     args["user_prompt"] = "Hello";
-    args["wait_to_finish"] = true;
+    args["system_prompt"] = "You are a helpful assistant";
 
-    std::string resultStr = tool.Call(callerAgent, args);
-    auto result = nlohmann::json::parse(resultStr);
+    auto result = tool.Call(callerAgent, args);
 
-    EXPECT_TRUE(result.contains("finished"));
-    EXPECT_EQ(result["finished"], true);
+    EXPECT_FALSE(result.content.empty());
 }
 
 TEST(AgentStartToolTest, MissingUserPromptReturnsError) {
@@ -129,41 +129,34 @@ TEST(AgentStartToolTest, MissingUserPromptReturnsError) {
     AgentStartTool tool(factory);
 
     nlohmann::json args;
-    std::string resultStr = tool.Call(callerAgent, args);
-    auto result = nlohmann::json::parse(resultStr);
+    auto result = tool.Call(callerAgent, args);
 
-    EXPECT_TRUE(result.contains("error"));
+    EXPECT_TRUE(result.isError);
+    EXPECT_TRUE(result.content.find("user_prompt") != std::string::npos);
 }
 
-TEST(AgentStartToolTest, StartWithReturnConsoleIncludesConsoleResult) {
+TEST(AgentStartToolTest, RecursionDepthExceededReturnsError) {
     TestFactory factory;
-    auto callerAgent = std::make_shared<MockAgent>();
+    // Build a chain so the caller depth >= 5
+    auto p1 = std::make_shared<MockAgent>();
+    auto p2 = std::make_shared<MockAgent>();
+    p2->SetParent(p1);
+    auto p3 = std::make_shared<MockAgent>();
+    p3->SetParent(p2);
+    auto p4 = std::make_shared<MockAgent>();
+    p4->SetParent(p3);
+    auto p5 = std::make_shared<MockAgent>();
+    p5->SetParent(p4);
+    auto p6 = std::make_shared<MockAgent>();
+    p6->SetParent(p5);
+
     AgentStartTool tool(factory);
 
     nlohmann::json args;
     args["user_prompt"] = "Hello";
-    args["wait_to_finish"] = true;
-    args["return_console"] = true;
 
-    std::string resultStr = tool.Call(callerAgent, args);
-    auto result = nlohmann::json::parse(resultStr);
+    auto result = tool.Call(p6, args);
 
-    EXPECT_TRUE(result.contains("console_result"));
-}
-
-TEST(AgentStartToolTest, StartWithReturnMessagesIncludesMessagesResult) {
-    TestFactory factory;
-    auto callerAgent = std::make_shared<MockAgent>();
-    AgentStartTool tool(factory);
-
-    nlohmann::json args;
-    args["user_prompt"] = "Hello";
-    args["wait_to_finish"] = true;
-    args["return_messages"] = true;
-
-    std::string resultStr = tool.Call(callerAgent, args);
-    auto result = nlohmann::json::parse(resultStr);
-
-    EXPECT_TRUE(result.contains("messages_result"));
-    EXPECT_TRUE(result["messages_result"].is_array());
+    EXPECT_TRUE(result.isError);
+    EXPECT_TRUE(result.content.find("depth") != std::string::npos);
 }

@@ -56,9 +56,7 @@ TEST(FactoryTest, CreateAgent) {
         std::move(console),
         {"You are a helpful AI assistant."},
         "test_agent",
-        nullptr,
-        "",
-        {});
+        nullptr);
 
     EXPECT_NE(agent, nullptr);
     EXPECT_EQ(agent->Name(), "test_agent");

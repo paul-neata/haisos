@@ -20,19 +20,15 @@ TEST(AgentListRunningToolTest, ListRunningReturnsAgent) {
     auto callerAgent = std::make_shared<MockAgent>();
     auto child = std::make_shared<MockAgent>();
     child->SetName("child1");
-    child->SetStartTime("2026-04-28 12:00:00");
     callerAgent->AddChild(child);
 
     AgentListRunningTool tool;
 
     nlohmann::json args;
-    std::string resultStr = tool.Call(callerAgent, args);
-    auto result = nlohmann::json::parse(resultStr);
+    auto result = tool.Call(callerAgent, args);
+    std::string resultStr = result.content;
 
-    ASSERT_TRUE(result.is_array());
-    ASSERT_EQ(result.size(), 1u);
-    EXPECT_EQ(result[0]["name"], "child1");
-    EXPECT_TRUE(result[0].contains("start_time"));
+    EXPECT_EQ(resultStr, "child1");
 }
 
 TEST(AgentListRunningToolTest, ListRunningEmptyAfterStop) {
@@ -45,23 +41,20 @@ TEST(AgentListRunningToolTest, ListRunningEmptyAfterStop) {
     AgentListRunningTool tool;
 
     nlohmann::json args;
-    std::string resultStr = tool.Call(callerAgent, args);
-    auto result = nlohmann::json::parse(resultStr);
+    auto result = tool.Call(callerAgent, args);
+    std::string resultStr = result.content;
 
-    ASSERT_TRUE(result.is_array());
-    EXPECT_EQ(result.size(), 0u);
+    EXPECT_EQ(resultStr, "");
 }
 
 TEST(AgentListRunningToolTest, ListRunningWithNameFilter) {
     auto callerAgent = std::make_shared<MockAgent>();
     auto child1 = std::make_shared<MockAgent>();
     child1->SetName("alpha");
-    child1->SetStartTime("2026-04-28 12:00:00");
     callerAgent->AddChild(child1);
 
     auto child2 = std::make_shared<MockAgent>();
     child2->SetName("beta");
-    child2->SetStartTime("2026-04-28 12:01:00");
     callerAgent->AddChild(child2);
 
     AgentListRunningTool tool;
@@ -69,10 +62,42 @@ TEST(AgentListRunningToolTest, ListRunningWithNameFilter) {
     nlohmann::json args;
     args["names"] = nlohmann::json::array({"alpha"});
 
-    std::string resultStr = tool.Call(callerAgent, args);
-    auto result = nlohmann::json::parse(resultStr);
+    auto result = tool.Call(callerAgent, args);
+    std::string resultStr = result.content;
 
-    ASSERT_TRUE(result.is_array());
-    ASSERT_EQ(result.size(), 1u);
-    EXPECT_EQ(result[0]["name"], "alpha");
+    EXPECT_EQ(resultStr, "alpha");
+}
+
+TEST(AgentListRunningToolTest, ListRunningMultipleAgents) {
+    auto callerAgent = std::make_shared<MockAgent>();
+    auto child1 = std::make_shared<MockAgent>();
+    child1->SetName("alpha");
+    callerAgent->AddChild(child1);
+
+    auto child2 = std::make_shared<MockAgent>();
+    child2->SetName("beta");
+    callerAgent->AddChild(child2);
+
+    auto child3 = std::make_shared<MockAgent>();
+    child3->SetName("gamma");
+    child3->SetFinished(true);
+    callerAgent->AddChild(child3);
+
+    AgentListRunningTool tool;
+
+    nlohmann::json args;
+    auto result = tool.Call(callerAgent, args);
+    std::string resultStr = result.content;
+
+    EXPECT_EQ(resultStr, "alpha,beta");
+}
+
+TEST(AgentListRunningToolTest, ListRunningNoCallerAgent) {
+    AgentListRunningTool tool;
+
+    nlohmann::json args;
+    auto result = tool.Call(nullptr, args);
+
+    EXPECT_TRUE(result.isError);
+    EXPECT_EQ(result.content, "no caller agent");
 }

@@ -1,7 +1,7 @@
 #pragma once
 #include <memory>
 #include <string>
-#include "JsonSendReceiveCallbacks.h"
+#include "SystemCallbacks.h"
 
 namespace Haisos {
 
@@ -14,7 +14,7 @@ struct RunConfig {
 class IHaisosEngine {
 public:
     virtual ~IHaisosEngine() = default;
-    virtual void Run(const RunConfig& config, const JsonSendReceiveCallbacks& callbacks = {}) = 0;
+    virtual void Run(const RunConfig& config, const SystemCallbacks& callbacks = {}) = 0;
 };
 
 }

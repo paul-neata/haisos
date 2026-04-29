@@ -104,7 +104,8 @@ Agent::Agent(
     const std::string& name,
     std::shared_ptr<IAgent> parent,
     const std::string& startTime,
-    const JsonSendReceiveCallbacks& callbacks)
+    const SystemCallbacks& callbacks,
+    bool longRunning)
     : m_llmCommunicator(std::move(llmCommunicator))
     , m_toolFactory(std::move(toolFactory))
     , m_console(std::move(console))
@@ -113,13 +114,20 @@ Agent::Agent(
     , m_startTime(startTime)
     , m_parent(std::move(parent))
     , m_callbacks(callbacks)
+    , m_longRunning(longRunning)
 {
     m_thread = std::thread(&Agent::RunThread, this);
 }
 
 Agent::~Agent() {
     Stop(0);
-    WaitToFinish();
+    if (!WaitToFinish(5000)) {
+        LogWarning("Agent '%s' thread did not finish within 5s during destruction, detaching", m_name.c_str());
+        std::lock_guard<std::mutex> joinLock(m_joinMutex);
+        if (m_thread.joinable()) {
+            m_thread.detach();
+        }
+    }
 }
 
 void Agent::Post(const std::string& command) {
@@ -200,6 +208,7 @@ nlohmann::json Agent::GetHistory() const {
         entry["content"] = msg.content;
         entry["name"] = msg.name;
         entry["thinking"] = msg.thinking;
+        entry["is_error"] = msg.is_error;
         if (!msg.toolCallsJson.empty()) {
             entry["toolCallsJson"] = msg.toolCallsJson;
         }
@@ -234,8 +243,12 @@ int Agent::GetDepth() const {
     return depth;
 }
 
-std::vector<std::tuple<std::string, std::string, std::string>> Agent::ExecuteToolCalls(const LLMMessage& message) {
-    std::vector<std::tuple<std::string, std::string, std::string>> toolResults;
+bool Agent::IsLongRunning() const {
+    return m_longRunning;
+}
+
+std::vector<std::tuple<std::string, std::string, std::string, bool>> Agent::ExecuteToolCalls(const LLMMessage& message) {
+    std::vector<std::tuple<std::string, std::string, std::string, bool>> toolResults;
     if (!m_toolFactory) {
         return toolResults;
     }
@@ -279,23 +292,23 @@ std::vector<std::tuple<std::string, std::string, std::string>> Agent::ExecuteToo
         }
 
         if (toolName.empty()) {
-            toolResults.emplace_back("", "Error: Tool name is empty", toolCallId);
+            toolResults.emplace_back("", "Error: Tool name is empty", toolCallId, true);
             continue;
         }
 
         LogInfo("Agent '%s' - Tool call received: %s", m_name.c_str(), toolName.c_str());
         auto tool = m_toolFactory->CreateTool(toolName, shared_from_this());
         if (tool) {
-            std::string result = tool->Call(shared_from_this(), args);
-            toolResults.emplace_back(toolName, result, toolCallId);
-            LogTrace("Agent '%s' - Tool result: %s", m_name.c_str(), result.c_str());
+            ToolResult result = tool->Call(shared_from_this(), args);
+            toolResults.emplace_back(toolName, result.content, toolCallId, result.isError);
+            LogTrace("Agent '%s' - Tool result: %s", m_name.c_str(), result.content.c_str());
         } else {
             LogError("Agent '%s' - Unknown tool: %s", m_name.c_str(), toolName.c_str());
             if (m_console) {
                 m_console->Write(*this, "Error: Unknown tool - " + toolName);
             }
             m_messageBuffer.Append("[" + m_name + "] Error: Unknown tool - " + toolName + "\n");
-            toolResults.emplace_back(toolName, "Error: Unknown tool - " + toolName, toolCallId);
+            toolResults.emplace_back(toolName, "Error: Unknown tool - " + toolName, toolCallId, true);
         }
     }
 
@@ -303,7 +316,7 @@ std::vector<std::tuple<std::string, std::string, std::string>> Agent::ExecuteToo
 }
 
 void Agent::RunThread() {
-    JsonSendReceiveCallbacks llmCallbacks;
+    SystemCallbacks llmCallbacks;
     if (m_callbacks.on_send) {
         llmCallbacks.on_send = [this](const std::string& json) {
             LogDebug("Agent '%s' sending JSON (%zu bytes)", m_name.c_str(), json.size());
@@ -332,12 +345,16 @@ void Agent::RunThread() {
         try {
             std::string command;
             if (!m_commandQueue.Pop(command)) {
+                LogVerboseDebug("Agent '%s' command queue closed, exiting outer loop", m_name.c_str());
                 break;
             }
 
             if (command.empty()) {
+                LogVerboseDebug("Agent '%s' received empty command, skipping", m_name.c_str());
                 continue;
             }
+
+            LogDebug("Agent '%s' processing command: %s", m_name.c_str(), command.c_str());
 
             std::string sanitizedCommand = SanitizeUserInput(command);
             LLMMessage userMsg;
@@ -349,7 +366,16 @@ void Agent::RunThread() {
                 TrimHistory(m_history);
             }
 
+            constexpr int MAX_LLM_ROUNDS = 20;
+            int rounds = 0;
             while (true) {
+                if (++rounds > MAX_LLM_ROUNDS) {
+                    LogWarning("Agent '%s' exceeded maximum LLM rounds (%d), breaking conversation loop", m_name.c_str(), MAX_LLM_ROUNDS);
+                    break;
+                }
+
+                LogVerboseDebug("Agent '%s' LLM round %d starting", m_name.c_str(), rounds);
+
                 std::vector<std::tuple<std::string, std::string, nlohmann::json>> tools;
                 if (m_toolFactory) {
                     tools = m_toolFactory->GetAvailableToolDescriptions();
@@ -379,6 +405,7 @@ void Agent::RunThread() {
                 }
 
                 if (!response.message.toolCallsJson.empty()) {
+                    LogDebug("Agent '%s' received %zu tool call(s)", m_name.c_str(), response.message.toolCallsJson.size());
                     auto toolResults = ExecuteToolCalls(response.message);
                     {
                         std::lock_guard<std::mutex> lock(m_historyMutex);
@@ -386,7 +413,10 @@ void Agent::RunThread() {
                             LLMMessage toolMsg;
                             toolMsg.role = "tool";
                             toolMsg.content = std::get<1>(tr);
-                            TruncateIfNeeded(toolMsg.content);
+                            toolMsg.is_error = std::get<3>(tr);
+                            if (!toolMsg.is_error) {
+                                TruncateIfNeeded(toolMsg.content);
+                            }
                             toolMsg.name = std::get<0>(tr);
                             toolMsg.tool_call_id = std::get<2>(tr);
                             m_history.push_back(toolMsg);
@@ -397,13 +427,22 @@ void Agent::RunThread() {
                 }
 
                 if (response.done) {
+                    LogVerboseDebug("Agent '%s' LLM response done=true, breaking conversation loop", m_name.c_str());
                     break;
                 }
 
                 // Prevent infinite loop if done is false with empty content and no tool calls
                 if (response.message.content.empty()) {
+                    LogVerboseDebug("Agent '%s' empty content with done=false, breaking conversation loop", m_name.c_str());
                     break;
                 }
+
+                LogVerboseDebug("Agent '%s' continuing conversation loop (done=false, content_len=%zu)", m_name.c_str(), response.message.content.size());
+            }
+
+            if (!m_longRunning) {
+                LogVerboseDebug("Agent '%s' short-running: finished processing command, exiting outer loop", m_name.c_str());
+                break;
             }
         } catch (const std::exception& e) {
             LogError("Agent '%s' - Exception in RunThread: %s", m_name.c_str(), e.what());
@@ -415,6 +454,7 @@ void Agent::RunThread() {
         m_finished = true;
     }
     m_finishedCv.notify_all();
+    LogDebug("Agent '%s' RunThread finished", m_name.c_str());
 }
 
 }

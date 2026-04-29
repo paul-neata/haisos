@@ -6,10 +6,15 @@
 
 namespace Haisos {
 
+struct ToolResult {
+    std::string content;
+    bool isError = false;
+};
+
 class ITool {
 public:
     virtual ~ITool() = default;
-    virtual std::string Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) = 0;
+    virtual ToolResult Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) = 0;
     virtual nlohmann::json GetParametersSchema() const = 0;
 };
 

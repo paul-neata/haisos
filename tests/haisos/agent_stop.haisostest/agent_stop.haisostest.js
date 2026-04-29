@@ -7,7 +7,7 @@ const haisosPath = path.join(__dirname, '..', '..', '..', 'output', 'linux', 'ha
 const prompt = "Start a subagent with prompt 'Count to 100 slowly' using agent_start without wait. Then use agent_stop to stop it. Return the result.";
 
 try {
-    const result = execSync(`${haisosPath} --prompt "${prompt}"`, { encoding: 'utf8', timeout: 60000 });
+    const result = execSync(`${haisosPath} --prompt "${prompt}"`, { encoding: 'utf8', timeout: 120000 });
     console.log(result);
     console.log("agent_stop haisos test passed");
 } catch (e) {

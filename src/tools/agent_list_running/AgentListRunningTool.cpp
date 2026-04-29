@@ -4,7 +4,7 @@
 namespace Haisos::Tools {
 
 const std::string AgentListRunningTool::ToolName = "agent_list_running";
-const std::string AgentListRunningTool::ToolDefaultDescription = "List running subagents. Optionally filter by names.";
+const std::string AgentListRunningTool::ToolDefaultDescription = "List currently running subagents by name. On success, returns a comma-separated string of agent names without spaces, like 'agent1,agent2'.";
 
 nlohmann::json AgentListRunningTool::GetDefaultParametersSchema() {
     return nlohmann::json{
@@ -20,7 +20,7 @@ nlohmann::json AgentListRunningTool::GetDefaultParametersSchema() {
     };
 }
 
-std::string AgentListRunningTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) {
+ToolResult AgentListRunningTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) {
     std::vector<std::string> filterNames;
     if (args.contains("names") && args["names"].is_array()) {
         for (const auto& name : args["names"]) {
@@ -30,11 +30,11 @@ std::string AgentListRunningTool::Call(std::shared_ptr<IAgent> callerAgent, cons
         }
     }
 
-    nlohmann::json results = nlohmann::json::array();
     if (!callerAgent) {
-        return results.dump();
+        return ToolResult{"no caller agent", true};
     }
 
+    std::string commaSeparatedNames;
     for (const auto& child : callerAgent->GetChildren()) {
         std::string name = child->Name();
         if (!filterNames.empty()) {
@@ -49,11 +49,17 @@ std::string AgentListRunningTool::Call(std::shared_ptr<IAgent> callerAgent, cons
         }
 
         if (!child->IsFinished() && !child->IsKilled()) {
-            results.push_back(BuildListRunningEntry(child));
+            LogVerboseDebug("AgentListRunningTool: found running agent '%s'", name.c_str());
+            if (!commaSeparatedNames.empty()) {
+                commaSeparatedNames += ",";
+            }
+            commaSeparatedNames += name;
         }
     }
 
-    return results.dump();
+    LogDebug("AgentListRunningTool: returning %zu running agent(s)", commaSeparatedNames.empty() ? 0 : std::count(commaSeparatedNames.begin(), commaSeparatedNames.end(), ',') + 1);
+
+    return ToolResult{commaSeparatedNames, false};
 }
 
 } // namespace Haisos::Tools

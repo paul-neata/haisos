@@ -19,9 +19,9 @@ bool TestHandlesErrorGracefully() {
 
     LLMCommunicator llm(std::move(httpClient), "http://localhost:9999/api/chat", "llama3", "");
 
-    JsonSendReceiveCallbacks callbacks;
-    callbacks.on_send = IntegrationTest::MakeLLMJsonLogger("send");
-    callbacks.on_received = IntegrationTest::MakeLLMJsonLogger("receive");
+    SystemCallbacks callbacks;
+    callbacks.on_send = IntegrationTest::MakeLLMJsonLogger("send", "");
+    callbacks.on_received = IntegrationTest::MakeLLMJsonLogger("receive", "");
 
     std::vector<LLMMessage> messages;
     LLMMessage systemMsg;

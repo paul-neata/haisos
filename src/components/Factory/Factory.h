@@ -28,8 +28,15 @@ public:
         const std::string& name,
         std::shared_ptr<IAgent> parent,
         const std::string& startTime = "",
-        const JsonSendReceiveCallbacks& callbacks = {}) override;
+        bool longRunning = true) override;
     std::unique_ptr<IHaisosEngine> CreateHaisosEngine(IFactory& factory) override;
+
+    SystemCallbacks GetSystemCallbacks() const override { return m_systemCallbacks; }
+    void SetSystemCallbacks(const SystemCallbacks& callbacks) override { m_systemCallbacks = callbacks; }
+
+private:
+    SystemCallbacks m_systemCallbacks;
+    std::vector<std::shared_ptr<IAgent>> m_agents;
 };
 
 std::unique_ptr<IFactory> CreateFactory();

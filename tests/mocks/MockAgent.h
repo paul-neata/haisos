@@ -94,6 +94,10 @@ public:
         return depth;
     }
 
+    bool IsLongRunning() const override {
+        return m_longRunning;
+    }
+
     void AddChild(std::shared_ptr<IAgent> child) override {
         m_children.push_back(child);
     }
@@ -112,6 +116,7 @@ public:
     void SetKilled(bool killed) { m_killed = killed; }
     void SetStartTime(const std::string& startTime) { m_startTime = startTime; }
     void SetConsoleOutput(const std::string& output) { m_consoleOutput = output; }
+    void SetLongRunning(bool longRunning) { m_longRunning = longRunning; }
 
 private:
     std::vector<std::string> m_commands;
@@ -128,6 +133,7 @@ private:
     std::shared_ptr<IAgent> m_parent;
     std::vector<std::weak_ptr<IAgent>> m_children;
     nlohmann::json m_history = nlohmann::json::array();
+    bool m_longRunning = false;
 };
 
 }

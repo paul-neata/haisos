@@ -22,7 +22,7 @@ TEST(AgentStopToolTest, StopOnExistingAgent) {
     auto callerAgent = std::make_shared<MockAgent>();
     auto child = std::make_shared<MockAgent>();
     child->SetName("child1");
-    callerAgent->RegisterChild(child);
+    callerAgent->AddChild(child);
 
     AgentStopTool tool;
 
@@ -43,7 +43,7 @@ TEST(AgentStopToolTest, KillOnExistingAgent) {
     auto callerAgent = std::make_shared<MockAgent>();
     auto child = std::make_shared<MockAgent>();
     child->SetName("child1");
-    callerAgent->RegisterChild(child);
+    callerAgent->AddChild(child);
 
     AgentStopTool tool;
 

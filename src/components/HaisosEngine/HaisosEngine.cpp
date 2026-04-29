@@ -161,15 +161,13 @@ void HaisosEngine::Run(const RunConfig& config, const JsonSendReceiveCallbacks& 
         std::move(console),
         systemPrompts,
         "console_agent",
-        "",
-        nullptr,
         nullptr,
         "",
         callbacks);
 
     content = SanitizeUserInput(content);
     agent->Send(content);
-    agent->Stop();
+    agent->Stop(0);
     agent->WaitToFinish();
 }
 

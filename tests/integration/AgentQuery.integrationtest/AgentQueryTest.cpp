@@ -29,14 +29,12 @@ bool TestAgentQuery() {
         std::move(console),
         std::vector<std::string>{"You are a helpful AI assistant."},
         "integration_agent",
-        "",
-        nullptr,
         nullptr,
         "",
         callbacks);
 
     agent->Post("Start a subagent with prompt 'What is 4+4?', then query its status.");
-    agent->Stop();
+    agent->Stop(0);
     agent->WaitToFinish();
 
     bool success = true;

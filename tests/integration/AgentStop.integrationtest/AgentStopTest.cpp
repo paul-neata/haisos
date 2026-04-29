@@ -29,14 +29,12 @@ bool TestAgentStop() {
         std::move(console),
         std::vector<std::string>{"You are a helpful AI assistant."},
         "integration_agent",
-        "",
-        nullptr,
         nullptr,
         "",
         callbacks);
 
     agent->Post("Start a subagent with prompt 'Count to 100 slowly', then stop it.");
-    agent->Stop();
+    agent->Stop(0);
     agent->WaitToFinish();
 
     bool success = true;

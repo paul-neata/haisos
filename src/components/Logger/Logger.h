@@ -43,8 +43,11 @@ inline std::string FormatLogMessage(const char* fmt, ...) {
 // Implementation function
 void LogImpl(LogLevel level, const char* file, int line, const std::string& message);
 
-// Register a message receiver
-void LogRegisterMessageReceiver(LogMessageReceiver receiver);
+// Register a message receiver, returns a token for unregistering
+int LogRegisterMessageReceiver(LogMessageReceiver receiver);
+
+// Unregister a message receiver by token
+void LogUnregisterMessageReceiver(int token);
 
 // Clear all registered message receivers
 void LogClearMessageReceivers();

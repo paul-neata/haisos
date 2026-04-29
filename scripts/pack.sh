@@ -27,10 +27,22 @@ GIT_HASH_SHORT="${GIT_HASH:0:15}"
 if [ -n "$GITHUB_BASE_REF" ]; then
     BASE_BRANCH="$GITHUB_BASE_REF"
 else
+    BASE_BRANCH=""
+    # Try to get default branch from origin/HEAD
     DEFAULT_REF=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || true)
     if [ -n "$DEFAULT_REF" ]; then
         BASE_BRANCH="${DEFAULT_REF#refs/remotes/origin/}"
-    else
+    fi
+    # Fallback: try main or master
+    if [ -z "$BASE_BRANCH" ]; then
+        if git show-ref --verify --quiet refs/heads/main; then
+            BASE_BRANCH="main"
+        elif git show-ref --verify --quiet refs/heads/master; then
+            BASE_BRANCH="master"
+        fi
+    fi
+    # Final fallback
+    if [ -z "$BASE_BRANCH" ]; then
         BASE_BRANCH="unknown"
     fi
 fi
@@ -50,9 +62,9 @@ mkdir -p "$STAGING/bin/linux"
 mkdir -p "$STAGING/bin/windows"
 mkdir -p "$STAGING/meta"
 
-# Copy binaries (ignore missing)
-cp -r "$REPO_ROOT/output/linux/"* "$STAGING/bin/linux/" 2>/dev/null || true
-cp -r "$REPO_ROOT/output/windows/"* "$STAGING/bin/windows/" 2>/dev/null || true
+# Copy only haisos binary/executable (ignore missing)
+cp "$REPO_ROOT/output/linux/haisos" "$STAGING/bin/linux/" 2>/dev/null || true
+cp "$REPO_ROOT/output/windows/haisos.exe" "$STAGING/bin/windows/" 2>/dev/null || true
 
 # Compute GitHub commit URL
 if [ -n "$GITHUB_SERVER_URL" ] && [ -n "$GITHUB_REPOSITORY" ]; then

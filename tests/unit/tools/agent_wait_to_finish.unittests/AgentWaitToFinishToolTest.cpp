@@ -22,7 +22,7 @@ TEST(AgentWaitToFinishToolTest, WaitToFinish_ImmediateCheck) {
     auto callerAgent = std::make_shared<MockAgent>();
     auto child = std::make_shared<MockAgent>();
     child->SetName("child1");
-    callerAgent->RegisterChild(child);
+    callerAgent->AddChild(child);
 
     AgentWaitToFinishTool tool;
 
@@ -47,7 +47,7 @@ TEST(AgentWaitToFinishToolTest, WaitToFinish_WithTimeout_Succeeds) {
     auto child = std::make_shared<MockAgent>();
     child->SetName("child1");
     child->SetFinished(true);
-    callerAgent->RegisterChild(child);
+    callerAgent->AddChild(child);
 
     AgentWaitToFinishTool tool;
 
@@ -67,27 +67,15 @@ TEST(AgentWaitToFinishToolTest, WaitToFinish_WithTimeout_Succeeds) {
     EXPECT_FALSE(result[0].contains("error"));
 }
 
-class SimpleVirtualConsole : public IVirtualConsole {
-public:
-    void Write(const std::string& message) override { m_contents += message + "\n"; }
-    void Write(const IAgent& agent, const std::string& message) override { m_contents += "[" + agent.Name() + "] " + message + "\n"; }
-    void Start() override {}
-    void Stop() override {}
-    std::string GetContents() const override { return m_contents; }
-    void Clear() override { m_contents.clear(); }
-private:
-    std::string m_contents = "virtual console content";
-};
-
 TEST(AgentWaitToFinishToolTest, WaitToFinish_ReturnsConsoleAndMessages) {
     auto callerAgent = std::make_shared<MockAgent>();
     auto child = std::make_shared<MockAgent>();
     child->SetName("child1");
     child->SetFinished(true);
-    child->SetVirtualConsole(std::make_shared<SimpleVirtualConsole>());
+    child->SetConsoleOutput("virtual console content");
     nlohmann::json history = nlohmann::json::array({{{"role", "user"}, {"content", "Hello"}}});
     child->SetHistory(history);
-    callerAgent->RegisterChild(child);
+    callerAgent->AddChild(child);
 
     AgentWaitToFinishTool tool;
 
@@ -114,7 +102,7 @@ TEST(AgentWaitToFinishToolTest, WaitToFinish_Forever) {
     auto child = std::make_shared<MockAgent>();
     child->SetName("child1");
     child->SetFinished(true);
-    callerAgent->RegisterChild(child);
+    callerAgent->AddChild(child);
 
     AgentWaitToFinishTool tool;
 

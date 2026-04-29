@@ -1,6 +1,7 @@
 #include "LLMCommunicator.h"
 #include <nlohmann/json.hpp>
 #include <vector>
+#include <atomic>
 
 using json = nlohmann::json;
 
@@ -70,7 +71,7 @@ LLMResponse LLMCommunicator::ParseResponseJson(const std::string& jsonResponse, 
     LLMResponse response;
     response.done = true;
 
-    static int s_toolCallIdCounter = 0;
+    static std::atomic<int> s_toolCallIdCounter{0};
 
     try {
         json parsed = json::parse(jsonResponse);
@@ -95,15 +96,20 @@ LLMResponse LLMCommunicator::ParseResponseJson(const std::string& jsonResponse, 
 
         // Try Ollama format: {"message": {"content": "..."}}
         if (parsed.contains("message") && parsed["message"].contains("content")) {
-            response.message.content = parsed["message"]["content"].get<std::string>();
-
+            const auto& contentNode = parsed["message"]["content"];
+            if (contentNode.is_string()) {
+                response.message.content = contentNode.get<std::string>();
+            }
             if (parsed["message"].contains("thinking")) {
                 response.message.thinking = parsed["message"]["thinking"];
             }
         }
         // Try direct format: {"content": "..."}
         else if (parsed.contains("content")) {
-            response.message.content = parsed["content"].get<std::string>();
+            const auto& contentNode = parsed["content"];
+            if (contentNode.is_string()) {
+                response.message.content = contentNode.get<std::string>();
+            }
         }
 
         // Check for Ollama-format tool calls: message.tool_calls[].function.name / .arguments
@@ -123,7 +129,7 @@ LLMResponse LLMCommunicator::ParseResponseJson(const std::string& jsonResponse, 
                     if (item.contains("type") && item["type"] == "tool_use") {
                         json toolCall;
                         toolCall["type"] = "function";
-                        toolCall["id"] = "call_" + std::to_string(++s_toolCallIdCounter);
+                        toolCall["id"] = "call_" + std::to_string(s_toolCallIdCounter.fetch_add(1));
                         if (item.contains("name")) {
                             toolCall["function"]["name"] = item["name"];
                         }

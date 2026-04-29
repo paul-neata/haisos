@@ -26,13 +26,20 @@ rem Get base branch
 if defined GITHUB_BASE_REF (
     set "BASE_BRANCH=%GITHUB_BASE_REF%"
 ) else (
+    set "BASE_BRANCH=unknown"
     for /f "usebackq tokens=*" %%a in (`git -C "%REPO_ROOT%" symbolic-ref refs/remotes/origin/HEAD 2^>nul`) do (
         set "DEFAULT_REF=%%a"
     )
     if defined DEFAULT_REF (
         set "BASE_BRANCH=!DEFAULT_REF:refs/remotes/origin/=!"
-    ) else (
-        set "BASE_BRANCH=unknown"
+    )
+    if "!BASE_BRANCH!==unknown" (
+        git -C "%REPO_ROOT%" show-ref --verify --quiet refs/heads/main >nul 2>nul
+        if !errorlevel! equ 0 set "BASE_BRANCH=main"
+    )
+    if "!BASE_BRANCH!==unknown" (
+        git -C "%REPO_ROOT%" show-ref --verify --quiet refs/heads/master >nul 2>nul
+        if !errorlevel! equ 0 set "BASE_BRANCH=master"
     )
 )
 
@@ -48,9 +55,9 @@ mkdir "%STAGING%\bin\linux"
 mkdir "%STAGING%\bin\windows"
 mkdir "%STAGING%\meta"
 
-rem Copy binaries (ignore errors)
-xcopy /E /I /Y "%REPO_ROOT%\output\linux\*" "%STAGING%\bin\linux\" >nul 2>&1
-xcopy /E /I /Y "%REPO_ROOT%\output\windows\*" "%STAGING%\bin\windows\" >nul 2>&1
+rem Copy only haisos binary/executable (ignore errors)
+if exist "%REPO_ROOT%\output\linux\haisos" copy /Y "%REPO_ROOT%\output\linux\haisos" "%STAGING%\bin\linux\" >nul 2>&1
+if exist "%REPO_ROOT%\output\windows\haisos.exe" copy /Y "%REPO_ROOT%\output\windows\haisos.exe" "%STAGING%\bin\windows\" >nul 2>&1
 
 rem Compute GitHub commit URL
 if defined GITHUB_SERVER_URL (

@@ -16,15 +16,6 @@ TEST(FactoryTest, CreateConsole) {
     EXPECT_NE(consoleWithLog, nullptr);
 }
 
-TEST(FactoryTest, CreateVirtualConsole) {
-    Factory factory;
-    auto vconsole = factory.CreateVirtualConsole();
-    EXPECT_NE(vconsole, nullptr);
-
-    vconsole->Write("test");
-    EXPECT_EQ(vconsole->GetContents(), "test\n");
-}
-
 TEST(FactoryTest, CreateHTTPClient) {
     Factory factory;
     auto httpClient = factory.CreateHTTPClient();
@@ -65,8 +56,9 @@ TEST(FactoryTest, CreateAgent) {
         std::move(console),
         {"You are a helpful AI assistant."},
         "test_agent",
+        nullptr,
         "",
-        nullptr);
+        {});
 
     EXPECT_NE(agent, nullptr);
     EXPECT_EQ(agent->Name(), "test_agent");

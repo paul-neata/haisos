@@ -10,10 +10,15 @@
 namespace Haisos {
 
 namespace {
-    std::vector<LogMessageReceiver> g_receivers;
+    struct ReceiverEntry {
+        int token;
+        LogMessageReceiver receiver;
+    };
+    std::vector<ReceiverEntry> g_receivers;
     LogLevel g_minLevel = LogLevel::VerboseDebug;
     bool g_consoleOutput = true;
     std::mutex g_mutex;
+    int g_nextToken = 1;
 }
 
 void LogImpl(LogLevel level, const char* file, int line, const std::string& message) {
@@ -52,8 +57,8 @@ void LogImpl(LogLevel level, const char* file, int line, const std::string& mess
     // Notify receivers
     {
         std::lock_guard<std::mutex> lock(g_mutex);
-        for (const auto& receiver : g_receivers) {
-            receiver(msg);
+        for (const auto& entry : g_receivers) {
+            entry.receiver(msg);
         }
     }
 
@@ -65,9 +70,19 @@ void LogImpl(LogLevel level, const char* file, int line, const std::string& mess
             msg.timestamp.c_str(), levelStr, file, line, msg.message.c_str());
 }
 
-void LogRegisterMessageReceiver(LogMessageReceiver receiver) {
+int LogRegisterMessageReceiver(LogMessageReceiver receiver) {
     std::lock_guard<std::mutex> lock(g_mutex);
-    g_receivers.push_back(receiver);
+    int token = g_nextToken++;
+    g_receivers.push_back({token, std::move(receiver)});
+    return token;
+}
+
+void LogUnregisterMessageReceiver(int token) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_receivers.erase(
+        std::remove_if(g_receivers.begin(), g_receivers.end(),
+            [token](const ReceiverEntry& entry) { return entry.token == token; }),
+        g_receivers.end());
 }
 
 void LogSetMinimumLevel(LogLevel level) {

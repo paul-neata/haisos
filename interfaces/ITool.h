@@ -5,10 +5,12 @@
 #include "interfaces/IAgent.h"
 
 namespace Haisos {
-    class ITool {
-    public:
-        virtual ~ITool() = default;
-        virtual std::string Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) = 0;
-        virtual nlohmann::json GetParametersSchema() const = 0;
-    };
+
+class ITool {
+public:
+    virtual ~ITool() = default;
+    virtual std::string Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) = 0;
+    virtual nlohmann::json GetParametersSchema() const = 0;
+};
+
 }

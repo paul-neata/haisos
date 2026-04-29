@@ -7,7 +7,7 @@ namespace Haisos {
 Console::Console(bool registerAsLogMessageReceiver)
 {
     if (registerAsLogMessageReceiver) {
-        LogRegisterMessageReceiver([this](const LogMessage& msg) {
+        m_logReceiverToken = LogRegisterMessageReceiver([this](const LogMessage& msg) {
             Write(msg.message);
         });
     }
@@ -15,7 +15,10 @@ Console::Console(bool registerAsLogMessageReceiver)
 
 Console::~Console() {
     Stop();
-    LogClearMessageReceivers();
+    if (m_logReceiverToken >= 0) {
+        LogUnregisterMessageReceiver(m_logReceiverToken);
+        m_logReceiverToken = -1;
+    }
 }
 
 void Console::Write(const std::string& message) {
@@ -46,7 +49,7 @@ void Console::ProcessQueue() {
             break;
         }
         if (!message.empty()) {
-            std::cout << message << std::endl;
+            std::cout << message << '\n';
         }
     }
 }

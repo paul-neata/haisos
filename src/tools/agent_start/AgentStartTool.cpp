@@ -5,7 +5,7 @@
 namespace Haisos::Tools {
 
 const std::string AgentStartTool::ToolName = "agent_start";
-const std::string AgentStartTool::ToolDefaultDescription = "Start a new subagent with a user prompt and return immediately. On success, returns only the agent name string. For an agent that normally does a job it was delegated and then finishes, pass long_running=false (this is the common choice and the default). If you need the subagent to keep running and wait for more commands, pass long_running=true. This tool ONLY starts the agent and does NOT wait for it to finish. If you need to wait for results, use agent_wait_to_finish afterward.";
+const std::string AgentStartTool::ToolDefaultDescription = "Start a new subagent with a user prompt and return immediately. On success, returns only the agent name string as a plain unquoted string. The name is alphanumeric and may contain underscores and spaces. For an agent that normally does a job it was delegated and then finishes, pass oneShot=true (this is the common choice). oneShot=true agents finish by themselves; there is no need to stop them, monitor them, or call agent_list_running to check if they are running. If you need the response, just call agent_wait_to_finish with no timeout; it will return as soon as the agent is done. If you need the subagent to keep running and wait for more commands, pass oneShot=false. This tool ONLY starts the agent and does NOT wait for it to finish. Even if the agent finishes quickly, you can still call agent_query to check its status and collect output. If you need to wait for results, use agent_wait_to_finish afterward.";
 
 AgentStartTool::AgentStartTool(IFactory& factory)
     : m_factory(factory) {}
@@ -62,12 +62,12 @@ nlohmann::json AgentStartTool::GetDefaultParametersSchema() {
                 {"type", "string"},
                 {"description", "Optional system prompt for the subagent"}
             }},
-            {"long_running", {
+            {"oneShot", {
                 {"type", "boolean"},
-                {"description", "If true, the subagent keeps running and waits for more commands. If false (default), the subagent finishes after processing its initial task."}
+                {"description", "If true, the subagent finishes after processing its initial task. If false, the subagent keeps running and waits for more commands."}
             }}
         }},
-        {"required", nlohmann::json::array({"user_prompt"})}
+        {"required", nlohmann::json::array({"user_prompt", "oneShot"})}
     };
 }
 
@@ -82,9 +82,9 @@ ToolResult AgentStartTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohm
         systemPrompts.push_back(SanitizeUserInput(args["system_prompt"]));
     }
 
-    bool longRunning = false;
-    if (args.contains("long_running") && args["long_running"].is_boolean()) {
-        longRunning = args["long_running"].get<bool>();
+    bool oneShot = false;
+    if (args.contains("oneShot") && args["oneShot"].is_boolean()) {
+        oneShot = args["oneShot"].get<bool>();
     }
 
     constexpr int MAX_SUBAGENT_DEPTH = 5;
@@ -92,12 +92,12 @@ ToolResult AgentStartTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohm
         return ToolResult{"Subagent recursion depth limit exceeded", true};
     }
 
-    auto agent = CreateAndStartSubagent(m_factory, callerAgent, userPrompt, systemPrompts, longRunning);
+    auto agent = CreateAndStartSubagent(m_factory, callerAgent, userPrompt, systemPrompts, !oneShot);
 
-    if (longRunning) {
-        LogDebug("AgentStartTool: subagent '%s' started as long-running", agent->Name().c_str());
+    if (oneShot) {
+        LogDebug("AgentStartTool: subagent '%s' started as one-shot", agent->Name().c_str());
     } else {
-        LogDebug("AgentStartTool: subagent '%s' started as short-running", agent->Name().c_str());
+        LogDebug("AgentStartTool: subagent '%s' started as long-running", agent->Name().c_str());
     }
 
     return ToolResult{agent->Name(), false};

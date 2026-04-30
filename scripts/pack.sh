@@ -23,40 +23,6 @@ BRANCH_NAME="${BRANCH_NAME%%/*}"
 GIT_HASH=$(git rev-parse HEAD)
 GIT_HASH_SHORT="${GIT_HASH:0:15}"
 
-# Get base branch
-if [ -n "$GITHUB_BASE_REF" ]; then
-    BASE_BRANCH="$GITHUB_BASE_REF"
-else
-    BASE_BRANCH=""
-    # Try to get default branch from origin/HEAD
-    DEFAULT_REF=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || true)
-    if [ -n "$DEFAULT_REF" ]; then
-        BASE_BRANCH="${DEFAULT_REF#refs/remotes/origin/}"
-    fi
-    # Determine actual base branch from ancestry using origin refs
-    if [ -z "$BASE_BRANCH" ]; then
-        for CANDIDATE in master main; do
-            if git merge-base --is-ancestor "origin/$CANDIDATE" HEAD 2>/dev/null || \
-               [ -n "$(git log --oneline "origin/$CANDIDATE..HEAD" 2>/dev/null | head -1)" ]; then
-                BASE_BRANCH=$CANDIDATE
-                break
-            fi
-        done
-    fi
-    # Fallback: try local main or master
-    if [ -z "$BASE_BRANCH" ]; then
-        if git show-ref --verify --quiet refs/heads/main 2>/dev/null; then
-            BASE_BRANCH="main"
-        elif git show-ref --verify --quiet refs/heads/master 2>/dev/null; then
-            BASE_BRANCH="master"
-        fi
-    fi
-    # Final fallback
-    if [ -z "$BASE_BRANCH" ]; then
-        BASE_BRANCH="unknown"
-    fi
-fi
-
 # Compute minute of year
 day_of_year=$(date +%j)
 hour=$(date +%H)
@@ -90,7 +56,6 @@ echo "https://github.com/paul-neata/haisos" > "$STAGING/meta/repo"
 echo "$BRANCH" > "$STAGING/meta/branch"
 echo "$GIT_HASH" > "$STAGING/meta/git_hash"
 echo "$VERSION" > "$STAGING/meta/version"
-echo "$BASE_BRANCH" > "$STAGING/meta/base_branch"
 echo "$GITHUB_COMMIT_URL" > "$STAGING/meta/github_commit_url"
 
 # Copy LICENSE

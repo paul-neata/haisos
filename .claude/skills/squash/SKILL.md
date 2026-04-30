@@ -9,43 +9,13 @@ Squash all commits on the current branch (from the detected base branch up to HE
 
 ### 1. Detect the base branch
 
-Use the following methods in order:
+Use `scripts/base_branch.sh`:
 
-- **From PR**:
-  ```bash
-  BASE_BRANCH=$(gh pr view --json baseRefName -q .baseRefName 2>/dev/null)
-  ```
-- **From git upstream tracking**:
-  ```bash
-  UPSTREAM=$(git rev-parse --abbrev-ref @{upstream} 2>/dev/null)
-  BASE_BRANCH=${UPSTREAM#origin/}
-  ```
-- **From git config**:
-  ```bash
-  CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-  BASE_BRANCH=$(git config branch.$CURRENT_BRANCH.merge 2>/dev/null | sed 's|refs/heads/||')
-  ```
-- **From commit ancestry** (checks which default branch HEAD actually descends from):
-  ```bash
-  for CANDIDATE in master main; do
-      if git merge-base --is-ancestor "origin/$CANDIDATE" HEAD 2>/dev/null || \
-         [ -n "$(git log --oneline "origin/$CANDIDATE..HEAD" 2>/dev/null | head -1)" ]; then
-          BASE_BRANCH=$CANDIDATE
-          break
-      fi
-  done
-  ```
-- **Fallback to common default branch refs**:
-  ```bash
-  for CANDIDATE in master main; do
-      if git show-ref --verify --quiet refs/remotes/origin/$CANDIDATE 2>/dev/null || \
-         git show-ref --verify --quiet refs/heads/$CANDIDATE 2>/dev/null; then
-          BASE_BRANCH=$CANDIDATE
-          break
-      fi
-  done
-  ```
-- If no base branch is found, stop and ask the user to specify it.
+```bash
+BASE_BRANCH=$(./scripts/base_branch.sh)
+```
+
+- If the script fails, stop and ask the user to specify the base branch.
 
 ### 2. Find the merge-base commit
 

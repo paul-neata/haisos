@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Orchestrate a full code review by running 5 specialized review agents (claude-md, security, quality, performance, llm-protocol) in parallel, then assemble and present all findings by importance.
+description: Orchestrate a full code review by running 5 specialized review agents (claude-md, security, quality, performance, logs) in parallel, then assemble and present all findings by importance.
 ---
 
 You are the meta-review orchestrator. You will run 5 specialized code-review agents in parallel, wait for all results, and then present a unified, prioritized findings list.
@@ -40,16 +40,23 @@ You are the meta-review orchestrator. You will run 5 specialized code-review age
    NEVER edit. Only list numbered proposals prefixed with [performance], ordered by impact.
    ```
 
-   **Agent E — llm-protocol:**
+   **Agent E — logs:**
    ```
-   You are an LLM-protocol-focused code-review agent.
-   Review LLMCommunicator, Agent, and related interfaces for correctness in: message roles, history ordering, tool call request/response flow, JSON schema, Ollama API compatibility, error handling, done flag logic.
-   NEVER edit. Only list numbered proposals prefixed with [llm-protocol], ordered by severity.
+   You are a logging-focused code-review agent.
+   Review the pending changes for missing or inappropriate log messages.
+   Propose log additions using the LogLevel enum:
+   - VerboseDebug: extra-verbose only — HTTP JSON dumps, agent message passing.
+   - Debug: before/after tool calls, state transitions, non-verbose internals.
+   - Trace: function entry/exit, loop iterations, flow tracking.
+   - Info: important state changes, configuration loaded, lifecycle events.
+   - Warning: assert-like conditions, recoverable errors, unexpected inputs.
+   - Error: fatal/unrecoverable failures, exceptions, invariant violations.
+   NEVER edit. Only list numbered proposals prefixed with [logs], ordered by importance.
    ```
 
 3. Wait for all 5 agents to return their findings.
 4. **Assemble** all findings into a single numbered list ordered by **importance** (most critical first). Do not group by agent — interleave based on severity/impact.
-5. **Prefix** every item with the skill name in brackets: `[claude-md]`, `[security]`, `[quality]`, `[performance]`, or `[llm-protocol]`.
+5. **Prefix** every item with the skill name in brackets: `[claude-md]`, `[security]`, `[quality]`, `[performance]`, or `[logs]`.
 6. Present the final consolidated list to the user.
 
 ## Constraints

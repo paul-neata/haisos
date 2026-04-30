@@ -18,37 +18,11 @@ Create a new GitHub pull request for the current branch.
    ```
    - If the command succeeds and returns a PR number, a PR already exists. Stop and inform the user: "A PR already exists for branch <branch>. Use `/update-pr-description` to update it."
 
-3. Detect the base branch for the PR. Try in order:
-   - From git upstream tracking:
-     ```bash
-     UPSTREAM=$(git rev-parse --abbrev-ref @{upstream} 2>/dev/null)
-     BASE_BRANCH=${UPSTREAM#origin/}
-     ```
-   - From git config:
-     ```bash
-     BASE_BRANCH=$(git config branch.$CURRENT_BRANCH.merge 2>/dev/null | sed 's|refs/heads/||')
-     ```
-   - From commit ancestry (most accurate when local branch is based on a remote default):
-     ```bash
-     for CANDIDATE in master main; do
-         if git merge-base --is-ancestor "origin/$CANDIDATE" HEAD 2>/dev/null || \
-            [ -n "$(git log --oneline "origin/$CANDIDATE..HEAD" 2>/dev/null | head -1)" ]; then
-             BASE_BRANCH=$CANDIDATE
-             break
-         fi
-     done
-     ```
-   - From common default branch refs:
-     ```bash
-     for CANDIDATE in master main; do
-         if git show-ref --verify --quiet refs/remotes/origin/$CANDIDATE 2>/dev/null || \
-            git show-ref --verify --quiet refs/heads/$CANDIDATE 2>/dev/null; then
-             BASE_BRANCH=$CANDIDATE
-             break
-         fi
-     done
-     ```
-   - If still undetected, stop and ask the user to specify the base branch.
+3. Detect the base branch for the PR using `scripts/base_branch.sh`:
+   ```bash
+   BASE_BRANCH=$(./scripts/base_branch.sh)
+   ```
+   - If the script fails, stop and ask the user to specify the base branch.
 
 4. Invoke the `/propose-pr-description` skill to generate the PR title and description.
 

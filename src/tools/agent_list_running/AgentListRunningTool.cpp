@@ -4,7 +4,7 @@
 namespace Haisos::Tools {
 
 const std::string AgentListRunningTool::ToolName = "agent_list_running";
-const std::string AgentListRunningTool::ToolDefaultDescription = "List currently running subagents by name. On success, returns a comma-separated string of agent names without spaces, like 'agent1,agent2'.";
+const std::string AgentListRunningTool::ToolDefaultDescription = "List currently running subagents by name. On success, returns a comma-separated string of agent names, like 'agent1,agent2'. Names are plain strings without quotes; each name is alphanumeric and may contain underscores and spaces.";
 
 nlohmann::json AgentListRunningTool::GetDefaultParametersSchema() {
     return nlohmann::json{

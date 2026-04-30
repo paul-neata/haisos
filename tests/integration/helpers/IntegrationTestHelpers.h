@@ -9,6 +9,8 @@
 #include <sstream>
 #include <iomanip>
 #include <functional>
+#include <unordered_map>
+#include <algorithm>
 #include "src/components/HTTPClient/HTTPClient.h"
 #include <nlohmann/json.hpp>
 
@@ -83,10 +85,85 @@ inline std::string GetCurrentTimestamp() {
 
 inline std::string PrettyPrintJson(const std::string& jsonStr) {
     try {
-        auto j = nlohmann::json::parse(jsonStr, nullptr, false);
+        auto j = nlohmann::ordered_json::parse(jsonStr, nullptr, false);
         return j.dump(2);
     } catch (...) {
         return jsonStr;
+    }
+}
+
+inline std::unordered_map<std::string, std::string>& GetLastSentJsonMap() {
+    static std::unordered_map<std::string, std::string> map;
+    return map;
+}
+
+// INTENTIONAL: Set to true for smart diff mode (shows only array changes vs previous send),
+// or false for full ordered JSON output on every send. Do not remove — reviewed and kept by design.
+inline constexpr bool kIntegrationTestLogSmartDiff = true;
+
+inline std::string ComputeSmartDiff(const std::string& prevJson, const std::string& currJson) {
+    try {
+        auto prev = nlohmann::ordered_json::parse(prevJson, nullptr, false);
+        auto curr = nlohmann::ordered_json::parse(currJson, nullptr, false);
+        nlohmann::ordered_json result;
+
+        // Helper to emit the smart-diff value for a key that is known to be an array.
+        auto emitArray = [&](const std::string& key, const nlohmann::ordered_json& currArray) {
+            auto prevIt = prev.find(key);
+            if (prevIt == prev.end() || !prevIt->is_array()) {
+                result[key] = currArray;
+                return;
+            }
+            const auto& prevArray = *prevIt;
+            if (prevArray == currArray) {
+                result[key] = "-- same --";
+                return;
+            }
+            bool isPrefix = true;
+            if (prevArray.size() > currArray.size()) {
+                isPrefix = false;
+            } else {
+                for (size_t i = 0; i < prevArray.size(); ++i) {
+                    if (prevArray[i] != currArray[i]) {
+                        isPrefix = false;
+                        break;
+                    }
+                }
+            }
+            if (isPrefix) {
+                nlohmann::ordered_json diffArray = nlohmann::ordered_json::array();
+                diffArray.push_back("-- precedent array --");
+                for (size_t i = prevArray.size(); i < currArray.size(); ++i) {
+                    diffArray.push_back(currArray[i]);
+                }
+                result[key] = std::move(diffArray);
+            } else {
+                result[key] = currArray;
+            }
+        };
+
+        // Pass 1: static scalar keys (model first, stream second, then the rest)
+        auto emitScalar = [&](const std::string& key) {
+            if (curr.contains(key) && !curr[key].is_array()) {
+                result[key] = curr[key];
+            }
+        };
+        emitScalar("model");
+        emitScalar("stream");
+        for (auto& [key, value] : curr.items()) {
+            if (key == "model" || key == "stream" || value.is_array()) continue;
+            result[key] = value;
+        }
+
+        // Pass 2: array keys (tools, messages, ...) with smart diff
+        for (auto& [key, value] : curr.items()) {
+            if (!value.is_array()) continue;
+            emitArray(key, value);
+        }
+
+        return result.dump(2);
+    } catch (...) {
+        return PrettyPrintJson(currJson);
     }
 }
 
@@ -98,7 +175,21 @@ inline std::function<void(const std::string&)> MakeLLMJsonLogger(const std::stri
             std::cout << " @ " << agentName;
         }
         std::cout << "\n";
-        std::cout << PrettyPrintJson(json) << "\n\n" << std::flush;
+
+        if (direction == "send") {
+            const std::string key = agentName.empty() ? "__default__" : agentName;
+            auto& lastMap = GetLastSentJsonMap();
+            auto it = lastMap.find(key);
+            if (kIntegrationTestLogSmartDiff && it != lastMap.end()) {
+                std::cout << "<DIFF>\n" << ComputeSmartDiff(it->second, json) << "\n";
+            } else {
+                std::cout << PrettyPrintJson(json) << "\n";
+            }
+            lastMap[key] = json;
+        } else {
+            std::cout << PrettyPrintJson(json) << "\n";
+        }
+        std::cout << std::flush;
     };
 }
 

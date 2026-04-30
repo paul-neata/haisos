@@ -26,8 +26,21 @@ std::string LLMCommunicator::BuildRequestJson(
     const std::vector<LLMMessage>& messages,
     std::vector<std::tuple<std::string, std::string, nlohmann::json>> tools)
 {
-    json request;
+    nlohmann::ordered_json request;
     request["model"] = modelName;
+
+    if (!tools.empty()) {
+        json toolsArray = json::array();
+        for (auto& tool : tools) {
+            json toolObj;
+            toolObj["type"] = "function";
+            toolObj["function"]["name"] = std::get<0>(tool);
+            toolObj["function"]["description"] = std::get<1>(tool);
+            toolObj["function"]["parameters"] = std::move(std::get<2>(tool));
+            toolsArray.push_back(std::move(toolObj));
+        }
+        request["tools"] = std::move(toolsArray);
+    }
 
     json messagesArray = json::array();
 
@@ -51,19 +64,6 @@ std::string LLMCommunicator::BuildRequestJson(
     }
 
     request["messages"] = std::move(messagesArray);
-
-    if (!tools.empty()) {
-    json toolsArray = json::array();
-    for (auto& tool : tools) {
-        json toolObj;
-        toolObj["type"] = "function";
-        toolObj["function"]["name"] = std::get<0>(tool);
-        toolObj["function"]["description"] = std::get<1>(tool);
-        toolObj["function"]["parameters"] = std::move(std::get<2>(tool));
-        toolsArray.push_back(std::move(toolObj));
-    }
-    request["tools"] = std::move(toolsArray);
-    }
 
     request["stream"] = false;
 

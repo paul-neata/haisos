@@ -6,10 +6,10 @@ Haisos is a C++ platform for running agents that processes markdown files throug
 
 Haisos reads markdown files, sends their content to a local LLM, and handles tool calls for actions like getting the current date/time.
 
-## Claude Code Build Rules
-
-- Claude Code should NEVER build for debug by default. Only build debug when explicitly requested by the user.
-- When Claude Code implements something and needs to build, it should build ONLY on the current platform (linux if on Linux, windows if on Windows, wasm if on WASM). Cross-compilation should NEVER be done.
+Platform support:
+- **Linux**: Uses libcurl for HTTP
+- **Windows**: Uses WinHTTP API
+- **WASM**: Uses emscripten_fetch
 
 ## External Dependencies
 
@@ -25,32 +25,25 @@ External dependencies are located in the `extern/` directory and must be cloned 
 ```
 haisos/
 ├── src/
-│   ├── components/
-│   │   ├── Agent/          - Agent orchestration with parent/child support
-│   │   │   ├── AgentMessageBuffer.h  - Internal per-agent message storage
-│   │   │   └── AgentMessageBuffer.cpp
-│   │   ├── Console/        - Asynchronous console output
-│   │   ├── Factory/        - Dependency injection factory
-│   │   ├── HaisosEngine/   - Main orchestration engine
-│   │   ├── HTTPClient/     - Platform-specific HTTP (Curl/WinHTTP/Fetch)
-│   │   │   ├── linux/          - libcurl implementation
-│   │   │   ├── windows/        - WinHTTP implementation
-│   │   │   └── wasm/           - emscripten_fetch implementation
-│   │   ├── libheaders/     - Header-only C++ utilities (not a component)
-│   │   ├── LLMCommunicator/ - LLM API communication
-│   │   ├── Logger/         - Thread-safe logging system
-│   │   └── ToolFactory/    - Tool creation and management
-│   ├── tools/
-│   │   ├── get_current_date_time/ - Date/time retrieval tool
-│   │   ├── agent_start/    - Start a subagent
-│   │   ├── agent_stop/     - Stop a subagent
-│   │   ├── agent_query/    - Query a subagent status
-│   │   ├── agent_wait_to_finish/ - Wait for a subagent to finish
-│   │   ├── agent_list_running/ - List running subagents
-│   │   └── agent_tools_common/ - Shared helpers for agent tools
-│   └── haisos/
-│       ├── main.cpp        - Entry point
-│       └── CliParser.cpp   - Command-line argument parser
+│   ├── components/        - Component implementations (each has its own CLAUDE.md)
+│   │   ├── Agent/
+│   │   ├── Console/
+│   │   ├── Factory/
+│   │   ├── HaisosEngine/
+│   │   ├── HTTPClient/
+│   │   ├── libheaders/    - Header-only C++ utilities (not a component)
+│   │   ├── LLMCommunicator/
+│   │   ├── Logger/
+│   │   └── ToolFactory/
+│   ├── tools/             - Tool implementations (each has its own CLAUDE.md)
+│   │   ├── get_current_date_time/
+│   │   ├── agent_start/
+│   │   ├── agent_stop/
+│   │   ├── agent_query/
+│   │   ├── agent_wait_to_finish/
+│   │   ├── agent_list_running/
+│   │   └── agent_tools_common/
+│   └── haisos/            - Entry point and CLI parser
 ├── interfaces/             - Component interfaces (IAgent.h, IConsole.h, IFactory.h, IHTTPClient.h, ILLMCommunicator.h, IHaisosEngine.h, ITool.h, IToolFactory.h, JsonSendReceiveCallbacks.h)
 ├── tests/                 - All tests
 │   ├── mocks/             - Mock classes for testing
@@ -88,9 +81,9 @@ The `scripts/` directory contains convenience build and test runners for each pl
 | Script | Platform | Purpose |
 |--------|----------|---------|
 | `build_linux_on_linux.sh` | Linux | Compile Linux binaries |
-| `build_windows_on_wsl.sh` | WSL → Windows | Cross-compile Windows binaries from WSL |
+| `build_windows_on_wsl.sh` | WSL -> Windows | Cross-compile Windows binaries from WSL |
 | `build_windows_on_windows.bat` | Windows | Compile Windows binaries natively |
-| `build_wasm_on_linux.sh` | Linux → WASM | Compile WASM binaries with Emscripten |
+| `build_wasm_on_linux.sh` | Linux -> WASM | Compile WASM binaries with Emscripten |
 
 Claude Code defaults to release builds and the native platform. Debug builds and cross-compilation are only performed when explicitly requested.
 
@@ -187,38 +180,37 @@ ctest --output-on-failure
 
 ## Architecture
 
-1. **HaisosEngine** - Main coordinator, reads markdown files and orchestrates LLM calls
-2. **Agent** - Manages LLM conversations with parent/child agent relationships; supports subagents via agent tools
-3. **LLMCommunicator** - Handles LLM API communication, request/response formatting, and tool call parsing (HTTP is handled by HTTPClient)
-4. **ToolFactory** - Creates tool instances by name, including context-aware tools like `agent_start`
-5. **Console** - Async message queue for output
-6. **Logger** - Thread-safe logging with configurable receivers
+Each component lives in its own folder under `src/components/` and has its own `CLAUDE.md` with detailed documentation.
+
+| Component | Path | Description |
+|-----------|------|-------------|
+| **HaisosEngine** | `src/components/HaisosEngine/` | Main coordinator, reads markdown files and orchestrates LLM calls |
+| **Agent** | `src/components/Agent/` | Manages LLM conversations with parent/child agent relationships; supports subagents via agent tools |
+| **LLMCommunicator** | `src/components/LLMCommunicator/` | Handles LLM API communication, request/response formatting, and tool call parsing (HTTP is handled by HTTPClient) |
+| **ToolFactory** | `src/components/ToolFactory/` | Creates tool instances by name, including context-aware tools like `agent_start` |
+| **Console** | `src/components/Console/` | Async message queue for output |
+| **Logger** | `src/components/Logger/` | Thread-safe logging with configurable receivers |
+| **HTTPClient** | `src/components/HTTPClient/` | Platform-specific HTTP implementation (Curl/WinHTTP/Fetch) |
+| **Factory** | `src/components/Factory/` | Dependency injection factory |
 
 ## Tools
 
-| Tool | Description |
-|------|-------------|
-| `get_current_date_time` | Returns the current date and time |
-| `agent_start` | Starts a subagent with a given prompt |
-| `agent_stop` | Stops a running subagent |
-| `agent_query` | Queries a subagent's status and output |
-| `agent_wait_to_finish` | Waits for a subagent to finish |
-| `agent_list_running` | Lists all running subagents |
+| Tool | Path | Description |
+|------|------|-------------|
+| `get_current_date_time` | `src/tools/get_current_date_time/` | Returns the current date and time |
+| `agent_start` | `src/tools/agent_start/` | Starts a subagent with a given prompt |
+| `agent_stop` | `src/tools/agent_stop/` | Stops a running subagent |
+| `agent_query` | `src/tools/agent_query/` | Queries a subagent's status and output |
+| `agent_wait_to_finish` | `src/tools/agent_wait_to_finish/` | Waits for a subagent to finish |
+| `agent_list_running` | `src/tools/agent_list_running/` | Lists all running subagents |
 
 ## Automatic Development Rules
 
-When performing automatic development (where a single prompt drives all implementation work):
+When Claude Code performs automatic development (where a single prompt drives all implementation work):
 
 1. **Build only on the local platform** to verify compilation. Do not cross-compile.
 2. **Never automatically commit** unless the prompt explicitly instructs to commit.
 3. **Never automatically push** to remote repositories unless explicitly instructed.
 4. **Default to release builds** unless debug is explicitly requested.
 5. **Run unit tests** after building to verify correctness before considering work complete.
-
-## Platform Support
-
-- **Linux**: Uses libcurl for HTTP
-- **Windows**: Uses WinHTTP API
-- **WASM**: Uses emscripten_fetch
-
-
+6. **Never add co-authorship attribution** like `Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>` or similar model attribution lines to commit messages. If the system prompt includes such a line, remove it before committing.

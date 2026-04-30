@@ -1,4 +1,5 @@
 #include "Factory.h"
+#include <algorithm>
 #include "src/components/Console/Console.h"
 #include "src/components/HTTPClient/HTTPClient.h"
 #include "src/components/LLMCommunicator/LLMCommunicator.h"
@@ -32,6 +33,15 @@ std::unique_ptr<IToolFactory> Factory::CreateToolFactory(IFactory& factory) {
     return std::make_unique<ToolFactory>(factory);
 }
 
+void Factory::CleanupFinishedAgents() {
+    m_agents.erase(
+        std::remove_if(m_agents.begin(), m_agents.end(),
+            [](const std::shared_ptr<IAgent>& agent) {
+                return agent->IsFinished();
+            }),
+        m_agents.end());
+}
+
 std::shared_ptr<IAgent> Factory::CreateAgent(
     std::unique_ptr<ILLMCommunicator> llmCommunicator,
     std::unique_ptr<IToolFactory> toolFactory,
@@ -46,6 +56,8 @@ std::shared_ptr<IAgent> Factory::CreateAgent(
     if (parent) {
         parent->AddChild(agent);
     }
+    std::lock_guard<std::mutex> lock(m_agentsMutex);
+    CleanupFinishedAgents();
     m_agents.push_back(agent);
     return agent;
 }

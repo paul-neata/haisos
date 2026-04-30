@@ -1,17 +1,17 @@
 #pragma once
 #include "interfaces/IHTTPClient.h"
 #include <memory>
-#include "linux/CurlHTTPClient.h"
 
 // Platform detection
-#if defined(_WIN32)
+#if defined(__linux__)
+    #include "linux/CurlHTTPClient.h"
+    #define PLATFORM_LINUX 1
+#elif defined(_WIN32)
     #include "windows/WinHTTPClient.h"
     #define PLATFORM_WINDOWS 1
 #elif defined(__EMSCRIPTEN__)
     #include "wasm/FetchHTTPClient.h"
     #define PLATFORM_WASM 1
-#else
-    #define PLATFORM_LINUX 1
 #endif
 
 namespace Haisos {

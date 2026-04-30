@@ -6,7 +6,7 @@ Wait for named subagents to finish. On success, returns an empty string. On erro
 
 1. **Wait for a background subagent** — call `agent_wait_to_finish` with `names: ["agent_name"]` after starting a subagent with `agent_start`. Blocks until completion.
 2. **Poll agent status with timeout** — call `agent_wait_to_finish` with `names`, `timeout_ms: 0` to check current status without blocking.
-3. **Collect subagent results** — call `agent_wait_to_finish` with `names`, `return_console: true`, and `return_messages: true` to gather the subagent's full output and conversation history after it finishes.
+3. **Wait with timeout** — call `agent_wait_to_finish` with `names` and `timeout_ms: <value>` to block up to a specified duration, returning immediately if the agent finishes earlier.
 
 ## Arguments
 

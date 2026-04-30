@@ -1,4 +1,5 @@
 #include "AgentStartTool.h"
+#include "src/components/libheaders/SanitizeUserInput.h"
 #include "src/tools/agent_tools_common/AgentToolsCommon.h"
 
 namespace Haisos::Tools {
@@ -75,10 +76,10 @@ ToolResult AgentStartTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohm
         return ToolResult{"Missing required field: user_prompt", true};
     }
 
-    std::string userPrompt = args["user_prompt"];
+    std::string userPrompt = SanitizeUserInput(args["user_prompt"]);
     std::vector<std::string> systemPrompts;
     if (args.contains("system_prompt") && args["system_prompt"].is_string()) {
-        systemPrompts.push_back(args["system_prompt"]);
+        systemPrompts.push_back(SanitizeUserInput(args["system_prompt"]));
     }
 
     bool longRunning = false;

@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <sstream>
 #include <random>
+#include <atomic>
 #include <nlohmann/json.hpp>
 #include "interfaces/IAgent.h"
 #include "interfaces/IFactory.h"
@@ -17,12 +18,21 @@ namespace Haisos::Tools {
 
 inline std::string GenerateAgentName() {
     const char chars[] = "abcdefghijklmnopqrstuvwxyz0123456789";
-    std::random_device rd;
-    std::mt19937 gen(rd());
+    static std::mt19937 gen([]() {
+        std::random_device rd;
+        return rd();
+    }());
+    static std::atomic<uint64_t> s_counter{0};
     std::uniform_int_distribution<> dist(0, static_cast<int>(sizeof(chars) - 2));
 
     std::string name;
-    for (int i = 0; i < 8; ++i) {
+    uint64_t count = s_counter.fetch_add(1);
+    // First 4 chars from counter (base-36), next 4 chars random
+    for (int i = 0; i < 4; ++i) {
+        name += chars[count % 36];
+        count /= 36;
+    }
+    for (int i = 0; i < 4; ++i) {
         name += chars[dist(gen)];
     }
     return name;

@@ -28,6 +28,7 @@ std::string LLMCommunicator::BuildRequestJson(
 {
     nlohmann::ordered_json request;
     request["model"] = modelName;
+    request["stream"] = false;
 
     if (!tools.empty()) {
         json toolsArray = json::array();
@@ -64,8 +65,6 @@ std::string LLMCommunicator::BuildRequestJson(
     }
 
     request["messages"] = std::move(messagesArray);
-
-    request["stream"] = false;
 
     return request.dump();
 }

@@ -106,7 +106,7 @@ void HaisosEngine::Run(const RunConfig& config, const SystemCallbacks& callbacks
         std::move(toolFactory),
         std::move(console),
         systemPrompts,
-        "console_agent",
+        "root",
         nullptr,
         "",
         false);

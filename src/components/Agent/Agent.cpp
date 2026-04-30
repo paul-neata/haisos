@@ -274,13 +274,23 @@ std::vector<std::tuple<std::string, std::string, std::string, bool>> Agent::Exec
 
 void Agent::RunThread() {
     SystemCallbacks llmCallbacks;
-    if (m_callbacks.on_send) {
+    if (m_callbacks.on_send_with_name) {
+        llmCallbacks.on_send = [this](const std::string& json) {
+            LogDebug("Agent '%s' sending JSON (%zu bytes)", m_name.c_str(), json.size());
+            m_callbacks.on_send_with_name(m_name, json);
+        };
+    } else if (m_callbacks.on_send) {
         llmCallbacks.on_send = [this](const std::string& json) {
             LogDebug("Agent '%s' sending JSON (%zu bytes)", m_name.c_str(), json.size());
             m_callbacks.on_send(json);
         };
     }
-    if (m_callbacks.on_received) {
+    if (m_callbacks.on_received_with_name) {
+        llmCallbacks.on_received = [this](const std::string& json) {
+            LogDebug("Agent '%s' received JSON (%zu bytes)", m_name.c_str(), json.size());
+            m_callbacks.on_received_with_name(m_name, json);
+        };
+    } else if (m_callbacks.on_received) {
         llmCallbacks.on_received = [this](const std::string& json) {
             LogDebug("Agent '%s' received JSON (%zu bytes)", m_name.c_str(), json.size());
             m_callbacks.on_received(json);

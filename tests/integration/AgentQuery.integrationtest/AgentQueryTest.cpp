@@ -23,8 +23,8 @@ bool TestAgentQuery() {
         std::move(httpClient), endpoint, model, apiKey);
 
     SystemCallbacks callbacks;
-    callbacks.on_send = IntegrationTest::MakeLLMJsonLogger("send", "integration_agent");
-    callbacks.on_received = IntegrationTest::MakeLLMJsonLogger("receive", "integration_agent");
+    callbacks.on_send_with_name = IntegrationTest::MakeLLMJsonLoggerWithName("send");
+    callbacks.on_received_with_name = IntegrationTest::MakeLLMJsonLoggerWithName("receive");
     factory.SetSystemCallbacks(callbacks);
 
     auto agent = factory.CreateAgent(
@@ -32,7 +32,7 @@ bool TestAgentQuery() {
         std::move(toolFactory),
         std::move(console),
         std::vector<std::string>{"You are a helpful AI assistant."},
-        "integration_agent",
+        "root",
         nullptr);
 
     // Create a subagent directly under the main agent

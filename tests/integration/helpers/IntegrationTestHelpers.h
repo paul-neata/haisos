@@ -193,6 +193,32 @@ inline std::function<void(const std::string&)> MakeLLMJsonLogger(const std::stri
     };
 }
 
+inline std::function<void(const std::string&, const std::string&)> MakeLLMJsonLoggerWithName(const std::string& direction) {
+    return [direction](const std::string& agentName, const std::string& json) {
+        ConsoleLock lock;
+        std::cout << "---- " << direction << " ---- " << GetCurrentTimestamp();
+        if (!agentName.empty()) {
+            std::cout << " @ " << agentName;
+        }
+        std::cout << "\n";
+
+        if (direction == "send") {
+            const std::string key = agentName.empty() ? "__default__" : agentName;
+            auto& lastMap = GetLastSentJsonMap();
+            auto it = lastMap.find(key);
+            if (kIntegrationTestLogSmartDiff && it != lastMap.end()) {
+                std::cout << "<DIFF>\n" << ComputeSmartDiff(it->second, json) << "\n";
+            } else {
+                std::cout << PrettyPrintJson(json) << "\n";
+            }
+            lastMap[key] = json;
+        } else {
+            std::cout << PrettyPrintJson(json) << "\n";
+        }
+        std::cout << std::flush;
+    };
+}
+
 inline void PrintTestStart(const std::string& testName, bool printEnvVars = true) {
     ConsoleLock lock;
     std::cout << "\n\n";

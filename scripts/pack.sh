@@ -33,11 +33,21 @@ else
     if [ -n "$DEFAULT_REF" ]; then
         BASE_BRANCH="${DEFAULT_REF#refs/remotes/origin/}"
     fi
-    # Fallback: try main or master
+    # Determine actual base branch from ancestry using origin refs
     if [ -z "$BASE_BRANCH" ]; then
-        if git show-ref --verify --quiet refs/heads/main; then
+        for CANDIDATE in master main; do
+            if git merge-base --is-ancestor "origin/$CANDIDATE" HEAD 2>/dev/null || \
+               [ -n "$(git log --oneline "origin/$CANDIDATE..HEAD" 2>/dev/null | head -1)" ]; then
+                BASE_BRANCH=$CANDIDATE
+                break
+            fi
+        done
+    fi
+    # Fallback: try local main or master
+    if [ -z "$BASE_BRANCH" ]; then
+        if git show-ref --verify --quiet refs/heads/main 2>/dev/null; then
             BASE_BRANCH="main"
-        elif git show-ref --verify --quiet refs/heads/master; then
+        elif git show-ref --verify --quiet refs/heads/master 2>/dev/null; then
             BASE_BRANCH="master"
         fi
     fi

@@ -25,7 +25,17 @@ Determine the base branch using the following methods in order:
   CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
   BASE_BRANCH=$(git config branch.$CURRENT_BRANCH.merge 2>/dev/null | sed 's|refs/heads/||')
   ```
-- **Fallback to common default branches**:
+- **From commit ancestry** (checks which default branch HEAD actually descends from):
+  ```bash
+  for CANDIDATE in master main; do
+      if git merge-base --is-ancestor "origin/$CANDIDATE" HEAD 2>/dev/null || \
+         [ -n "$(git log --oneline "origin/$CANDIDATE..HEAD" 2>/dev/null | head -1)" ]; then
+          BASE_BRANCH=$CANDIDATE
+          break
+      fi
+  done
+  ```
+- **Fallback to common default branch refs**:
   ```bash
   for CANDIDATE in master main; do
       if git show-ref --verify --quiet refs/remotes/origin/$CANDIDATE 2>/dev/null || \

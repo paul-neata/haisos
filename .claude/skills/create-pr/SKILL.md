@@ -28,7 +28,17 @@ Create a new GitHub pull request for the current branch.
      ```bash
      BASE_BRANCH=$(git config branch.$CURRENT_BRANCH.merge 2>/dev/null | sed 's|refs/heads/||')
      ```
-   - From common default branches:
+   - From commit ancestry (most accurate when local branch is based on a remote default):
+     ```bash
+     for CANDIDATE in master main; do
+         if git merge-base --is-ancestor "origin/$CANDIDATE" HEAD 2>/dev/null || \
+            [ -n "$(git log --oneline "origin/$CANDIDATE..HEAD" 2>/dev/null | head -1)" ]; then
+             BASE_BRANCH=$CANDIDATE
+             break
+         fi
+     done
+     ```
+   - From common default branch refs:
      ```bash
      for CANDIDATE in master main; do
          if git show-ref --verify --quiet refs/remotes/origin/$CANDIDATE 2>/dev/null || \

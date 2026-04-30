@@ -4,7 +4,7 @@
 namespace Haisos::Tools {
 
 const std::string AgentQueryTool::ToolName = "agent_query";
-const std::string AgentQueryTool::ToolDefaultDescription = "Query the status of named subagents. On success, returns a JSON array of agent status objects. Each object includes the agent's name, starting_time, killed, finished, and long_running status.";
+const std::string AgentQueryTool::ToolDefaultDescription = "Query the status of named subagents. On success, returns a JSON array of agent status objects. Each object includes the agent's name, starting_time, killed, finished, and oneShot status.";
 
 nlohmann::json AgentQueryTool::GetDefaultParametersSchema() {
     return nlohmann::json{
@@ -62,7 +62,7 @@ ToolResult AgentQueryTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohm
             result["starting_time"] = target->GetStartTime();
             result["killed"] = target->IsKilled();
             result["finished"] = target->IsFinished();
-            result["long_running"] = target->IsLongRunning();
+            result["oneShot"] = !target->IsLongRunning();
             if (returnConsole) {
                 result["console_result"] = target->GetConsoleOutput();
             }

@@ -1,6 +1,6 @@
 # agent_list_running
 
-List all currently running subagents by name. On success, returns a comma-separated string of agent names without spaces, like 'agent1,agent2'. Optionally filter by names.
+List all currently running subagents by name. On success, returns a comma-separated string of agent names, like 'agent1,agent2'. Names are plain strings without quotes; each name is alphanumeric and may contain underscores and spaces. Optionally filter by names.
 
 ## Use cases
 
@@ -24,8 +24,4 @@ agent1,agent2
 
 If no agents match the filter or if no agents are running, returns an empty string.
 
-If an error occurs (e.g., no caller agent), the response is:
-
-```json
-{"is_error": true, "content": "no caller agent"}
-```
+On error, it sets the `is_error=true` flag.

@@ -89,6 +89,7 @@ TEST(AgentStartToolTest, GetParametersSchemaIsValid) {
     EXPECT_TRUE(schema.contains("required"));
     EXPECT_TRUE(schema["properties"].contains("user_prompt"));
     EXPECT_TRUE(schema["properties"].contains("system_prompt"));
+    EXPECT_TRUE(schema["properties"].contains("oneShot"));
     EXPECT_FALSE(schema["properties"].contains("wait_to_finish"));
     EXPECT_FALSE(schema["properties"].contains("wait_to_finish_timeout_ms"));
     EXPECT_FALSE(schema["properties"].contains("return_console"));
@@ -102,6 +103,7 @@ TEST(AgentStartToolTest, StartReturnsName) {
 
     nlohmann::json args;
     args["user_prompt"] = "Hello";
+    args["oneShot"] = true;
 
     auto result = tool.Call(callerAgent, args);
 
@@ -117,6 +119,7 @@ TEST(AgentStartToolTest, StartWithSystemPrompt) {
     nlohmann::json args;
     args["user_prompt"] = "Hello";
     args["system_prompt"] = "You are a helpful assistant";
+    args["oneShot"] = true;
 
     auto result = tool.Call(callerAgent, args);
 
@@ -154,6 +157,7 @@ TEST(AgentStartToolTest, RecursionDepthExceededReturnsError) {
 
     nlohmann::json args;
     args["user_prompt"] = "Hello";
+    args["oneShot"] = true;
 
     auto result = tool.Call(p6, args);
 

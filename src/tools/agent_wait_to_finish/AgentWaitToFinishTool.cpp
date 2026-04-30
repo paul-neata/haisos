@@ -4,7 +4,7 @@
 namespace Haisos::Tools {
 
 const std::string AgentWaitToFinishTool::ToolName = "agent_wait_to_finish";
-const std::string AgentWaitToFinishTool::ToolDefaultDescription = "Wait for named subagents to finish. On success, returns an empty string. On error, returns an error message about agents that could not be found or waited for.";
+const std::string AgentWaitToFinishTool::ToolDefaultDescription = "Wait for named subagents to finish. On success, returns an empty string. On error, returns an error message about agents that could not be found or waited for. For oneShot=true agents, it is fine to omit timeout_ms; they finish as soon as they can and this call will return promptly.";
 
 nlohmann::json AgentWaitToFinishTool::GetDefaultParametersSchema() {
     return nlohmann::json{

@@ -22,27 +22,6 @@ rem Get full git hash and first 15 chars
 for /f "usebackq tokens=*" %%a in (`git -C "%REPO_ROOT%" rev-parse HEAD`) do set "GIT_HASH=%%a"
 set "GIT_HASH_SHORT=!GIT_HASH:~0,15!"
 
-rem Get base branch
-if defined GITHUB_BASE_REF (
-    set "BASE_BRANCH=%GITHUB_BASE_REF%"
-) else (
-    set "BASE_BRANCH=unknown"
-    for /f "usebackq tokens=*" %%a in (`git -C "%REPO_ROOT%" symbolic-ref refs/remotes/origin/HEAD 2^>nul`) do (
-        set "DEFAULT_REF=%%a"
-    )
-    if defined DEFAULT_REF (
-        set "BASE_BRANCH=!DEFAULT_REF:refs/remotes/origin/=!"
-    )
-    if "!BASE_BRANCH!==unknown" (
-        git -C "%REPO_ROOT%" show-ref --verify --quiet refs/heads/main >nul 2>nul
-        if !errorlevel! equ 0 set "BASE_BRANCH=main"
-    )
-    if "!BASE_BRANCH!==unknown" (
-        git -C "%REPO_ROOT%" show-ref --verify --quiet refs/heads/master >nul 2>nul
-        if !errorlevel! equ 0 set "BASE_BRANCH=master"
-    )
-)
-
 rem Compute minute of year using PowerShell
 for /f "usebackq tokens=*" %%a in (`powershell -NoProfile -Command "$d = Get-Date; $min = ($d.DayOfYear - 1) * 1440 + $d.Hour * 60 + $d.Minute; Write-Host $min"`) do set "MIN_OF_YEAR=%%a"
 
@@ -77,7 +56,6 @@ echo https://github.com/paul-neata/haisos > "%STAGING%\meta\repo"
 echo %BRANCH% > "%STAGING%\meta\branch"
 echo %GIT_HASH% > "%STAGING%\meta\git_hash"
 echo %VERSION% > "%STAGING%\meta\version"
-echo %BASE_BRANCH% > "%STAGING%\meta\base_branch"
 echo %GITHUB_COMMIT_URL% > "%STAGING%\meta\github_commit_url"
 
 rem Copy LICENSE

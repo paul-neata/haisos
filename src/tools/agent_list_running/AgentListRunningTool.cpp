@@ -35,6 +35,7 @@ ToolResult AgentListRunningTool::Call(std::shared_ptr<IAgent> callerAgent, const
     }
 
     std::string commaSeparatedNames;
+    size_t runningCount = 0;
     for (const auto& child : callerAgent->GetChildren()) {
         std::string name = child->Name();
         if (!filterNames.empty()) {
@@ -54,10 +55,11 @@ ToolResult AgentListRunningTool::Call(std::shared_ptr<IAgent> callerAgent, const
                 commaSeparatedNames += ",";
             }
             commaSeparatedNames += name;
+            ++runningCount;
         }
     }
 
-    LogDebug("AgentListRunningTool: returning %zu running agent(s)", commaSeparatedNames.empty() ? 0 : std::count(commaSeparatedNames.begin(), commaSeparatedNames.end(), ',') + 1);
+    LogDebug("AgentListRunningTool: returning %zu running agent(s)", runningCount);
 
     return ToolResult{commaSeparatedNames, false};
 }

@@ -108,7 +108,7 @@ TEST(AgentStopToolTest, StopMultipleAgentsMixedFoundAndNotFound) {
     EXPECT_FALSE(result.isError);
 }
 
-TEST(AgentStopToolTest, MissingNamesReturnsEmptyString) {
+TEST(AgentStopToolTest, MissingNamesReturnsError) {
     auto callerAgent = std::make_shared<MockAgent>();
 
     AgentStopTool tool;
@@ -116,6 +116,6 @@ TEST(AgentStopToolTest, MissingNamesReturnsEmptyString) {
     nlohmann::json args;
     auto result = tool.Call(callerAgent, args);
 
-    EXPECT_TRUE(result.content.empty());
-    EXPECT_FALSE(result.isError);
+    EXPECT_EQ(result.content, "Missing required field: names");
+    EXPECT_TRUE(result.isError);
 }

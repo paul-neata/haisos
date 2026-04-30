@@ -40,7 +40,7 @@ public:
     std::shared_ptr<IAgent> GetParent() const override;
     std::string Name() const override;
     void WaitToFinish() override;
-    bool WaitToFinish(uint64_t timeout_ms) override;
+    bool WaitToFinish(uint64_t timeoutMs) override;
     std::vector<std::shared_ptr<IAgent>> GetChildren() const override;
     nlohmann::json GetHistory() const override;
     std::string GetConsoleOutput() const override;
@@ -49,8 +49,6 @@ public:
     std::string GetStartTime() const override;
     int GetDepth() const override;
     bool IsLongRunning() const override;
-
-protected:
     void AddChild(std::shared_ptr<IAgent> child) override;
 
 private:

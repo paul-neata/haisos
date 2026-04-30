@@ -26,7 +26,7 @@ nlohmann::json AgentStopTool::GetDefaultParametersSchema() {
 
 ToolResult AgentStopTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) {
     if (!args.contains("names") || !args["names"].is_array()) {
-        return ToolResult{"", false};
+        return ToolResult{"Missing required field: names", true};
     }
 
     bool kill = false;

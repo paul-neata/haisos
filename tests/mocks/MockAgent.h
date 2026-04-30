@@ -45,10 +45,10 @@ public:
         m_finished = true;
     }
 
-    bool WaitToFinish(uint64_t timeout_ms) override {
+    bool WaitToFinish(uint64_t timeoutMs) override {
         m_waitedWithTimeout = true;
-        m_waitTimeoutValue = timeout_ms;
-        if (timeout_ms > 0) {
+        m_waitTimeoutValue = timeoutMs;
+        if (timeoutMs > 0) {
             m_waited = true;
         }
         return m_finished;

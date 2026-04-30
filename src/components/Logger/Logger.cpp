@@ -3,6 +3,7 @@
 #include <cstdarg>
 #include <ctime>
 #include <mutex>
+#include <atomic>
 #include <sstream>
 #include <iomanip>
 #include <chrono>
@@ -15,15 +16,15 @@ namespace {
         LogMessageReceiver receiver;
     };
     std::vector<ReceiverEntry> g_receivers;
-    LogLevel g_minLevel = LogLevel::VerboseDebug;
-    bool g_consoleOutput = true;
+    std::atomic<LogLevel> g_minLevel{LogLevel::VerboseDebug};
+    std::atomic<bool> g_consoleOutput{true};
     std::mutex g_mutex;
     int g_nextToken = 1;
 }
 
 void LogImpl(LogLevel level, const char* file, int line, const std::string& message) {
     // Check if level is >= minimum
-    if (static_cast<int>(level) < static_cast<int>(g_minLevel)) {
+    if (static_cast<int>(level) < static_cast<int>(g_minLevel.load())) {
         return;
     }
 
@@ -55,14 +56,16 @@ void LogImpl(LogLevel level, const char* file, int line, const std::string& mess
         level == LogLevel::Error ? "ERROR" : "UNKNOWN";
 
     // Notify receivers
+    std::vector<ReceiverEntry> receivers_copy;
     {
         std::lock_guard<std::mutex> lock(g_mutex);
-        for (const auto& entry : g_receivers) {
-            entry.receiver(msg);
-        }
+        receivers_copy = g_receivers;
+    }
+    for (const auto& entry : receivers_copy) {
+        entry.receiver(msg);
     }
 
-    if (!g_consoleOutput) {
+    if (!g_consoleOutput.load()) {
         return;
     }
 
@@ -91,8 +94,7 @@ void LogSetMinimumLevel(LogLevel level) {
 }
 
 LogLevel LogGetMinimumLevel() {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    return g_minLevel;
+    return g_minLevel.load();
 }
 
 void LogClearMessageReceivers() {

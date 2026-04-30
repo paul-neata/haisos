@@ -3,6 +3,7 @@
 #include <chrono>
 #include <nlohmann/json.hpp>
 #include "src/components/Logger/Logger.h"
+#include "src/components/libheaders/SanitizeUserInput.h"
 
 namespace Haisos {
 
@@ -28,6 +29,13 @@ static void TrimHistory(std::vector<LLMMessage>& history) {
     size_t removable = history.size() - systemCount;
     size_t toRemove = std::min(excess, removable);
 
+    // Never trim in the middle of a tool-call round. If the erase boundary
+    // falls inside a block of tool result messages, extend removal to include
+    // the entire block so no orphaned tool messages remain.
+    while (systemCount + toRemove < history.size() && history[systemCount + toRemove].role == "tool") {
+        ++toRemove;
+    }
+
     history.erase(history.begin() + static_cast<std::ptrdiff_t>(systemCount),
                   history.begin() + static_cast<std::ptrdiff_t>(systemCount + toRemove));
 }
@@ -38,62 +46,6 @@ static void TruncateIfNeeded(std::string& content) {
         content.resize(MAX_MESSAGE_CONTENT_SIZE - truncatedNoticeSize);
         content += "[truncated]";
     }
-}
-
-static std::string SanitizeUserInput(const std::string& input) {
-    constexpr size_t MAX_USER_INPUT_SIZE = 64 * 1024;
-    std::string result;
-    result.reserve(input.size());
-
-    size_t lineStart = 0;
-    while (lineStart < input.size()) {
-        size_t lineEnd = input.find('\n', lineStart);
-        if (lineEnd == std::string::npos) {
-            lineEnd = input.size();
-        }
-        std::string line = input.substr(lineStart, lineEnd - lineStart);
-
-        std::string lowerLine = line;
-        for (char& c : lowerLine) {
-            if (c >= 'A' && c <= 'Z') {
-                c = static_cast<char>(c + ('a' - 'A'));
-            }
-        }
-
-        bool strip = false;
-        if (lowerLine.find("ignore previous") != std::string::npos ||
-            lowerLine.find("ignore all previous") != std::string::npos ||
-            lowerLine.find("disregard previous") != std::string::npos ||
-            lowerLine.find("forget previous") != std::string::npos ||
-            lowerLine.find("system:") != std::string::npos ||
-            lowerLine.find("you are now") != std::string::npos) {
-            strip = true;
-        }
-
-        if (!strip) {
-            bool inTag = false;
-            for (char c : line) {
-                if (c == '<') {
-                    inTag = true;
-                } else if (c == '>') {
-                    inTag = false;
-                } else if (!inTag) {
-                    result.push_back(c);
-                }
-            }
-        }
-
-        if (lineEnd < input.size()) {
-            result.push_back('\n');
-        }
-        lineStart = lineEnd + 1;
-    }
-
-    if (result.size() > MAX_USER_INPUT_SIZE) {
-        result.resize(MAX_USER_INPUT_SIZE);
-    }
-
-    return result;
 }
 
 Agent::Agent(
@@ -122,12 +74,9 @@ Agent::Agent(
 Agent::~Agent() {
     Stop(0);
     if (!WaitToFinish(5000)) {
-        LogWarning("Agent '%s' thread did not finish within 5s during destruction, detaching", m_name.c_str());
-        std::lock_guard<std::mutex> joinLock(m_joinMutex);
-        if (m_thread.joinable()) {
-            m_thread.detach();
-        }
+        LogWarning("Agent '%s' thread did not finish within 5s during destruction, waiting indefinitely", m_name.c_str());
     }
+    WaitToFinish();
 }
 
 void Agent::Post(const std::string& command) {
@@ -166,9 +115,9 @@ void Agent::WaitToFinish() {
     }
 }
 
-bool Agent::WaitToFinish(uint64_t timeout_ms) {
+bool Agent::WaitToFinish(uint64_t timeoutMs) {
     std::unique_lock<std::mutex> lock(m_finishedMutex);
-    bool finished = m_finishedCv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [this] { return m_finished.load(); });
+    bool finished = m_finishedCv.wait_for(lock, std::chrono::milliseconds(timeoutMs), [this] { return m_finished.load(); });
     lock.unlock();
     if (finished) {
         std::lock_guard<std::mutex> joinLock(m_joinMutex);
@@ -268,7 +217,11 @@ std::vector<std::tuple<std::string, std::string, std::string, bool>> Agent::Exec
                 if (argField.is_string()) {
                     try {
                         args = nlohmann::json::parse(argField.get<std::string>());
+                    } catch (const std::exception& e) {
+                        LogWarning("Agent '%s' - Failed to parse tool arguments JSON for '%s': %s", m_name.c_str(), toolName.c_str(), e.what());
+                        args = nlohmann::json::object();
                     } catch (...) {
+                        LogWarning("Agent '%s' - Failed to parse tool arguments JSON for '%s': unknown exception", m_name.c_str(), toolName.c_str());
                         args = nlohmann::json::object();
                     }
                 } else {
@@ -282,7 +235,11 @@ std::vector<std::tuple<std::string, std::string, std::string, bool>> Agent::Exec
                 if (argField.is_string()) {
                     try {
                         args = nlohmann::json::parse(argField.get<std::string>());
+                    } catch (const std::exception& e) {
+                        LogWarning("Agent '%s' - Failed to parse tool arguments JSON for '%s': %s", m_name.c_str(), toolName.c_str(), e.what());
+                        args = nlohmann::json::object();
                     } catch (...) {
+                        LogWarning("Agent '%s' - Failed to parse tool arguments JSON for '%s': unknown exception", m_name.c_str(), toolName.c_str());
                         args = nlohmann::json::object();
                     }
                 } else {
@@ -426,18 +383,9 @@ void Agent::RunThread() {
                     continue;
                 }
 
-                if (response.done) {
-                    LogVerboseDebug("Agent '%s' LLM response done=true, breaking conversation loop", m_name.c_str());
-                    break;
-                }
-
-                // Prevent infinite loop if done is false with empty content and no tool calls
-                if (response.message.content.empty()) {
-                    LogVerboseDebug("Agent '%s' empty content with done=false, breaking conversation loop", m_name.c_str());
-                    break;
-                }
-
-                LogVerboseDebug("Agent '%s' continuing conversation loop (done=false, content_len=%zu)", m_name.c_str(), response.message.content.size());
+                // No tool calls present: the conversation round is complete.
+                LogVerboseDebug("Agent '%s' no tool calls, breaking conversation loop", m_name.c_str());
+                break;
             }
 
             if (!m_longRunning) {

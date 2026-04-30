@@ -9,7 +9,7 @@ public:
     AgentMessageBuffer();
 
     void Append(const std::string& text);
-    std::string GetContents() const;
+    const std::string& GetContents() const;
     void Clear();
 
 private:

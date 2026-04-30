@@ -1,6 +1,7 @@
 #include "FetchHTTPClient.h"
 #include <emscripten/fetch.h>
 #include <string>
+#include <vector>
 #include <mutex>
 #include <atomic>
 
@@ -60,12 +61,17 @@ HTTPResponse FetchHTTPClient::PerformRequest(const std::string& url, const char*
     attr.onerror = FetchError;
     attr.userData = this;
 
-    std::string requestHeaders;
+    std::vector<std::string> requestHeadersStrs;
     for (const auto& h : headers) {
-        requestHeaders += h.name + ": " + h.value + "\n";
+        requestHeadersStrs.push_back(h.name + ": " + h.value);
     }
-    if (!requestHeaders.empty()) {
-        attr.requestHeaders = reinterpret_cast<const char**>(&requestHeaders);
+    std::vector<const char*> requestHeaders;
+    for (const auto& h : requestHeadersStrs) {
+        requestHeaders.push_back(h.c_str());
+    }
+    requestHeaders.push_back(nullptr);
+    if (!requestHeadersStrs.empty()) {
+        attr.requestHeaders = requestHeaders.data();
     }
 
     if (strcmp(method, "POST") == 0 && !body.empty()) {

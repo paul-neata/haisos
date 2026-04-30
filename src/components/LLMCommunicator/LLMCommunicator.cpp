@@ -24,7 +24,7 @@ LLMCommunicator::~LLMCommunicator() = default;
 std::string LLMCommunicator::BuildRequestJson(
     const std::string& modelName,
     const std::vector<LLMMessage>& messages,
-    const std::vector<std::tuple<std::string, std::string, nlohmann::json>>& tools)
+    std::vector<std::tuple<std::string, std::string, nlohmann::json>> tools)
 {
     json request;
     request["model"] = modelName;
@@ -44,16 +44,13 @@ std::string LLMCommunicator::BuildRequestJson(
         if (msg.role == "tool" && !msg.tool_call_id.empty()) {
             message["tool_call_id"] = msg.tool_call_id;
         }
-        if (msg.role == "tool") {
-            message["is_error"] = msg.is_error;
-        }
         if (!msg.toolCallsJson.empty()) {
             message["tool_calls"] = msg.toolCallsJson;
         }
         messagesArray.push_back(std::move(message));
     }
 
-    request["messages"] = messagesArray;
+    request["messages"] = std::move(messagesArray);
 
     if (!tools.empty()) {
     json toolsArray = json::array();
@@ -84,7 +81,15 @@ LLMResponse LLMCommunicator::ParseResponseJson(const std::string& jsonResponse, 
 
         // Check for error response first
         if (parsed.contains("error")) {
-            std::string errorMsg = parsed["error"];
+            std::string errorMsg;
+            const auto& errorNode = parsed["error"];
+            if (errorNode.is_string()) {
+                errorMsg = errorNode.get<std::string>();
+            } else if (errorNode.is_object() && errorNode.contains("message") && errorNode["message"].is_string()) {
+                errorMsg = errorNode["message"].get<std::string>();
+            } else {
+                errorMsg = errorNode.dump();
+            }
             LogError("LLM API error: %s", errorMsg.c_str());
             response.message.role = "assistant";
             response.message.content = "Error: " + errorMsg;
@@ -123,6 +128,9 @@ LLMResponse LLMCommunicator::ParseResponseJson(const std::string& jsonResponse, 
         if (parsed.contains("message") && parsed["message"].contains("tool_calls")
             && parsed["message"]["tool_calls"].is_array()) {
             for (auto& tc : parsed["message"]["tool_calls"]) {
+                if (!tc.contains("id") || !tc["id"].is_string() || tc["id"].get<std::string>().empty()) {
+                    tc["id"] = "call_" + std::to_string(s_toolCallIdCounter.fetch_add(1));
+                }
                 response.message.toolCallsJson.push_back(std::move(tc));
                 hasToolCalls = true;
             }
@@ -195,15 +203,41 @@ LLMResponse LLMCommunicator::Call(
     HTTPResponse httpResponse = m_httpClient->Post(m_endpoint, requestJson, headers);
 
     if (!httpResponse.IsSuccess()) {
-        LogError("HTTP request failed: status=%d error=%s", httpResponse.statusCode, httpResponse.error.c_str());
+        std::string bodyError;
+        if (!httpResponse.body.empty()) {
+            try {
+                json bodyJson = json::parse(httpResponse.body);
+                if (bodyJson.contains("error")) {
+                    const auto& errorNode = bodyJson["error"];
+                    if (errorNode.is_string()) {
+                        bodyError = errorNode.get<std::string>();
+                    } else if (errorNode.is_object() && errorNode.contains("message") && errorNode["message"].is_string()) {
+                        bodyError = errorNode["message"].get<std::string>();
+                    } else {
+                        bodyError = errorNode.dump();
+                    }
+                } else {
+                    bodyError = httpResponse.body;
+                }
+            } catch (...) {
+                bodyError = httpResponse.body;
+            }
+        }
+        LogError("HTTP request failed: status=%d error=%s body=%s", httpResponse.statusCode, httpResponse.error.c_str(), bodyError.c_str());
         LLMResponse response;
         response.done = true;
         response.done_reason = "http_error";
         response.message.role = "assistant";
+        std::string errorDetail;
         if (!httpResponse.error.empty()) {
-            response.message.content = "Error: HTTP request failed: " + httpResponse.error;
+            errorDetail = httpResponse.error;
         } else {
-            response.message.content = "Error: HTTP request failed with status " + std::to_string(httpResponse.statusCode);
+            errorDetail = "status " + std::to_string(httpResponse.statusCode);
+        }
+        if (!bodyError.empty()) {
+            response.message.content = "Error: HTTP request failed: " + errorDetail + " - " + bodyError;
+        } else {
+            response.message.content = "Error: HTTP request failed: " + errorDetail;
         }
         return response;
     }

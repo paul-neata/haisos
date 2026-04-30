@@ -17,7 +17,7 @@ public:
     virtual std::shared_ptr<IAgent> GetParent() const = 0;
     virtual std::string Name() const = 0;
     virtual void WaitToFinish() = 0;
-    virtual bool WaitToFinish(uint64_t timeout_ms) = 0;
+    virtual bool WaitToFinish(uint64_t timeoutMs) = 0;
     virtual std::vector<std::shared_ptr<IAgent>> GetChildren() const = 0;
     virtual nlohmann::json GetHistory() const = 0;
     virtual std::string GetConsoleOutput() const = 0;

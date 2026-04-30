@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 #include "interfaces/IFactory.h"
@@ -35,8 +36,11 @@ public:
     void SetSystemCallbacks(const SystemCallbacks& callbacks) override { m_systemCallbacks = callbacks; }
 
 private:
+    void CleanupFinishedAgents();
+
     SystemCallbacks m_systemCallbacks;
     std::vector<std::shared_ptr<IAgent>> m_agents;
+    std::mutex m_agentsMutex;
 };
 
 std::unique_ptr<IFactory> CreateFactory();

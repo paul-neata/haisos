@@ -15,6 +15,11 @@ public:
     ToolFactory();
     explicit ToolFactory(IFactory& factory);
 
+    ToolFactory(const ToolFactory&) = delete;
+    ToolFactory& operator=(const ToolFactory&) = delete;
+    ToolFactory(ToolFactory&&) = delete;
+    ToolFactory& operator=(ToolFactory&&) = delete;
+
     // IToolFactory interface
     std::unique_ptr<ITool> CreateTool(const std::string& name, std::shared_ptr<IAgent> callerAgent = nullptr) override;
     std::vector<std::string> GetAvailableTools() const override;

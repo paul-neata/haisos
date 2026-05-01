@@ -28,7 +28,7 @@ void AgentMessageBuffer::Append(const std::string& text) {
     m_buffer.append(text);
 }
 
-const std::string& AgentMessageBuffer::GetContents() const {
+std::string AgentMessageBuffer::GetContents() const {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_buffer;
 }

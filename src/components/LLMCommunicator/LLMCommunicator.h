@@ -25,7 +25,7 @@ public:
     static std::string BuildRequestJson(
         const std::string& modelName,
         const std::vector<LLMMessage>& messages,
-        std::vector<std::tuple<std::string, std::string, nlohmann::json>> tools);
+        const std::vector<std::tuple<std::string, std::string, nlohmann::json>>& tools);
 
     IHTTPClient* GetHttpClient() const { return m_httpClient.get(); }
 

@@ -19,4 +19,4 @@ Initiate graceful stop or force-kill on named subagents. On success, returns an 
 
 On success, returns an empty string.
 
-If the `names` argument is missing, also returns an empty string (this tool never produces an error).
+If the `names` argument is missing or not an array, returns `"Missing required field: names"` as an error.

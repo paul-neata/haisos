@@ -25,7 +25,6 @@ private:
     static void FetchSuccess(emscripten_fetch_t* fetch);
     static void FetchError(emscripten_fetch_t* fetch);
 
-    std::string m_lastResponse;
     std::string m_pendingResponse;
     int m_pendingStatusCode = 0;
     std::string m_pendingError;

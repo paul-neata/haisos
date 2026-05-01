@@ -405,6 +405,9 @@ void Agent::RunThread() {
         } catch (const std::exception& e) {
             LogError("Agent '%s' - Exception in RunThread: %s", m_name.c_str(), e.what());
             break;
+        } catch (...) {
+            LogError("Agent '%s' - Unknown exception in RunThread", m_name.c_str());
+            break;
         }
     }
     {

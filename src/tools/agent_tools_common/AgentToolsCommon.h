@@ -9,6 +9,7 @@
 #include <sstream>
 #include <random>
 #include <atomic>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include "interfaces/IAgent.h"
 #include "interfaces/IFactory.h"
@@ -23,6 +24,7 @@ inline std::string GenerateAgentName() {
         return rd();
     }());
     static std::atomic<uint64_t> s_counter{0};
+    static std::mutex s_genMutex;
     std::uniform_int_distribution<> dist(0, static_cast<int>(sizeof(chars) - 2));
 
     std::string name;
@@ -32,8 +34,11 @@ inline std::string GenerateAgentName() {
         name += chars[count % 36];
         count /= 36;
     }
-    for (int i = 0; i < 4; ++i) {
-        name += chars[dist(gen)];
+    {
+        std::lock_guard<std::mutex> lock(s_genMutex);
+        for (int i = 0; i < 4; ++i) {
+            name += chars[dist(gen)];
+        }
     }
     return name;
 }

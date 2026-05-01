@@ -24,7 +24,7 @@ LLMCommunicator::~LLMCommunicator() = default;
 std::string LLMCommunicator::BuildRequestJson(
     const std::string& modelName,
     const std::vector<LLMMessage>& messages,
-    std::vector<std::tuple<std::string, std::string, nlohmann::json>> tools)
+    const std::vector<std::tuple<std::string, std::string, nlohmann::json>>& tools)
 {
     nlohmann::ordered_json request;
     request["model"] = modelName;
@@ -32,12 +32,12 @@ std::string LLMCommunicator::BuildRequestJson(
 
     if (!tools.empty()) {
         json toolsArray = json::array();
-        for (auto& tool : tools) {
+        for (const auto& tool : tools) {
             json toolObj;
             toolObj["type"] = "function";
             toolObj["function"]["name"] = std::get<0>(tool);
             toolObj["function"]["description"] = std::get<1>(tool);
-            toolObj["function"]["parameters"] = std::move(std::get<2>(tool));
+            toolObj["function"]["parameters"] = std::get<2>(tool);
             toolsArray.push_back(std::move(toolObj));
         }
         request["tools"] = std::move(toolsArray);

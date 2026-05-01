@@ -119,7 +119,7 @@ node ./output/wasm/haisos.js
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `HAISOS_ENDPOINT` | LLM API endpoint URL | `http://localhost:11434/api/chat` |
-| `HAISOS_MODEL` | Model name | `kimi-k2.6:cloud` |
+| `HAISOS_MODEL` | Model name | `llama3` |
 | `HAISOS_API_KEY` | API key (optional for local Ollama) | (empty) |
 
 ## Command-Line Arguments

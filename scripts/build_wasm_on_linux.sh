@@ -30,12 +30,15 @@ if [ ! -d "extern/googletest" ]; then
     git clone --branch v1.14.0 --depth 1 https://github.com/google/googletest.git extern/googletest
 fi
 
-# Create build directory if it doesn't exist
-mkdir -p "build/temp_wasm${BUILD_SUFFIX}"
+BUILD_DIR="build/temp_wasm${BUILD_SUFFIX}"
+mkdir -p "$BUILD_DIR"
 
-# Configure and build with Emscripten
-cmake -B "build/temp_wasm${BUILD_SUFFIX}" -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" -DHAISOS_DEBUG=$([ "$BUILD_TYPE" = "Debug" ] && echo ON || echo OFF)
-cmake --build "build/temp_wasm${BUILD_SUFFIX}"
+# Configure only on first run; reuse existing build system on rebuilds
+if [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
+    cmake -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" -DHAISOS_DEBUG=$([ "$BUILD_TYPE" = "Debug" ] && echo ON || echo OFF)
+fi
+
+cmake --build "$BUILD_DIR" --parallel "$(nproc)"
 
 # Print the final command to run
 echo ""

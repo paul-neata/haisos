@@ -55,7 +55,8 @@ HTTPResponse FetchHTTPClient::PerformRequest(const std::string& url, const char*
 
     emscripten_fetch_attr_t attr;
     emscripten_fetch_attr_init(&attr);
-    strcpy(attr.requestMethod, method);
+    strncpy(attr.requestMethod, method, sizeof(attr.requestMethod) - 1);
+    attr.requestMethod[sizeof(attr.requestMethod) - 1] = '\0';
     attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
     attr.onsuccess = FetchSuccess;
     attr.onerror = FetchError;
@@ -94,7 +95,6 @@ HTTPResponse FetchHTTPClient::PerformRequest(const std::string& url, const char*
         response.statusCode = m_pendingStatusCode;
         response.body = m_pendingResponse;
         response.error = m_pendingError;
-        m_lastResponse = m_pendingResponse;
     }
     return response;
 }

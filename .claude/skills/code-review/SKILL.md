@@ -16,6 +16,9 @@ You are the meta-review orchestrator. You will run 5 specialized code-review age
    2. Verify each against actual code/build scripts.
    3. Propose fixes for wrong/outdated/missing info.
    4. Propose splits, optimizations, or new CLAUDE.md files where valuable.
+
+   EXCEPTION — do NOT flag the default value of `HAISOS_MODEL` in the root `CLAUDE.md`.
+   The root CLAUDE.md documents the model currently in use for the project, which may differ from the hardcoded fallback in C++ source files. This is intentional and not a documentation bug.
    NEVER edit. Only list numbered proposals prefixed with [claude-md], ordered by importance.
    ```
 

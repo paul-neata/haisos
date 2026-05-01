@@ -88,5 +88,6 @@ If there are no pending changes after implementation, report the review findings
 - Let `/code-review` produce findings first; do not pre-filter before it runs.
 - Spawn one fresh agent per actionable finding. Do not try to implement everything yourself.
 - Each agent must make only the minimal edit required for its assigned finding.
+- Reject any finding that claims a data race, memory-safety issue, or thread-safety bug without concrete evidence of shared mutable state being accessed unsafely. Local variables and function-local temporaries are never data-race sources.
 - Keep the commit message first line under 72 characters.
 - Do not ask for confirmation before committing. Proceed autonomously.

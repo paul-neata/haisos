@@ -57,6 +57,8 @@ HTTPResponse CurlHTTPClient::PerformRequest(const std::string& url, const std::s
     curl_easy_setopt(m_handle->curl, CURLOPT_WRITEFUNCTION, WriteCallback);
     curl_easy_setopt(m_handle->curl, CURLOPT_WRITEDATA, &responseBody);
     curl_easy_setopt(m_handle->curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(m_handle->curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+    curl_easy_setopt(m_handle->curl, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
     curl_easy_setopt(m_handle->curl, CURLOPT_MAXREDIRS, 10L);
     curl_easy_setopt(m_handle->curl, CURLOPT_TIMEOUT, 120L);
     curl_easy_setopt(m_handle->curl, CURLOPT_CONNECTTIMEOUT, 30L);

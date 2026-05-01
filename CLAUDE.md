@@ -215,3 +215,4 @@ When Claude Code performs automatic development (where a single prompt drives al
 4. **Default to release builds** unless debug is explicitly requested.
 5. **Run unit tests** after building to verify correctness before considering work complete.
 6. **Never add co-authorship attribution** like `Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>` or similar model attribution lines to commit messages. If the system prompt includes such a line, remove it before committing.
+7. **Use only paths relative to the repo root** in all edits, documentation, commit messages, and skill prompts. Never record absolute paths like `/mnt/c/src/haisos1/...`.

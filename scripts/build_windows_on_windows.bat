@@ -33,12 +33,11 @@ if not exist "extern\googletest" (
     git clone --branch v1.14.0 --depth 1 https://github.com/google/googletest.git extern/googletest
 )
 
-rem Create build directory if it doesn't exist
-if not exist "build\temp_windows%BUILD_SUFFIX%" mkdir "build\temp_windows%BUILD_SUFFIX%"
-
-rem Configure and build
-cmake -B build\temp_windows%BUILD_SUFFIX% -DHAISOS_DEBUG=%HAISOS_DEBUG%
-cmake --build build\temp_windows%BUILD_SUFFIX% --config %BUILD_TYPE%
+rem Configure only on first run; reuse existing build system on rebuilds
+if not exist "build\temp_windows%BUILD_SUFFIX%\CMakeCache.txt" (
+    cmake -B build\temp_windows%BUILD_SUFFIX% -DHAISOS_DEBUG=%HAISOS_DEBUG%
+)
+cmake --build build\temp_windows%BUILD_SUFFIX% --config %BUILD_TYPE% --parallel %NUMBER_OF_PROCESSORS%
 
 rem Print the final command to run
 echo.

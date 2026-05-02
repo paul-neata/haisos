@@ -47,8 +47,8 @@ public:
         return m_openReturn;
     }
 
-    int OpenFile(const std::string& pathname, int flags, mode_t mode) override {
-        m_openCalls.push_back({pathname, flags, static_cast<int>(mode)});
+    int OpenFile(const std::string& pathname, int flags, int mode) override {
+        m_openCalls.push_back({pathname, flags, mode});
         return m_openReturn;
     }
 
@@ -57,15 +57,15 @@ public:
         return m_closeReturn;
     }
 
-    ssize_t ReadFile(int fd, void* buf, size_t count) override {
+    int ReadFile(int fd, void* buf, size_t count) override {
         m_readCalls.push_back({fd, count});
         if (m_readBuffer.empty()) return m_readReturn;
         size_t toCopy = std::min(count, m_readBuffer.size());
         std::memcpy(buf, m_readBuffer.data(), toCopy);
-        return static_cast<ssize_t>(toCopy);
+        return static_cast<int>(toCopy);
     }
 
-    ssize_t WriteFile(int fd, const void* buf, size_t count) override {
+    int WriteFile(int fd, const void* buf, size_t count) override {
         m_writeCalls.push_back({fd, count});
         m_writeBuffer.insert(m_writeBuffer.end(),
             static_cast<const char*>(buf),
@@ -73,8 +73,8 @@ public:
         return m_writeReturn;
     }
 
-    int CreateDirectory(const std::string& pathname, mode_t mode) override {
-        m_mkdirCalls.push_back({pathname, static_cast<int>(mode)});
+    int CreateDirectory(const std::string& pathname, int mode) override {
+        m_mkdirCalls.push_back({pathname, mode});
         return m_mkdirReturn;
     }
 

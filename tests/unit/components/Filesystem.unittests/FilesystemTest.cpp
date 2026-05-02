@@ -54,14 +54,14 @@ TEST_F(FilesystemTest, WriteFileAndReadFile) {
     int fdw = fs.OpenFile(kTestFile, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
     ASSERT_GE(fdw, 0);
     std::string data = "Hello, Filesystem!";
-    EXPECT_EQ(fs.WriteFile(fdw, data.data(), data.size()), static_cast<ssize_t>(data.size()));
+    EXPECT_EQ(fs.WriteFile(fdw, data.data(), data.size()), static_cast<int>(data.size()));
     EXPECT_EQ(fs.CloseFile(fdw), 0);
 
     // Read
     int fdr = fs.OpenFile(kTestFile, O_RDONLY);
     ASSERT_GE(fdr, 0);
     std::string buf(data.size(), '\0');
-    EXPECT_EQ(fs.ReadFile(fdr, buf.data(), buf.size()), static_cast<ssize_t>(data.size()));
+    EXPECT_EQ(fs.ReadFile(fdr, buf.data(), buf.size()), static_cast<int>(data.size()));
     EXPECT_EQ(buf, data);
 
     // Read partial

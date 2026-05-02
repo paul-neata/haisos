@@ -13,24 +13,24 @@ int Filesystem::OpenFile(const std::string& pathname, int flags) {
     return ::open(pathname.c_str(), flags);
 }
 
-int Filesystem::OpenFile(const std::string& pathname, int flags, mode_t mode) {
-    return ::open(pathname.c_str(), flags, mode);
+int Filesystem::OpenFile(const std::string& pathname, int flags, int mode) {
+    return ::open(pathname.c_str(), flags, static_cast<mode_t>(mode));
 }
 
 int Filesystem::CloseFile(int fd) {
     return ::close(fd);
 }
 
-ssize_t Filesystem::ReadFile(int fd, void* buf, size_t count) {
-    return ::read(fd, buf, count);
+int Filesystem::ReadFile(int fd, void* buf, size_t count) {
+    return static_cast<int>(::read(fd, buf, count));
 }
 
-ssize_t Filesystem::WriteFile(int fd, const void* buf, size_t count) {
-    return ::write(fd, buf, count);
+int Filesystem::WriteFile(int fd, const void* buf, size_t count) {
+    return static_cast<int>(::write(fd, buf, count));
 }
 
-int Filesystem::CreateDirectory(const std::string& pathname, mode_t mode) {
-    return ::mkdir(pathname.c_str(), mode);
+int Filesystem::CreateDirectory(const std::string& pathname, int mode) {
+    return ::mkdir(pathname.c_str(), static_cast<mode_t>(mode));
 }
 
 int Filesystem::RemoveDirectory(const std::string& pathname) {

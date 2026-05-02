@@ -31,6 +31,7 @@ public:
         const std::string& startTime = "",
         bool longRunning = true) override;
     std::unique_ptr<IHaisosEngine> CreateHaisosEngine(IFactory& factory) override;
+    std::unique_ptr<IFileSystem> CreateFilesystem() override;
 
     SystemCallbacks GetSystemCallbacks() const override { return m_systemCallbacks; }
     void SetSystemCallbacks(const SystemCallbacks& callbacks) override { m_systemCallbacks = callbacks; }

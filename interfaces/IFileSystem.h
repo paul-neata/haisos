@@ -4,6 +4,10 @@
 #include <vector>
 #include <cstddef>
 
+#ifdef _WIN32
+using ssize_t = std::ptrdiff_t;
+#endif
+
 namespace Haisos {
 
 enum DirectoryEntryType : char {
@@ -44,10 +48,10 @@ public:
     virtual int CloseFile(int fd) = 0;
 
     // ReadFile is the IFileSystem counterpart of the C read() function.
-    virtual int ReadFile(int fd, void* buf, size_t count) = 0;
+    virtual ssize_t ReadFile(int fd, void* buf, size_t count) = 0;
 
     // WriteFile is the IFileSystem counterpart of the C write() function.
-    virtual int WriteFile(int fd, const void* buf, size_t count) = 0;
+    virtual ssize_t WriteFile(int fd, const void* buf, size_t count) = 0;
 
     // CreateDirectory is the IFileSystem counterpart of the C mkdir() function.
     virtual int CreateDirectory(const std::string& pathname, int mode) = 0;
@@ -64,6 +68,9 @@ public:
     // ReadDirectory returns the non-"." / ".." entries in |path|.
     // There is no direct single C counterpart; it wraps opendir/readdir/closedir
     // on POSIX and FindFirstFile/FindNextFile on Windows.
+    // Note: on POSIX, when d_type is unknown, stat() is used rather than lstat(),
+    // so symbolic links are followed and the target's type is reported (not the
+    // symlink type itself).
     virtual std::vector<DirectoryEntry> ReadDirectory(const std::string& path) = 0;
 };
 

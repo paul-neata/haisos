@@ -9,39 +9,39 @@
 
 namespace Haisos {
 
-int Filesystem::OpenFile(const std::string& pathname, int flags) {
+int FileSystem::OpenFile(const std::string& pathname, int flags) {
     return ::open(pathname.c_str(), flags);
 }
 
-int Filesystem::OpenFile(const std::string& pathname, int flags, int mode) {
+int FileSystem::OpenFile(const std::string& pathname, int flags, int mode) {
     return ::open(pathname.c_str(), flags, static_cast<mode_t>(mode));
 }
 
-int Filesystem::CloseFile(int fd) {
+int FileSystem::CloseFile(int fd) {
     return ::close(fd);
 }
 
-int Filesystem::ReadFile(int fd, void* buf, size_t count) {
-    return static_cast<int>(::read(fd, buf, count));
+ssize_t FileSystem::ReadFile(int fd, void* buf, size_t count) {
+    return ::read(fd, buf, count);
 }
 
-int Filesystem::WriteFile(int fd, const void* buf, size_t count) {
-    return static_cast<int>(::write(fd, buf, count));
+ssize_t FileSystem::WriteFile(int fd, const void* buf, size_t count) {
+    return ::write(fd, buf, count);
 }
 
-int Filesystem::CreateDirectory(const std::string& pathname, int mode) {
+int FileSystem::CreateDirectory(const std::string& pathname, int mode) {
     return ::mkdir(pathname.c_str(), static_cast<mode_t>(mode));
 }
 
-int Filesystem::RemoveDirectory(const std::string& pathname) {
+int FileSystem::RemoveDirectory(const std::string& pathname) {
     return ::rmdir(pathname.c_str());
 }
 
-int Filesystem::ChangeDirectory(const std::string& path) {
+int FileSystem::ChangeDirectory(const std::string& path) {
     return ::chdir(path.c_str());
 }
 
-char* Filesystem::GetCurrentDirectory(std::string& buf, size_t size) {
+char* FileSystem::GetCurrentDirectory(std::string& buf, size_t size) {
     buf.resize(size);
     char* result = ::getcwd(buf.data(), size);
     if (result != nullptr) {
@@ -53,7 +53,7 @@ char* Filesystem::GetCurrentDirectory(std::string& buf, size_t size) {
     return result;
 }
 
-std::vector<DirectoryEntry> Filesystem::ReadDirectory(const std::string& path) {
+std::vector<DirectoryEntry> FileSystem::ReadDirectory(const std::string& path) {
     std::vector<DirectoryEntry> entries;
     DIR* dir = ::opendir(path.c_str());
     if (!dir) {
@@ -90,7 +90,7 @@ std::vector<DirectoryEntry> Filesystem::ReadDirectory(const std::string& path) {
 }
 
 std::unique_ptr<IFileSystem> CreateFilesystem() {
-    return std::make_unique<Filesystem>();
+    return std::make_unique<FileSystem>();
 }
 
 } // namespace Haisos

@@ -68,7 +68,7 @@ std::unique_ptr<IHaisosEngine> Factory::CreateHaisosEngine(IFactory& factory) {
 }
 
 std::unique_ptr<IFileSystem> Factory::CreateFilesystem() {
-    return std::make_unique<Filesystem>();
+    return std::make_unique<FileSystem>();
 }
 
 std::unique_ptr<IFactory> CreateFactory() {

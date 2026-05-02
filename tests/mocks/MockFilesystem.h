@@ -57,15 +57,15 @@ public:
         return m_closeReturn;
     }
 
-    int ReadFile(int fd, void* buf, size_t count) override {
+    ssize_t ReadFile(int fd, void* buf, size_t count) override {
         m_readCalls.push_back({fd, count});
         if (m_readBuffer.empty()) return m_readReturn;
         size_t toCopy = std::min(count, m_readBuffer.size());
         std::memcpy(buf, m_readBuffer.data(), toCopy);
-        return static_cast<int>(toCopy);
+        return static_cast<ssize_t>(toCopy);
     }
 
-    int WriteFile(int fd, const void* buf, size_t count) override {
+    ssize_t WriteFile(int fd, const void* buf, size_t count) override {
         m_writeCalls.push_back({fd, count});
         m_writeBuffer.insert(m_writeBuffer.end(),
             static_cast<const char*>(buf),

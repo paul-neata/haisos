@@ -65,7 +65,7 @@ protected:
 };
 
 TEST_F(FilesystemTest, OpenFileCreatesNewFile) {
-    Filesystem fs;
+    FileSystem fs;
     fs.CreateDirectory(kTestDir, S_IRWXU);
     int fd = fs.OpenFile(kTestFile, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
     EXPECT_GE(fd, 0);
@@ -74,32 +74,32 @@ TEST_F(FilesystemTest, OpenFileCreatesNewFile) {
 }
 
 TEST_F(FilesystemTest, OpenFileNonExistentReturnsError) {
-    Filesystem fs;
+    FileSystem fs;
     int fd = fs.OpenFile(kTestFile, O_RDONLY);
     EXPECT_LT(fd, 0);
 }
 
 TEST_F(FilesystemTest, CloseFileInvalidFdReturnsError) {
-    Filesystem fs;
+    FileSystem fs;
     EXPECT_LT(fs.CloseFile(-1), 0);
 }
 
 TEST_F(FilesystemTest, WriteFileAndReadFile) {
-    Filesystem fs;
+    FileSystem fs;
     fs.CreateDirectory(kTestDir, S_IRWXU);
 
     // Write
     int fdw = fs.OpenFile(kTestFile, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
     ASSERT_GE(fdw, 0);
     std::string data = "Hello, Filesystem!";
-    EXPECT_EQ(fs.WriteFile(fdw, data.data(), data.size()), static_cast<int>(data.size()));
+    EXPECT_EQ(fs.WriteFile(fdw, data.data(), data.size()), static_cast<ssize_t>(data.size()));
     EXPECT_EQ(fs.CloseFile(fdw), 0);
 
     // Read
     int fdr = fs.OpenFile(kTestFile, O_RDONLY);
     ASSERT_GE(fdr, 0);
     std::string buf(data.size(), '\0');
-    EXPECT_EQ(fs.ReadFile(fdr, buf.data(), buf.size()), static_cast<int>(data.size()));
+    EXPECT_EQ(fs.ReadFile(fdr, buf.data(), buf.size()), static_cast<ssize_t>(data.size()));
     EXPECT_EQ(buf, data);
 
     // Read partial
@@ -113,7 +113,7 @@ TEST_F(FilesystemTest, WriteFileAndReadFile) {
 }
 
 TEST_F(FilesystemTest, ReadFilePastEnd) {
-    Filesystem fs;
+    FileSystem fs;
     fs.CreateDirectory(kTestDir, S_IRWXU);
     int fd = fs.OpenFile(kTestFile, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
     ASSERT_GE(fd, 0);
@@ -129,13 +129,13 @@ TEST_F(FilesystemTest, ReadFilePastEnd) {
 }
 
 TEST_F(FilesystemTest, WriteFileReturnsErrorOnInvalidFd) {
-    Filesystem fs;
+    FileSystem fs;
     std::string data = "test";
     EXPECT_LT(fs.WriteFile(-1, data.data(), data.size()), 0);
 }
 
 TEST_F(FilesystemTest, CreateDirectoryAndRemoveDirectory) {
-    Filesystem fs;
+    FileSystem fs;
 
     EXPECT_EQ(fs.CreateDirectory(kTestDir, S_IRWXU), 0);
     EXPECT_EQ(::access(kTestDir.c_str(), F_OK), 0);
@@ -145,19 +145,19 @@ TEST_F(FilesystemTest, CreateDirectoryAndRemoveDirectory) {
 }
 
 TEST_F(FilesystemTest, CreateDirectoryExistingReturnsError) {
-    Filesystem fs;
+    FileSystem fs;
     fs.CreateDirectory(kTestDir, S_IRWXU);
     EXPECT_LT(fs.CreateDirectory(kTestDir, S_IRWXU), 0);
     fs.RemoveDirectory(kTestDir);
 }
 
 TEST_F(FilesystemTest, RemoveDirectoryNonExistentReturnsError) {
-    Filesystem fs;
+    FileSystem fs;
     EXPECT_LT(fs.RemoveDirectory("/tmp/haisos_nonexistent_dir_12345"), 0);
 }
 
 TEST_F(FilesystemTest, ChangeDirectoryAndGetCurrentDirectory) {
-    Filesystem fs;
+    FileSystem fs;
 
     // Save original
     std::string original;
@@ -180,13 +180,13 @@ TEST_F(FilesystemTest, ChangeDirectoryAndGetCurrentDirectory) {
 }
 
 TEST_F(FilesystemTest, GetCurrentDirectoryNullOnZeroSize) {
-    Filesystem fs;
+    FileSystem fs;
     std::string buf;
     EXPECT_EQ(fs.GetCurrentDirectory(buf, 0), nullptr);
 }
 
 TEST_F(FilesystemTest, ReadDirectoryListsEntries) {
-    Filesystem fs;
+    FileSystem fs;
 
     fs.CreateDirectory(kTestDir, S_IRWXU);
     int fd = fs.OpenFile(kTestFile, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
@@ -209,7 +209,7 @@ TEST_F(FilesystemTest, ReadDirectoryListsEntries) {
 }
 
 TEST_F(FilesystemTest, ReadDirectoryFiltersDotAndDotDot) {
-    Filesystem fs;
+    FileSystem fs;
     fs.CreateDirectory(kTestDir, S_IRWXU);
 
     auto entries = fs.ReadDirectory(kTestDir);
@@ -222,7 +222,7 @@ TEST_F(FilesystemTest, ReadDirectoryFiltersDotAndDotDot) {
 }
 
 TEST_F(FilesystemTest, ReadDirectoryNonExistentReturnsEmpty) {
-    Filesystem fs;
+    FileSystem fs;
     auto entries = fs.ReadDirectory("/tmp/haisos_nonexistent_dir_12345");
     EXPECT_TRUE(entries.empty());
 }

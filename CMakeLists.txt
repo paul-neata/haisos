@@ -80,6 +80,7 @@ enable_testing()
 
 # Components subdirectories
 add_subdirectory(src/components/Logger)
+add_subdirectory(src/components/Filesystem)
 add_subdirectory(src/components/Factory)
 add_subdirectory(src/components/Console)
 add_subdirectory(src/components/HTTPClient)

@@ -7,6 +7,7 @@
 #include "IHTTPClient.h"
 #include "ILLMCommunicator.h"
 #include "IHaisosEngine.h"
+#include "IFilesystem.h"
 #include "IToolFactory.h"
 #include "SystemCallbacks.h"
 
@@ -33,6 +34,7 @@ public:
         const std::string& startTime = "",
         bool longRunning = true) = 0;
     virtual std::unique_ptr<IHaisosEngine> CreateHaisosEngine(IFactory& factory) = 0;
+    virtual std::unique_ptr<IFilesystem> CreateFilesystem() = 0;
 
     virtual SystemCallbacks GetSystemCallbacks() const = 0;
     virtual void SetSystemCallbacks(const SystemCallbacks& callbacks) = 0;

@@ -6,6 +6,7 @@
 #include "src/components/ToolFactory/ToolFactory.h"
 #include "src/components/HaisosEngine/HaisosEngine.h"
 #include "src/components/Agent/Agent.h"
+#include "src/components/Filesystem/Filesystem.h"
 
 namespace Haisos {
 
@@ -64,6 +65,10 @@ std::shared_ptr<IAgent> Factory::CreateAgent(
 
 std::unique_ptr<IHaisosEngine> Factory::CreateHaisosEngine(IFactory& factory) {
     return std::make_unique<HaisosEngine>(factory);
+}
+
+std::unique_ptr<IFilesystem> Factory::CreateFilesystem() {
+    return std::make_unique<Filesystem>();
 }
 
 std::unique_ptr<IFactory> CreateFactory() {

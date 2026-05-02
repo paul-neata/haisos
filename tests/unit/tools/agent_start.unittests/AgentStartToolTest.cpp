@@ -68,6 +68,7 @@ public:
         return agent;
     }
     std::unique_ptr<IHaisosEngine> CreateHaisosEngine(IFactory&) override { return nullptr; }
+    std::unique_ptr<IFilesystem> CreateFilesystem() override { return nullptr; }
 
     SystemCallbacks GetSystemCallbacks() const override { return m_callbacks; }
     void SetSystemCallbacks(const SystemCallbacks& callbacks) override { m_callbacks = callbacks; }

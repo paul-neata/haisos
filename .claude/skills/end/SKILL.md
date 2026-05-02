@@ -1,23 +1,23 @@
 ---
 name: end
-description: Finish the current task branch by building on Linux and Windows, pushing, and creating a GitHub PR.
+description: Finish the current task branch by building on current and other platforms, committing, pushing, and updating/creating a GitHub PR.
 ---
 
-Finish the current task branch by building on both platforms, pushing, and opening a pull request.
+Finish the current task branch by building, committing, pushing, and updating or creating a pull request.
 
 ## Steps
 
-### 1. Build on Linux
+### 1. Build on current platform
 
-Invoke the `/build` skill for Linux:
+Invoke the `/build` skill for the current platform:
 ```bash
-/build L
+/build
 ```
-If the build fails, report the failure and stop. Do not proceed to PR creation.
+If the build fails, report the failure and stop. Do not proceed.
 
-### 2. Build on Windows (if on WSL)
+### 2. Build on the other platform (if applicable)
 
-Detect WSL:
+Detect the platform:
 ```bash
 IS_WSL=0
 if [[ "$(uname -s)" == Linux* ]] && grep -qi microsoft /proc/version 2>/dev/null; then
@@ -25,15 +25,19 @@ if [[ "$(uname -s)" == Linux* ]] && grep -qi microsoft /proc/version 2>/dev/null
 fi
 ```
 
-If `IS_WSL == 1`, invoke the `/build` skill for Windows:
+If on Linux or WSL, also invoke the `/build` skill for Windows:
 ```bash
 /build W
 ```
-If the Windows build fails, report the failure and stop. Do not proceed to PR creation.
+If the Windows build fails, report the failure and stop. Do not proceed.
 
-If not on WSL, print "Windows build skipped (not on WSL)."
+If not on Linux/WSL, print "Cross-platform build skipped (not on Linux/WSL)."
 
-### 3. Push the branch
+### 3. Commit any pending changes
+
+Invoke the `/commit` skill.
+
+### 4. Push the branch
 
 Determine the current branch:
 ```bash
@@ -50,10 +54,16 @@ If the push fails because the branch already has an upstream set, fall back to:
 git push
 ```
 
-### 4. Create a pull request
+### 5. Update or create a pull request
 
-Invoke the `/create-pr` skill.
+Check if a GitHub PR already exists for this branch:
+```bash
+gh pr view --json number 2>/dev/null
+```
 
-### 5. Confirm completion
+- If a PR exists, invoke the `/update-pr-description` skill.
+- If no PR exists, invoke the `/create-pr` skill.
 
-Tell the user the branch has been pushed and a PR has been created (or attempted).
+### 6. Confirm completion
+
+Tell the user the branch has been built, committed, pushed, and the PR has been updated or created.

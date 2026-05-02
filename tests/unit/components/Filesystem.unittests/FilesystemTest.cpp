@@ -1,15 +1,53 @@
 #include <gtest/gtest.h>
 #include "Filesystem.h"
+#include <cstring>
+
+#ifdef _WIN32
+#include <io.h>
+#include <direct.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <windows.h>
+#undef CreateDirectory
+#undef RemoveDirectory
+#undef GetCurrentDirectory
+#undef small
+
+#define unlink _unlink
+#define rmdir _rmdir
+#define access _access
+#define getcwd _getcwd
+#ifndef F_OK
+#define F_OK 0
+#endif
+#ifndef S_IRWXU
+#define S_IRWXU (_S_IREAD | _S_IWRITE | _S_IEXEC)
+#endif
+#ifndef S_IRUSR
+#define S_IRUSR _S_IREAD
+#endif
+#ifndef S_IWUSR
+#define S_IWUSR _S_IWRITE
+#endif
+#else
 #include <unistd.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <cstring>
+#endif
 
 using namespace Haisos;
 
 namespace {
 
+#ifdef _WIN32
+const std::string kTestDir = []() {
+    char buf[MAX_PATH];
+    DWORD len = GetTempPathA(MAX_PATH, buf);
+    return std::string(buf, len) + "haisos_fs_test";
+}();
+#else
 const std::string kTestDir = "/tmp/haisos_fs_test";
+#endif
 const std::string kTestFile = kTestDir + "/testfile.txt";
 
 class FilesystemTest : public ::testing::Test {

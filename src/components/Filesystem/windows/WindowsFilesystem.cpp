@@ -3,6 +3,9 @@
 #include <io.h>
 #include <direct.h>
 #include <windows.h>
+#undef CreateDirectory
+#undef RemoveDirectory
+#undef GetCurrentDirectory
 #include <string>
 #include <algorithm>
 

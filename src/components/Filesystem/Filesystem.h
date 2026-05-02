@@ -1,9 +1,9 @@
 #pragma once
-#include "interfaces/IFilesystem.h"
+#include "interfaces/IFileSystem.h"
 
 namespace Haisos {
 
-class Filesystem : public IFilesystem {
+class Filesystem : public IFileSystem {
 public:
     Filesystem() = default;
     ~Filesystem() override = default;

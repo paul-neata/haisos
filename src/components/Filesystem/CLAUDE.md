@@ -10,4 +10,4 @@ Thin wrapper around Linux filesystem syscalls.
 
 ## Key Classes
 
-- `Filesystem` - Main implementation of `IFilesystem`
+- `Filesystem` - Main implementation of `IFileSystem`

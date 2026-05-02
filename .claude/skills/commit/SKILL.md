@@ -27,7 +27,7 @@ Stage all pending changes and create a commit with a concise one-line message.
 4. Draft a short one-line commit message (under 72 characters) that summarizes the changes.
    Use the file paths, diff-stat, and the nature of edits to infer intent.
    Examples:
-   - `Add IFilesystem interface and Filesystem component`
+   - `Add IFileSystem interface and Filesystem component`
    - `Fix deprecated curl options in HTTPClient`
    - `Update build scripts to use parallel compilation`
    - `Refactor Agent message buffer locking`

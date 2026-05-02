@@ -80,7 +80,7 @@ std::vector<DirectoryEntry> Filesystem::ReadDirectory(const std::string& path) {
     return entries;
 }
 
-std::unique_ptr<IFilesystem> CreateFilesystem() {
+std::unique_ptr<IFileSystem> CreateFilesystem() {
     return std::make_unique<Filesystem>();
 }
 

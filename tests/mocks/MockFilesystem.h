@@ -1,11 +1,11 @@
 #pragma once
-#include "interfaces/IFilesystem.h"
+#include "interfaces/IFileSystem.h"
 #include <vector>
 #include <tuple>
 
 namespace Haisos::Mocks {
 
-class MockFilesystem : public IFilesystem {
+class MockFilesystem : public IFileSystem {
 public:
     MockFilesystem() = default;
 
@@ -41,7 +41,7 @@ public:
     char* m_getcwdReturn = nullptr;
     std::vector<DirectoryEntry> m_readdirReturn;
 
-    // IFilesystem overrides
+    // IFileSystem overrides
     int OpenFile(const std::string& pathname, int flags) override {
         m_openCalls.push_back({pathname, flags, 0});
         return m_openReturn;

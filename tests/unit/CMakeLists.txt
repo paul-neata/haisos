@@ -1,4 +1,5 @@
 add_subdirectory(components/Console.unittests)
+add_subdirectory(components/Filesystem.unittests)
 add_subdirectory(components/Factory.unittests)
 add_subdirectory(components/HaisosEngine.unittests)
 add_subdirectory(components/Agent.unittests)

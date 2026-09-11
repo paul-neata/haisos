@@ -7,13 +7,26 @@
 using namespace Haisos;
 using namespace Haisos::Mocks;
 
-TEST(FactoryTest, CreateConsole) {
+TEST(FactoryTest, CreatePhysicalConsole) {
     Factory factory;
-    auto console = factory.CreateConsole(false);
+    auto console = factory.CreatePhysicalConsole(false);
     EXPECT_NE(console, nullptr);
 
-    auto consoleWithLog = factory.CreateConsole(true);
+    auto consoleWithLog = factory.CreatePhysicalConsole(true);
     EXPECT_NE(consoleWithLog, nullptr);
+}
+
+TEST(FactoryTest, CreateAgentConsole) {
+    Factory factory;
+    auto console = factory.CreateAgentConsole();
+    EXPECT_NE(console, nullptr);
+}
+
+TEST(FactoryTest, CreateAgentConsoleFromPhysical) {
+    Factory factory;
+    auto physicalConsole = factory.CreatePhysicalConsole(false);
+    auto console = factory.CreateAgentConsoleFromPhysical(physicalConsole, "test_source");
+    EXPECT_NE(console, nullptr);
 }
 
 TEST(FactoryTest, CreateHTTPClient) {
@@ -41,7 +54,7 @@ TEST(FactoryTest, CreateToolFactory) {
 
 TEST(FactoryTest, CreateAgent) {
     Factory factory;
-    auto console = factory.CreateConsole(false);
+    auto console = factory.CreateAgentConsole();
     auto httpClient = factory.CreateHTTPClient();
     auto toolFactory = factory.CreateToolFactory(factory);
     auto llmCommunicator = factory.CreateLLMCommunicator(
@@ -62,8 +75,3 @@ TEST(FactoryTest, CreateAgent) {
     EXPECT_EQ(agent->Name(), "test_agent");
 }
 
-TEST(FactoryTest, CreateHaisosEngine) {
-    Factory factory;
-    auto engine = factory.CreateHaisosEngine(factory);
-    EXPECT_NE(engine, nullptr);
-}

@@ -24,7 +24,7 @@ std::shared_ptr<IAgent> CreateAndStartSubagent(
 
     auto httpClient = factory.CreateHTTPClient();
     auto toolFactory = factory.CreateToolFactory(factory);
-    auto console = factory.CreateConsole(false);
+    auto console = factory.CreateAgentConsole();
     std::string endpoint = std::getenv("HAISOS_ENDPOINT") ? std::getenv("HAISOS_ENDPOINT") : "http://localhost:11434/api/chat";
     std::string model = std::getenv("HAISOS_MODEL") ? std::getenv("HAISOS_MODEL") : "llama3";
     std::string apiKey = std::getenv("HAISOS_API_KEY") ? std::getenv("HAISOS_API_KEY") : "";

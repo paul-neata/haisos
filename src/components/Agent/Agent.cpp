@@ -51,12 +51,11 @@ static void TruncateIfNeeded(std::string& content) {
 Agent::Agent(
     std::shared_ptr<ILLMCommunicator> llmCommunicator,
     std::shared_ptr<IToolFactory> toolFactory,
-    std::shared_ptr<IConsole> console,
+    std::shared_ptr<IAgentConsole> console,
     const std::vector<std::string>& systemPrompts,
     const std::string& name,
     std::shared_ptr<IAgent> parent,
     const std::string& startTime,
-    const SystemCallbacks& callbacks,
     bool longRunning)
     : m_llmCommunicator(std::move(llmCommunicator))
     , m_toolFactory(std::move(toolFactory))
@@ -65,7 +64,6 @@ Agent::Agent(
     , m_name(name)
     , m_startTime(startTime)
     , m_parent(std::move(parent))
-    , m_callbacks(callbacks)
     , m_longRunning(longRunning)
 {
     m_thread = std::thread(&Agent::RunThread, this);
@@ -262,7 +260,7 @@ std::vector<std::tuple<std::string, std::string, std::string, bool>> Agent::Exec
         } else {
             LogError("Agent '%s' - Unknown tool: %s", m_name.c_str(), toolName.c_str());
             if (m_console) {
-                m_console->Write(*this, "Error: Unknown tool - " + toolName);
+                m_console->Write("Error: Unknown tool - " + toolName);
             }
             m_messageBuffer.Append("[" + m_name + "] Error: Unknown tool - " + toolName + "\n");
             toolResults.emplace_back(toolName, "Error: Unknown tool - " + toolName, toolCallId, true);
@@ -273,30 +271,6 @@ std::vector<std::tuple<std::string, std::string, std::string, bool>> Agent::Exec
 }
 
 void Agent::RunThread() {
-    SystemCallbacks llmCallbacks;
-    if (m_callbacks.on_send_with_name) {
-        llmCallbacks.on_send = [this](const std::string& json) {
-            LogDebug("Agent '%s' sending JSON (%zu bytes)", m_name.c_str(), json.size());
-            m_callbacks.on_send_with_name(m_name, json);
-        };
-    } else if (m_callbacks.on_send) {
-        llmCallbacks.on_send = [this](const std::string& json) {
-            LogDebug("Agent '%s' sending JSON (%zu bytes)", m_name.c_str(), json.size());
-            m_callbacks.on_send(json);
-        };
-    }
-    if (m_callbacks.on_received_with_name) {
-        llmCallbacks.on_received = [this](const std::string& json) {
-            LogDebug("Agent '%s' received JSON (%zu bytes)", m_name.c_str(), json.size());
-            m_callbacks.on_received_with_name(m_name, json);
-        };
-    } else if (m_callbacks.on_received) {
-        llmCallbacks.on_received = [this](const std::string& json) {
-            LogDebug("Agent '%s' received JSON (%zu bytes)", m_name.c_str(), json.size());
-            m_callbacks.on_received(json);
-        };
-    }
-
     for (const auto& prompt : m_systemPrompts) {
         LLMMessage systemMsg;
         systemMsg.role = "system";
@@ -354,12 +328,12 @@ void Agent::RunThread() {
                     localHistory = m_history;
                 }
 
-                LLMResponse response = m_llmCommunicator->Call(localHistory, tools, llmCallbacks);
+                LLMResponse response = m_llmCommunicator->Call(localHistory, tools);
                 TruncateIfNeeded(response.message.content);
 
                 if (!response.message.content.empty()) {
                     if (m_console) {
-                        m_console->Write(*this, response.message.content);
+                        m_console->Write(response.message.content);
                     }
                     m_messageBuffer.Append("[" + m_name + "] " + response.message.content + "\n");
                 }

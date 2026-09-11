@@ -1,10 +1,10 @@
 # Haisos - C++ Platform for Running Agents
 
-Haisos is a C++ platform for running agents that processes markdown files through a local LLM (like Ollama) with tool calling capabilities.
+Haisos is a C++ platform that boots a small OS-like environment (`IHaisosOS`) from a `haisosfile` manifest and runs processes in it: LLM agents (`.md` files, sent to a local LLM like Ollama with tool-calling) and embedded Lua scripts (`.lua` files).
 
 ## Project Overview
 
-Haisos reads markdown files, sends their content to a local LLM, and handles tool calls for actions like getting the current date/time.
+A `haisosfile` (Dockerfile-style; see "The `haisosfile` DSL" below) selects a filesystem root to mount and one or more initial processes to run. Haisos starts each one under a rooted `IHaisosOS`, and exits once they've all finished. Agent-backed processes get both the LLM's agent-management tools (`agent_start`, ...) and the OS's own tools (`os_read_file`, `os_start_process`, ...); Lua processes get the OS's tools directly as global functions.
 
 Platform support:
 - **Linux**: Uses libcurl for HTTP
@@ -17,6 +17,7 @@ Platform support:
 |-----------|---------|---------|
 | [nlohmann/json](https://github.com/nlohmann/json) | JSON parsing for LLM API requests/responses | v3.11.3 |
 | [google/googletest](https://github.com/google/googletest) | Unit testing framework | v1.14.0 |
+| [lua/lua](https://github.com/lua/lua) | Embedded Lua interpreter for `.lua` processes (`LuaProcess`) | v5.4.9 |
 
 External dependencies are located in the `extern/` directory and must be cloned before building.
 
@@ -29,11 +30,16 @@ haisos/
 │   │   ├── Agent/
 │   │   ├── Console/
 │   │   ├── Factory/
-│   │   ├── HaisosEngine/
+│   │   ├── FileSystemService/
+│   │   ├── Filesystem/
+│   │   ├── HaisosOS/
 │   │   ├── HTTPClient/
 │   │   ├── libheaders/    - Header-only C++ utilities (not a component)
 │   │   ├── LLMCommunicator/
+│   │   ├── LLMService/
 │   │   ├── Logger/
+│   │   ├── NetworkService/
+│   │   ├── ServicesCreator/
 │   │   └── ToolFactory/
 │   ├── tools/             - Tool implementations (each has its own CLAUDE.md)
 │   │   ├── get_current_date_time/
@@ -42,9 +48,14 @@ haisos/
 │   │   ├── agent_query/
 │   │   ├── agent_wait_to_finish/
 │   │   ├── agent_list_running/
-│   │   └── agent_tools_common/
-│   └── haisos/            - Entry point and CLI parser
-├── interfaces/             - Component interfaces (IAgent.h, IConsole.h, IFactory.h, IHTTPClient.h, ILLMCommunicator.h, IHaisosEngine.h, ITool.h, IToolFactory.h, SystemCallbacks.h)
+│   │   ├── agent_tools_common/
+│   │   ├── os_read_file/
+│   │   ├── os_write_file/
+│   │   ├── os_list_directory/
+│   │   ├── os_start_process/
+│   │   └── os_list_processes/
+│   └── haisos/            - Entry point, CLI parser, and haisosfile parser
+├── interfaces/             - Service-based interfaces (IFactory.h, IServicesCreator.h, IHaisosOS.h, IProcess.h, ILLMService.h [IAgent, ITool, IToolFactory, IAgentConsole], INetworkService.h [IHTTPClient], IFilesystemService.h [IFileSystem], ILLMCommunicator.h)
 ├── tests/                 - All tests
 │   ├── mocks/             - Mock classes for testing
 │   ├── unit/              - Unit tests (Google Test)
@@ -52,7 +63,7 @@ haisos/
 │   │   └── helpers/       - Integration test helpers and utilities
 │   └── haisos/            - Haisos JS-based tests
 ├── scripts/               - Build scripts
-├── extern/                - External dependencies (nlohmann_json, googletest)
+├── extern/                - External dependencies (nlohmann_json, googletest, lua)
 ├── .claude/               - Claude Code configuration
 │   └── skills/            - Custom Claude Code skills
 ├── build/temp_<platform>/ - CMake build files (temporary, e.g., temp_linux, temp_linux_debug)
@@ -72,6 +83,7 @@ haisos/
 ```bash
 git clone --branch v3.11.3 --depth 1 https://github.com/nlohmann/json.git extern/nlohmann_json
 git clone --branch v1.14.0 --depth 1 https://github.com/google/googletest.git extern/googletest
+git clone --branch v5.4.9 --depth 1 https://github.com/lua/lua.git extern/lua
 ```
 
 ### Build and Run Scripts
@@ -124,40 +136,56 @@ node ./output/wasm/haisos.js
 
 ## Command-Line Arguments
 
+Usage: `haisos [haisosfile] [options] [-- key=value ...]` (Docker-like: `haisosfile`
+defaults to `haisosfile` in the current directory when omitted, and everything
+after a literal `--` is parsed as `key=value` pairs fed to the haisosfile as
+`ARG` overrides).
+
 | Argument | Description |
 |----------|-------------|
-| `-f, --file <path>` | Specify the markdown file to process |
-| `-p, --prompt <string>` | Provide the user prompt directly as a string |
-| `--system-prompt <string>` | Set a system prompt text |
-| `--system-prompt-file <path>` | Read system prompt from a file |
-| `--take-stdin` | Read the entire user prompt from stdin until EOF |
+| `<haisosfile>` | Path to the haisosfile to run (positional; defaults to `./haisosfile`) |
+| `-- key=value ...` | `ARG` overrides passed to the haisosfile |
 | `--log-to-console` | Enable logging to console |
 | `--log-to-file <path>` | Enable logging to file |
 | `--log-level <level>` | Set log level (verbose_debug, debug, trace, info, warning, error) |
 | `--log-json-in-temp` | Log input/output JSON to a temporary file |
 | `--version` | Show version information |
 | `-h, --help` | Show help message |
-| `<markdown_file>` | Path to markdown file to process (positional) |
+
+## The `haisosfile` DSL
+
+A small Dockerfile-style language (parsed by `HaisosFileParser` in `src/haisos/`):
+
+```
+# Comments start with '#'
+ARG name=default_value        # declares an argument; overridable via `-- name=value`
+VAR greeting=Hello-${name}    # declares a variable; RHS may reference ${ARG}/${VAR} names
+ROOT ./workspace               # directory to mount as the OS's filesystem root
+RUN agent.md                   # start an initial process (.md agent or .lua script); may repeat
+RUN tools/setup.lua ${greeting}
+```
+
+`ROOT` defaults to the haisosfile's own directory when omitted; exactly one is
+allowed. Each `RUN` starts a top-most process (parent PID 0); Haisos exits once
+all of them have finished. Composed/temporary/mounted filesystems and
+site/network permissions are not implemented yet.
 
 ## Example Usage
 
 ```bash
-# Basic usage with local Ollama
+# Basic usage with local Ollama, using ./haisosfile in the cwd
 export HAISOS_MODEL=llama3
-./output/linux/haisos prompt.md
+./output/linux/haisos
 
-# With verbose logging
-./output/linux/haisos --log-to-console --log-level debug prompt.md
+# Explicit haisosfile path, with verbose logging
+./output/linux/haisos ./examples/greeter/haisosfile --log-to-console --log-level debug
 
 # Using custom endpoint
 export HAISOS_ENDPOINT=http://localhost:11434/api/chat
-./output/linux/haisos prompt.md
+./output/linux/haisos
 
-# Provide prompt directly without a file
-./output/linux/haisos --prompt "What is 2+2?"
-
-# Pipe input via stdin
-echo "What is the capital of France?" | ./output/linux/haisos --take-stdin
+# Override a haisosfile ARG from the CLI
+./output/linux/haisos -- name=Claude
 ```
 
 ## Running Tests
@@ -185,14 +213,19 @@ Each component lives in its own folder under `src/components/` and has its own `
 
 | Component | Path | Description |
 |-----------|------|-------------|
-| **HaisosEngine** | `src/components/HaisosEngine/` | Main coordinator, reads markdown files and orchestrates LLM calls |
 | **Agent** | `src/components/Agent/` | Manages LLM conversations with parent/child agent relationships; supports subagents via agent tools |
 | **LLMCommunicator** | `src/components/LLMCommunicator/` | Handles LLM API communication, request/response formatting, and tool call parsing (HTTP is handled by HTTPClient) |
 | **ToolFactory** | `src/components/ToolFactory/` | Creates tool instances by name, including context-aware tools like `agent_start` |
-| **Console** | `src/components/Console/` | Async message queue for output |
+| **Console** | `src/components/Console/` | Async physical console output, plus adapters giving agents a write-only view onto it (or onto memory only) |
 | **Logger** | `src/components/Logger/` | Thread-safe logging with configurable receivers |
 | **HTTPClient** | `src/components/HTTPClient/` | Platform-specific HTTP implementation (Curl/WinHTTP/Fetch) |
 | **Factory** | `src/components/Factory/` | Dependency injection factory |
+| **Filesystem** | `src/components/Filesystem/` | Filesystem access: an unrooted passthrough and a `PhysicalFileSystem` jailed to a real disk path |
+| **ServicesCreator** | `src/components/ServicesCreator/` | Factory-of-services built on `IFactory`; creates `IFilesystemService`/`INetworkService`/`ILLMService`, passing each the services it depends on |
+| **NetworkService** | `src/components/NetworkService/` | Service-layer wrapper over network access (creates `IHTTPClient`) |
+| **FileSystemService** | `src/components/FileSystemService/` | Service-layer wrapper holding a single `IFileSystem` |
+| **LLMService** | `src/components/LLMService/` | Service-layer entry point for creating LLM-backed agents; exposes the shared agent-management tool set |
+| **HaisosOS** | `src/components/HaisosOS/` | An OS instance: owns a rooted filesystem, physical console, and services; starts processes (`.md` agents, `.lua` scripts) and sub-OS instances |
 
 ## Tools
 
@@ -204,6 +237,16 @@ Each component lives in its own folder under `src/components/` and has its own `
 | `agent_query` | `src/tools/agent_query/` | Queries a subagent's status and output |
 | `agent_wait_to_finish` | `src/tools/agent_wait_to_finish/` | Waits for a subagent to finish |
 | `agent_list_running` | `src/tools/agent_list_running/` | Lists all running subagents |
+| `os_read_file` | `src/tools/os_read_file/` | Reads a file from the OS's filesystem |
+| `os_write_file` | `src/tools/os_write_file/` | Writes a file on the OS's filesystem |
+| `os_list_directory` | `src/tools/os_list_directory/` | Lists a directory on the OS's filesystem |
+| `os_start_process` | `src/tools/os_start_process/` | Starts a new OS process (`.md`/`.lua`) as a child of the calling process |
+| `os_list_processes` | `src/tools/os_list_processes/` | Lists the OS's currently running processes |
+
+The `agent_*` tools above are agent-management tools, returned by `ILLMService`
+and available to every agent. The `os_*` tools are the OS's own tool set,
+returned by `IHaisosOS`'s `OSToolFactory` and merged with an agent's tools
+(via `CompositeToolFactory`) only for processes started by an `IHaisosOS`.
 
 ## Automatic Development Rules
 

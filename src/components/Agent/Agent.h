@@ -7,11 +7,8 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include "interfaces/IAgent.h"
+#include "interfaces/ILLMService.h"
 #include "interfaces/ILLMCommunicator.h"
-#include "interfaces/IToolFactory.h"
-#include "interfaces/IConsole.h"
-#include "interfaces/SystemCallbacks.h"
 #include "src/components/libheaders/SynchronizedQueueEx.h"
 #include "AgentMessageBuffer.h"
 
@@ -22,12 +19,11 @@ public:
     Agent(
         std::shared_ptr<ILLMCommunicator> llmCommunicator,
         std::shared_ptr<IToolFactory> toolFactory,
-        std::shared_ptr<IConsole> console,
+        std::shared_ptr<IAgentConsole> console,
         const std::vector<std::string>& systemPrompts,
         const std::string& name,
         std::shared_ptr<IAgent> parent,
         const std::string& startTime = "",
-        const SystemCallbacks& callbacks = {},
         bool longRunning = true);
 
     ~Agent() override;
@@ -57,12 +53,11 @@ private:
 
     std::shared_ptr<ILLMCommunicator> m_llmCommunicator;
     std::shared_ptr<IToolFactory> m_toolFactory;
-    std::shared_ptr<IConsole> m_console;
+    std::shared_ptr<IAgentConsole> m_console;
     std::vector<std::string> m_systemPrompts;
     std::string m_name;
     std::string m_startTime;
     std::shared_ptr<IAgent> m_parent;
-    SystemCallbacks m_callbacks;
     bool m_longRunning;
     mutable std::mutex m_historyMutex;
     std::vector<LLMMessage> m_history;

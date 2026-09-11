@@ -3,13 +3,13 @@
 namespace Haisos {
 
 std::string FormatUsage(const char* programName) {
-    return std::string("Usage: ") + programName + " [options] [<markdown_file>]\n"
+    return std::string("Usage: ") + programName + " [haisosfile] [options] [-- key=value ...]\n"
+        "\n"
+        "haisosfile defaults to \"haisosfile\" in the current directory if omitted.\n"
+        "Everything after a literal \"--\" is parsed as key=value pairs and fed to\n"
+        "the haisosfile as ARG overrides.\n"
+        "\n"
         "Options:\n"
-        "  -f, --file <path>              Specify the markdown file to process\n"
-        "  -p, --prompt <string>          Provide the user prompt directly as a string\n"
-        "      --system-prompt <string>   Set a system prompt text\n"
-        "      --system-prompt-file <path> Read system prompt from a file\n"
-        "      --take-stdin               Read the entire user prompt from stdin until EOF\n"
         "      --log-to-console           Enable logging to console\n"
         "      --log-to-file <path>       Enable logging to file\n"
         "      --log-level <level>        Set log level (verbose_debug, debug, trace, info, warning, error)\n"
@@ -34,15 +34,16 @@ LogLevel ParseLogLevel(const std::string& level) {
 
 ParseResult ParseArguments(int argc, char* argv[]) {
     CliOptions options;
-    std::string mdFilePath;
-    std::string prompt;
-    std::string systemPrompt;
-    std::string systemPromptFile;
+    std::string haisosFilePath;
 
-    for (int i = 1; i < argc; ++i) {
+    int i = 1;
+    for (; i < argc; ++i) {
         std::string arg = argv[i];
 
-        if (arg == "--help" || arg == "-h") {
+        if (arg == "--") {
+            ++i;
+            break;
+        } else if (arg == "--help" || arg == "-h") {
             options.help = true;
             return ParseResult{options, ""};
         } else if (arg == "--version") {
@@ -64,61 +65,26 @@ ParseResult ParseArguments(int argc, char* argv[]) {
             }
         } else if (arg == "--log-json-in-temp") {
             options.logJsonInTemp = true;
-        } else if (arg == "--file" || arg == "-f") {
-            if (i + 1 < argc) {
-                mdFilePath = argv[++i];
-            } else {
-                return ParseResult{options, "Error: --file requires a path argument\n"};
-            }
-        } else if (arg == "--prompt" || arg == "-p") {
-            if (i + 1 < argc) {
-                prompt = argv[++i];
-            } else {
-                return ParseResult{options, "Error: --prompt requires a string argument\n"};
-            }
-        } else if (arg == "--system-prompt") {
-            if (i + 1 < argc) {
-                systemPrompt = argv[++i];
-            } else {
-                return ParseResult{options, "Error: --system-prompt requires a string argument\n"};
-            }
-        } else if (arg == "--system-prompt-file") {
-            if (i + 1 < argc) {
-                systemPromptFile = argv[++i];
-            } else {
-                return ParseResult{options, "Error: --system-prompt-file requires a path argument\n"};
-            }
-        } else if (arg == "--take-stdin") {
-            options.takeStdin = true;
-        } else if (arg[0] != '-') {
-            if (!mdFilePath.empty()) {
+        } else if (!arg.empty() && arg[0] != '-') {
+            if (!haisosFilePath.empty()) {
                 return ParseResult{options, std::string("Error: Unexpected positional argument: ") + arg + "\n"};
             }
-            mdFilePath = arg;
+            haisosFilePath = arg;
         } else {
             return ParseResult{options, std::string("Error: Unknown flag: ") + arg + "\n"};
         }
     }
 
-    // Validate arguments
-    if (prompt.empty() && !options.takeStdin && mdFilePath.empty()) {
-        return ParseResult{options, "Error: No input specified. Provide a markdown file, --prompt, or --take-stdin\n"};
+    for (; i < argc; ++i) {
+        std::string arg = argv[i];
+        auto eq = arg.find('=');
+        if (eq == std::string::npos) {
+            return ParseResult{options, std::string("Error: Expected key=value after --, got: ") + arg + "\n"};
+        }
+        options.argOverrides.emplace_back(arg.substr(0, eq), arg.substr(eq + 1));
     }
 
-    if (!prompt.empty() && options.takeStdin) {
-        return ParseResult{options, "Error: --prompt and --take-stdin cannot be used together\n"};
-    }
-
-    if (!mdFilePath.empty()) {
-        options.userPrompt = mdFilePath;
-        options.useFile = true;
-    } else if (!prompt.empty()) {
-        options.userPrompt = prompt;
-        options.useFile = false;
-    }
-
-    options.systemPrompt = systemPrompt;
-    options.systemPromptFile = systemPromptFile;
+    options.haisosFilePath = haisosFilePath;
 
     return ParseResult{options, ""};
 }

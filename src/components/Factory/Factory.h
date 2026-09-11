@@ -13,7 +13,11 @@ public:
     ~Factory() override;
 
     // IFactory interface
-    std::unique_ptr<IConsole> CreateConsole(bool registerAsLogMessageReceiver) override;
+    std::shared_ptr<IPhysicalConsole> CreatePhysicalConsole(bool registerAsLogMessageReceiver) override;
+    std::unique_ptr<IAgentConsole> CreateAgentConsole() override;
+    std::unique_ptr<IAgentConsole> CreateAgentConsoleFromPhysical(
+        std::shared_ptr<IPhysicalConsole> physicalConsole,
+        const std::string& sourceName) override;
     std::unique_ptr<IHTTPClient> CreateHTTPClient() override;
     std::unique_ptr<ILLMCommunicator> CreateLLMCommunicator(
         std::unique_ptr<IHTTPClient> httpClient,
@@ -24,22 +28,18 @@ public:
     std::shared_ptr<IAgent> CreateAgent(
         std::unique_ptr<ILLMCommunicator> llmCommunicator,
         std::unique_ptr<IToolFactory> toolFactory,
-        std::unique_ptr<IConsole> console,
+        std::unique_ptr<IAgentConsole> console,
         const std::vector<std::string>& systemPrompts,
         const std::string& name,
         std::shared_ptr<IAgent> parent,
         const std::string& startTime = "",
         bool longRunning = true) override;
-    std::unique_ptr<IHaisosEngine> CreateHaisosEngine(IFactory& factory) override;
     std::unique_ptr<IFileSystem> CreateFilesystem() override;
-
-    SystemCallbacks GetSystemCallbacks() const override { return m_systemCallbacks; }
-    void SetSystemCallbacks(const SystemCallbacks& callbacks) override { m_systemCallbacks = callbacks; }
+    std::unique_ptr<IFileSystem> CreatePhysicalFileSystem(const std::string& rootPath) override;
 
 private:
     void CleanupFinishedAgents();
 
-    SystemCallbacks m_systemCallbacks;
     std::vector<std::shared_ptr<IAgent>> m_agents;
     std::mutex m_agentsMutex;
 };

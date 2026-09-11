@@ -10,7 +10,7 @@
 #include <random>
 #include <atomic>
 #include <nlohmann/json.hpp>
-#include "interfaces/IAgent.h"
+#include "interfaces/ILLMService.h"
 #include "interfaces/IFactory.h"
 #include "src/components/Logger/Logger.h"
 

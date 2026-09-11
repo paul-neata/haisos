@@ -1,5 +1,5 @@
 #pragma once
-#include "interfaces/IFileSystem.h"
+#include "interfaces/IFilesystemService.h"
 
 namespace Haisos {
 

@@ -5,7 +5,7 @@
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
-#include "interfaces/IAgent.h"
+#include "interfaces/ILLMService.h"
 
 namespace Haisos::Mocks {
 

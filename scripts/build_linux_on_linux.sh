@@ -30,6 +30,11 @@ if [ ! -d "extern/googletest" ]; then
     git clone --branch v1.14.0 --depth 1 https://github.com/google/googletest.git extern/googletest
 fi
 
+if [ ! -d "extern/lua" ]; then
+    echo "Cloning lua/lua..."
+    git clone --branch v5.4.9 --depth 1 https://github.com/lua/lua.git extern/lua
+fi
+
 BUILD_DIR="build/temp_linux${BUILD_SUFFIX}"
 mkdir -p "$BUILD_DIR"
 

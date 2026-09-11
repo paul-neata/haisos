@@ -12,17 +12,13 @@ bool TestAgentStop() {
     auto [endpoint, model, apiKey] = IntegrationTest::GetEndpointModelAndApiKey();
 
     Factory factory;
-    auto console = factory.CreateConsole(false);
-    console->Start();
+    auto physicalConsole = factory.CreatePhysicalConsole(false);
+    physicalConsole->Start();
+    auto console = factory.CreateAgentConsoleFromPhysical(physicalConsole, "root");
     auto httpClient = factory.CreateHTTPClient();
     auto toolFactory = factory.CreateToolFactory(factory);
     auto llmCommunicator = factory.CreateLLMCommunicator(
         std::move(httpClient), endpoint, model, apiKey);
-
-    SystemCallbacks callbacks;
-    callbacks.on_send_with_name = IntegrationTest::MakeLLMJsonLoggerWithName("send");
-    callbacks.on_received_with_name = IntegrationTest::MakeLLMJsonLoggerWithName("receive");
-    factory.SetSystemCallbacks(callbacks);
 
     auto agent = factory.CreateAgent(
         std::move(llmCommunicator),

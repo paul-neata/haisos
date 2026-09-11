@@ -1,4 +1,4 @@
-add_library(Filesystem STATIC)
+add_library(Filesystem STATIC PhysicalFileSystem.cpp)
 
 if(WIN32)
     target_sources(Filesystem PRIVATE windows/WindowsFilesystem.cpp)
@@ -12,4 +12,5 @@ target_include_directories(Filesystem PUBLIC
     ${CMAKE_SOURCE_DIR}/interfaces
     ${CMAKE_SOURCE_DIR}/src/components/Filesystem
 )
+target_link_libraries(Filesystem PUBLIC Logger)
 target_compile_features(Filesystem PUBLIC cxx_std_17)

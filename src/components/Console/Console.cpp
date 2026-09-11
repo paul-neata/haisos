@@ -1,6 +1,5 @@
 #include "Console.h"
 #include <iostream>
-#include "interfaces/IAgent.h"
 
 namespace Haisos {
 
@@ -25,8 +24,8 @@ void Console::Write(const std::string& message) {
     m_queue.Post(message);
 }
 
-void Console::Write(const IAgent& agent, const std::string& message) {
-    m_queue.Post("[" + agent.Name() + "] " + message);
+void Console::Write(const std::string& sourceName, const std::string& message) {
+    m_queue.Post("[" + sourceName + "] " + message);
 }
 
 void Console::Start() {

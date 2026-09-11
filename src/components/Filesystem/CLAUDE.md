@@ -10,4 +10,5 @@ Thin wrapper around Linux filesystem syscalls.
 
 ## Key Classes
 
-- `Filesystem` - Main implementation of `IFileSystem`
+- `FileSystem` - Main implementation of `IFileSystem`, unrooted (operates on real, absolute/cwd-relative paths)
+- `PhysicalFileSystem` - `IFileSystem` jailed to a real disk directory; validates every path stays within that root before delegating to an inner `FileSystem`

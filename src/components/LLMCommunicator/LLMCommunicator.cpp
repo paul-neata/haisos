@@ -69,7 +69,7 @@ std::string LLMCommunicator::BuildRequestJson(
     return request.dump();
 }
 
-LLMResponse LLMCommunicator::ParseResponseJson(const std::string& jsonResponse, const SystemCallbacks& /*callbacks*/) {
+LLMResponse LLMCommunicator::ParseResponseJson(const std::string& jsonResponse) {
     LLMResponse response;
     response.done = true;
 
@@ -180,18 +180,13 @@ LLMResponse LLMCommunicator::ParseResponseJson(const std::string& jsonResponse, 
 
 LLMResponse LLMCommunicator::Call(
     const std::vector<LLMMessage>& messages,
-    const std::vector<std::tuple<std::string, std::string, nlohmann::json>>& availableTools,
-    const SystemCallbacks& callbacks)
+    const std::vector<std::tuple<std::string, std::string, nlohmann::json>>& availableTools)
 {
     LogInfo("LLMCommunicator::Call - Endpoint: %s", m_endpoint.c_str());
 
     std::string requestJson = BuildRequestJson(m_modelName, messages, availableTools);
 
     LogVerboseDebug("[JSON_REQUEST] %s", requestJson.c_str());
-
-    if (callbacks.on_send) {
-        callbacks.on_send(requestJson);
-    }
 
     std::vector<HTTPHeader> headers;
     headers.push_back({"Content-Type", "application/json"});
@@ -241,13 +236,9 @@ LLMResponse LLMCommunicator::Call(
         return response;
     }
 
-    if (callbacks.on_received) {
-        callbacks.on_received(httpResponse.body);
-    }
-
     LogVerboseDebug("[JSON_RESPONSE] %s", httpResponse.body.c_str());
 
-    return ParseResponseJson(httpResponse.body, callbacks);
+    return ParseResponseJson(httpResponse.body);
 }
 
 }

@@ -1,6 +1,6 @@
 #pragma once
 #include <memory>
-#include "interfaces/IHTTPClient.h"
+#include "interfaces/INetworkService.h"
 
 namespace Haisos {
 

@@ -1,5 +1,5 @@
 #pragma once
-#include "interfaces/IHTTPClient.h"
+#include "interfaces/INetworkService.h"
 
 #ifdef __EMSCRIPTEN__
 

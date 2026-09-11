@@ -2,7 +2,7 @@
 #include <string>
 #include <memory>
 #include "interfaces/ILLMCommunicator.h"
-#include "interfaces/IHTTPClient.h"
+#include "interfaces/INetworkService.h"
 #include "src/components/Logger/Logger.h"
 
 namespace Haisos {
@@ -19,8 +19,7 @@ public:
 
     LLMResponse Call(
         const std::vector<LLMMessage>& messages,
-        const std::vector<std::tuple<std::string, std::string, nlohmann::json>>& availableTools,
-        const SystemCallbacks& callbacks) override;
+        const std::vector<std::tuple<std::string, std::string, nlohmann::json>>& availableTools) override;
 
     static std::string BuildRequestJson(
         const std::string& modelName,
@@ -30,7 +29,7 @@ public:
     IHTTPClient* GetHttpClient() const { return m_httpClient.get(); }
 
 private:
-    LLMResponse ParseResponseJson(const std::string& jsonResponse, const SystemCallbacks& callbacks);
+    LLMResponse ParseResponseJson(const std::string& jsonResponse);
 
     std::unique_ptr<IHTTPClient> m_httpClient;
     std::string m_endpoint;

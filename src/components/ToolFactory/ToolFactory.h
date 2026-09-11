@@ -3,7 +3,7 @@
 #include <vector>
 #include <memory>
 #include <functional>
-#include "interfaces/IToolFactory.h"
+#include "interfaces/ILLMService.h"
 #include "src/components/Logger/Logger.h"
 
 namespace Haisos {

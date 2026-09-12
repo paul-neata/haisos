@@ -16,6 +16,16 @@ Manages LLM conversations with parent/child agent relationships. Supports subage
 - `Agent` - Main implementation of `IAgent`
 - `AgentMessageBuffer` - Internal per-agent message storage
 
+## Notes
+
+- Tool-call results are treated as untrusted content: they are added to the history verbatim
+  (never filtered, so file contents and JSON stay intact) but wrapped in
+  `--- BEGIN TOOL RESULT ---` / `--- END TOOL RESULT ---` delimiters, the same convention used
+  for user input. Oversized results are truncated before the delimiters are added.
+- Tool descriptions are fetched from the tool factory once in the constructor and cached for the
+  agent's lifetime, not rebuilt per LLM round. Tools registered after an agent is constructed are
+  invisible to it, so tool registries must be populated before agents are created.
+
 ## Public Interface
 
 `IAgent` is defined in `interfaces/ILLMService.h` and provides methods for:

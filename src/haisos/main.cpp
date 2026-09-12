@@ -58,11 +58,34 @@ std::string PrettyPrintJson(const std::string& jsonStr) {
 // resolution/escape-check and the read itself to PhysicalFileSystem (rooted
 // at cwd) instead of re-validating paths by hand, so there is a single place
 // ("does this path escape the root?") maintaining that logic.
+// ReadWholeFile stops at 10MB and cannot report that it truncated, so a file
+// that reaches the cap is rejected rather than parsed in part.
+constexpr size_t kMaxHaisosFileSize = 10 * 1024 * 1024;
+
 std::string ReadFileWithinCwd(IFactory& factory, const std::string& filePath) {
-    auto cwdFileSystem = factory.CreatePhysicalFileSystem(".");
+    // An absolute path is an explicit operator choice, so jail at the file's own
+    // directory; a relative path is jailed to the cwd, where it still cannot
+    // traverse out. Either way the jail root matches the directory that ROOT and
+    // `FS ... PHYSICAL` are later resolved against, so content and root can't
+    // come from different places.
+    std::filesystem::path requested(filePath);
+    std::string rootPath = ".";
+    std::string nameInRoot = filePath;
+    if (requested.is_absolute()) {
+        rootPath = requested.parent_path().string();
+        nameInRoot = requested.filename().string();
+    }
+
+    auto rootFileSystem = factory.CreatePhysicalFileSystem(rootPath);
     std::string content;
-    if (!ReadWholeFile(*cwdFileSystem, filePath, content)) {
-        LogError("Failed to read file: %s", filePath.c_str());
+    if (!ReadWholeFile(*rootFileSystem, nameInRoot, content)) {
+        LogError("Failed to open or read haisosfile (missing, unreadable, or outside %s): %s",
+            rootPath.c_str(), filePath.c_str());
+        return "";
+    }
+    if (content.size() >= kMaxHaisosFileSize) {
+        LogError("haisosfile is too large (at least %zu bytes, max %zu): %s",
+            content.size(), kMaxHaisosFileSize, filePath.c_str());
         return "";
     }
     return content;
@@ -105,7 +128,9 @@ int main(int argc, char* argv[]) {
 
     // Apply test environment variables for logging
     if (const char* envLevel = std::getenv("HAISOS_TEST_LOG_LEVEL")) {
-        result.options.logLevel = ParseLogLevel(envLevel);
+        if (!ParseLogLevel(envLevel, result.options.logLevel)) {
+            std::cerr << "Warning: ignoring unrecognized HAISOS_TEST_LOG_LEVEL value: " << envLevel << "\n";
+        }
     }
 
     // Set minimum log level
@@ -133,18 +158,10 @@ int main(int argc, char* argv[]) {
     }
 
     // Set up console logging if requested via CLI
-    if (result.options.logToConsole) {
-        LogRegisterMessageReceiver([](const LogMessage& msg) {
-            const char* levelStr =
-                msg.level == LogLevel::VerboseDebug ? "VERBOSE_DEBUG" :
-                msg.level == LogLevel::Debug ? "DEBUG" :
-                msg.level == LogLevel::Trace ? "TRACE" :
-                msg.level == LogLevel::Info ? "INFO" :
-                msg.level == LogLevel::Warning ? "WARNING" :
-                msg.level == LogLevel::Error ? "ERROR" : "UNKNOWN";
-            std::cout << "[" << msg.timestamp << "][" << levelStr << "] " << msg.message << "\n" << std::flush;
-        });
-    }
+    // The Logger writes to the console on its own (defaulting to on), so this
+    // flag just drives that switch. Registering a second, stdout-writing
+    // receiver here would print every message twice.
+    LogSetConsoleOutput(result.options.logToConsole);
 
     LogInfo("Haisos starting with model from environment");
 

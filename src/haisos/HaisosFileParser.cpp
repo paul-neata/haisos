@@ -1,6 +1,7 @@
 #include "HaisosFileParser.h"
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace Haisos {
 
@@ -57,6 +58,25 @@ std::string Substitute(const std::string& text, const std::unordered_map<std::st
     return result;
 }
 
+// Substitutes text into *out, and on an unresolved reference writes this
+// file's standard "Error: line <N>: ..." message into *error and returns
+// false, so every call site can just bail out on a false return.
+bool SubstituteOrFail(
+    const std::string& text,
+    const std::unordered_map<std::string, std::string>& values,
+    int lineNumber,
+    std::string* out,
+    std::string* error)
+{
+    std::string subError;
+    *out = Substitute(text, values, &subError);
+    if (!subError.empty()) {
+        *error = "Error: line " + std::to_string(lineNumber) + ": " + subError;
+        return false;
+    }
+    return true;
+}
+
 std::vector<std::string> SplitWhitespace(const std::string& text) {
     std::vector<std::string> tokens;
     std::istringstream iss(text);
@@ -75,6 +95,7 @@ HaisosFileParseResult ParseHaisosFile(
 {
     HaisosFileParseResult result;
     std::unordered_map<std::string, std::string> values;
+    std::unordered_set<std::string> declaredArgs;
     bool sawRoot = false;
 
     std::istringstream stream(content);
@@ -95,29 +116,33 @@ HaisosFileParseResult ParseHaisosFile(
         if (key == "ARG") {
             auto eq = rest.find('=');
             std::string name = (eq == std::string::npos) ? rest : rest.substr(0, eq);
+            const bool hasDefault = (eq != std::string::npos);
             std::string defaultValue;
-            if (eq != std::string::npos) {
-                std::string subError;
-                defaultValue = Substitute(rest.substr(eq + 1), values, &subError);
-                if (!subError.empty()) {
-                    result.error = "Error: line " + std::to_string(lineNumber) + ": " + subError;
-                    return result;
-                }
+            if (hasDefault && !SubstituteOrFail(rest.substr(eq + 1), values, lineNumber, &defaultValue, &result.error)) {
+                return result;
             }
             name = Trim(name);
             if (name.empty()) {
                 result.error = "Error: line " + std::to_string(lineNumber) + ": ARG requires a name\n";
                 return result;
             }
+            declaredArgs.insert(name);
 
-            std::string value = defaultValue;
+            const std::string* overrideValue = nullptr;
             for (const auto& override : argOverrides) {
                 if (override.first == name) {
-                    value = override.second;
+                    overrideValue = &override.second;
                     break;
                 }
             }
-            values[name] = value;
+            // A bare "ARG name" (no '=') declares an argument with no default,
+            // so it must be supplied via `-- name=value`; "ARG name=" declares
+            // one that deliberately defaults to the empty string.
+            if (overrideValue == nullptr && !hasDefault) {
+                result.error = "Error: line " + std::to_string(lineNumber) + ": ARG '" + name + "' has no default value and was not provided (pass `-- " + name + "=value`)\n";
+                return result;
+            }
+            values[name] = (overrideValue != nullptr) ? *overrideValue : defaultValue;
         } else if (key == "VAR") {
             auto eq = rest.find('=');
             if (eq == std::string::npos) {
@@ -129,10 +154,8 @@ HaisosFileParseResult ParseHaisosFile(
                 result.error = "Error: line " + std::to_string(lineNumber) + ": VAR requires a name\n";
                 return result;
             }
-            std::string subError;
-            std::string value = Substitute(rest.substr(eq + 1), values, &subError);
-            if (!subError.empty()) {
-                result.error = "Error: line " + std::to_string(lineNumber) + ": " + subError;
+            std::string value;
+            if (!SubstituteOrFail(rest.substr(eq + 1), values, lineNumber, &value, &result.error)) {
                 return result;
             }
             values[name] = value;
@@ -145,10 +168,7 @@ HaisosFileParseResult ParseHaisosFile(
                 result.error = "Error: line " + std::to_string(lineNumber) + ": ROOT requires a directory\n";
                 return result;
             }
-            std::string subError;
-            result.config.rootPath = Substitute(rest, values, &subError);
-            if (!subError.empty()) {
-                result.error = "Error: line " + std::to_string(lineNumber) + ": " + subError;
+            if (!SubstituteOrFail(rest, values, lineNumber, &result.config.rootPath, &result.error)) {
                 return result;
             }
             sawRoot = true;
@@ -157,12 +177,11 @@ HaisosFileParseResult ParseHaisosFile(
                 result.error = "Error: line " + std::to_string(lineNumber) + ": FS requires a name and a filesystem type\n";
                 return result;
             }
-            std::string subError;
-            auto tokens = SplitWhitespace(Substitute(rest, values, &subError));
-            if (!subError.empty()) {
-                result.error = "Error: line " + std::to_string(lineNumber) + ": " + subError;
+            std::string substituted;
+            if (!SubstituteOrFail(rest, values, lineNumber, &substituted, &result.error)) {
                 return result;
             }
+            auto tokens = SplitWhitespace(substituted);
             if (tokens.size() < 2) {
                 result.error = "Error: line " + std::to_string(lineNumber) + ": FS requires a name and a filesystem type\n";
                 return result;
@@ -196,12 +215,11 @@ HaisosFileParseResult ParseHaisosFile(
             step.declare = std::move(decl);
             result.config.fsSteps.push_back(std::move(step));
         } else if (key == "MOUNT") {
-            std::string subError;
-            auto tokens = SplitWhitespace(Substitute(rest, values, &subError));
-            if (!subError.empty()) {
-                result.error = "Error: line " + std::to_string(lineNumber) + ": " + subError;
+            std::string substituted;
+            if (!SubstituteOrFail(rest, values, lineNumber, &substituted, &result.error)) {
                 return result;
             }
+            auto tokens = SplitWhitespace(substituted);
             if (tokens.size() != 3) {
                 result.error = "Error: line " + std::to_string(lineNumber) + ": MOUNT requires <main_fs> <path> <fs_to_mount>\n";
                 return result;
@@ -218,10 +236,15 @@ HaisosFileParseResult ParseHaisosFile(
                 result.error = "Error: line " + std::to_string(lineNumber) + ": RUN requires a program path\n";
                 return result;
             }
-            std::string subError;
-            auto tokens = SplitWhitespace(Substitute(rest, values, &subError));
-            if (!subError.empty()) {
-                result.error = "Error: line " + std::to_string(lineNumber) + ": " + subError;
+            std::string substituted;
+            if (!SubstituteOrFail(rest, values, lineNumber, &substituted, &result.error)) {
+                return result;
+            }
+            // Substitution can leave nothing behind (e.g. "RUN ${empty}"), so
+            // re-check before indexing into the token vector.
+            auto tokens = SplitWhitespace(substituted);
+            if (tokens.empty()) {
+                result.error = "Error: line " + std::to_string(lineNumber) + ": RUN requires a program path\n";
                 return result;
             }
             HaisosFileRunEntry entry;
@@ -230,6 +253,15 @@ HaisosFileParseResult ParseHaisosFile(
             result.config.runEntries.push_back(std::move(entry));
         } else {
             result.error = "Error: line " + std::to_string(lineNumber) + ": unknown directive '" + key + "'\n";
+            return result;
+        }
+    }
+
+    // An override naming an ARG the haisosfile never declares would otherwise
+    // be silently discarded, hiding a typo in `-- name=value`.
+    for (const auto& override : argOverrides) {
+        if (declaredArgs.find(override.first) == declaredArgs.end()) {
+            result.error = "Error: unknown argument override '" + override.first + "' (no ARG with that name is declared in the haisosfile)\n";
             return result;
         }
     }
@@ -248,7 +280,9 @@ std::string GetHaisosFileTemplate() {
         "# Comments start with '#' (full-line or trailing).\n"
         "\n"
         "# ARG declares an argument, overridable from the command line via\n"
-        "# `haisos -- name=value`. The value here is the default.\n"
+        "# `haisos -- name=value`. The value here is the default; written\n"
+        "# without a '=' (just `ARG name`) the argument has no default and\n"
+        "# must be supplied on the command line.\n"
         "ARG name=World\n"
         "\n"
         "# VAR declares a variable; its value may reference ${ARG} or ${VAR} names\n"

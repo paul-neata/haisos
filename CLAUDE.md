@@ -4,7 +4,7 @@ Haisos is a C++ platform that boots a small OS-like environment (`IHaisosOS`) fr
 
 ## Project Overview
 
-A `haisosfile` (Dockerfile-style; see "The `haisosfile` DSL" below) selects a filesystem root to mount and one or more initial processes to run. Haisos starts each one under a rooted `IHaisosOS`, and exits once they've all finished. Agent-backed processes get both the LLM's agent-management tools (`agent_start`, ...) and the OS's own tools (`os_read_file`, `os_start_process`, ...); Lua processes get the OS's tools directly as global functions.
+A `haisosfile` (Dockerfile-style; see "The `haisosfile` DSL" below) selects a filesystem root to mount and one or more initial processes to run. Haisos starts each one under a rooted `IHaisosOS`, and exits once they've all finished. Agent-backed processes get both the LLM's agent-management tools (`agent_start`, ...) and the OS's own tools (`os_read_file`, `os_start_process`, ...); Lua processes get the OS's tools directly as global functions, and run against a restricted subset of the Lua standard library, so filesystem/process access is only available through the OS's `os_*` tools.
 
 Platform support:
 - **Linux**: Uses libcurl for HTTP
@@ -55,7 +55,7 @@ haisos/
 │   │   ├── os_start_process/
 │   │   └── os_list_processes/
 │   └── haisos/            - Entry point, CLI parser, haisosfile parser, and root-filesystem builder
-├── interfaces/             - Service-based interfaces (IFactory.h, IServicesCreator.h, IHaisosOS.h, IProcess.h, ILLMService.h [IAgent, ITool, IToolFactory, IAgentConsole], INetworkService.h [IHTTPClient], IFilesystemService.h [IFileSystem], ILLMCommunicator.h)
+├── interfaces/             - Service-based interfaces (IFactory.h [IPhysicalConsole], IServicesCreator.h, IHaisosOS.h, IProcess.h, ILLMService.h [IAgent, ITool, IToolFactory, IAgentConsole], INetworkService.h [IHTTPClient], IFilesystemService.h [IFileSystem], ILLMCommunicator.h)
 ├── tests/                 - All tests
 │   ├── mocks/             - Mock classes for testing
 │   ├── unit/              - Unit tests (Google Test)

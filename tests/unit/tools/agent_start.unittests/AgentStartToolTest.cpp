@@ -18,6 +18,7 @@ public:
 class DummyToolFactory : public IToolFactory {
 public:
     std::unique_ptr<ITool> CreateTool(const std::string&, std::shared_ptr<IAgent>) override { return nullptr; }
+    bool HasTool(const std::string&) const override { return false; }
     std::vector<std::string> GetAvailableTools() const override { return {}; }
     std::vector<std::tuple<std::string, std::string, nlohmann::json>> GetAvailableToolDescriptions() const override { return {}; }
 };

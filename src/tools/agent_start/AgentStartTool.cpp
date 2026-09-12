@@ -20,7 +20,14 @@ std::shared_ptr<IAgent> CreateAndStartSubagent(
     std::string name = GenerateAgentName();
     std::string startTime = GetCurrentTimestamp();
 
-    LogDebug("CreateAndStartSubagent: creating subagent '%s' with prompt '%s' longRunning=%d", name.c_str(), userPrompt.c_str(), longRunning ? 1 : 0);
+    // Prompts can embed large pasted content (whole files), so only their sizes
+    // are logged at Debug; the full text belongs at VerboseDebug.
+    LogDebug("CreateAndStartSubagent: creating subagent '%s' promptLength=%zu systemPrompts=%zu longRunning=%d",
+             name.c_str(), userPrompt.size(), systemPrompts.size(), longRunning ? 1 : 0);
+    LogVerboseDebug("CreateAndStartSubagent: subagent '%s' user prompt: '%s'", name.c_str(), userPrompt.c_str());
+    for (const auto& systemPrompt : systemPrompts) {
+        LogVerboseDebug("CreateAndStartSubagent: subagent '%s' system prompt: '%s'", name.c_str(), systemPrompt.c_str());
+    }
 
     auto agent = llmService.CreateAgent(
         systemPrompts,

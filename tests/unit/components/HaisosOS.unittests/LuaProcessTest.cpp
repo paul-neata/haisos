@@ -41,6 +41,9 @@ public:
         }
         return nullptr;
     }
+    bool HasTool(const std::string& name) const override {
+        return name == "echo" || name == "list_things" || name == "fail_tool";
+    }
     std::vector<std::string> GetAvailableTools() const override { return {"echo", "list_things", "fail_tool"}; }
     std::vector<std::tuple<std::string, std::string, nlohmann::json>> GetAvailableToolDescriptions() const override { return {}; }
 };
@@ -123,4 +126,56 @@ TEST(LuaProcessTest, KillStopsABusyLoop) {
 
     process->Kill();
     EXPECT_TRUE(process->WaitToFinish(2000));
+}
+
+// The Lua sandbox is a security boundary: a .lua program is untrusted input,
+// since an agent can write one with os_write_file and launch it with
+// os_start_process. These tests pin the boundary so it cannot regress silently.
+
+TEST(LuaProcessTest, SandboxOmitsHostAccessLibraries) {
+    TestToolFactory toolFactory;
+    auto console = std::make_shared<MockAgentConsole>();
+    RunScript(toolFactory, console, R"(
+        print(tostring(io) .. "|" .. tostring(os) .. "|" .. tostring(package) .. "|" .. tostring(debug))
+    )");
+
+    ASSERT_FALSE(console->GetMessages().empty());
+    EXPECT_NE(console->GetMessages()[0].find("nil|nil|nil|nil"), std::string::npos);
+}
+
+TEST(LuaProcessTest, SandboxRemovesChunkLoadingGlobals) {
+    TestToolFactory toolFactory;
+    auto console = std::make_shared<MockAgentConsole>();
+    RunScript(toolFactory, console, R"(
+        print(tostring(dofile) .. "|" .. tostring(loadfile) .. "|" .. tostring(load) .. "|" .. tostring(warn))
+    )");
+
+    ASSERT_FALSE(console->GetMessages().empty());
+    EXPECT_NE(console->GetMessages()[0].find("nil|nil|nil|nil"), std::string::npos);
+}
+
+TEST(LuaProcessTest, SandboxKeepsSafeLibraries) {
+    TestToolFactory toolFactory;
+    auto console = std::make_shared<MockAgentConsole>();
+    RunScript(toolFactory, console, R"(
+        print(#table.concat({"a","b"}) .. string.upper("x") .. tostring(math.floor(1.5)))
+    )");
+
+    ASSERT_FALSE(console->GetMessages().empty());
+    EXPECT_NE(console->GetMessages()[0].find("2X1"), std::string::npos);
+}
+
+TEST(LuaProcessTest, PrecompiledBytecodeIsRefused) {
+    // Lua's undump does not validate untrusted bytecode, so accepting a binary
+    // chunk would hand a script arbitrary memory access. A chunk starting with
+    // the Lua binary signature ("\x1bLua") must be rejected at load time, which
+    // means the script never runs and nothing reaches the console.
+    TestToolFactory toolFactory;
+    auto console = std::make_shared<MockAgentConsole>();
+    std::string bytecode = "\x1b" "Lua" "\x54\x00\x19\x93\r\n\x1a\n";
+    auto process = RunScript(toolFactory, console, bytecode);
+
+    EXPECT_TRUE(process->IsFinished());
+    EXPECT_TRUE(console->GetMessages().empty() ||
+                console->GetMessages()[0].find("Error") != std::string::npos);
 }

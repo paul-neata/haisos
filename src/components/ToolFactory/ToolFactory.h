@@ -23,6 +23,7 @@ public:
 
     // IToolFactory interface
     std::unique_ptr<ITool> CreateTool(const std::string& name, std::shared_ptr<IAgent> callerAgent = nullptr) override;
+    bool HasTool(const std::string& name) const override;
     std::vector<std::string> GetAvailableTools() const override;
     std::vector<std::tuple<std::string, std::string, nlohmann::json>> GetAvailableToolDescriptions() const override;
 

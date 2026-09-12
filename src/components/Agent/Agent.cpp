@@ -9,6 +9,7 @@ namespace Haisos {
 
 constexpr size_t MAX_HISTORY_SIZE = 100;
 constexpr size_t MAX_MESSAGE_CONTENT_SIZE = 100 * 1024;
+constexpr size_t MAX_LOGGED_TOOL_RESULT_SIZE = 1024;
 
 static void TrimHistory(std::vector<LLMMessage>& history) {
     if (history.size() <= MAX_HISTORY_SIZE) {
@@ -40,10 +41,10 @@ static void TrimHistory(std::vector<LLMMessage>& history) {
                   history.begin() + static_cast<std::ptrdiff_t>(systemCount + toRemove));
 }
 
-static void TruncateIfNeeded(std::string& content) {
+static void TruncateIfNeeded(std::string& content, size_t maxSize = MAX_MESSAGE_CONTENT_SIZE) {
     constexpr size_t truncatedNoticeSize = 11; // strlen("[truncated]")
-    if (content.size() > MAX_MESSAGE_CONTENT_SIZE) {
-        content.resize(MAX_MESSAGE_CONTENT_SIZE - truncatedNoticeSize);
+    if (content.size() > maxSize && maxSize > truncatedNoticeSize) {
+        content.resize(maxSize - truncatedNoticeSize);
         content += "[truncated]";
     }
 }
@@ -254,14 +255,16 @@ std::vector<std::tuple<std::string, std::string, std::string, bool>> Agent::Exec
             continue;
         }
 
-        LogInfo("Agent '%s' - Tool call received: %s", m_name.c_str(), toolName.c_str());
+        LogDebug("Agent '%s' - Tool call received: %s", m_name.c_str(), toolName.c_str());
         auto tool = m_toolFactory->CreateTool(toolName, shared_from_this());
         if (tool) {
             ToolResult result = tool->Call(shared_from_this(), args);
             toolResults.emplace_back(toolName, result.content, toolCallId, result.isError);
-            LogTrace("Agent '%s' - Tool result: %s", m_name.c_str(), result.content.c_str());
+            std::string loggedResult = result.content;
+            TruncateIfNeeded(loggedResult, MAX_LOGGED_TOOL_RESULT_SIZE);
+            LogVerboseDebug("Agent '%s' - Tool result: %s", m_name.c_str(), loggedResult.c_str());
         } else {
-            LogError("Agent '%s' - Unknown tool: %s", m_name.c_str(), toolName.c_str());
+            LogWarning("Agent '%s' - Unknown tool: %s", m_name.c_str(), toolName.c_str());
             if (m_console) {
                 m_console->Write("Error: Unknown tool - " + toolName);
             }
@@ -320,15 +323,13 @@ void Agent::RunThread() {
 
                 LogVerboseDebug("Agent '%s' LLM round %d starting", m_name.c_str(), rounds);
 
-                const std::vector<std::tuple<std::string, std::string, nlohmann::json>>& tools = m_cachedToolDescriptions;
-
                 std::vector<LLMMessage> localHistory;
                 {
                     std::lock_guard<std::mutex> lock(m_historyMutex);
                     localHistory = m_history;
                 }
 
-                LLMResponse response = m_llmCommunicator->Call(localHistory, tools);
+                LLMResponse response = m_llmCommunicator->Call(localHistory, m_cachedToolDescriptions);
                 TruncateIfNeeded(response.message.content);
 
                 if (!response.message.content.empty()) {
@@ -353,11 +354,17 @@ void Agent::RunThread() {
                         for (const auto& tr : toolResults) {
                             LLMMessage toolMsg;
                             toolMsg.role = "tool";
-                            toolMsg.content = SanitizeUserInput(std::get<1>(tr));
+                            // Tool results are untrusted content, but they are structured data
+                            // (file contents, JSON) that must reach the LLM verbatim. Instead of
+                            // filtering them, delimit them the same way user input is delimited
+                            // so the model can tell data from instructions. The delimiters are
+                            // added after truncation so they are never cut off.
+                            toolMsg.content = std::get<1>(tr);
                             toolMsg.is_error = std::get<3>(tr);
                             if (!toolMsg.is_error) {
                                 TruncateIfNeeded(toolMsg.content);
                             }
+                            toolMsg.content = "\n--- BEGIN TOOL RESULT ---\n" + toolMsg.content + "\n--- END TOOL RESULT ---\n";
                             toolMsg.name = std::get<0>(tr);
                             toolMsg.tool_call_id = std::get<2>(tr);
                             m_history.push_back(toolMsg);

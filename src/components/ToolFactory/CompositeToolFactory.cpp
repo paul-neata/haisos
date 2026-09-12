@@ -1,5 +1,4 @@
 #include "CompositeToolFactory.h"
-#include <algorithm>
 #include "src/components/Logger/Logger.h"
 
 namespace Haisos {
@@ -13,18 +12,18 @@ CompositeToolFactory::CompositeToolFactory(IToolFactory& sharedFactory, std::uni
 CompositeToolFactory::~CompositeToolFactory() = default;
 
 std::unique_ptr<ITool> CompositeToolFactory::CreateTool(const std::string& name, std::shared_ptr<IAgent> callerAgent) {
-    auto sharedNames = m_sharedFactory.GetAvailableTools();
-    if (std::find(sharedNames.begin(), sharedNames.end(), name) != sharedNames.end()) {
+    if (m_sharedFactory.HasTool(name)) {
         return m_sharedFactory.CreateTool(name, callerAgent);
     }
-    if (m_ownedFactory) {
-        auto ownedNames = m_ownedFactory->GetAvailableTools();
-        if (std::find(ownedNames.begin(), ownedNames.end(), name) != ownedNames.end()) {
-            return m_ownedFactory->CreateTool(name, callerAgent);
-        }
+    if (m_ownedFactory && m_ownedFactory->HasTool(name)) {
+        return m_ownedFactory->CreateTool(name, callerAgent);
     }
     LogWarning("CompositeToolFactory: Unknown tool requested: %s", name.c_str());
     return nullptr;
+}
+
+bool CompositeToolFactory::HasTool(const std::string& name) const {
+    return (m_ownedFactory && m_ownedFactory->HasTool(name)) || m_sharedFactory.HasTool(name);
 }
 
 std::vector<std::string> CompositeToolFactory::GetAvailableTools() const {

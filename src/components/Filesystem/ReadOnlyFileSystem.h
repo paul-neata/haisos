@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <mutex>
 #include <string>
 #include "interfaces/IFilesystemService.h"
 
@@ -27,9 +28,14 @@ public:
     std::vector<DirectoryEntry> ReadDirectory(const std::string& path) override;
 
 private:
+    std::string GetCwd() const;
+
     std::shared_ptr<IFileSystem> m_inner;
     // This view's own current directory; not delegated to inner's
     // ChangeDirectory (inner may be shared by other views/processes).
+    // Guarded by m_cwdMutex: this filesystem instance may be shared by
+    // multiple concurrently-running processes, each on its own thread.
+    mutable std::mutex m_cwdMutex;
     std::string m_cwd = "/";
 };
 

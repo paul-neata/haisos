@@ -1,4 +1,5 @@
 #include "ToolFactory.h"
+#include <algorithm>
 #include "src/tools/get_current_date_time/GetCurrentDateTime.h"
 #include "src/tools/agent_start/AgentStartTool.h"
 #include "src/tools/agent_wait_to_finish/AgentWaitToFinishTool.h"
@@ -91,6 +92,11 @@ std::unique_ptr<ITool> ToolFactory::CreateTool(const std::string& name, std::sha
     }
     LogWarning("ToolFactory: Unknown tool requested: %s", name.c_str());
     return nullptr;
+}
+
+bool ToolFactory::HasTool(const std::string& name) const {
+    return std::find_if(m_registry.begin(), m_registry.end(),
+                        [&name](const ToolEntry& entry) { return entry.name == name; }) != m_registry.end();
 }
 
 std::vector<std::string> ToolFactory::GetAvailableTools() const {

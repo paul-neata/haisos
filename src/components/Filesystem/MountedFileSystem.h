@@ -2,7 +2,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <unordered_set>
+#include <unordered_map>
 #include "interfaces/IFilesystemService.h"
 
 namespace Haisos {
@@ -34,7 +34,30 @@ public:
     std::vector<DirectoryEntry> ReadDirectory(const std::string& path) override;
 
 private:
+    // Which of the two underlying filesystems an open file lives on.
+    enum class Side { Main, Mounted };
+
+    // What a synthetic fd handed out by this view actually refers to.
+    struct Handle {
+        Side side = Side::Main;
+        int innerFd = -1;
+    };
+
+    // The first fd this view hands out; above the standard streams (0/1/2).
+    static constexpr int kFirstSyntheticFd = 3;
+
     std::string GetCwd() const;
+
+    const std::shared_ptr<IFileSystem>& FileSystemFor(Side side) const;
+    // Takes the fd an underlying filesystem returned and gives back the
+    // synthetic fd callers of this view see (or the underlying error value).
+    int RegisterFd(Side side, int innerFd);
+    // Returns false if |fd| was not handed out by this view (or is already
+    // closed); otherwise fills in |handle|.
+    bool LookupFd(int fd, Handle& handle) const;
+    // Returns the next synthetic fd that is not currently live, or -1 if there
+    // is none. m_openFdsMutex must be held.
+    int AllocateFdLocked();
 
     std::shared_ptr<IFileSystem> m_main;
     std::string m_mountPoint;
@@ -46,11 +69,18 @@ private:
     mutable std::mutex m_cwdMutex;
     std::string m_cwd = "/";
 
-    // main and mounted have independent fd namespaces, so an fd alone doesn't
-    // say which one owns it (and the two could coincidentally overlap); this
-    // records which side each fd opened through was created on.
+    // main and mounted have independent fd namespaces that routinely overlap
+    // (InMemoryFileSystem hands out fds from 3 up, and PhysicalFileSystem
+    // returns real OS fds, which also start around 3), so an underlying fd
+    // alone cannot say which side owns it. This view therefore hands out fds
+    // from its own namespace and maps each one to the side it was opened on
+    // plus the fd that side returned; every fd-taking method translates back
+    // before dispatching.
     mutable std::mutex m_openFdsMutex;
-    std::unordered_set<int> m_mountedFds;
+    std::unordered_map<int, Handle> m_openFds;
+    // Synthetic fds are handed out in increasing order, so one is never reused
+    // while it is still live.
+    int m_nextFd = kFirstSyntheticFd;
 };
 
 }

@@ -29,14 +29,14 @@ bool PhysicalFileSystem::ResolveWithinRoot(const std::string& pathname, std::str
             canonicalStr.compare(0, m_rootPath.size(), m_rootPath) != 0 ||
             (canonicalStr.size() > m_rootPath.size() &&
              canonicalStr[m_rootPath.size()] != std::filesystem::path::preferred_separator)) {
-            LogError("PhysicalFileSystem: path escapes root (%s): %s", m_rootPath.c_str(), pathname.c_str());
+            LogWarning("PhysicalFileSystem: path escapes root (%s): %s", m_rootPath.c_str(), pathname.c_str());
             return false;
         }
 
         resolved = canonicalStr;
         return true;
     } catch (const std::exception& e) {
-        LogError("PhysicalFileSystem: invalid path (%s): %s", e.what(), pathname.c_str());
+        LogDebug("PhysicalFileSystem: invalid path (%s): %s", e.what(), pathname.c_str());
         return false;
     }
 }

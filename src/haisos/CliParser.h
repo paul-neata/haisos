@@ -29,7 +29,11 @@ struct ParseResult {
     std::string error;
 };
 
-LogLevel ParseLogLevel(const std::string& level);
+// Parses a log level name ("verbose_debug", "debug", "trace", "info",
+// "warning", "error"). Returns false and leaves outLevel untouched if the name
+// is not recognized, so callers can report the mistake instead of silently
+// running at some other verbosity.
+bool ParseLogLevel(const std::string& level, LogLevel& outLevel);
 
 ParseResult ParseArguments(int argc, char* argv[]);
 

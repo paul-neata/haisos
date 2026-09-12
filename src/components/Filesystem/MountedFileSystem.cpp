@@ -1,5 +1,7 @@
 #include "MountedFileSystem.h"
+#include <limits>
 #include "VirtualPath.h"
+#include "src/components/Logger/Logger.h"
 
 namespace Haisos {
 
@@ -33,56 +35,101 @@ std::string MountedFileSystem::GetCwd() const {
     return m_cwd;
 }
 
+const std::shared_ptr<IFileSystem>& MountedFileSystem::FileSystemFor(Side side) const {
+    return (side == Side::Mounted) ? m_mounted : m_main;
+}
+
+int MountedFileSystem::AllocateFdLocked() {
+    // At most one more candidate than there are live fds has to be tried before
+    // an unused one turns up (the candidates are distinct until the counter
+    // wraps). Wrapping, rather than incrementing past INT_MAX, also keeps the
+    // counter out of signed-overflow territory.
+    for (size_t attempts = 0; attempts <= m_openFds.size(); ++attempts) {
+        int fd = m_nextFd;
+        m_nextFd = (fd == std::numeric_limits<int>::max()) ? kFirstSyntheticFd : (fd + 1);
+        if (m_openFds.find(fd) == m_openFds.end()) {
+            return fd;
+        }
+    }
+    return -1;
+}
+
+int MountedFileSystem::RegisterFd(Side side, int innerFd) {
+    if (innerFd < 0) {
+        return innerFd; // pass the underlying filesystem's error value through
+    }
+
+    int fd;
+    {
+        std::lock_guard<std::mutex> lock(m_openFdsMutex);
+        fd = AllocateFdLocked();
+        if (fd >= 0) {
+            m_openFds.emplace(fd, Handle{side, innerFd});
+        }
+    }
+
+    if (fd < 0) {
+        LogError("MountedFileSystem: no free file descriptor left (mount point: %s)", m_mountPoint.c_str());
+        FileSystemFor(side)->CloseFile(innerFd); // don't leak the underlying handle
+        return -1;
+    }
+    return fd;
+}
+
+bool MountedFileSystem::LookupFd(int fd, Handle& handle) const {
+    std::lock_guard<std::mutex> lock(m_openFdsMutex);
+    auto it = m_openFds.find(fd);
+    if (it == m_openFds.end()) {
+        return false;
+    }
+    handle = it->second;
+    return true;
+}
+
 int MountedFileSystem::OpenFile(const std::string& pathname, int flags) {
     std::string normalized = NormalizeVirtualPath(pathname, GetCwd());
     if (auto rel = RelativeToBase(m_mountPoint, normalized)) {
-        int fd = m_mounted->OpenFile(*rel, flags);
-        if (fd >= 0) {
-            std::lock_guard<std::mutex> lock(m_openFdsMutex);
-            m_mountedFds.insert(fd);
-        }
-        return fd;
+        return RegisterFd(Side::Mounted, m_mounted->OpenFile(*rel, flags));
     }
-    return m_main->OpenFile(normalized, flags);
+    return RegisterFd(Side::Main, m_main->OpenFile(normalized, flags));
 }
 
 int MountedFileSystem::OpenFile(const std::string& pathname, int flags, int mode) {
     std::string normalized = NormalizeVirtualPath(pathname, GetCwd());
     if (auto rel = RelativeToBase(m_mountPoint, normalized)) {
-        int fd = m_mounted->OpenFile(*rel, flags, mode);
-        if (fd >= 0) {
-            std::lock_guard<std::mutex> lock(m_openFdsMutex);
-            m_mountedFds.insert(fd);
-        }
-        return fd;
+        return RegisterFd(Side::Mounted, m_mounted->OpenFile(*rel, flags, mode));
     }
-    return m_main->OpenFile(normalized, flags, mode);
+    return RegisterFd(Side::Main, m_main->OpenFile(normalized, flags, mode));
 }
 
 int MountedFileSystem::CloseFile(int fd) {
-    std::lock_guard<std::mutex> lock(m_openFdsMutex);
-    if (m_mountedFds.erase(fd) > 0) {
-        return m_mounted->CloseFile(fd);
+    Handle handle;
+    {
+        std::lock_guard<std::mutex> lock(m_openFdsMutex);
+        auto it = m_openFds.find(fd);
+        if (it == m_openFds.end()) {
+            return -1;
+        }
+        handle = it->second;
+        m_openFds.erase(it);
     }
-    return m_main->CloseFile(fd);
+    return FileSystemFor(handle.side)->CloseFile(handle.innerFd);
 }
 
 ssize_t MountedFileSystem::ReadFile(int fd, void* buf, size_t count) {
-    bool isMounted;
-    {
-        std::lock_guard<std::mutex> lock(m_openFdsMutex);
-        isMounted = m_mountedFds.count(fd) > 0;
+    Handle handle;
+    if (!LookupFd(fd, handle)) {
+        return -1;
     }
-    return isMounted ? m_mounted->ReadFile(fd, buf, count) : m_main->ReadFile(fd, buf, count);
+    return FileSystemFor(handle.side)->ReadFile(handle.innerFd, buf, count);
 }
 
 ssize_t MountedFileSystem::WriteFile(int fd, const void* buf, size_t count) {
-    bool isMounted;
-    {
-        std::lock_guard<std::mutex> lock(m_openFdsMutex);
-        isMounted = m_mountedFds.count(fd) > 0;
+    Handle handle;
+    if (!LookupFd(fd, handle)) {
+        return -1;
     }
-    return isMounted ? m_mounted->WriteFile(fd, buf, count) : m_main->WriteFile(fd, buf, count);
+    return FileSystemFor(handle.side)->WriteFile(handle.innerFd, buf, count);
 }
 
 int MountedFileSystem::CreateDirectory(const std::string& pathname, int mode) {

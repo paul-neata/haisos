@@ -7,18 +7,23 @@ namespace Haisos {
 ReadOnlyFileSystem::ReadOnlyFileSystem(std::shared_ptr<IFileSystem> inner) : m_inner(std::move(inner)) {}
 ReadOnlyFileSystem::~ReadOnlyFileSystem() = default;
 
+std::string ReadOnlyFileSystem::GetCwd() const {
+    std::lock_guard<std::mutex> lock(m_cwdMutex);
+    return m_cwd;
+}
+
 int ReadOnlyFileSystem::OpenFile(const std::string& pathname, int flags) {
     if (RequestsWriteAccess(flags)) {
         return -1;
     }
-    return m_inner->OpenFile(NormalizeVirtualPath(pathname, m_cwd), flags);
+    return m_inner->OpenFile(NormalizeVirtualPath(pathname, GetCwd()), flags);
 }
 
 int ReadOnlyFileSystem::OpenFile(const std::string& pathname, int flags, int mode) {
     if (RequestsWriteAccess(flags)) {
         return -1;
     }
-    return m_inner->OpenFile(NormalizeVirtualPath(pathname, m_cwd), flags, mode);
+    return m_inner->OpenFile(NormalizeVirtualPath(pathname, GetCwd()), flags, mode);
 }
 
 int ReadOnlyFileSystem::CloseFile(int fd) {
@@ -43,11 +48,13 @@ int ReadOnlyFileSystem::RemoveDirectory(const std::string& /*pathname*/) {
 
 int ReadOnlyFileSystem::ChangeDirectory(const std::string& path) {
     // Kept purely virtual (see header): inner may be shared by other views.
+    std::lock_guard<std::mutex> lock(m_cwdMutex);
     m_cwd = NormalizeVirtualPath(path, m_cwd);
     return 0;
 }
 
 char* ReadOnlyFileSystem::GetCurrentDirectory(std::string& buf, size_t size) {
+    std::lock_guard<std::mutex> lock(m_cwdMutex);
     if (m_cwd.size() + 1 > size) {
         return nullptr;
     }
@@ -56,7 +63,7 @@ char* ReadOnlyFileSystem::GetCurrentDirectory(std::string& buf, size_t size) {
 }
 
 std::vector<DirectoryEntry> ReadOnlyFileSystem::ReadDirectory(const std::string& path) {
-    return m_inner->ReadDirectory(NormalizeVirtualPath(path, m_cwd));
+    return m_inner->ReadDirectory(NormalizeVirtualPath(path, GetCwd()));
 }
 
 }

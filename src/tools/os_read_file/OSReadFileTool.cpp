@@ -1,5 +1,6 @@
 #include "OSReadFileTool.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
+#include "src/components/Logger/Logger.h"
 
 namespace Haisos::Tools {
 
@@ -26,9 +27,11 @@ ToolResult OSReadFileTool::Call(std::shared_ptr<IAgent> /*callerAgent*/, const n
         return ToolResult{"Missing required field: path", true};
     }
     std::string path = args["path"];
+    LogDebug("OSReadFileTool: reading file '%s'", path.c_str());
 
     std::string content;
     if (!ReadWholeFile(m_os.GetFileSystem(), path, content)) {
+        LogWarning("OSReadFileTool: failed to read file '%s'", path.c_str());
         return ToolResult{"Failed to read file: " + path, true};
     }
     return ToolResult{content, false};

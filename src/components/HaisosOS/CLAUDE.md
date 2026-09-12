@@ -16,6 +16,14 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   exposed as a Lua global function returning `(content, is_error)` (JSON
   results are handed back as Lua tables); `print()` routes to the process's
   console
+- Lua processes run sandboxed: only a restricted subset of the Lua standard
+  library is opened, and host-access libraries (`io`, `os`, `package`,
+  `debug`) plus the file-loading globals are deliberately removed, so a script
+  cannot touch the real disk, environment, or native libraries. Consequently
+  **all** filesystem and process access from Lua must go through the `os_*`
+  tool globals. This is a security boundary, not an oversight -- the exact set
+  of libraries and globals is defined by the library-opening helper in
+  `LuaProcess.cpp`, which is the ground truth.
 - `CreateSubOS` builds a logically-confined child OS: a filesystem sub-root
   (via `IFilesystemService::CreateSubFileSystem`, which cannot actually escape
   its base by construction; an explicit `..`-escaping path is still rejected

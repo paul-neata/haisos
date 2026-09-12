@@ -23,14 +23,14 @@ std::string FormatUsage(const char* programName) {
         "  HAISOS_API_KEY     API key (optional for local Ollama)\n";
 }
 
-LogLevel ParseLogLevel(const std::string& level) {
-    if (level == "verbose_debug") return LogLevel::VerboseDebug;
-    if (level == "debug") return LogLevel::Debug;
-    if (level == "trace") return LogLevel::Trace;
-    if (level == "info") return LogLevel::Info;
-    if (level == "warning") return LogLevel::Warning;
-    if (level == "error") return LogLevel::Error;
-    return LogLevel::Info;
+bool ParseLogLevel(const std::string& level, LogLevel& outLevel) {
+    if (level == "verbose_debug") { outLevel = LogLevel::VerboseDebug; return true; }
+    if (level == "debug") { outLevel = LogLevel::Debug; return true; }
+    if (level == "trace") { outLevel = LogLevel::Trace; return true; }
+    if (level == "info") { outLevel = LogLevel::Info; return true; }
+    if (level == "warning") { outLevel = LogLevel::Warning; return true; }
+    if (level == "error") { outLevel = LogLevel::Error; return true; }
+    return false;
 }
 
 ParseResult ParseArguments(int argc, char* argv[]) {
@@ -63,7 +63,10 @@ ParseResult ParseArguments(int argc, char* argv[]) {
             }
         } else if (arg == "--log-level") {
             if (i + 1 < argc) {
-                options.logLevel = ParseLogLevel(argv[++i]);
+                std::string levelName = argv[++i];
+                if (!ParseLogLevel(levelName, options.logLevel)) {
+                    return ParseResult{options, "Error: unrecognized --log-level value: " + levelName + "\n"};
+                }
             } else {
                 return ParseResult{options, "Error: --log-level requires a level argument\n"};
             }

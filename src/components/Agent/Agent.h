@@ -53,6 +53,9 @@ private:
 
     std::shared_ptr<ILLMCommunicator> m_llmCommunicator;
     std::shared_ptr<IToolFactory> m_toolFactory;
+    // Tool descriptions are fetched once in the constructor and reused for every LLM round.
+    // This assumes the tool factory's registry is immutable after the Agent is constructed;
+    // tools registered later will not be visible to this agent.
     std::vector<std::tuple<std::string, std::string, nlohmann::json>> m_cachedToolDescriptions;
     std::shared_ptr<IAgentConsole> m_console;
     std::vector<std::string> m_systemPrompts;

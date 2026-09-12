@@ -33,7 +33,12 @@ public:
     IServicesCreator& GetServicesCreator() override;
 
 private:
+    // Erases finished processes (and their m_agentToPid entries).
+    // Must be called with m_processesMutex held.
     void CleanupFinishedProcesses();
+    // Stops one process, escalating to Kill() if it does not stop in time.
+    // Never called with m_processesMutex held.
+    static void DrainProcess(const std::shared_ptr<IProcess>& process);
     uint64_t ResolveParentPid(const std::shared_ptr<IAgent>& callerAgent) const;
     std::shared_ptr<IProcess> StartAgentProcess(const std::string& programPath, const std::vector<std::string>& args, uint64_t parentPid);
     std::shared_ptr<IProcess> StartLuaProcess(const std::string& programPath, const std::vector<std::string>& args, uint64_t parentPid);
@@ -48,11 +53,22 @@ private:
     std::shared_ptr<std::atomic<uint64_t>> m_pidCounter;
     OSToolFactory m_osToolFactory;
 
+    // Set by the destructor before draining, so no further process can be started.
+    std::atomic<bool> m_shuttingDown{false};
+
     mutable std::mutex m_processesMutex;
     std::vector<std::shared_ptr<IProcess>> m_processes;
 
+    // A pid keyed by the agent's address, kept honest by a weak_ptr: an address
+    // can be reused by a later allocation, so an entry counts only while it
+    // still refers to the very agent instance that registered it.
+    struct AgentPidEntry {
+        std::weak_ptr<IAgent> agent;
+        uint64_t pid = 0;
+    };
+
     mutable std::mutex m_agentPidMutex;
-    std::unordered_map<IAgent*, uint64_t> m_agentToPid;
+    std::unordered_map<IAgent*, AgentPidEntry> m_agentToPid;
 };
 
 }

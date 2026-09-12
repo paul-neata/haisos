@@ -184,11 +184,14 @@ LLMResponse LLMCommunicator::Call(
     const std::vector<LLMMessage>& messages,
     const std::vector<std::tuple<std::string, std::string, nlohmann::json>>& availableTools)
 {
-    LogInfo("LLMCommunicator::Call - Endpoint: %s", m_endpoint.c_str());
+    std::string sourceTag = m_sourceName.empty() ? "" : ("[" + m_sourceName + "]");
+
+    // Per-request internal detail, not a lifecycle event: keep it at Debug so it
+    // does not flood the log (or the console) on every LLM round trip.
+    LogDebug("LLMCommunicator::Call%s - Endpoint: %s", sourceTag.c_str(), m_endpoint.c_str());
 
     std::string requestJson = BuildRequestJson(m_modelName, messages, availableTools);
 
-    std::string sourceTag = m_sourceName.empty() ? "" : ("[" + m_sourceName + "]");
     LogVerboseDebug("[JSON_REQUEST]%s %s", sourceTag.c_str(), requestJson.c_str());
 
     std::vector<HTTPHeader> headers;

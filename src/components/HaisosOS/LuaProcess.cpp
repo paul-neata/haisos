@@ -124,9 +124,17 @@ LuaProcess* SelfFromState(lua_State* L) {
 // base, table, string, math, utf8, and coroutine. Deliberately omits `io`,
 // `os`, `package`, and `debug`, which would grant raw filesystem/process/env
 // access and native library loading, bypassing the rooted IFileSystem and the
-// OS's tool-only sandboxing. The base library's `dofile`/`loadfile` (which
-// read directly from the real disk) are removed after opening; `load` is left
-// available since it only executes Lua source/bytecode already in-process.
+// OS's tool-only sandboxing. Four base-library globals are removed after
+// opening:
+//  - `dofile`/`loadfile` read directly from the real disk, escaping the jail;
+//  - `load` defaults to mode "bt", i.e. it accepts *binary* chunks, and Lua's
+//    bytecode loader does not validate untrusted input: a crafted binary chunk
+//    yields arbitrary memory read/write and native code execution, defeating
+//    the whole sandbox. Nil'ing `load` is simpler and strictly safer than
+//    wrapping it to force mode "t", and no .lua process needs to compile source
+//    at runtime;
+//  - `warn` writes straight to the host process's stderr, bypassing the `print`
+//    override and the per-process console tagging.
 void OpenSafeLuaLibs(lua_State* L) {
     luaL_requiref(L, "_G", luaopen_base, 1);
     luaL_requiref(L, LUA_TABLIBNAME, luaopen_table, 1);
@@ -136,14 +144,28 @@ void OpenSafeLuaLibs(lua_State* L) {
     luaL_requiref(L, LUA_COLIBNAME, luaopen_coroutine, 1);
     lua_settop(L, 0);
 
-    lua_pushnil(L);
-    lua_setglobal(L, "dofile");
-    lua_pushnil(L);
-    lua_setglobal(L, "loadfile");
+    static const char* const kRemovedGlobals[] = {"dofile", "loadfile", "load", "warn"};
+    for (const char* name : kRemovedGlobals) {
+        lua_pushnil(L);
+        lua_setglobal(L, name);
+    }
 }
 
+// Latched kill hook. A plain error raised from a count hook is an ordinary
+// catchable Lua error, so `while true do pcall(f) end` would swallow the kill
+// and keep running forever. Once a kill has been requested the hook therefore
+// re-arms itself to fire on *every* instruction, call, return and line (the
+// same masks the stock Lua interpreter uses for Ctrl-C) before raising: the
+// script then cannot execute a single further instruction without erroring
+// again, so each caught error strips one `pcall` level - and no new level can
+// be entered, since the hook fires before the call instruction runs - until the
+// error reaches the top-level lua_pcall and the script terminates.
+// lua_sethook() re-arms the trap flag on every Lua frame on the stack, so the
+// hook survives the error unwinding back into an outer frame.
 void KillHookTrampoline(lua_State* L, lua_Debug* /*ar*/) {
     if (SelfFromState(L)->IsKillRequested()) {
+        lua_sethook(L, &KillHookTrampoline,
+                    LUA_MASKCOUNT | LUA_MASKCALL | LUA_MASKRET | LUA_MASKLINE, 1);
         luaL_error(L, "process killed");
     }
 }
@@ -235,51 +257,78 @@ bool LuaProcess::IsKillRequested() const {
 }
 
 int LuaProcess::LuaToolTrampoline(lua_State* L) {
-    LuaProcess* self = SelfFromState(L);
-    const char* toolName = lua_tostring(L, lua_upvalueindex(1));
+    // Lua is built as C and unwinds with longjmp, so a C++ exception escaping
+    // into its frames would reach std::terminate rather than any handler. Tool
+    // code can genuinely throw -- nlohmann's dump() raises on invalid UTF-8,
+    // which a directory listing can easily contain -- so everything is funnelled
+    // into the (message, is_error) shape scripts already handle. lua_pushfstring
+    // is used in the handlers because it allocates through Lua, not the C++ heap.
+    try {
+        LuaProcess* self = SelfFromState(L);
+        const char* toolName = lua_tostring(L, lua_upvalueindex(1));
 
-    nlohmann::json args = nlohmann::json::object();
-    if (lua_gettop(L) >= 1 && lua_istable(L, 1)) {
-        args = ToJson(L, 1);
-    }
+        nlohmann::json args = nlohmann::json::object();
+        if (lua_gettop(L) >= 1 && lua_istable(L, 1)) {
+            args = ToJson(L, 1);
+        }
 
-    auto tool = self->m_toolFactory.CreateTool(toolName ? toolName : "", nullptr);
-    if (!tool) {
-        lua_pushstring(L, "unknown tool");
+        auto tool = self->m_toolFactory.CreateTool(toolName ? toolName : "", nullptr);
+        if (!tool) {
+            LogWarning("LuaProcess '%s': unknown tool '%s'", self->m_name.c_str(), toolName ? toolName : "");
+            lua_pushstring(L, "unknown tool");
+            lua_pushboolean(L, true);
+            return 2;
+        }
+
+        LogDebug("LuaProcess '%s': calling tool '%s'", self->m_name.c_str(), toolName ? toolName : "");
+        ToolResult result = tool->Call(nullptr, args);
+        LogDebug("LuaProcess '%s': tool '%s' returned is_error=%d (%zu bytes)",
+            self->m_name.c_str(), toolName ? toolName : "", result.isError ? 1 : 0, result.content.size());
+
+        // Tool results that happen to be JSON (e.g. os_list_directory) are handed
+        // back as a Lua table rather than a raw string, so scripts don't need
+        // their own JSON parser for the common case.
+        auto parsed = nlohmann::json::parse(result.content, nullptr, false);
+        if (!result.isError && !parsed.is_discarded() && (parsed.is_object() || parsed.is_array())) {
+            PushJson(L, parsed);
+        } else {
+            lua_pushstring(L, result.content.c_str());
+        }
+        lua_pushboolean(L, result.isError);
+        return 2;
+    } catch (const std::exception& e) {
+        lua_pushfstring(L, "tool call failed: %s", e.what());
+        lua_pushboolean(L, true);
+        return 2;
+    } catch (...) {
+        lua_pushstring(L, "tool call failed: unknown error");
         lua_pushboolean(L, true);
         return 2;
     }
-
-    ToolResult result = tool->Call(nullptr, args);
-
-    // Tool results that happen to be JSON (e.g. os_list_directory) are handed
-    // back as a Lua table rather than a raw string, so scripts don't need
-    // their own JSON parser for the common case.
-    auto parsed = nlohmann::json::parse(result.content, nullptr, false);
-    if (!result.isError && !parsed.is_discarded() && (parsed.is_object() || parsed.is_array())) {
-        PushJson(L, parsed);
-    } else {
-        lua_pushstring(L, result.content.c_str());
-    }
-    lua_pushboolean(L, result.isError);
-    return 2;
 }
 
 int LuaProcess::LuaPrintTrampoline(lua_State* L) {
-    LuaProcess* self = SelfFromState(L);
-    int n = lua_gettop(L);
-    std::string line;
-    for (int i = 1; i <= n; ++i) {
-        if (i > 1) {
-            line += "\t";
+    // See LuaToolTrampoline: a C++ exception must not unwind into Lua's C frames.
+    // Building the line and writing to the console both allocate, so a failure
+    // here drops the output rather than taking the process down.
+    try {
+        LuaProcess* self = SelfFromState(L);
+        int n = lua_gettop(L);
+        std::string line;
+        for (int i = 1; i <= n; ++i) {
+            if (i > 1) {
+                line += "\t";
+            }
+            size_t len = 0;
+            const char* s = luaL_tolstring(L, i, &len);
+            line.append(s, len);
+            lua_pop(L, 1);
         }
-        size_t len = 0;
-        const char* s = luaL_tolstring(L, i, &len);
-        line.append(s, len);
-        lua_pop(L, 1);
-    }
-    if (self->m_console) {
-        self->m_console->Write(line);
+        if (self->m_console) {
+            self->m_console->Write(line);
+        }
+    } catch (...) {
+        return 0;
     }
     return 0;
 }
@@ -305,6 +354,11 @@ void LuaProcess::RegisterBindings(lua_State* L) {
 }
 
 void LuaProcess::RunThread() {
+    LogDebug("LuaProcess '%s' RunThread starting (%zu bytes of script)", m_name.c_str(), m_scriptContent.size());
+    // Anything thrown here would otherwise take down the whole program and, worse,
+    // leave m_finished false so every WaitToFinish() hangs. The finished-marking
+    // below therefore has to run on every path out of the Lua work.
+    try {
     m_luaState = luaL_newstate();
     if (!m_luaState) {
         LogError("LuaProcess '%s': failed to create Lua state", m_name.c_str());
@@ -313,7 +367,11 @@ void LuaProcess::RunThread() {
         RegisterBindings(m_luaState);
         lua_sethook(m_luaState, &KillHookTrampoline, LUA_MASKCOUNT, 1000);
 
-        if (luaL_loadbuffer(m_luaState, m_scriptContent.data(), m_scriptContent.size(), m_name.c_str()) != LUA_OK) {
+        // Mode "t" accepts source text only. The default ("bt") would also accept
+        // precompiled bytecode, which Lua's undump does not validate -- and a .lua
+        // program is untrusted input, since an agent can write one via os_write_file
+        // and then launch it via os_start_process.
+        if (luaL_loadbufferx(m_luaState, m_scriptContent.data(), m_scriptContent.size(), m_name.c_str(), "t") != LUA_OK) {
             const char* err = lua_tostring(m_luaState, -1);
             LogError("LuaProcess '%s': failed to load script: %s", m_name.c_str(), err ? err : "unknown error");
             if (m_console) {
@@ -321,12 +379,27 @@ void LuaProcess::RunThread() {
             }
         } else if (lua_pcall(m_luaState, 0, 0, 0) != LUA_OK) {
             const char* err = lua_tostring(m_luaState, -1);
-            LogError("LuaProcess '%s': script error: %s", m_name.c_str(), err ? err : "unknown error");
-            if (m_console) {
-                m_console->Write("[" + m_name + "] Error: " + std::string(err ? err : "script error"));
+            if (IsKillRequested()) {
+                // Not a fault: the kill hook aborts the script by raising, so this
+                // is the expected way a killed process unwinds.
+                LogInfo("LuaProcess '%s': killed by request", m_name.c_str());
+            } else {
+                LogError("LuaProcess '%s': script error: %s", m_name.c_str(), err ? err : "unknown error");
+                if (m_console) {
+                    m_console->Write("[" + m_name + "] Error: " + std::string(err ? err : "script error"));
+                }
             }
         }
 
+        lua_close(m_luaState);
+        m_luaState = nullptr;
+    }
+    } catch (const std::exception& e) {
+        LogError("LuaProcess '%s': unexpected exception: %s", m_name.c_str(), e.what());
+    } catch (...) {
+        LogError("LuaProcess '%s': unexpected unknown exception", m_name.c_str());
+    }
+    if (m_luaState) {
         lua_close(m_luaState);
         m_luaState = nullptr;
     }

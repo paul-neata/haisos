@@ -2,6 +2,7 @@ add_executable(Call.get_current_date_time.integrationtest CallGetCurrentDateTime
 target_include_directories(Call.get_current_date_time.integrationtest PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(Call.get_current_date_time.integrationtest PRIVATE
     Factory
+    ServicesCreator
     Agent
     LLMCommunicator
     HTTPClient

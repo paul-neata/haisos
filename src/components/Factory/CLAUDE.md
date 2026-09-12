@@ -1,11 +1,11 @@
 # Factory
 
-Dependency injection factory.
+Low-level factory for real/physical primitives.
 
 ## Responsibilities
 
-- Creates all component instances (Console, HTTPClient, LLMCommunicator, ToolFactory, Agent, Filesystem)
-- Owns the agent lifecycle by keeping shared references
+- Creates real primitives only: a physical console, an HTTP client, and disk-backed filesystems (unrooted and `PhysicalFileSystem`)
+- Knows nothing about agents, LLM communication, or tool factories -- that all lives in `ILLMService` (see `src/components/LLMService/`)
 
 ## Key Classes
 

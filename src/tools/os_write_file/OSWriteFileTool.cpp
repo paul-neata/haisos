@@ -40,7 +40,7 @@ ToolResult OSWriteFileTool::Call(std::shared_ptr<IAgent> /*callerAgent*/, const 
     std::string content = args["content"];
     bool append = args.value("append", false);
 
-    auto& fs = m_os.GetFileSystemService().GetFileSystem();
+    auto& fs = m_os.GetFileSystem();
     int fd = fs.OpenFile(path, append ? kFileOpenWriteCreateAppend : kFileOpenWriteCreateTruncate, kFileCreateMode);
     if (fd < 0) {
         return ToolResult{"Failed to open file for writing: " + path, true};

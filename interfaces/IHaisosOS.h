@@ -9,8 +9,8 @@ namespace Haisos {
 
 // Permissions for a sub-OS created via IHaisosOS::CreateSubOS. This is
 // deliberately scoped to logical/application-level confinement for now:
-// a real filesystem sub-root and a coarse process-start toggle. Deeper
-// permissioning (network access, composed filesystems, ...) is future work.
+// a filesystem sub-root and a coarse process-start toggle. Deeper
+// permissioning (network access, ...) is future work.
 struct SubOSPermissions {
     // Directory (relative to the parent OS's root) the sub-OS is confined to.
     // Empty means "same root as the parent" (i.e. no extra filesystem confinement).
@@ -39,20 +39,26 @@ public:
 
     virtual std::shared_ptr<IHaisosOS> CreateSubOS(const SubOSPermissions& permissions) = 0;
 
+    // The OS's own mounted root filesystem.
+    virtual IFileSystem& GetFileSystem() = 0;
+    // The filesystem-composition factory (read-only/in-memory/sub/mount views).
     virtual IFilesystemService& GetFileSystemService() = 0;
     virtual IServicesCreator& GetServicesCreator() = 0;
 };
 
-// rootPath is the real disk directory filesystemService's IFileSystem is rooted
-// at (used to resolve CreateSubOS's sub-roots against it).
+// Builds the root IHaisosOS. networkService/llmService/filesystem-service are
+// not passed in -- they are created internally via servicesCreator (llmService
+// using endpoint/modelName/apiKey); rootFileSystem becomes the OS's initial
+// mounted root (build one via IFactory::CreatePhysicalFileSystem for a real
+// disk directory, or via a filesystem service's CreateEmptyInMemFileSystem/
+// etc. for anything else). The root OS always allows starting processes;
+// only a sub-OS (see CreateSubOS) can be more restricted.
 std::shared_ptr<IHaisosOS> CreateHaisosOS(
-    IFactory& factory,
     IServicesCreator& servicesCreator,
-    std::shared_ptr<INetworkService> networkService,
-    std::shared_ptr<ILLMService> llmService,
-    std::unique_ptr<IFilesystemService> filesystemService,
-    const std::string& rootPath,
+    std::shared_ptr<IFileSystem> rootFileSystem,
     std::shared_ptr<IPhysicalConsole> physicalConsole,
-    bool allowStartProcess = true);
+    const std::string& endpoint,
+    const std::string& modelName,
+    const std::string& apiKey);
 
 }

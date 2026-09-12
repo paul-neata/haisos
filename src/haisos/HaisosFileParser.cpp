@@ -126,6 +126,57 @@ HaisosFileParseResult ParseHaisosFile(
             }
             result.config.rootPath = Substitute(rest, values);
             sawRoot = true;
+        } else if (key == "FS") {
+            if (rest.empty()) {
+                result.error = "Error: line " + std::to_string(lineNumber) + ": FS requires a name and a filesystem type\n";
+                return result;
+            }
+            auto tokens = SplitWhitespace(Substitute(rest, values));
+            if (tokens.size() < 2) {
+                result.error = "Error: line " + std::to_string(lineNumber) + ": FS requires a name and a filesystem type\n";
+                return result;
+            }
+
+            HaisosFileFilesystemDecl decl;
+            decl.name = tokens[0];
+            decl.type = tokens[1];
+            decl.args.assign(tokens.begin() + 2, tokens.end());
+
+            size_t expectedArgs = 0;
+            if (decl.type == "PHYSICAL") {
+                expectedArgs = 1;
+            } else if (decl.type == "RO") {
+                expectedArgs = 1;
+            } else if (decl.type == "MEM") {
+                expectedArgs = 0;
+            } else if (decl.type == "SUB") {
+                expectedArgs = 2;
+            } else {
+                result.error = "Error: line " + std::to_string(lineNumber) + ": unknown FS type '" + decl.type + "' (expected PHYSICAL, RO, MEM, or SUB)\n";
+                return result;
+            }
+            if (decl.args.size() != expectedArgs) {
+                result.error = "Error: line " + std::to_string(lineNumber) + ": FS " + decl.type + " expects " + std::to_string(expectedArgs) + " argument(s), got " + std::to_string(decl.args.size()) + "\n";
+                return result;
+            }
+
+            HaisosFileFsStep step;
+            step.isMount = false;
+            step.declare = std::move(decl);
+            result.config.fsSteps.push_back(std::move(step));
+        } else if (key == "MOUNT") {
+            auto tokens = SplitWhitespace(Substitute(rest, values));
+            if (tokens.size() != 3) {
+                result.error = "Error: line " + std::to_string(lineNumber) + ": MOUNT requires <main_fs> <path> <fs_to_mount>\n";
+                return result;
+            }
+
+            HaisosFileFsStep step;
+            step.isMount = true;
+            step.mount.mainFs = tokens[0];
+            step.mount.path = tokens[1];
+            step.mount.toBeMountedFs = tokens[2];
+            result.config.fsSteps.push_back(std::move(step));
         } else if (key == "RUN") {
             if (rest.empty()) {
                 result.error = "Error: line " + std::to_string(lineNumber) + ": RUN requires a program path\n";
@@ -148,6 +199,42 @@ HaisosFileParseResult ParseHaisosFile(
     }
 
     return result;
+}
+
+std::string GetHaisosFileTemplate() {
+    return
+        "# haisosfile - a small manifest that boots a Haisos OS.\n"
+        "# Comments start with '#' (full-line or trailing).\n"
+        "\n"
+        "# ARG declares an argument, overridable from the command line via\n"
+        "# `haisos -- name=value`. The value here is the default.\n"
+        "ARG name=World\n"
+        "\n"
+        "# VAR declares a variable; its value may reference ${ARG} or ${VAR} names\n"
+        "# declared above it.\n"
+        "VAR greeting=Hello-${name}\n"
+        "\n"
+        "# FS declares a named filesystem: FS <name> <type> <args...>\n"
+        "#   FS <name> PHYSICAL <folder>       a real disk directory (relative to\n"
+        "#                                     this file, or absolute; may use . and ..)\n"
+        "#   FS <name> RO <other_fs>           a read-only view of another declared FS\n"
+        "#   FS <name> MEM                     an empty, in-memory read/write FS\n"
+        "#   FS <name> SUB <other_fs> <folder> a view confined to a sub-path of another FS\n"
+        "FS workspace PHYSICAL .\n"
+        "\n"
+        "# MOUNT overlays one filesystem inside another at a path, overriding\n"
+        "# anything already there: MOUNT <main_fs> <path> <fs_to_mount>\n"
+        "# FS scratch MEM\n"
+        "# MOUNT workspace /scratch scratch\n"
+        "\n"
+        "# ROOT selects which declared filesystem (by name) becomes this OS's\n"
+        "# root. If omitted, the last FS declared above is used; if no FS is\n"
+        "# declared at all, ROOT may instead be a plain directory path.\n"
+        "ROOT workspace\n"
+        "\n"
+        "# RUN starts an initial process: a .md agent or a .lua script. May\n"
+        "# repeat; Haisos exits once every RUN process has finished.\n"
+        "RUN agent.md\n";
 }
 
 } // namespace Haisos

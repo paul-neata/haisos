@@ -32,13 +32,19 @@ protected:
         auto* servicesCreatorPtr = servicesCreator.get();
         m_servicesCreators.push_back(std::move(servicesCreator));
 
-        auto networkService = std::shared_ptr<INetworkService>(servicesCreatorPtr->CreateNetworkService());
-        auto llmService = std::shared_ptr<ILLMService>(servicesCreatorPtr->CreateLLMService(*networkService, kUnreachableEndpoint, "llama3", ""));
-        auto filesystem = m_factory.CreatePhysicalFileSystem(kTestRoot);
-        auto filesystemService = servicesCreatorPtr->CreateFileSystemService(std::move(filesystem));
+        std::shared_ptr<IFileSystem> rootFileSystem = m_factory.CreatePhysicalFileSystem(kTestRoot);
         auto physicalConsole = m_factory.CreatePhysicalConsole(false);
 
-        return CreateHaisosOS(m_factory, *servicesCreatorPtr, networkService, llmService, std::move(filesystemService), kTestRoot, physicalConsole, allowStartProcess);
+        // The root OS created via CreateHaisosOS always allows starting
+        // processes; a restricted root for tests is built via CreateSubOS
+        // (matching how any other caller would restrict it).
+        auto os = CreateHaisosOS(*servicesCreatorPtr, rootFileSystem, physicalConsole, kUnreachableEndpoint, "llama3", "");
+        if (!allowStartProcess) {
+            SubOSPermissions permissions;
+            permissions.allowStartProcess = false;
+            os = os->CreateSubOS(permissions);
+        }
+        return os;
     }
 
     Factory m_factory;

@@ -3,6 +3,8 @@
 #include "src/components/LLMCommunicator/LLMCommunicator.h"
 #include "src/components/ToolFactory/ToolFactory.h"
 #include "src/components/Factory/Factory.h"
+#include "src/components/ServicesCreator/ServicesCreator.h"
+#include "src/components/Console/AgentConsoleAdapter.h"
 #include "src/components/Logger/Logger.h"
 #include "tests/integration/helpers/IntegrationTestHelpers.h"
 #include "tests/integration/helpers/IntegrationTestLogCapture.h"
@@ -17,21 +19,19 @@ bool TestCallGetCurrentDateTime() {
     auto [endpoint, model, apiKey] = IntegrationTest::GetEndpointModelAndApiKey();
 
     Factory factory;
+    auto servicesCreator = CreateServicesCreator(factory);
+    auto networkService = std::shared_ptr<INetworkService>(servicesCreator->CreateNetworkService());
+    auto llmService = servicesCreator->CreateLLMService(*networkService, endpoint, model, apiKey);
+
     auto physicalConsole = factory.CreatePhysicalConsole(false);
     physicalConsole->Start();
-    auto console = factory.CreateAgentConsoleFromPhysical(physicalConsole, "root");
-    auto httpClient = factory.CreateHTTPClient();
-    auto toolFactory = factory.CreateToolFactory(factory);
-    auto llmCommunicator = factory.CreateLLMCommunicator(
-        std::move(httpClient), endpoint, model, apiKey);
+    auto console = std::make_unique<AgentConsoleAdapter>(physicalConsole, "root");
 
-    auto agent = factory.CreateAgent(
-        std::move(llmCommunicator),
-        std::move(toolFactory),
-        std::move(console),
+    auto agent = llmService->CreateAgent(
         std::vector<std::string>{"You are a helpful AI assistant."},
         "root",
-        nullptr);
+        nullptr,
+        std::move(console));
 
     agent->Post("What is the current date and time? Please use the get_current_date_time tool to find out.");
     agent->Stop(0);

@@ -54,7 +54,7 @@ haisos/
 │   │   ├── os_list_directory/
 │   │   ├── os_start_process/
 │   │   └── os_list_processes/
-│   └── haisos/            - Entry point, CLI parser, and haisosfile parser
+│   └── haisos/            - Entry point, CLI parser, haisosfile parser, and root-filesystem builder
 ├── interfaces/             - Service-based interfaces (IFactory.h, IServicesCreator.h, IHaisosOS.h, IProcess.h, ILLMService.h [IAgent, ITool, IToolFactory, IAgentConsole], INetworkService.h [IHTTPClient], IFilesystemService.h [IFileSystem], ILLMCommunicator.h)
 ├── tests/                 - All tests
 │   ├── mocks/             - Mock classes for testing
@@ -145,6 +145,7 @@ after a literal `--` is parsed as `key=value` pairs fed to the haisosfile as
 |----------|-------------|
 | `<haisosfile>` | Path to the haisosfile to run (positional; defaults to `./haisosfile`) |
 | `-- key=value ...` | `ARG` overrides passed to the haisosfile |
+| `--init` | Write a commented starter haisosfile to `./haisosfile` and exit (refuses to overwrite an existing one) |
 | `--log-to-console` | Enable logging to console |
 | `--log-to-file <path>` | Enable logging to file |
 | `--log-level <level>` | Set log level (verbose_debug, debug, trace, info, warning, error) |
@@ -154,25 +155,43 @@ after a literal `--` is parsed as `key=value` pairs fed to the haisosfile as
 
 ## The `haisosfile` DSL
 
-A small Dockerfile-style language (parsed by `HaisosFileParser` in `src/haisos/`):
+A small Dockerfile-style language (parsed by `HaisosFileParser` in `src/haisos/`;
+`haisos --init` writes a fully-commented starter file):
 
 ```
 # Comments start with '#'
 ARG name=default_value        # declares an argument; overridable via `-- name=value`
 VAR greeting=Hello-${name}    # declares a variable; RHS may reference ${ARG}/${VAR} names
-ROOT ./workspace               # directory to mount as the OS's filesystem root
+
+# FS declares a named filesystem: FS <name> <type> <args...>
+FS workspace PHYSICAL .              # a real disk directory (relative to this file, or absolute)
+FS scratch MEM                       # an empty, in-memory read/write filesystem
+FS readonly RO workspace             # a read-only view of another declared filesystem
+FS inner SUB workspace tools         # a view confined to a sub-path of another filesystem
+
+# MOUNT overlays one filesystem inside another at a path, overriding
+# anything already there: MOUNT <main_fs> <path> <fs_to_mount>
+MOUNT workspace /scratch scratch
+
+ROOT workspace                 # which declared filesystem (by name) becomes the OS's root
 RUN agent.md                   # start an initial process (.md agent or .lua script); may repeat
 RUN tools/setup.lua ${greeting}
 ```
 
-`ROOT` defaults to the haisosfile's own directory when omitted; exactly one is
-allowed. Each `RUN` starts a top-most process (parent PID 0); Haisos exits once
-all of them have finished. Composed/temporary/mounted filesystems and
-site/network permissions are not implemented yet.
+`ROOT`'s value is looked up by name against the declared `FS`s; if omitted, the
+last `FS` declared is used. If a haisosfile declares no `FS` at all, `ROOT`
+falls back to the original shorthand -- a plain directory path (or the
+haisosfile's own directory, if `ROOT` is also omitted) -- so simple haisosfiles
+never need `FS`. Each `RUN` starts a top-most process (parent PID 0); Haisos
+exits once all of them have finished. Composed/temporary filesystems from
+GitHub or tar archives, and site/network permissions, are not implemented yet.
 
 ## Example Usage
 
 ```bash
+# Scaffold a new haisosfile with comments explaining every directive
+./output/linux/haisos --init
+
 # Basic usage with local Ollama, using ./haisosfile in the cwd
 export HAISOS_MODEL=llama3
 ./output/linux/haisos

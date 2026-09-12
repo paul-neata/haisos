@@ -21,36 +21,17 @@ public:
     virtual void Stop() = 0;
 };
 
-// IFactory is the low-level dependency-injection factory: it builds the raw
-// components (console, HTTP client, LLM communicator, tool factory, agent,
-// filesystem). Higher-level services (see IServicesCreator) are built on top
-// of it and are what the rest of the platform should generally depend on.
+// IFactory is the low-level factory for real/physical primitives: a physical
+// console, an HTTP client, and disk-backed filesystems. It deliberately knows
+// nothing about agents, LLM communication, or tool factories any more -- that
+// all lives in ILLMService now (see IServicesCreator), which is what the rest
+// of the platform should generally depend on.
 class IFactory {
 public:
     virtual ~IFactory() = default;
 
     virtual std::shared_ptr<IPhysicalConsole> CreatePhysicalConsole(bool registerAsLogMessageReceiver) = 0;
-    virtual std::unique_ptr<IAgentConsole> CreateAgentConsole() = 0;
-    virtual std::unique_ptr<IAgentConsole> CreateAgentConsoleFromPhysical(
-        std::shared_ptr<IPhysicalConsole> physicalConsole,
-        const std::string& sourceName) = 0;
-
     virtual std::unique_ptr<IHTTPClient> CreateHTTPClient() = 0;
-    virtual std::unique_ptr<ILLMCommunicator> CreateLLMCommunicator(
-        std::unique_ptr<IHTTPClient> httpClient,
-        const std::string& endpoint,
-        const std::string& modelName,
-        const std::string& apiKey) = 0;
-    virtual std::unique_ptr<IToolFactory> CreateToolFactory(IFactory& factory) = 0;
-    virtual std::shared_ptr<IAgent> CreateAgent(
-        std::unique_ptr<ILLMCommunicator> llmCommunicator,
-        std::unique_ptr<IToolFactory> toolFactory,
-        std::unique_ptr<IAgentConsole> console,
-        const std::vector<std::string>& systemPrompts,
-        const std::string& name,
-        std::shared_ptr<IAgent> parent,
-        const std::string& startTime = "",
-        bool longRunning = true) = 0;
 
     virtual std::unique_ptr<IFileSystem> CreateFilesystem() = 0;
     // Returns a filesystem jailed to (rooted at) a real disk path: every path

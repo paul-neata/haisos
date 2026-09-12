@@ -23,7 +23,7 @@ nlohmann::json OSListDirectoryTool::GetDefaultParametersSchema() {
 ToolResult OSListDirectoryTool::Call(std::shared_ptr<IAgent> /*callerAgent*/, const nlohmann::json& args) {
     std::string path = args.value("path", ".");
 
-    auto entries = m_os.GetFileSystemService().GetFileSystem().ReadDirectory(path);
+    auto entries = m_os.GetFileSystem().ReadDirectory(path);
 
     nlohmann::json result = nlohmann::json::array();
     for (const auto& entry : entries) {

@@ -9,11 +9,18 @@ namespace Haisos {
 
 class LLMCommunicator : public ILLMCommunicator {
 public:
+    // sourceName, when non-empty, tags this communicator's [JSON_REQUEST]/
+    // [JSON_RESPONSE] trace log lines with it (e.g. an agent's name), so
+    // concurrent agents' traffic can still be told apart in the logs --
+    // restoring what the old SystemCallbacks on_send_with_name/
+    // on_received_with_name gave test/debug tooling, without the callback
+    // plumbing.
     LLMCommunicator(
         std::unique_ptr<IHTTPClient> httpClient,
         const std::string& endpoint,
         const std::string& modelName,
-        const std::string& apiKey);
+        const std::string& apiKey,
+        const std::string& sourceName = "");
 
     ~LLMCommunicator() override;
 
@@ -35,6 +42,7 @@ private:
     std::string m_endpoint;
     std::string m_modelName;
     std::string m_apiKey;
+    std::string m_sourceName;
 };
 
 }

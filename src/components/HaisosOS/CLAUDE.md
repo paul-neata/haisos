@@ -17,8 +17,18 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   results are handed back as Lua tables); `print()` routes to the process's
   console
 - `CreateSubOS` builds a logically-confined child OS: a filesystem sub-root
-  (validated to stay within the parent's root) and, optionally, a tool set
-  without `os_start_process`
+  (via `IFilesystemService::CreateSubFileSystem`, which cannot actually escape
+  its base by construction; an explicit `..`-escaping path is still rejected
+  up front so a typo fails loudly rather than silently landing elsewhere) and,
+  optionally, a tool set without `os_start_process`
+- `CreateHaisosOS(...)` builds `INetworkService`/`ILLMService`/the filesystem-
+  composition factory internally via the given `IServicesCreator`, rather than
+  receiving them pre-built; the caller supplies only the root `IFileSystem`
+  (e.g. from `IFactory::CreatePhysicalFileSystem`) and endpoint/model/apiKey.
+  The root OS always allows starting processes; only `CreateSubOS` can restrict it.
+- `GetFileSystem()` exposes the OS's actual root filesystem directly (what the
+  `os_*` tools operate on); `GetFileSystemService()` exposes the stateless
+  composition factory (read-only/in-memory/sub/mount views)
 
 ## Key Classes
 

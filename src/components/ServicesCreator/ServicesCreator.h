@@ -8,7 +8,7 @@ public:
     explicit ServicesCreator(IFactory& factory);
     ~ServicesCreator() override;
 
-    std::unique_ptr<IFilesystemService> CreateFileSystemService(std::unique_ptr<IFileSystem> filesystem) override;
+    std::unique_ptr<IFilesystemService> CreateFileSystemService() override;
     std::unique_ptr<INetworkService> CreateNetworkService() override;
     std::unique_ptr<ILLMService> CreateLLMService(
         INetworkService& networkService,

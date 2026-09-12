@@ -11,11 +11,13 @@ LLMCommunicator::LLMCommunicator(
     std::unique_ptr<IHTTPClient> httpClient,
     const std::string& endpoint,
     const std::string& modelName,
-    const std::string& apiKey)
+    const std::string& apiKey,
+    const std::string& sourceName)
     : m_httpClient(std::move(httpClient))
     , m_endpoint(endpoint)
     , m_modelName(modelName)
     , m_apiKey(apiKey)
+    , m_sourceName(sourceName)
 {
 }
 
@@ -186,7 +188,8 @@ LLMResponse LLMCommunicator::Call(
 
     std::string requestJson = BuildRequestJson(m_modelName, messages, availableTools);
 
-    LogVerboseDebug("[JSON_REQUEST] %s", requestJson.c_str());
+    std::string sourceTag = m_sourceName.empty() ? "" : ("[" + m_sourceName + "]");
+    LogVerboseDebug("[JSON_REQUEST]%s %s", sourceTag.c_str(), requestJson.c_str());
 
     std::vector<HTTPHeader> headers;
     headers.push_back({"Content-Type", "application/json"});
@@ -236,7 +239,7 @@ LLMResponse LLMCommunicator::Call(
         return response;
     }
 
-    LogVerboseDebug("[JSON_RESPONSE] %s", httpResponse.body.c_str());
+    LogVerboseDebug("[JSON_RESPONSE]%s %s", sourceTag.c_str(), httpResponse.body.c_str());
 
     return ParseResponseJson(httpResponse.body);
 }

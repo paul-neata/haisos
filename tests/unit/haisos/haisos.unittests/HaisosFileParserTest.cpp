@@ -94,3 +94,81 @@ TEST(HaisosFileParserTest, UnresolvedSubstitutionBecomesEmpty) {
     ASSERT_EQ(result.config.runEntries.size(), 1u);
     EXPECT_EQ(result.config.runEntries[0].programPath, "agent.md");
 }
+
+TEST(HaisosFileParserTest, FsPhysicalDirective) {
+    auto result = ParseHaisosFile("FS workspace PHYSICAL ./data\nRUN agent.md\n", {});
+    EXPECT_TRUE(result.error.empty());
+    ASSERT_EQ(result.config.fsSteps.size(), 1u);
+    EXPECT_FALSE(result.config.fsSteps[0].isMount);
+    EXPECT_EQ(result.config.fsSteps[0].declare.name, "workspace");
+    EXPECT_EQ(result.config.fsSteps[0].declare.type, "PHYSICAL");
+    ASSERT_EQ(result.config.fsSteps[0].declare.args.size(), 1u);
+    EXPECT_EQ(result.config.fsSteps[0].declare.args[0], "./data");
+}
+
+TEST(HaisosFileParserTest, FsMemDirectiveTakesNoArgs) {
+    auto result = ParseHaisosFile("FS scratch MEM\nRUN agent.md\n", {});
+    EXPECT_TRUE(result.error.empty());
+    ASSERT_EQ(result.config.fsSteps.size(), 1u);
+    EXPECT_EQ(result.config.fsSteps[0].declare.type, "MEM");
+    EXPECT_TRUE(result.config.fsSteps[0].declare.args.empty());
+}
+
+TEST(HaisosFileParserTest, FsRoAndSubDirectives) {
+    auto result = ParseHaisosFile(
+        "FS workspace PHYSICAL .\n"
+        "FS readonly RO workspace\n"
+        "FS inner SUB workspace sub/dir\n"
+        "RUN agent.md\n", {});
+    EXPECT_TRUE(result.error.empty());
+    ASSERT_EQ(result.config.fsSteps.size(), 3u);
+    EXPECT_EQ(result.config.fsSteps[1].declare.type, "RO");
+    EXPECT_EQ(result.config.fsSteps[1].declare.args[0], "workspace");
+    EXPECT_EQ(result.config.fsSteps[2].declare.type, "SUB");
+    ASSERT_EQ(result.config.fsSteps[2].declare.args.size(), 2u);
+    EXPECT_EQ(result.config.fsSteps[2].declare.args[0], "workspace");
+    EXPECT_EQ(result.config.fsSteps[2].declare.args[1], "sub/dir");
+}
+
+TEST(HaisosFileParserTest, FsUnknownTypeIsError) {
+    auto result = ParseHaisosFile("FS thing BOGUS x\nRUN agent.md\n", {});
+    EXPECT_FALSE(result.error.empty());
+}
+
+TEST(HaisosFileParserTest, FsWrongArgCountIsError) {
+    auto result = ParseHaisosFile("FS workspace PHYSICAL\nRUN agent.md\n", {});
+    EXPECT_FALSE(result.error.empty());
+}
+
+TEST(HaisosFileParserTest, MountDirective) {
+    auto result = ParseHaisosFile(
+        "FS main PHYSICAL .\n"
+        "FS scratch MEM\n"
+        "MOUNT main /data scratch\n"
+        "RUN agent.md\n", {});
+    EXPECT_TRUE(result.error.empty());
+    ASSERT_EQ(result.config.fsSteps.size(), 3u);
+    EXPECT_TRUE(result.config.fsSteps[2].isMount);
+    EXPECT_EQ(result.config.fsSteps[2].mount.mainFs, "main");
+    EXPECT_EQ(result.config.fsSteps[2].mount.path, "/data");
+    EXPECT_EQ(result.config.fsSteps[2].mount.toBeMountedFs, "scratch");
+}
+
+TEST(HaisosFileParserTest, MountWrongArgCountIsError) {
+    auto result = ParseHaisosFile("MOUNT main /data\nRUN agent.md\n", {});
+    EXPECT_FALSE(result.error.empty());
+}
+
+TEST(HaisosFileParserTest, RootByNameWhenFsDeclared) {
+    auto result = ParseHaisosFile("FS workspace PHYSICAL .\nROOT workspace\nRUN agent.md\n", {});
+    EXPECT_TRUE(result.error.empty());
+    EXPECT_EQ(result.config.rootPath, "workspace");
+}
+
+TEST(HaisosFileParserTest, TemplateParsesCleanly) {
+    // GetHaisosFileTemplate() must itself be a valid haisosfile.
+    auto result = ParseHaisosFile(GetHaisosFileTemplate(), {});
+    EXPECT_TRUE(result.error.empty());
+    ASSERT_EQ(result.config.runEntries.size(), 1u);
+    EXPECT_EQ(result.config.runEntries[0].programPath, "agent.md");
+}

@@ -1,4 +1,10 @@
-add_library(Filesystem STATIC PhysicalFileSystem.cpp)
+add_library(Filesystem STATIC
+    PhysicalFileSystem.cpp
+    ReadOnlyFileSystem.cpp
+    InMemoryFileSystem.cpp
+    SubFileSystem.cpp
+    MountedFileSystem.cpp
+)
 
 if(WIN32)
     target_sources(Filesystem PRIVATE windows/WindowsFilesystem.cpp)

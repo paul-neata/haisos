@@ -12,12 +12,11 @@ namespace Haisos {
 class HaisosOS : public IHaisosOS, public std::enable_shared_from_this<HaisosOS> {
 public:
     HaisosOS(
-        IFactory& factory,
         IServicesCreator& servicesCreator,
         std::shared_ptr<INetworkService> networkService,
         std::shared_ptr<ILLMService> llmService,
-        std::unique_ptr<IFilesystemService> filesystemService,
-        const std::string& rootPath,
+        std::unique_ptr<IFilesystemService> filesystemServiceFactory,
+        std::shared_ptr<IFileSystem> rootFileSystem,
         std::shared_ptr<IPhysicalConsole> physicalConsole,
         bool allowStartProcess,
         std::shared_ptr<std::atomic<uint64_t>> pidCounter);
@@ -29,6 +28,7 @@ public:
         std::shared_ptr<IAgent> callerAgent) override;
     std::vector<std::shared_ptr<IProcess>> GetRunningProcesses() const override;
     std::shared_ptr<IHaisosOS> CreateSubOS(const SubOSPermissions& permissions) override;
+    IFileSystem& GetFileSystem() override;
     IFilesystemService& GetFileSystemService() override;
     IServicesCreator& GetServicesCreator() override;
 
@@ -38,12 +38,11 @@ private:
     std::shared_ptr<IProcess> StartAgentProcess(const std::string& programPath, const std::vector<std::string>& args, uint64_t parentPid);
     std::shared_ptr<IProcess> StartLuaProcess(const std::string& programPath, const std::vector<std::string>& args, uint64_t parentPid);
 
-    IFactory& m_factory;
     IServicesCreator& m_servicesCreator;
     std::shared_ptr<INetworkService> m_networkService;
     std::shared_ptr<ILLMService> m_llmService;
-    std::unique_ptr<IFilesystemService> m_filesystemService;
-    std::string m_rootPath;
+    std::unique_ptr<IFilesystemService> m_filesystemServiceFactory;
+    std::shared_ptr<IFileSystem> m_rootFileSystem;
     std::shared_ptr<IPhysicalConsole> m_physicalConsole;
     bool m_allowStartProcess;
     std::shared_ptr<std::atomic<uint64_t>> m_pidCounter;

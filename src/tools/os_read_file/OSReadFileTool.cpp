@@ -28,7 +28,7 @@ ToolResult OSReadFileTool::Call(std::shared_ptr<IAgent> /*callerAgent*/, const n
     std::string path = args["path"];
 
     std::string content;
-    if (!ReadWholeFile(m_os.GetFileSystemService().GetFileSystem(), path, content)) {
+    if (!ReadWholeFile(m_os.GetFileSystem(), path, content)) {
         return ToolResult{"Failed to read file: " + path, true};
     }
     return ToolResult{content, false};

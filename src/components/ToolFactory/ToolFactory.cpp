@@ -8,7 +8,7 @@
 
 namespace Haisos {
 
-ToolFactory::ToolFactory() : m_factory(nullptr) {
+ToolFactory::ToolFactory() : m_llmService(nullptr) {
     m_registry = {
         ToolEntry{
             Tools::GetCurrentDateTime::ToolName,
@@ -21,10 +21,10 @@ ToolFactory::ToolFactory() : m_factory(nullptr) {
             []() { return Tools::AgentStartTool::ToolDefaultDescription; },
             []() { return Tools::AgentStartTool::GetDefaultParametersSchema(); },
             [this](std::shared_ptr<IAgent> callerAgent) -> std::unique_ptr<ITool> {
-                if (m_factory && callerAgent) {
-                    return std::make_unique<Tools::AgentStartTool>(*m_factory);
+                if (m_llmService && callerAgent) {
+                    return std::make_unique<Tools::AgentStartTool>(*m_llmService);
                 }
-                LogWarning("ToolFactory: agent_start requested but factory or caller agent is missing");
+                LogWarning("ToolFactory: agent_start requested but LLM service or caller agent is missing");
                 return nullptr;
             }
         },
@@ -79,8 +79,8 @@ ToolFactory::ToolFactory() : m_factory(nullptr) {
     };
 }
 
-ToolFactory::ToolFactory(IFactory& factory) : ToolFactory() {
-    m_factory = &factory;
+ToolFactory::ToolFactory(ILLMService& llmService) : ToolFactory() {
+    m_llmService = &llmService;
 }
 
 std::unique_ptr<ITool> ToolFactory::CreateTool(const std::string& name, std::shared_ptr<IAgent> callerAgent) {

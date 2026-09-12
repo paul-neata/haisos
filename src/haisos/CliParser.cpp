@@ -14,6 +14,7 @@ std::string FormatUsage(const char* programName) {
         "      --log-to-file <path>       Enable logging to file\n"
         "      --log-level <level>        Set log level (verbose_debug, debug, trace, info, warning, error)\n"
         "      --log-json-in-temp         Log input/output JSON to a temporary file\n"
+        "      --init                     Write a commented starter haisosfile to ./haisosfile and exit\n"
         "      --version                  Show version information\n"
         "  -h, --help                     Show this help message\n"
         "\nEnvironment variables:\n"
@@ -48,6 +49,9 @@ ParseResult ParseArguments(int argc, char* argv[]) {
             return ParseResult{options, ""};
         } else if (arg == "--version") {
             options.version = true;
+            return ParseResult{options, ""};
+        } else if (arg == "--init") {
+            options.init = true;
             return ParseResult{options, ""};
         } else if (arg == "--log-to-console") {
             options.logToConsole = true;

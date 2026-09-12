@@ -1,24 +1,36 @@
 #include "LLMService.h"
+#include <algorithm>
+#include "src/components/Agent/Agent.h"
+#include "src/components/LLMCommunicator/LLMCommunicator.h"
+#include "src/components/ToolFactory/ToolFactory.h"
 #include "src/components/ToolFactory/CompositeToolFactory.h"
+#include "src/components/Console/InMemoryAgentConsole.h"
 
 namespace Haisos {
 
 LLMService::LLMService(
-    IFactory& factory,
     INetworkService& networkService,
     const std::string& endpoint,
     const std::string& modelName,
     const std::string& apiKey)
-    : m_factory(factory)
-    , m_networkService(networkService)
+    : m_networkService(networkService)
     , m_endpoint(endpoint)
     , m_modelName(modelName)
     , m_apiKey(apiKey)
-    , m_toolFactory(factory.CreateToolFactory(factory))
+    , m_toolFactory(std::make_unique<ToolFactory>(*this))
 {
 }
 
 LLMService::~LLMService() = default;
+
+void LLMService::CleanupFinishedAgents() {
+    m_agents.erase(
+        std::remove_if(m_agents.begin(), m_agents.end(),
+            [](const std::shared_ptr<IAgent>& agent) {
+                return agent->IsFinished();
+            }),
+        m_agents.end());
+}
 
 std::shared_ptr<IAgent> LLMService::CreateAgent(
     const std::vector<std::string>& systemPrompts,
@@ -30,13 +42,13 @@ std::shared_ptr<IAgent> LLMService::CreateAgent(
     IToolFactory* additionalTools)
 {
     auto httpClient = m_networkService.CreateHTTPClient();
-    auto llmCommunicator = m_factory.CreateLLMCommunicator(std::move(httpClient), m_endpoint, m_modelName, m_apiKey);
-    std::unique_ptr<IToolFactory> toolFactory = m_factory.CreateToolFactory(m_factory);
+    auto llmCommunicator = std::make_unique<LLMCommunicator>(std::move(httpClient), m_endpoint, m_modelName, m_apiKey, name);
+    std::unique_ptr<IToolFactory> toolFactory = std::make_unique<ToolFactory>(*this);
     if (additionalTools) {
         toolFactory = std::make_unique<CompositeToolFactory>(*additionalTools, std::move(toolFactory));
     }
 
-    return m_factory.CreateAgent(
+    auto agent = std::make_shared<Agent>(
         std::move(llmCommunicator),
         std::move(toolFactory),
         std::move(console),
@@ -45,10 +57,23 @@ std::shared_ptr<IAgent> LLMService::CreateAgent(
         parent,
         startTime,
         longRunning);
+
+    if (parent) {
+        parent->AddChild(agent);
+    }
+
+    std::lock_guard<std::mutex> lock(m_agentsMutex);
+    CleanupFinishedAgents();
+    m_agents.push_back(agent);
+    return agent;
 }
 
 IToolFactory& LLMService::GetToolFactory() {
     return *m_toolFactory;
+}
+
+std::unique_ptr<IAgentConsole> LLMService::CreateAgentConsole() {
+    return std::make_unique<InMemoryAgentConsole>();
 }
 
 }

@@ -90,6 +90,12 @@ TEST_F(CliParserTest, VersionFlag) {
     EXPECT_TRUE(result.options.version);
 }
 
+TEST_F(CliParserTest, InitFlag) {
+    auto result = Parse({"--init"});
+    EXPECT_TRUE(result.error.empty());
+    EXPECT_TRUE(result.options.init);
+}
+
 TEST_F(CliParserTest, LogToConsole) {
     auto result = Parse({"--log-to-console"});
     EXPECT_TRUE(result.error.empty());

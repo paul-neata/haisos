@@ -15,7 +15,7 @@ class IServicesCreator {
 public:
     virtual ~IServicesCreator() = default;
 
-    virtual std::unique_ptr<IFilesystemService> CreateFileSystemService(std::unique_ptr<IFileSystem> filesystem) = 0;
+    virtual std::unique_ptr<IFilesystemService> CreateFileSystemService() = 0;
     virtual std::unique_ptr<INetworkService> CreateNetworkService() = 0;
     virtual std::unique_ptr<ILLMService> CreateLLMService(
         INetworkService& networkService,

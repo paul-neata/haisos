@@ -20,6 +20,7 @@
 #include "interfaces/IHaisosOS.h"
 #include "CliParser.h"
 #include "HaisosFileParser.h"
+#include "HaisosFileSystemBuilder.h"
 
 using namespace Haisos;
 
@@ -119,6 +120,22 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    if (result.options.init) {
+        if (std::filesystem::exists("haisosfile")) {
+            std::cerr << "Error: haisosfile already exists in the current directory\n";
+            return 1;
+        }
+        std::ofstream out("haisosfile");
+        if (!out.is_open()) {
+            std::cerr << "Error: failed to create haisosfile\n";
+            return 1;
+        }
+        out << GetHaisosFileTemplate();
+        out.close();
+        std::cout << "Created haisosfile\n";
+        return 0;
+    }
+
     // Apply test environment variables for logging
     if (const char* envLevel = std::getenv("HAISOS_TEST_LOG_LEVEL")) {
         result.options.logLevel = ParseLogLevel(envLevel);
@@ -172,16 +189,21 @@ int main(int argc, char* argv[]) {
                 LogSetMinimumLevel(LogLevel::VerboseDebug);
             }
 
-            static const std::string kRequestPrefix = "[JSON_REQUEST] ";
-            static const std::string kResponsePrefix = "[JSON_RESPONSE] ";
+            static const std::string kRequestPrefix = "[JSON_REQUEST]";
+            static const std::string kResponsePrefix = "[JSON_RESPONSE]";
+            // The optional per-source tag (e.g. "[agent_1]") sits between the
+            // prefix and the JSON payload, so find the payload by its leading
+            // '{' rather than assuming a fixed offset.
             LogRegisterMessageReceiver([&tempJsonLog](const LogMessage& msg) {
-                if (msg.message.compare(0, kRequestPrefix.size(), kRequestPrefix) == 0) {
-                    *tempJsonLog << "---- send ---- " << GetCurrentTimestamp() << "\n";
-                    *tempJsonLog << PrettyPrintJson(msg.message.substr(kRequestPrefix.size())) << "\n\n";
-                } else if (msg.message.compare(0, kResponsePrefix.size(), kResponsePrefix) == 0) {
-                    *tempJsonLog << "---- receive ---- " << GetCurrentTimestamp() << "\n";
-                    *tempJsonLog << PrettyPrintJson(msg.message.substr(kResponsePrefix.size())) << "\n\n";
+                bool isRequest = msg.message.compare(0, kRequestPrefix.size(), kRequestPrefix) == 0;
+                bool isResponse = !isRequest && msg.message.compare(0, kResponsePrefix.size(), kResponsePrefix) == 0;
+                if (!isRequest && !isResponse) {
+                    return;
                 }
+                auto jsonStart = msg.message.find('{');
+                std::string json = (jsonStart == std::string::npos) ? "" : msg.message.substr(jsonStart);
+                *tempJsonLog << "---- " << (isRequest ? "send" : "receive") << " ---- " << GetCurrentTimestamp() << "\n";
+                *tempJsonLog << PrettyPrintJson(json) << "\n\n";
             });
         } else {
             LogWarning("Failed to open temporary JSON log file: %s", tempPath.c_str());
@@ -204,12 +226,9 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // ROOT is resolved relative to the haisosfile's own directory; an omitted
-    // ROOT defaults to that same directory.
+    // ROOT (and every FS PHYSICAL directive) is resolved relative to the
+    // haisosfile's own directory.
     std::filesystem::path haisosFileDir = std::filesystem::absolute(haisosFilePath).parent_path();
-    std::string rootPath = parseResult.config.rootPath.empty()
-        ? haisosFileDir.string()
-        : (haisosFileDir / parseResult.config.rootPath).string();
 
     std::string endpoint = std::getenv("HAISOS_ENDPOINT") ? std::getenv("HAISOS_ENDPOINT") : "http://localhost:11434/api/chat";
     std::string model = std::getenv("HAISOS_MODEL") ? std::getenv("HAISOS_MODEL") : "llama3";
@@ -217,15 +236,19 @@ int main(int argc, char* argv[]) {
 
     auto factory = CreateFactory();
     auto servicesCreator = CreateServicesCreator(*factory);
+    auto filesystemService = servicesCreator->CreateFileSystemService();
 
-    std::shared_ptr<INetworkService> networkService = servicesCreator->CreateNetworkService();
-    std::shared_ptr<ILLMService> llmService = servicesCreator->CreateLLMService(*networkService, endpoint, model, apiKey);
-    auto filesystem = factory->CreatePhysicalFileSystem(rootPath);
-    auto filesystemService = servicesCreator->CreateFileSystemService(std::move(filesystem));
+    std::string fsError;
+    std::shared_ptr<IFileSystem> rootFileSystem = BuildRootFileSystem(*factory, *filesystemService, parseResult.config, haisosFileDir, fsError);
+    if (!rootFileSystem) {
+        std::cerr << fsError;
+        return 1;
+    }
+
     auto physicalConsole = factory->CreatePhysicalConsole(false);
     physicalConsole->Start();
 
-    auto os = CreateHaisosOS(*factory, *servicesCreator, networkService, llmService, std::move(filesystemService), rootPath, physicalConsole, true);
+    auto os = CreateHaisosOS(*servicesCreator, rootFileSystem, physicalConsole, endpoint, model, apiKey);
 
     std::vector<std::shared_ptr<IProcess>> processes;
     for (const auto& runEntry : parseResult.config.runEntries) {

@@ -1,4 +1,3 @@
-#include "src/components/Factory/Factory.h"
 #include "src/components/ToolFactory/ToolFactory.h"
 #include "src/components/Logger/Logger.h"
 #include "tests/integration/helpers/IntegrationTestHelpers.h"
@@ -15,13 +14,7 @@ namespace {
 bool TestToolCallIntegration() {
     IntegrationTest::IntegrationTestLogCapture logCapture;
 
-    auto factory = CreateFactory();
-    if (!factory) {
-        LogError("Failed to create factory");
-        return false;
-    }
-
-    auto toolFactory = factory->CreateToolFactory(*factory);
+    auto toolFactory = std::make_unique<ToolFactory>();
 
     auto tool = toolFactory->CreateTool("get_current_date_time");
     if (!tool) {

@@ -5,6 +5,7 @@ target_include_directories(HaisosOS PUBLIC
 )
 target_link_libraries(HaisosOS PUBLIC
     Logger
+    Console
     OSReadFileTool
     OSWriteFileTool
     OSListDirectoryTool

@@ -20,6 +20,8 @@ struct CliOptions {
     bool logJsonInTemp = false;
     bool help = false;
     bool version = false;
+    // Write a commented starter haisosfile to ./haisosfile and exit.
+    bool init = false;
 };
 
 struct ParseResult {

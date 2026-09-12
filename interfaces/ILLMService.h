@@ -79,6 +79,10 @@ public:
     // The agent-management tool set (agent_start, agent_stop, ...), shared by
     // every agent this service creates.
     virtual IToolFactory& GetToolFactory() = 0;
+
+    // A standalone, in-memory IAgentConsole: writes are just accumulated, not
+    // routed anywhere physical.
+    virtual std::unique_ptr<IAgentConsole> CreateAgentConsole() = 0;
 };
 
 }

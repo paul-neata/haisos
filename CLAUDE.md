@@ -61,7 +61,11 @@ haisos/
 │   ├── unit/              - Unit tests (Google Test)
 │   ├── integration/       - Integration tests (Google Test)
 │   │   └── helpers/       - Integration test helpers and utilities
-│   └── haisos/            - Haisos JS-based tests
+│   ├── haisos/            - Haisos JS-based tests
+│   ├── tools/
+│   │   └── llm_cache_proxy/ - Record/replay HTTP proxy for LLM traffic used by integration/haisos tests (see its CLAUDE.md); recordings live in `tests/tool/llm_cache_proxy_database/`
+│   └── tool/
+│       └── llm_cache_proxy_database/ - Cached recordings + proxy log for llm_cache_proxy (.gitkeep'd, populated by the `llm-cache` skill)
 ├── scripts/               - Build scripts
 ├── extern/                - External dependencies (nlohmann_json, googletest, lua)
 ├── .claude/               - Claude Code configuration

@@ -28,6 +28,9 @@ public:
 
 private:
     std::shared_ptr<IFileSystem> m_inner;
+    // This view's own current directory; not delegated to inner's
+    // ChangeDirectory (inner may be shared by other views/processes).
+    std::string m_cwd = "/";
 };
 
 }

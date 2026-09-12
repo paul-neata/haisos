@@ -66,6 +66,9 @@ Agent::Agent(
     , m_parent(std::move(parent))
     , m_longRunning(longRunning)
 {
+    if (m_toolFactory) {
+        m_cachedToolDescriptions = m_toolFactory->GetAvailableToolDescriptions();
+    }
     m_thread = std::thread(&Agent::RunThread, this);
 }
 
@@ -317,10 +320,7 @@ void Agent::RunThread() {
 
                 LogVerboseDebug("Agent '%s' LLM round %d starting", m_name.c_str(), rounds);
 
-                std::vector<std::tuple<std::string, std::string, nlohmann::json>> tools;
-                if (m_toolFactory) {
-                    tools = m_toolFactory->GetAvailableToolDescriptions();
-                }
+                const std::vector<std::tuple<std::string, std::string, nlohmann::json>>& tools = m_cachedToolDescriptions;
 
                 std::vector<LLMMessage> localHistory;
                 {
@@ -353,7 +353,7 @@ void Agent::RunThread() {
                         for (const auto& tr : toolResults) {
                             LLMMessage toolMsg;
                             toolMsg.role = "tool";
-                            toolMsg.content = std::get<1>(tr);
+                            toolMsg.content = SanitizeUserInput(std::get<1>(tr));
                             toolMsg.is_error = std::get<3>(tr);
                             if (!toolMsg.is_error) {
                                 TruncateIfNeeded(toolMsg.content);

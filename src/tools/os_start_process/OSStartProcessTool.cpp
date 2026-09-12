@@ -1,4 +1,5 @@
 #include "OSStartProcessTool.h"
+#include "src/components/Logger/Logger.h"
 
 namespace Haisos::Tools {
 
@@ -40,8 +41,11 @@ ToolResult OSStartProcessTool::Call(std::shared_ptr<IAgent> callerAgent, const n
         }
     }
 
+    LogDebug("OSStartProcessTool: starting process '%s' with %zu arg(s)", path.c_str(), programArgs.size());
+
     auto process = m_os.StartProcess(path, programArgs, callerAgent);
     if (!process) {
+        LogWarning("OSStartProcessTool: failed to start process '%s'", path.c_str());
         return ToolResult{"Failed to start process: " + path, true};
     }
 

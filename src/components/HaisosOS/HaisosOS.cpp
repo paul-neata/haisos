@@ -51,7 +51,24 @@ HaisosOS::HaisosOS(
 {
 }
 
-HaisosOS::~HaisosOS() = default;
+HaisosOS::~HaisosOS() {
+    // Stop and drain every tracked process before any other member (in
+    // particular m_osToolFactory, which agent-backed processes' tool
+    // factories reference) is torn down, so no process can outlive its
+    // owning HaisosOS.
+    std::vector<std::shared_ptr<IProcess>> processes;
+    {
+        std::lock_guard<std::mutex> lock(m_processesMutex);
+        processes = m_processes;
+    }
+    for (const auto& process : processes) {
+        process->Stop(0);
+        if (!process->WaitToFinish(5000)) {
+            LogWarning("HaisosOS: process '%s' did not finish within 5s during destruction, waiting indefinitely", process->Name().c_str());
+        }
+        process->WaitToFinish();
+    }
+}
 
 void HaisosOS::CleanupFinishedProcesses() {
     m_processes.erase(
@@ -143,7 +160,7 @@ std::shared_ptr<IProcess> HaisosOS::StartProcess(
     std::shared_ptr<IAgent> callerAgent)
 {
     if (!m_allowStartProcess) {
-        LogError("HaisosOS: starting processes is not permitted on this OS");
+        LogWarning("HaisosOS: starting processes is not permitted on this OS");
         return nullptr;
     }
 
@@ -156,7 +173,7 @@ std::shared_ptr<IProcess> HaisosOS::StartProcess(
     if (extension == ".lua") {
         return StartLuaProcess(programPath, args, parentPid);
     }
-    LogError("HaisosOS: unsupported program type: %s", programPath.c_str());
+    LogWarning("HaisosOS: unsupported program type: %s", programPath.c_str());
     return nullptr;
 }
 
@@ -180,7 +197,7 @@ std::shared_ptr<IHaisosOS> HaisosOS::CreateSubOS(const SubOSPermissions& permiss
             }
             if (segment == "..") {
                 if (depth == 0) {
-                    LogError("HaisosOS: sub-OS root escapes parent root: %s", permissions.subRootRelativePath.c_str());
+                    LogWarning("HaisosOS: sub-OS root escapes parent root: %s", permissions.subRootRelativePath.c_str());
                     return nullptr;
                 }
                 --depth;

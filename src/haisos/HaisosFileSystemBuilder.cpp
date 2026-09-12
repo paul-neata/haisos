@@ -1,7 +1,23 @@
 #include "HaisosFileSystemBuilder.h"
 #include <unordered_map>
+#include "src/components/Logger/Logger.h"
 
 namespace Haisos {
+
+namespace {
+
+std::string JoinArgs(const std::vector<std::string>& args) {
+    std::string joined;
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (i > 0) {
+            joined += ", ";
+        }
+        joined += args[i];
+    }
+    return joined;
+}
+
+} // namespace
 
 std::shared_ptr<IFileSystem> BuildRootFileSystem(
     IFactory& factory,
@@ -23,6 +39,11 @@ std::shared_ptr<IFileSystem> BuildRootFileSystem(
     for (const auto& step : config.fsSteps) {
         if (!step.isMount) {
             const auto& decl = step.declare;
+            LogDebug("HaisosFileSystemBuilder: FS %s %s %s", decl.name.c_str(), decl.type.c_str(), JoinArgs(decl.args).c_str());
+            if (namedFs.find(decl.name) != namedFs.end()) {
+                outError = "Error: Duplicate FS declaration: '" + decl.name + "' is already declared\n";
+                return nullptr;
+            }
             std::shared_ptr<IFileSystem> fs;
             if (decl.type == "PHYSICAL") {
                 fs = factory.CreatePhysicalFileSystem((haisosFileDir / decl.args[0]).string());
@@ -51,6 +72,7 @@ std::shared_ptr<IFileSystem> BuildRootFileSystem(
             lastDeclaredName = decl.name;
         } else {
             const auto& mount = step.mount;
+            LogDebug("HaisosFileSystemBuilder: MOUNT %s %s %s", mount.mainFs.c_str(), mount.path.c_str(), mount.toBeMountedFs.c_str());
             auto mainIt = namedFs.find(mount.mainFs);
             auto mountedIt = namedFs.find(mount.toBeMountedFs);
             if (mainIt == namedFs.end()) {
@@ -73,6 +95,7 @@ std::shared_ptr<IFileSystem> BuildRootFileSystem(
     if (!config.rootPath.empty()) {
         // ROOT didn't name a declared filesystem: legacy shorthand, treat it
         // as a plain directory path.
+        LogWarning("HaisosFileSystemBuilder: ROOT '%s' does not match a declared FS; treating it as a plain directory path", config.rootPath.c_str());
         return factory.CreatePhysicalFileSystem((haisosFileDir / config.rootPath).string());
     }
     outError = "Error: could not determine a root filesystem\n";

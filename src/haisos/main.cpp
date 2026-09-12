@@ -15,6 +15,7 @@
 #include "src/components/ServicesCreator/ServicesCreator.h"
 #include "src/components/HaisosOS/HaisosOS.h"
 #include "src/components/Logger/Logger.h"
+#include "src/components/Filesystem/FilesystemUtils.h"
 #include "interfaces/IFactory.h"
 #include "interfaces/IServicesCreator.h"
 #include "interfaces/IHaisosOS.h"
@@ -52,49 +53,15 @@ std::string PrettyPrintJson(const std::string& jsonStr) {
     }
 }
 
-// Path traversal protection: normalize and ensure the path stays within cwd.
-// TODO(haisosfile): superseded once the OS's rooted PhysicalFileSystem lands.
-std::string ReadFileWithinCwd(const std::string& filePath) {
-    try {
-        std::filesystem::path absPath = std::filesystem::absolute(filePath);
-        std::filesystem::path normPath = std::filesystem::weakly_canonical(absPath);
-        std::filesystem::path cwd = std::filesystem::current_path();
-
-        auto normStr = normPath.native();
-        auto cwdStr = cwd.native();
-        if (normStr.size() < cwdStr.size() ||
-            normStr.compare(0, cwdStr.size(), cwdStr) != 0 ||
-            (normStr.size() > cwdStr.size() &&
-             normStr[cwdStr.size()] != std::filesystem::path::preferred_separator)) {
-            LogError("Invalid file path (path traversal attempt): %s", filePath.c_str());
-            return "";
-        }
-    } catch (const std::exception& e) {
-        LogError("Invalid file path (%s): %s", e.what(), filePath.c_str());
-        return "";
-    }
-
-    std::ifstream file(filePath, std::ios::binary | std::ios::ate);
-    if (!file.is_open()) {
-        LogError("Failed to open file: %s", filePath.c_str());
-        return "";
-    }
-
-    // File size limit: 10 MB
-    const std::streamsize maxSize = 10 * 1024 * 1024;
-    std::streamsize size = file.tellg();
-    if (size > maxSize) {
-        LogError("File too large: %s (%zd bytes, max %zd)", filePath.c_str(), static_cast<size_t>(size), static_cast<size_t>(maxSize));
-        return "";
-    }
-    if (size < 0) {
-        LogError("Failed to determine file size: %s", filePath.c_str());
-        return "";
-    }
-
-    file.seekg(0, std::ios::beg);
-    std::string content(static_cast<size_t>(size), '\0');
-    if (!file.read(&content[0], size)) {
+// Reads filePath relative to the current working directory, rejecting any
+// path that escapes it and capping the read at 10 MB. Delegates the path
+// resolution/escape-check and the read itself to PhysicalFileSystem (rooted
+// at cwd) instead of re-validating paths by hand, so there is a single place
+// ("does this path escape the root?") maintaining that logic.
+std::string ReadFileWithinCwd(IFactory& factory, const std::string& filePath) {
+    auto cwdFileSystem = factory.CreatePhysicalFileSystem(".");
+    std::string content;
+    if (!ReadWholeFile(*cwdFileSystem, filePath, content)) {
         LogError("Failed to read file: %s", filePath.c_str());
         return "";
     }
@@ -165,6 +132,20 @@ int main(int argc, char* argv[]) {
         });
     }
 
+    // Set up console logging if requested via CLI
+    if (result.options.logToConsole) {
+        LogRegisterMessageReceiver([](const LogMessage& msg) {
+            const char* levelStr =
+                msg.level == LogLevel::VerboseDebug ? "VERBOSE_DEBUG" :
+                msg.level == LogLevel::Debug ? "DEBUG" :
+                msg.level == LogLevel::Trace ? "TRACE" :
+                msg.level == LogLevel::Info ? "INFO" :
+                msg.level == LogLevel::Warning ? "WARNING" :
+                msg.level == LogLevel::Error ? "ERROR" : "UNKNOWN";
+            std::cout << "[" << msg.timestamp << "][" << levelStr << "] " << msg.message << "\n" << std::flush;
+        });
+    }
+
     LogInfo("Haisos starting with model from environment");
 
     // Raw LLM JSON traffic is logged by LLMCommunicator at VerboseDebug level, tagged
@@ -211,9 +192,11 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    auto factory = CreateFactory();
+
     // Read the haisosfile (default: "haisosfile" in the current directory)
     std::string haisosFilePath = result.options.haisosFilePath.empty() ? "haisosfile" : result.options.haisosFilePath;
-    std::string haisosFileContent = ReadFileWithinCwd(haisosFilePath);
+    std::string haisosFileContent = ReadFileWithinCwd(*factory, haisosFilePath);
     if (haisosFileContent.empty()) {
         LogError("Failed to read haisosfile or it is empty: %s", haisosFilePath.c_str());
         std::cerr << "Error: Failed to read haisosfile or it is empty: " << haisosFilePath << "\n";
@@ -234,7 +217,6 @@ int main(int argc, char* argv[]) {
     std::string model = std::getenv("HAISOS_MODEL") ? std::getenv("HAISOS_MODEL") : "llama3";
     std::string apiKey = std::getenv("HAISOS_API_KEY") ? std::getenv("HAISOS_API_KEY") : "";
 
-    auto factory = CreateFactory();
     auto servicesCreator = CreateServicesCreator(*factory);
     auto filesystemService = servicesCreator->CreateFileSystemService();
 

@@ -88,11 +88,9 @@ TEST(HaisosFileParserTest, VarMissingEqualsIsError) {
     EXPECT_FALSE(result.error.empty());
 }
 
-TEST(HaisosFileParserTest, UnresolvedSubstitutionBecomesEmpty) {
+TEST(HaisosFileParserTest, UnresolvedSubstitutionIsError) {
     auto result = ParseHaisosFile("RUN ${undefined}agent.md\n", {});
-    EXPECT_TRUE(result.error.empty());
-    ASSERT_EQ(result.config.runEntries.size(), 1u);
-    EXPECT_EQ(result.config.runEntries[0].programPath, "agent.md");
+    EXPECT_FALSE(result.error.empty());
 }
 
 TEST(HaisosFileParserTest, FsPhysicalDirective) {

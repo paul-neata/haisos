@@ -26,3 +26,5 @@ abc123def
 ```
 
 On error, it sets the `is_error=true` flag.
+
+If the calling agent's subagent recursion depth has already reached `MAX_SUBAGENT_DEPTH` (5), returns `"Subagent recursion depth limit exceeded"` as an error and does not start the subagent.

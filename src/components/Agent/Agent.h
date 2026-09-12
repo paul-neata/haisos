@@ -53,6 +53,7 @@ private:
 
     std::shared_ptr<ILLMCommunicator> m_llmCommunicator;
     std::shared_ptr<IToolFactory> m_toolFactory;
+    std::vector<std::tuple<std::string, std::string, nlohmann::json>> m_cachedToolDescriptions;
     std::shared_ptr<IAgentConsole> m_console;
     std::vector<std::string> m_systemPrompts;
     std::string m_name;

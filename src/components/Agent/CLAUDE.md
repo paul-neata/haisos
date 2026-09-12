@@ -18,8 +18,8 @@ Manages LLM conversations with parent/child agent relationships. Supports subage
 
 ## Public Interface
 
-`IAgent` is defined in `interfaces/IAgent.h` and provides methods for:
+`IAgent` is defined in `interfaces/ILLMService.h` and provides methods for:
 - Sending commands (`Post`, `Send`)
-- Stopping and killing agents (`Stop`, `Kill`)
-- Querying status (`IsFinished`, `IsKilled`, `GetHistory`, `GetConsoleOutput`)
-- Navigating hierarchy (`GetParent`, `GetChildren`, `GetDepth`)
+- Stopping, killing, and waiting on agents (`Stop`, `Kill`, `WaitToFinish` (with and without a timeout))
+- Querying status (`Name`, `IsFinished`, `IsKilled`, `IsLongRunning`, `GetStartTime`, `GetHistory`, `GetConsoleOutput`)
+- Navigating hierarchy (`GetParent`, `GetChildren`, `AddChild`, `GetDepth`)

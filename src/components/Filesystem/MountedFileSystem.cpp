@@ -28,8 +28,13 @@ MountedFileSystem::MountedFileSystem(std::shared_ptr<IFileSystem> main, const st
 
 MountedFileSystem::~MountedFileSystem() = default;
 
+std::string MountedFileSystem::GetCwd() const {
+    std::lock_guard<std::mutex> lock(m_cwdMutex);
+    return m_cwd;
+}
+
 int MountedFileSystem::OpenFile(const std::string& pathname, int flags) {
-    std::string normalized = NormalizeVirtualPath(pathname, m_cwd);
+    std::string normalized = NormalizeVirtualPath(pathname, GetCwd());
     if (auto rel = RelativeToBase(m_mountPoint, normalized)) {
         int fd = m_mounted->OpenFile(*rel, flags);
         if (fd >= 0) {
@@ -42,7 +47,7 @@ int MountedFileSystem::OpenFile(const std::string& pathname, int flags) {
 }
 
 int MountedFileSystem::OpenFile(const std::string& pathname, int flags, int mode) {
-    std::string normalized = NormalizeVirtualPath(pathname, m_cwd);
+    std::string normalized = NormalizeVirtualPath(pathname, GetCwd());
     if (auto rel = RelativeToBase(m_mountPoint, normalized)) {
         int fd = m_mounted->OpenFile(*rel, flags, mode);
         if (fd >= 0) {
@@ -81,7 +86,7 @@ ssize_t MountedFileSystem::WriteFile(int fd, const void* buf, size_t count) {
 }
 
 int MountedFileSystem::CreateDirectory(const std::string& pathname, int mode) {
-    std::string normalized = NormalizeVirtualPath(pathname, m_cwd);
+    std::string normalized = NormalizeVirtualPath(pathname, GetCwd());
     if (auto rel = RelativeToBase(m_mountPoint, normalized)) {
         return m_mounted->CreateDirectory(*rel, mode);
     }
@@ -89,7 +94,7 @@ int MountedFileSystem::CreateDirectory(const std::string& pathname, int mode) {
 }
 
 int MountedFileSystem::RemoveDirectory(const std::string& pathname) {
-    std::string normalized = NormalizeVirtualPath(pathname, m_cwd);
+    std::string normalized = NormalizeVirtualPath(pathname, GetCwd());
     if (auto rel = RelativeToBase(m_mountPoint, normalized)) {
         return m_mounted->RemoveDirectory(*rel);
     }
@@ -97,11 +102,13 @@ int MountedFileSystem::RemoveDirectory(const std::string& pathname) {
 }
 
 int MountedFileSystem::ChangeDirectory(const std::string& path) {
+    std::lock_guard<std::mutex> lock(m_cwdMutex);
     m_cwd = NormalizeVirtualPath(path, m_cwd);
     return 0;
 }
 
 char* MountedFileSystem::GetCurrentDirectory(std::string& buf, size_t size) {
+    std::lock_guard<std::mutex> lock(m_cwdMutex);
     if (m_cwd.size() + 1 > size) {
         return nullptr;
     }
@@ -110,7 +117,7 @@ char* MountedFileSystem::GetCurrentDirectory(std::string& buf, size_t size) {
 }
 
 std::vector<DirectoryEntry> MountedFileSystem::ReadDirectory(const std::string& path) {
-    std::string normalized = NormalizeVirtualPath(path, m_cwd);
+    std::string normalized = NormalizeVirtualPath(path, GetCwd());
 
     if (auto rel = RelativeToBase(m_mountPoint, normalized)) {
         return m_mounted->ReadDirectory(*rel);

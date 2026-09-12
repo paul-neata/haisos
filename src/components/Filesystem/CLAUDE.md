@@ -1,12 +1,16 @@
 # Filesystem
 
-Thin wrapper around Linux filesystem syscalls.
+Platform-specific wrapper around POSIX (Linux/WASM) or Windows CRT filesystem calls.
 
 ## Responsibilities
 
 - Provides file operations: open, close, read, write
 - Provides directory operations: mkdir, rmdir, chdir, getcwd
 - Provides custom directory listing via `ReadDirectory`
+- Uses platform-specific backends:
+  - **Linux**: POSIX calls (`linux/PosixFilesystem.cpp`)
+  - **Windows**: Windows CRT (`windows/WindowsFilesystem.cpp`)
+  - **WASM**: POSIX calls (`linux/PosixFilesystem.cpp`, same source as Linux)
 
 ## Key Classes
 

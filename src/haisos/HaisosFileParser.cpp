@@ -26,7 +26,12 @@ std::string StripComment(const std::string& line) {
     return line;
 }
 
-std::string Substitute(const std::string& text, const std::unordered_map<std::string, std::string>& values) {
+// Substitutes every "${name}" in text against values. If a reference doesn't
+// resolve against a known ARG/VAR name, sets *error (if not already set) and
+// returns whatever partial result had been built so far -- callers must check
+// *error after calling this and bail out (mirroring the other parse-error
+// checks in ParseHaisosFile), rather than silently substituting empty string.
+std::string Substitute(const std::string& text, const std::unordered_map<std::string, std::string>& values, std::string* error) {
     std::string result;
     result.reserve(text.size());
     for (size_t i = 0; i < text.size(); ) {
@@ -40,6 +45,8 @@ std::string Substitute(const std::string& text, const std::unordered_map<std::st
             auto it = values.find(name);
             if (it != values.end()) {
                 result += it->second;
+            } else if (error != nullptr && error->empty()) {
+                *error = "Unknown variable reference: ${" + name + "}\n";
             }
             i = close + 1;
         } else {
@@ -88,7 +95,15 @@ HaisosFileParseResult ParseHaisosFile(
         if (key == "ARG") {
             auto eq = rest.find('=');
             std::string name = (eq == std::string::npos) ? rest : rest.substr(0, eq);
-            std::string defaultValue = (eq == std::string::npos) ? "" : Substitute(rest.substr(eq + 1), values);
+            std::string defaultValue;
+            if (eq != std::string::npos) {
+                std::string subError;
+                defaultValue = Substitute(rest.substr(eq + 1), values, &subError);
+                if (!subError.empty()) {
+                    result.error = "Error: line " + std::to_string(lineNumber) + ": " + subError;
+                    return result;
+                }
+            }
             name = Trim(name);
             if (name.empty()) {
                 result.error = "Error: line " + std::to_string(lineNumber) + ": ARG requires a name\n";
@@ -114,7 +129,13 @@ HaisosFileParseResult ParseHaisosFile(
                 result.error = "Error: line " + std::to_string(lineNumber) + ": VAR requires a name\n";
                 return result;
             }
-            values[name] = Substitute(rest.substr(eq + 1), values);
+            std::string subError;
+            std::string value = Substitute(rest.substr(eq + 1), values, &subError);
+            if (!subError.empty()) {
+                result.error = "Error: line " + std::to_string(lineNumber) + ": " + subError;
+                return result;
+            }
+            values[name] = value;
         } else if (key == "ROOT") {
             if (sawRoot) {
                 result.error = "Error: line " + std::to_string(lineNumber) + ": only one ROOT directive is allowed\n";
@@ -124,14 +145,24 @@ HaisosFileParseResult ParseHaisosFile(
                 result.error = "Error: line " + std::to_string(lineNumber) + ": ROOT requires a directory\n";
                 return result;
             }
-            result.config.rootPath = Substitute(rest, values);
+            std::string subError;
+            result.config.rootPath = Substitute(rest, values, &subError);
+            if (!subError.empty()) {
+                result.error = "Error: line " + std::to_string(lineNumber) + ": " + subError;
+                return result;
+            }
             sawRoot = true;
         } else if (key == "FS") {
             if (rest.empty()) {
                 result.error = "Error: line " + std::to_string(lineNumber) + ": FS requires a name and a filesystem type\n";
                 return result;
             }
-            auto tokens = SplitWhitespace(Substitute(rest, values));
+            std::string subError;
+            auto tokens = SplitWhitespace(Substitute(rest, values, &subError));
+            if (!subError.empty()) {
+                result.error = "Error: line " + std::to_string(lineNumber) + ": " + subError;
+                return result;
+            }
             if (tokens.size() < 2) {
                 result.error = "Error: line " + std::to_string(lineNumber) + ": FS requires a name and a filesystem type\n";
                 return result;
@@ -165,7 +196,12 @@ HaisosFileParseResult ParseHaisosFile(
             step.declare = std::move(decl);
             result.config.fsSteps.push_back(std::move(step));
         } else if (key == "MOUNT") {
-            auto tokens = SplitWhitespace(Substitute(rest, values));
+            std::string subError;
+            auto tokens = SplitWhitespace(Substitute(rest, values, &subError));
+            if (!subError.empty()) {
+                result.error = "Error: line " + std::to_string(lineNumber) + ": " + subError;
+                return result;
+            }
             if (tokens.size() != 3) {
                 result.error = "Error: line " + std::to_string(lineNumber) + ": MOUNT requires <main_fs> <path> <fs_to_mount>\n";
                 return result;
@@ -182,7 +218,12 @@ HaisosFileParseResult ParseHaisosFile(
                 result.error = "Error: line " + std::to_string(lineNumber) + ": RUN requires a program path\n";
                 return result;
             }
-            auto tokens = SplitWhitespace(Substitute(rest, values));
+            std::string subError;
+            auto tokens = SplitWhitespace(Substitute(rest, values, &subError));
+            if (!subError.empty()) {
+                result.error = "Error: line " + std::to_string(lineNumber) + ": " + subError;
+                return result;
+            }
             HaisosFileRunEntry entry;
             entry.programPath = tokens.front();
             entry.args.assign(tokens.begin() + 1, tokens.end());

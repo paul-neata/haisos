@@ -120,6 +120,28 @@ LuaProcess* SelfFromState(lua_State* L) {
     return *static_cast<LuaProcess**>(lua_getextraspace(L));
 }
 
+// Opens only the Lua libraries that are safe for a sandboxed .lua process:
+// base, table, string, math, utf8, and coroutine. Deliberately omits `io`,
+// `os`, `package`, and `debug`, which would grant raw filesystem/process/env
+// access and native library loading, bypassing the rooted IFileSystem and the
+// OS's tool-only sandboxing. The base library's `dofile`/`loadfile` (which
+// read directly from the real disk) are removed after opening; `load` is left
+// available since it only executes Lua source/bytecode already in-process.
+void OpenSafeLuaLibs(lua_State* L) {
+    luaL_requiref(L, "_G", luaopen_base, 1);
+    luaL_requiref(L, LUA_TABLIBNAME, luaopen_table, 1);
+    luaL_requiref(L, LUA_STRLIBNAME, luaopen_string, 1);
+    luaL_requiref(L, LUA_MATHLIBNAME, luaopen_math, 1);
+    luaL_requiref(L, LUA_UTF8LIBNAME, luaopen_utf8, 1);
+    luaL_requiref(L, LUA_COLIBNAME, luaopen_coroutine, 1);
+    lua_settop(L, 0);
+
+    lua_pushnil(L);
+    lua_setglobal(L, "dofile");
+    lua_pushnil(L);
+    lua_setglobal(L, "loadfile");
+}
+
 void KillHookTrampoline(lua_State* L, lua_Debug* /*ar*/) {
     if (SelfFromState(L)->IsKillRequested()) {
         luaL_error(L, "process killed");
@@ -287,7 +309,7 @@ void LuaProcess::RunThread() {
     if (!m_luaState) {
         LogError("LuaProcess '%s': failed to create Lua state", m_name.c_str());
     } else {
-        luaL_openlibs(m_luaState);
+        OpenSafeLuaLibs(m_luaState);
         RegisterBindings(m_luaState);
         lua_sethook(m_luaState, &KillHookTrampoline, LUA_MASKCOUNT, 1000);
 

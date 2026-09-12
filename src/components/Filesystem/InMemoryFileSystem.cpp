@@ -1,5 +1,6 @@
 #include "InMemoryFileSystem.h"
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include "FilesystemUtils.h"
 #include "VirtualPath.h"
@@ -100,6 +101,9 @@ ssize_t InMemoryFileSystem::WriteFile(int fd, const void* buf, size_t count) {
     }
     auto& data = nodeIt->second.data;
     size_t& pos = handleIt->second.position;
+    if (count > SIZE_MAX - pos) {
+        return -1; // pos + count would overflow
+    }
     if (pos + count > data.size()) {
         data.resize(pos + count);
     }

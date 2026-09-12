@@ -34,11 +34,16 @@ public:
     std::vector<DirectoryEntry> ReadDirectory(const std::string& path) override;
 
 private:
+    std::string GetCwd() const;
+
     std::shared_ptr<IFileSystem> m_main;
     std::string m_mountPoint;
     std::shared_ptr<IFileSystem> m_mounted;
     // This view's own current directory; not delegated to main/mounted (they
-    // may be shared by other views/processes).
+    // may be shared by other views/processes). Guarded by m_cwdMutex: this
+    // filesystem instance may itself be shared by multiple concurrently-
+    // running processes, each on its own thread.
+    mutable std::mutex m_cwdMutex;
     std::string m_cwd = "/";
 
     // main and mounted have independent fd namespaces, so an fd alone doesn't

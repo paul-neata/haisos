@@ -1,5 +1,6 @@
 #include "OSWriteFileTool.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
+#include "src/components/Logger/Logger.h"
 
 namespace Haisos::Tools {
 
@@ -40,9 +41,12 @@ ToolResult OSWriteFileTool::Call(std::shared_ptr<IAgent> /*callerAgent*/, const 
     std::string content = args["content"];
     bool append = args.value("append", false);
 
+    LogDebug("OSWriteFileTool: writing file '%s' append=%d", path.c_str(), append ? 1 : 0);
+
     auto& fs = m_os.GetFileSystem();
     int fd = fs.OpenFile(path, append ? kFileOpenWriteCreateAppend : kFileOpenWriteCreateTruncate, kFileCreateMode);
     if (fd < 0) {
+        LogWarning("OSWriteFileTool: failed to open file '%s' for writing (fd=%d)", path.c_str(), fd);
         return ToolResult{"Failed to open file for writing: " + path, true};
     }
 
@@ -50,6 +54,7 @@ ToolResult OSWriteFileTool::Call(std::shared_ptr<IAgent> /*callerAgent*/, const 
     fs.CloseFile(fd);
 
     if (written < 0 || static_cast<size_t>(written) != content.size()) {
+        LogWarning("OSWriteFileTool: failed to write file '%s' (written=%zd, expected=%zu)", path.c_str(), written, content.size());
         return ToolResult{"Failed to write file: " + path, true};
     }
     return ToolResult{"OK", false};

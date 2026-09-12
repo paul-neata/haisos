@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <mutex>
 #include <string>
 #include "interfaces/IFilesystemService.h"
 
@@ -36,6 +37,9 @@ private:
     std::string m_basePath;
     // This view's own current directory, relative to basePath. Not delegated
     // to root's ChangeDirectory (root may be shared by other views/processes).
+    // Guarded by m_cwdMutex: this filesystem instance may be shared by
+    // multiple concurrently-running processes, each on its own thread.
+    mutable std::mutex m_cwdMutex;
     std::string m_cwd = "/";
 };
 

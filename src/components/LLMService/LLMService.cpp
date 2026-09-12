@@ -5,6 +5,7 @@
 #include "src/components/ToolFactory/ToolFactory.h"
 #include "src/components/ToolFactory/CompositeToolFactory.h"
 #include "src/components/Console/InMemoryAgentConsole.h"
+#include "src/components/Logger/Logger.h"
 
 namespace Haisos {
 
@@ -24,12 +25,17 @@ LLMService::LLMService(
 LLMService::~LLMService() = default;
 
 void LLMService::CleanupFinishedAgents() {
+    size_t sizeBefore = m_agents.size();
     m_agents.erase(
         std::remove_if(m_agents.begin(), m_agents.end(),
             [](const std::shared_ptr<IAgent>& agent) {
                 return agent->IsFinished();
             }),
         m_agents.end());
+    size_t removed = sizeBefore - m_agents.size();
+    if (removed > 0) {
+        LogDebug("LLMService: cleaned up %zu finished agent(s)", removed);
+    }
 }
 
 std::shared_ptr<IAgent> LLMService::CreateAgent(
@@ -41,6 +47,11 @@ std::shared_ptr<IAgent> LLMService::CreateAgent(
     bool longRunning,
     IToolFactory* additionalTools)
 {
+    LogInfo("LLMService::CreateAgent: creating agent '%s' parent='%s' longRunning=%d",
+        name.c_str(),
+        parent ? parent->Name().c_str() : "(none)",
+        longRunning ? 1 : 0);
+
     auto httpClient = m_networkService.CreateHTTPClient();
     auto llmCommunicator = std::make_unique<LLMCommunicator>(std::move(httpClient), m_endpoint, m_modelName, m_apiKey, name);
     std::unique_ptr<IToolFactory> toolFactory = std::make_unique<ToolFactory>(*this);

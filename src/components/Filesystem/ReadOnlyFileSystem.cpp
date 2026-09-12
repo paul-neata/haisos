@@ -1,5 +1,6 @@
 #include "ReadOnlyFileSystem.h"
 #include "FilesystemUtils.h"
+#include "VirtualPath.h"
 
 namespace Haisos {
 
@@ -10,14 +11,14 @@ int ReadOnlyFileSystem::OpenFile(const std::string& pathname, int flags) {
     if (RequestsWriteAccess(flags)) {
         return -1;
     }
-    return m_inner->OpenFile(pathname, flags);
+    return m_inner->OpenFile(NormalizeVirtualPath(pathname, m_cwd), flags);
 }
 
 int ReadOnlyFileSystem::OpenFile(const std::string& pathname, int flags, int mode) {
     if (RequestsWriteAccess(flags)) {
         return -1;
     }
-    return m_inner->OpenFile(pathname, flags, mode);
+    return m_inner->OpenFile(NormalizeVirtualPath(pathname, m_cwd), flags, mode);
 }
 
 int ReadOnlyFileSystem::CloseFile(int fd) {
@@ -41,15 +42,21 @@ int ReadOnlyFileSystem::RemoveDirectory(const std::string& /*pathname*/) {
 }
 
 int ReadOnlyFileSystem::ChangeDirectory(const std::string& path) {
-    return m_inner->ChangeDirectory(path);
+    // Kept purely virtual (see header): inner may be shared by other views.
+    m_cwd = NormalizeVirtualPath(path, m_cwd);
+    return 0;
 }
 
 char* ReadOnlyFileSystem::GetCurrentDirectory(std::string& buf, size_t size) {
-    return m_inner->GetCurrentDirectory(buf, size);
+    if (m_cwd.size() + 1 > size) {
+        return nullptr;
+    }
+    buf = m_cwd;
+    return &buf[0];
 }
 
 std::vector<DirectoryEntry> ReadOnlyFileSystem::ReadDirectory(const std::string& path) {
-    return m_inner->ReadDirectory(path);
+    return m_inner->ReadDirectory(NormalizeVirtualPath(path, m_cwd));
 }
 
 }

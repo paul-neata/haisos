@@ -12,7 +12,12 @@ SubFileSystem::SubFileSystem(std::shared_ptr<IFileSystem> root, const std::strin
 SubFileSystem::~SubFileSystem() = default;
 
 std::string SubFileSystem::ResolveInRoot(const std::string& path) const {
-    std::string normalized = NormalizeVirtualPath(path, m_cwd);
+    std::string cwd;
+    {
+        std::lock_guard<std::mutex> lock(m_cwdMutex);
+        cwd = m_cwd;
+    }
+    std::string normalized = NormalizeVirtualPath(path, cwd);
     if (m_basePath == "/") {
         return normalized;
     }
@@ -49,11 +54,13 @@ int SubFileSystem::RemoveDirectory(const std::string& pathname) {
 
 int SubFileSystem::ChangeDirectory(const std::string& path) {
     // Kept purely virtual (see header): root may be shared by other views.
+    std::lock_guard<std::mutex> lock(m_cwdMutex);
     m_cwd = NormalizeVirtualPath(path, m_cwd);
     return 0;
 }
 
 char* SubFileSystem::GetCurrentDirectory(std::string& buf, size_t size) {
+    std::lock_guard<std::mutex> lock(m_cwdMutex);
     if (m_cwd.size() + 1 > size) {
         return nullptr;
     }

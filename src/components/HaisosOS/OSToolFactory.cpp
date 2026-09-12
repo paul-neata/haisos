@@ -1,4 +1,5 @@
 #include "OSToolFactory.h"
+#include "src/components/Logger/Logger.h"
 #include "src/tools/os_read_file/OSReadFileTool.h"
 #include "src/tools/os_write_file/OSWriteFileTool.h"
 #include "src/tools/os_list_directory/OSListDirectoryTool.h"
@@ -51,6 +52,7 @@ std::unique_ptr<ITool> OSToolFactory::CreateTool(const std::string& name, std::s
             return entry.create();
         }
     }
+    LogWarning("OSToolFactory: Unknown tool requested: %s", name.c_str());
     return nullptr;
 }
 

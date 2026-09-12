@@ -1,5 +1,6 @@
 #include "CompositeToolFactory.h"
 #include <algorithm>
+#include "src/components/Logger/Logger.h"
 
 namespace Haisos {
 
@@ -17,8 +18,12 @@ std::unique_ptr<ITool> CompositeToolFactory::CreateTool(const std::string& name,
         return m_sharedFactory.CreateTool(name, callerAgent);
     }
     if (m_ownedFactory) {
-        return m_ownedFactory->CreateTool(name, callerAgent);
+        auto ownedNames = m_ownedFactory->GetAvailableTools();
+        if (std::find(ownedNames.begin(), ownedNames.end(), name) != ownedNames.end()) {
+            return m_ownedFactory->CreateTool(name, callerAgent);
+        }
     }
+    LogWarning("CompositeToolFactory: Unknown tool requested: %s", name.c_str());
     return nullptr;
 }
 

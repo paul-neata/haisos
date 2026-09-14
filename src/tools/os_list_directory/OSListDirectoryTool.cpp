@@ -1,4 +1,5 @@
 #include "OSListDirectoryTool.h"
+#include "src/components/Logger/Logger.h"
 
 namespace Haisos::Tools {
 
@@ -22,6 +23,7 @@ nlohmann::json OSListDirectoryTool::GetDefaultParametersSchema() {
 
 ToolResult OSListDirectoryTool::Call(std::shared_ptr<IAgent> /*callerAgent*/, const nlohmann::json& args) {
     std::string path = args.value("path", ".");
+    LogDebug("OSListDirectoryTool: listing directory '%s'", path.c_str());
 
     auto entries = m_os.GetFileSystem().ReadDirectory(path);
 
@@ -32,7 +34,10 @@ ToolResult OSListDirectoryTool::Call(std::shared_ptr<IAgent> /*callerAgent*/, co
             {"type", entry.type == DirectoryEntryType::Dir ? "dir" : "file"}
         });
     }
-    return ToolResult{result.dump(), false};
+    // A filename is an arbitrary byte string, so it need not be valid UTF-8;
+    // the default dump() would throw on one, which is not a failure this tool
+    // should turn into an exception escaping into the caller.
+    return ToolResult{result.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace), false};
 }
 
 }

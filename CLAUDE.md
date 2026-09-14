@@ -108,7 +108,7 @@ Pass `debug` as an optional argument to any build script for a debug build (e.g.
 ### Linux
 
 ```bash
-cd /mnt/c/src/haisos
+cd <repo root>
 ./scripts/build_linux_on_linux.sh
 ./output/linux/haisos --help
 ```
@@ -116,7 +116,7 @@ cd /mnt/c/src/haisos
 ### Windows
 
 ```bash
-cd /mnt/c/src/haisos
+cd <repo root>
 ./scripts/build_windows_on_wsl.sh
 # Or on Windows directly:
 # scripts\build_windows_on_windows.bat
@@ -125,7 +125,7 @@ cd /mnt/c/src/haisos
 ### WASM
 
 ```bash
-cd /mnt/c/src/haisos
+cd <repo root>
 ./scripts/build_wasm_on_linux.sh
 node ./output/wasm/haisos.js
 ```
@@ -186,7 +186,14 @@ RUN tools/setup.lua ${greeting}
 last `FS` declared is used. If a haisosfile declares no `FS` at all, `ROOT`
 falls back to the original shorthand -- a plain directory path (or the
 haisosfile's own directory, if `ROOT` is also omitted) -- so simple haisosfiles
-never need `FS`. Each `RUN` starts a top-most process (parent PID 0); Haisos
+never need `FS`.
+
+Mistakes are reported rather than silently absorbed: a `${name}` that resolves
+to nothing declared, a duplicate `FS` name, a `-- key=value` override naming an
+argument the file never declares, and a `RUN` left empty by substitution are all
+parse errors. `ARG name` without `=` declares an argument with no default, which
+must then be supplied via `-- name=value`. A `VAR`/`ARG` right-hand side may only
+reference names declared above it. Each `RUN` starts a top-most process (parent PID 0); Haisos
 exits once all of them have finished. Composed/temporary filesystems from
 GitHub or tar archives, and site/network permissions, are not implemented yet.
 
@@ -216,12 +223,16 @@ export HAISOS_ENDPOINT=http://localhost:11434/api/chat
 Unit tests, integration tests, and haisos tests are compiled or run automatically with the main build.
 
 ```bash
-cd /mnt/c/src/haisos
+cd <repo root>
 ./scripts/build_linux_on_linux.sh
 ./scripts/test_linux.sh L "*"
 ```
 
-The `test_linux.sh` script accepts a platform selector (`L` for Linux, `W` for Windows, `N` for WASM) and a test type selector (`U` for unit, `I` for integration, `H` for haisos, `*` for all).
+The `test_linux.sh` script accepts a platform selector (`L` for Linux, `W` for Windows, `N` for WASM) and a test type selector (`U` for unit, `I` for integration, `H` for haisos, `*` for all). Both default to the host platform and `*` when omitted. It also accepts `--debug` (run the debug build instead of release), `--both` (run both configurations), `--smoke` (run only the tests listed in `scripts/internal/smoke_tests.txt`), and any trailing words as a name filter, e.g.:
+
+```bash
+./scripts/test_linux.sh L U --debug LuaProcess
+```
 
 Or with `ctest`:
 
@@ -243,10 +254,10 @@ Each component lives in its own folder under `src/components/` and has its own `
 | **Logger** | `src/components/Logger/` | Thread-safe logging with configurable receivers |
 | **HTTPClient** | `src/components/HTTPClient/` | Platform-specific HTTP implementation (Curl/WinHTTP/Fetch) |
 | **Factory** | `src/components/Factory/` | Dependency injection factory |
-| **Filesystem** | `src/components/Filesystem/` | Filesystem access: an unrooted passthrough and a `PhysicalFileSystem` jailed to a real disk path |
+| **Filesystem** | `src/components/Filesystem/` | Composable `IFileSystem` implementations: an unrooted passthrough, a `PhysicalFileSystem` jailed to a real disk path, plus in-memory, read-only, sub-path and mounted/overlay views |
 | **ServicesCreator** | `src/components/ServicesCreator/` | Factory-of-services built on `IFactory`; creates `IFilesystemService`/`INetworkService`/`ILLMService`, passing each the services it depends on |
 | **NetworkService** | `src/components/NetworkService/` | Service-layer wrapper over network access (creates `IHTTPClient`) |
-| **FileSystemService** | `src/components/FileSystemService/` | Service-layer wrapper holding a single `IFileSystem` |
+| **FileSystemService** | `src/components/FileSystemService/` | Stateless factory that composes filesystem views (read-only / in-memory / sub / mount); holds no filesystem of its own |
 | **LLMService** | `src/components/LLMService/` | Service-layer entry point for creating LLM-backed agents; exposes the shared agent-management tool set |
 | **HaisosOS** | `src/components/HaisosOS/` | An OS instance: owns a rooted filesystem, physical console, and services; starts processes (`.md` agents, `.lua` scripts) and sub-OS instances |
 

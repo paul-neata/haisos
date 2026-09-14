@@ -112,11 +112,13 @@ int main(int argc, char* argv[]) {
 
     if (result.options.init) {
         if (std::filesystem::exists("haisosfile")) {
+            LogError("--init: haisosfile already exists in the current directory");
             std::cerr << "Error: haisosfile already exists in the current directory\n";
             return 1;
         }
         std::ofstream out("haisosfile");
         if (!out.is_open()) {
+            LogError("--init: failed to create haisosfile in the current directory");
             std::cerr << "Error: failed to create haisosfile\n";
             return 1;
         }
@@ -163,7 +165,7 @@ int main(int argc, char* argv[]) {
     // receiver here would print every message twice.
     LogSetConsoleOutput(result.options.logToConsole);
 
-    LogInfo("Haisos starting with model from environment");
+    LogInfo("Haisos starting");
 
     // Raw LLM JSON traffic is logged by LLMCommunicator at VerboseDebug level, tagged
     // "[JSON_REQUEST] "/"[JSON_RESPONSE] ". --log-json-in-temp taps that via a log
@@ -222,6 +224,7 @@ int main(int argc, char* argv[]) {
 
     auto parseResult = ParseHaisosFile(haisosFileContent, result.options.argOverrides);
     if (!parseResult.error.empty()) {
+        LogError("Failed to parse haisosfile '%s': %s", haisosFilePath.c_str(), parseResult.error.c_str());
         std::cerr << parseResult.error;
         return 1;
     }
@@ -234,12 +237,17 @@ int main(int argc, char* argv[]) {
     std::string model = std::getenv("HAISOS_MODEL") ? std::getenv("HAISOS_MODEL") : "llama3";
     std::string apiKey = std::getenv("HAISOS_API_KEY") ? std::getenv("HAISOS_API_KEY") : "";
 
+    // The key itself is deliberately never logged, only whether one was supplied.
+    LogInfo("Haisos configuration: haisosfile='%s' endpoint='%s' model='%s' api_key_set=%d",
+        haisosFilePath.c_str(), endpoint.c_str(), model.c_str(), apiKey.empty() ? 0 : 1);
+
     auto servicesCreator = CreateServicesCreator(*factory);
     auto filesystemService = servicesCreator->CreateFileSystemService();
 
     std::string fsError;
     std::shared_ptr<IFileSystem> rootFileSystem = BuildRootFileSystem(*factory, *filesystemService, parseResult.config, haisosFileDir, fsError);
     if (!rootFileSystem) {
+        LogError("Failed to build the root filesystem for '%s': %s", haisosFilePath.c_str(), fsError.c_str());
         std::cerr << fsError;
         return 1;
     }
@@ -261,6 +269,8 @@ int main(int argc, char* argv[]) {
     }
 
     if (processes.empty()) {
+        LogError("No process could be started from '%s'; nothing to run", haisosFilePath.c_str());
+        std::cerr << "Error: no process could be started from " << haisosFilePath << "\n";
         physicalConsole->Stop();
         return 1;
     }

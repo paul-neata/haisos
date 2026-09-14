@@ -223,8 +223,10 @@ HaisosFileParseResult ParseHaisosFile(
                 expectedArgs = 0;
             } else if (decl.type == "SUB") {
                 expectedArgs = 2;
+            } else if (decl.type == "COMPOSED") {
+                expectedArgs = 3;
             } else {
-                result.error = "Error: line " + std::to_string(lineNumber) + ": unknown FS type '" + decl.type + "' (expected PHYSICAL, RO, MEM, or SUB)\n";
+                result.error = "Error: line " + std::to_string(lineNumber) + ": unknown FS type '" + decl.type + "' (expected PHYSICAL, RO, MEM, SUB, or COMPOSED)\n";
                 return result;
             }
             if (decl.args.size() != expectedArgs) {

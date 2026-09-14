@@ -10,7 +10,7 @@ namespace Haisos {
 // An empty, in-memory, read/write IFileSystem. Files are held as plain byte
 // buffers keyed by normalized path; there is no backing real disk. Intended
 // for scratch/temporary filesystems and as a mount target (see
-// IFilesystemService::MountFileSystem).
+// IFilesystemService::CreateComposedFileSystem).
 class InMemoryFileSystem : public IFileSystem {
 public:
     InMemoryFileSystem();

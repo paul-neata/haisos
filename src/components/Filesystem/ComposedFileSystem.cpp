@@ -1,4 +1,4 @@
-#include "MountedFileSystem.h"
+#include "ComposedFileSystem.h"
 #include <limits>
 #include "VirtualPath.h"
 #include "src/components/Logger/Logger.h"
@@ -21,25 +21,25 @@ std::optional<std::string> NextMountSegment(const std::string& ancestorPath, con
 
 }
 
-MountedFileSystem::MountedFileSystem(std::shared_ptr<IFileSystem> main, const std::string& whereToMount, std::shared_ptr<IFileSystem> mounted)
+ComposedFileSystem::ComposedFileSystem(std::shared_ptr<IFileSystem> main, const std::string& whereToMount, std::shared_ptr<IFileSystem> mounted)
     : m_main(std::move(main))
     , m_mountPoint(NormalizeVirtualPath(whereToMount))
     , m_mounted(std::move(mounted))
 {
 }
 
-MountedFileSystem::~MountedFileSystem() = default;
+ComposedFileSystem::~ComposedFileSystem() = default;
 
-std::string MountedFileSystem::GetCwd() const {
+std::string ComposedFileSystem::GetCwd() const {
     std::lock_guard<std::mutex> lock(m_cwdMutex);
     return m_cwd;
 }
 
-const std::shared_ptr<IFileSystem>& MountedFileSystem::FileSystemFor(Side side) const {
+const std::shared_ptr<IFileSystem>& ComposedFileSystem::FileSystemFor(Side side) const {
     return (side == Side::Mounted) ? m_mounted : m_main;
 }
 
-int MountedFileSystem::AllocateFdLocked() {
+int ComposedFileSystem::AllocateFdLocked() {
     // At most one more candidate than there are live fds has to be tried before
     // an unused one turns up (the candidates are distinct until the counter
     // wraps). Wrapping, rather than incrementing past INT_MAX, also keeps the
@@ -54,7 +54,7 @@ int MountedFileSystem::AllocateFdLocked() {
     return -1;
 }
 
-int MountedFileSystem::RegisterFd(Side side, int innerFd) {
+int ComposedFileSystem::RegisterFd(Side side, int innerFd) {
     if (innerFd < 0) {
         return innerFd; // pass the underlying filesystem's error value through
     }
@@ -69,14 +69,14 @@ int MountedFileSystem::RegisterFd(Side side, int innerFd) {
     }
 
     if (fd < 0) {
-        LogError("MountedFileSystem: no free file descriptor left (mount point: %s)", m_mountPoint.c_str());
+        LogError("ComposedFileSystem: no free file descriptor left (mount point: %s)", m_mountPoint.c_str());
         FileSystemFor(side)->CloseFile(innerFd); // don't leak the underlying handle
         return -1;
     }
     return fd;
 }
 
-bool MountedFileSystem::LookupFd(int fd, Handle& handle) const {
+bool ComposedFileSystem::LookupFd(int fd, Handle& handle) const {
     std::lock_guard<std::mutex> lock(m_openFdsMutex);
     auto it = m_openFds.find(fd);
     if (it == m_openFds.end()) {
@@ -86,7 +86,7 @@ bool MountedFileSystem::LookupFd(int fd, Handle& handle) const {
     return true;
 }
 
-int MountedFileSystem::OpenFile(const std::string& pathname, int flags) {
+int ComposedFileSystem::OpenFile(const std::string& pathname, int flags) {
     std::string normalized = NormalizeVirtualPath(pathname, GetCwd());
     if (auto rel = RelativeToBase(m_mountPoint, normalized)) {
         return RegisterFd(Side::Mounted, m_mounted->OpenFile(*rel, flags));
@@ -94,7 +94,7 @@ int MountedFileSystem::OpenFile(const std::string& pathname, int flags) {
     return RegisterFd(Side::Main, m_main->OpenFile(normalized, flags));
 }
 
-int MountedFileSystem::OpenFile(const std::string& pathname, int flags, int mode) {
+int ComposedFileSystem::OpenFile(const std::string& pathname, int flags, int mode) {
     std::string normalized = NormalizeVirtualPath(pathname, GetCwd());
     if (auto rel = RelativeToBase(m_mountPoint, normalized)) {
         return RegisterFd(Side::Mounted, m_mounted->OpenFile(*rel, flags, mode));
@@ -102,7 +102,7 @@ int MountedFileSystem::OpenFile(const std::string& pathname, int flags, int mode
     return RegisterFd(Side::Main, m_main->OpenFile(normalized, flags, mode));
 }
 
-int MountedFileSystem::CloseFile(int fd) {
+int ComposedFileSystem::CloseFile(int fd) {
     Handle handle;
     {
         std::lock_guard<std::mutex> lock(m_openFdsMutex);
@@ -116,7 +116,7 @@ int MountedFileSystem::CloseFile(int fd) {
     return FileSystemFor(handle.side)->CloseFile(handle.innerFd);
 }
 
-ssize_t MountedFileSystem::ReadFile(int fd, void* buf, size_t count) {
+ssize_t ComposedFileSystem::ReadFile(int fd, void* buf, size_t count) {
     Handle handle;
     if (!LookupFd(fd, handle)) {
         return -1;
@@ -124,7 +124,7 @@ ssize_t MountedFileSystem::ReadFile(int fd, void* buf, size_t count) {
     return FileSystemFor(handle.side)->ReadFile(handle.innerFd, buf, count);
 }
 
-ssize_t MountedFileSystem::WriteFile(int fd, const void* buf, size_t count) {
+ssize_t ComposedFileSystem::WriteFile(int fd, const void* buf, size_t count) {
     Handle handle;
     if (!LookupFd(fd, handle)) {
         return -1;
@@ -132,7 +132,7 @@ ssize_t MountedFileSystem::WriteFile(int fd, const void* buf, size_t count) {
     return FileSystemFor(handle.side)->WriteFile(handle.innerFd, buf, count);
 }
 
-int MountedFileSystem::CreateDirectory(const std::string& pathname, int mode) {
+int ComposedFileSystem::CreateDirectory(const std::string& pathname, int mode) {
     std::string normalized = NormalizeVirtualPath(pathname, GetCwd());
     if (auto rel = RelativeToBase(m_mountPoint, normalized)) {
         return m_mounted->CreateDirectory(*rel, mode);
@@ -140,7 +140,7 @@ int MountedFileSystem::CreateDirectory(const std::string& pathname, int mode) {
     return m_main->CreateDirectory(normalized, mode);
 }
 
-int MountedFileSystem::RemoveDirectory(const std::string& pathname) {
+int ComposedFileSystem::RemoveDirectory(const std::string& pathname) {
     std::string normalized = NormalizeVirtualPath(pathname, GetCwd());
     if (auto rel = RelativeToBase(m_mountPoint, normalized)) {
         return m_mounted->RemoveDirectory(*rel);
@@ -148,13 +148,13 @@ int MountedFileSystem::RemoveDirectory(const std::string& pathname) {
     return m_main->RemoveDirectory(normalized);
 }
 
-int MountedFileSystem::ChangeDirectory(const std::string& path) {
+int ComposedFileSystem::ChangeDirectory(const std::string& path) {
     std::lock_guard<std::mutex> lock(m_cwdMutex);
     m_cwd = NormalizeVirtualPath(path, m_cwd);
     return 0;
 }
 
-char* MountedFileSystem::GetCurrentDirectory(std::string& buf, size_t size) {
+char* ComposedFileSystem::GetCurrentDirectory(std::string& buf, size_t size) {
     std::lock_guard<std::mutex> lock(m_cwdMutex);
     if (m_cwd.size() + 1 > size) {
         return nullptr;
@@ -163,7 +163,7 @@ char* MountedFileSystem::GetCurrentDirectory(std::string& buf, size_t size) {
     return &buf[0];
 }
 
-std::vector<DirectoryEntry> MountedFileSystem::ReadDirectory(const std::string& path) {
+std::vector<DirectoryEntry> ComposedFileSystem::ReadDirectory(const std::string& path) {
     std::string normalized = NormalizeVirtualPath(path, GetCwd());
 
     if (auto rel = RelativeToBase(m_mountPoint, normalized)) {

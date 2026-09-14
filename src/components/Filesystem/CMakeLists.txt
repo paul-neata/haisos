@@ -3,7 +3,7 @@ add_library(Filesystem STATIC
     ReadOnlyFileSystem.cpp
     InMemoryFileSystem.cpp
     SubFileSystem.cpp
-    MountedFileSystem.cpp
+    ComposedFileSystem.cpp
 )
 
 if(WIN32)

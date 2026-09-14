@@ -32,6 +32,6 @@ decides what the call means. Mounting a `PhysicalFileSystem` inside an
 - `InMemoryFileSystem` - an empty, in-memory read/write `IFileSystem` (no real disk); files are plain byte buffers keyed by normalized path
 - `ReadOnlyFileSystem` - wraps another `IFileSystem`, rejecting every write/create/remove
 - `SubFileSystem` - confines access to a sub-path of another `IFileSystem`, resolved purely lexically (no real disk access, unlike `PhysicalFileSystem`); cannot actually escape its base path by construction
-- `MountFileSystem` (`MountedFileSystem`) - overlays one `IFileSystem` inside another at a path; the mount point is synthesized as a directory on listing even if the main filesystem has none there. It hands out its **own** file descriptors mapped to `(which side, inner fd)`: the two underlying filesystems allocate descriptors independently (in-memory and real POSIX fds both start at 3), so the underlying numbers overlap and cannot be used to tell the sides apart.
+- `ComposedFileSystem` - overlays one `IFileSystem` inside another at a path; the mount point is synthesized as a directory on listing even if the main filesystem has none there. It hands out its **own** file descriptors mapped to `(which side, inner fd)`: the two underlying filesystems allocate descriptors independently (in-memory and real POSIX fds both start at 3), so the underlying numbers overlap and cannot be used to tell the sides apart.
 
 These four are created via `IFilesystemService` (`src/components/FileSystemService/`), not directly.

@@ -12,7 +12,7 @@ public:
     std::shared_ptr<IFileSystem> CreateReadOnlyFileSystem(std::shared_ptr<IFileSystem> filesystem) override;
     std::shared_ptr<IFileSystem> CreateEmptyInMemFileSystem() override;
     std::shared_ptr<IFileSystem> CreateSubFileSystem(std::shared_ptr<IFileSystem> root, const std::string& path) override;
-    std::shared_ptr<IFileSystem> MountFileSystem(std::shared_ptr<IFileSystem> main, const std::string& whereToMount, std::shared_ptr<IFileSystem> toBeMounted) override;
+    std::shared_ptr<IFileSystem> CreateComposedFileSystem(std::shared_ptr<IFileSystem> main, const std::string& whereToMount, std::shared_ptr<IFileSystem> toBeMounted) override;
 };
 
 }

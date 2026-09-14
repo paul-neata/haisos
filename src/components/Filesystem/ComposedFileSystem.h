@@ -15,10 +15,10 @@ namespace Haisos {
 // ancestor of whereToMount synthesizes the next path segment towards it as a
 // directory entry, even if main has no real directory there, so the mount
 // point is always reachable by listing down from the root.
-class MountedFileSystem : public IFileSystem {
+class ComposedFileSystem : public IFileSystem {
 public:
-    MountedFileSystem(std::shared_ptr<IFileSystem> main, const std::string& whereToMount, std::shared_ptr<IFileSystem> mounted);
-    ~MountedFileSystem() override;
+    ComposedFileSystem(std::shared_ptr<IFileSystem> main, const std::string& whereToMount, std::shared_ptr<IFileSystem> mounted);
+    ~ComposedFileSystem() override;
 
     int OpenFile(const std::string& pathname, int flags) override;
     int OpenFile(const std::string& pathname, int flags, int mode) override;

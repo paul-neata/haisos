@@ -97,7 +97,7 @@ public:
     // toBeMounted, overriding anything main has there; the mount point is
     // synthesized as a directory on listing even if main has none there.
     // Neither main nor toBeMounted is mutated.
-    virtual std::shared_ptr<IFileSystem> MountFileSystem(std::shared_ptr<IFileSystem> main, const std::string& whereToMount, std::shared_ptr<IFileSystem> toBeMounted) = 0;
+    virtual std::shared_ptr<IFileSystem> CreateComposedFileSystem(std::shared_ptr<IFileSystem> main, const std::string& whereToMount, std::shared_ptr<IFileSystem> toBeMounted) = 0;
 };
 
 std::unique_ptr<IFileSystem> CreateFilesystem();

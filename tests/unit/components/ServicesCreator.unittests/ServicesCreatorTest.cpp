@@ -124,7 +124,7 @@ TEST(ServicesCreatorTest, CreateSubFileSystemConfinesToBasePath) {
     EXPECT_LT(sub->OpenFile("../outside.txt", kReadOnly), 0);
 }
 
-TEST(ServicesCreatorTest, MountFileSystemOverlaysAtMountPoint) {
+TEST(ServicesCreatorTest, ComposedFileSystemOverlaysAtMountPoint) {
     Factory factory;
     auto servicesCreator = CreateServicesCreator();
     auto filesystemService = servicesCreator->CreateFileSystemService();
@@ -141,7 +141,7 @@ TEST(ServicesCreatorTest, MountFileSystemOverlaysAtMountPoint) {
     mounted->WriteFile(fd, "n", 1);
     mounted->CloseFile(fd);
 
-    auto composed = filesystemService->MountFileSystem(main, "/data", mounted);
+    auto composed = filesystemService->CreateComposedFileSystem(main, "/data", mounted);
     ASSERT_NE(composed, nullptr);
 
     // Files under the mount point come from the mounted filesystem.

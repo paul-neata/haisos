@@ -63,6 +63,20 @@ std::shared_ptr<IFileSystem> BuildRootFileSystem(
                     return nullptr;
                 }
                 fs = filesystemService.CreateSubFileSystem(it->second, decl.args[1]);
+            } else if (decl.type == "COMPOSED") {
+                // FS <name> COMPOSED <main> <path> <mounted>: a new filesystem,
+                // leaving both operands untouched (unlike MOUNT, which mutates).
+                auto mainIt = namedFs.find(decl.args[0]);
+                auto mountedIt = namedFs.find(decl.args[2]);
+                if (mainIt == namedFs.end()) {
+                    outError = "Error: FS " + decl.name + " COMPOSED references unknown filesystem '" + decl.args[0] + "'\n";
+                    return nullptr;
+                }
+                if (mountedIt == namedFs.end()) {
+                    outError = "Error: FS " + decl.name + " COMPOSED references unknown filesystem '" + decl.args[2] + "'\n";
+                    return nullptr;
+                }
+                fs = filesystemService.CreateComposedFileSystem(mainIt->second, decl.args[1], mountedIt->second);
             }
             if (!fs) {
                 outError = "Error: failed to build filesystem '" + decl.name + "'\n";
@@ -83,7 +97,7 @@ std::shared_ptr<IFileSystem> BuildRootFileSystem(
                 outError = "Error: MOUNT references unknown filesystem '" + mount.toBeMountedFs + "'\n";
                 return nullptr;
             }
-            namedFs[mount.mainFs] = filesystemService.MountFileSystem(mainIt->second, mount.path, mountedIt->second);
+            namedFs[mount.mainFs] = filesystemService.CreateComposedFileSystem(mainIt->second, mount.path, mountedIt->second);
         }
     }
 

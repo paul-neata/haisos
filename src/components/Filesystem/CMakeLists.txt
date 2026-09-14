@@ -4,6 +4,8 @@ add_library(Filesystem STATIC
     InMemoryFileSystem.cpp
     SubFileSystem.cpp
     ComposedFileSystem.cpp
+    MountPoints.cpp
+    MountableFileSystem.cpp
 )
 
 if(WIN32)

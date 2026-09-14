@@ -17,7 +17,7 @@ straight to disk, which is exactly the intent. (A filesystem that genuinely
 - `CreateReadOnlyFileSystem` - wraps an existing filesystem, rejecting writes
 - `CreateEmptyInMemFileSystem` - an empty, in-memory read/write filesystem
 - `CreateSubFileSystem` - a filesystem confined to a sub-path of an existing filesystem, addressed purely through `IFileSystem` (no real disk access)
-- `CreateComposedFileSystem` - overlays one filesystem inside another at a path
+- `CreateComposedFileSystem` - overlays one filesystem inside another at a path, returning a new filesystem and leaving both operands untouched (to change one in place instead, call `IFileSystem::Mount` on it)
 
 ## Key Classes
 

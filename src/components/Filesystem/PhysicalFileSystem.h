@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include "MountableFileSystem.h"
 #include "interfaces/IFilesystemService.h"
 #include "Filesystem.h"
 
@@ -15,23 +16,25 @@ namespace Haisos {
 // IFileSystem is a thin wrapper over real OS state. This is deliberately
 // scoped for now -- composed/temporary/copy-on-write filesystems are a
 // documented future extension (see IHaisosOS).
-class PhysicalFileSystem : public IFileSystem {
+class PhysicalFileSystem : public MountableFileSystem {
 public:
     explicit PhysicalFileSystem(const std::string& rootPath);
     ~PhysicalFileSystem() override = default;
 
-    int OpenFile(const std::string& pathname, int flags) override;
-    int OpenFile(const std::string& pathname, int flags, int mode) override;
-    int CloseFile(int fd) override;
-    ssize_t ReadFile(int fd, void* buf, size_t count) override;
-    ssize_t WriteFile(int fd, const void* buf, size_t count) override;
+    int LocalOpenFile(const std::string& pathname, int flags) override;
+    int LocalOpenFile(const std::string& pathname, int flags, int mode) override;
+    int LocalCloseFile(int fd) override;
+    ssize_t LocalReadFile(int fd, void* buf, size_t count) override;
+    ssize_t LocalWriteFile(int fd, const void* buf, size_t count) override;
 
-    int CreateDirectory(const std::string& pathname, int mode) override;
-    int RemoveDirectory(const std::string& pathname) override;
+    int LocalCreateDirectory(const std::string& pathname, int mode) override;
+    int LocalRemoveDirectory(const std::string& pathname) override;
     int ChangeDirectory(const std::string& path) override;
     char* GetCurrentDirectory(std::string& buf, size_t size) override;
 
-    std::vector<DirectoryEntry> ReadDirectory(const std::string& path) override;
+    std::vector<DirectoryEntry> LocalReadDirectory(const std::string& path) override;
+
+    std::string AbsolutePathFor(const std::string& path) const override;
 
 private:
     // Resolves pathname against the root and validates it does not escape it.

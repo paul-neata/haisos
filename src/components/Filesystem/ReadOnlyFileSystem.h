@@ -2,6 +2,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include "MountableFileSystem.h"
 #include "interfaces/IFilesystemService.h"
 
 namespace Haisos {
@@ -9,23 +10,25 @@ namespace Haisos {
 // Wraps an existing IFileSystem, allowing only read/navigation operations.
 // Every write, create, or remove is rejected; the wrapped filesystem is kept
 // alive for as long as this filesystem is.
-class ReadOnlyFileSystem : public IFileSystem {
+class ReadOnlyFileSystem : public MountableFileSystem {
 public:
     explicit ReadOnlyFileSystem(std::shared_ptr<IFileSystem> inner);
     ~ReadOnlyFileSystem() override;
 
-    int OpenFile(const std::string& pathname, int flags) override;
-    int OpenFile(const std::string& pathname, int flags, int mode) override;
-    int CloseFile(int fd) override;
-    ssize_t ReadFile(int fd, void* buf, size_t count) override;
-    ssize_t WriteFile(int fd, const void* buf, size_t count) override;
+    int LocalOpenFile(const std::string& pathname, int flags) override;
+    int LocalOpenFile(const std::string& pathname, int flags, int mode) override;
+    int LocalCloseFile(int fd) override;
+    ssize_t LocalReadFile(int fd, void* buf, size_t count) override;
+    ssize_t LocalWriteFile(int fd, const void* buf, size_t count) override;
 
-    int CreateDirectory(const std::string& pathname, int mode) override;
-    int RemoveDirectory(const std::string& pathname) override;
+    int LocalCreateDirectory(const std::string& pathname, int mode) override;
+    int LocalRemoveDirectory(const std::string& pathname) override;
     int ChangeDirectory(const std::string& path) override;
     char* GetCurrentDirectory(std::string& buf, size_t size) override;
 
-    std::vector<DirectoryEntry> ReadDirectory(const std::string& path) override;
+    std::vector<DirectoryEntry> LocalReadDirectory(const std::string& path) override;
+
+    std::string AbsolutePathFor(const std::string& path) const override;
 
 private:
     std::string GetCwd() const;

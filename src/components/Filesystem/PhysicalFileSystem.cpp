@@ -1,4 +1,5 @@
 #include "PhysicalFileSystem.h"
+#include "VirtualPath.h"
 #include <filesystem>
 #include "src/components/Logger/Logger.h"
 
@@ -41,48 +42,48 @@ bool PhysicalFileSystem::ResolveWithinRoot(const std::string& pathname, std::str
     }
 }
 
-int PhysicalFileSystem::OpenFile(const std::string& pathname, int flags) {
+int PhysicalFileSystem::LocalOpenFile(const std::string& pathname, int flags) {
     std::string resolved;
     if (!ResolveWithinRoot(pathname, resolved)) {
         return -1;
     }
-    return m_inner.OpenFile(resolved, flags);
+    return m_inner.LocalOpenFile(resolved, flags);
 }
 
-int PhysicalFileSystem::OpenFile(const std::string& pathname, int flags, int mode) {
+int PhysicalFileSystem::LocalOpenFile(const std::string& pathname, int flags, int mode) {
     std::string resolved;
     if (!ResolveWithinRoot(pathname, resolved)) {
         return -1;
     }
-    return m_inner.OpenFile(resolved, flags, mode);
+    return m_inner.LocalOpenFile(resolved, flags, mode);
 }
 
-int PhysicalFileSystem::CloseFile(int fd) {
-    return m_inner.CloseFile(fd);
+int PhysicalFileSystem::LocalCloseFile(int fd) {
+    return m_inner.LocalCloseFile(fd);
 }
 
-ssize_t PhysicalFileSystem::ReadFile(int fd, void* buf, size_t count) {
-    return m_inner.ReadFile(fd, buf, count);
+ssize_t PhysicalFileSystem::LocalReadFile(int fd, void* buf, size_t count) {
+    return m_inner.LocalReadFile(fd, buf, count);
 }
 
-ssize_t PhysicalFileSystem::WriteFile(int fd, const void* buf, size_t count) {
-    return m_inner.WriteFile(fd, buf, count);
+ssize_t PhysicalFileSystem::LocalWriteFile(int fd, const void* buf, size_t count) {
+    return m_inner.LocalWriteFile(fd, buf, count);
 }
 
-int PhysicalFileSystem::CreateDirectory(const std::string& pathname, int mode) {
+int PhysicalFileSystem::LocalCreateDirectory(const std::string& pathname, int mode) {
     std::string resolved;
     if (!ResolveWithinRoot(pathname, resolved)) {
         return -1;
     }
-    return m_inner.CreateDirectory(resolved, mode);
+    return m_inner.LocalCreateDirectory(resolved, mode);
 }
 
-int PhysicalFileSystem::RemoveDirectory(const std::string& pathname) {
+int PhysicalFileSystem::LocalRemoveDirectory(const std::string& pathname) {
     std::string resolved;
     if (!ResolveWithinRoot(pathname, resolved)) {
         return -1;
     }
-    return m_inner.RemoveDirectory(resolved);
+    return m_inner.LocalRemoveDirectory(resolved);
 }
 
 int PhysicalFileSystem::ChangeDirectory(const std::string& path) {
@@ -97,12 +98,16 @@ char* PhysicalFileSystem::GetCurrentDirectory(std::string& buf, size_t size) {
     return m_inner.GetCurrentDirectory(buf, size);
 }
 
-std::vector<DirectoryEntry> PhysicalFileSystem::ReadDirectory(const std::string& path) {
+std::vector<DirectoryEntry> PhysicalFileSystem::LocalReadDirectory(const std::string& path) {
     std::string resolved;
     if (!ResolveWithinRoot(path, resolved)) {
         return {};
     }
-    return m_inner.ReadDirectory(resolved);
+    return m_inner.LocalReadDirectory(resolved);
+}
+
+std::string PhysicalFileSystem::AbsolutePathFor(const std::string& path) const {
+    return NormalizeVirtualPath(path, "/");
 }
 
 } // namespace Haisos

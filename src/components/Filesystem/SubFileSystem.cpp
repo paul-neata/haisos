@@ -24,31 +24,31 @@ std::string SubFileSystem::ResolveInRoot(const std::string& path) const {
     return (normalized == "/") ? m_basePath : (m_basePath + normalized);
 }
 
-int SubFileSystem::OpenFile(const std::string& pathname, int flags) {
+int SubFileSystem::LocalOpenFile(const std::string& pathname, int flags) {
     return m_root->OpenFile(ResolveInRoot(pathname), flags);
 }
 
-int SubFileSystem::OpenFile(const std::string& pathname, int flags, int mode) {
+int SubFileSystem::LocalOpenFile(const std::string& pathname, int flags, int mode) {
     return m_root->OpenFile(ResolveInRoot(pathname), flags, mode);
 }
 
-int SubFileSystem::CloseFile(int fd) {
+int SubFileSystem::LocalCloseFile(int fd) {
     return m_root->CloseFile(fd);
 }
 
-ssize_t SubFileSystem::ReadFile(int fd, void* buf, size_t count) {
+ssize_t SubFileSystem::LocalReadFile(int fd, void* buf, size_t count) {
     return m_root->ReadFile(fd, buf, count);
 }
 
-ssize_t SubFileSystem::WriteFile(int fd, const void* buf, size_t count) {
+ssize_t SubFileSystem::LocalWriteFile(int fd, const void* buf, size_t count) {
     return m_root->WriteFile(fd, buf, count);
 }
 
-int SubFileSystem::CreateDirectory(const std::string& pathname, int mode) {
+int SubFileSystem::LocalCreateDirectory(const std::string& pathname, int mode) {
     return m_root->CreateDirectory(ResolveInRoot(pathname), mode);
 }
 
-int SubFileSystem::RemoveDirectory(const std::string& pathname) {
+int SubFileSystem::LocalRemoveDirectory(const std::string& pathname) {
     return m_root->RemoveDirectory(ResolveInRoot(pathname));
 }
 
@@ -68,8 +68,18 @@ char* SubFileSystem::GetCurrentDirectory(std::string& buf, size_t size) {
     return &buf[0];
 }
 
-std::vector<DirectoryEntry> SubFileSystem::ReadDirectory(const std::string& path) {
+std::vector<DirectoryEntry> SubFileSystem::LocalReadDirectory(const std::string& path) {
     return m_root->ReadDirectory(ResolveInRoot(path));
+}
+
+
+std::string SubFileSystem::CwdSnapshot() const {
+    std::lock_guard<std::mutex> lock(m_cwdMutex);
+    return m_cwd;
+}
+
+std::string SubFileSystem::AbsolutePathFor(const std::string& path) const {
+    return NormalizeVirtualPath(path, CwdSnapshot());
 }
 
 }

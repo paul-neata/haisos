@@ -65,6 +65,21 @@ public:
     // GetCurrentDirectory is the IFileSystem counterpart of the C getcwd() function.
     virtual char* GetCurrentDirectory(std::string& buf, size_t size) = 0;
 
+    // Mount makes |toBeMounted| serve every path at or under |whereToMount| on
+    // THIS filesystem, in place -- unlike IFilesystemService::CreateComposedFileSystem,
+    // which leaves its operands alone and returns a new filesystem. Calls are
+    // routed to whichever filesystem owns a path, and that filesystem decides
+    // what they mean, so mounting a disk-backed filesystem into an in-memory one
+    // still writes those paths to disk. Mounting over an existing mount point
+    // replaces it. The mount point need not exist: listing an ancestor shows the
+    // way down to it regardless.
+    virtual void Mount(const std::string& whereToMount, std::shared_ptr<IFileSystem> toBeMounted) = 0;
+
+    // Removes the mount at exactly |mountedPath|. Unmounting a path that is not
+    // a mount point does nothing. Files still open on the unmounted filesystem
+    // keep working until they are closed.
+    virtual void Unmount(const std::string& mountedPath) = 0;
+
     // ReadDirectory returns the non-"." / ".." entries in |path|.
     // There is no direct single C counterpart; it wraps opendir/readdir/closedir
     // on POSIX and FindFirstFile/FindNextFile on Windows.

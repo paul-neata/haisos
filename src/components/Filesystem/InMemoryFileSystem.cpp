@@ -30,11 +30,11 @@ InMemoryFileSystem::InMemoryFileSystem() {
 
 InMemoryFileSystem::~InMemoryFileSystem() = default;
 
-int InMemoryFileSystem::OpenFile(const std::string& pathname, int flags) {
-    return OpenFile(pathname, flags, 0);
+int InMemoryFileSystem::LocalOpenFile(const std::string& pathname, int flags) {
+    return LocalOpenFile(pathname, flags, 0);
 }
 
-int InMemoryFileSystem::OpenFile(const std::string& pathname, int flags, int /*mode*/) {
+int InMemoryFileSystem::LocalOpenFile(const std::string& pathname, int flags, int /*mode*/) {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::string normalized = NormalizeVirtualPath(pathname, m_cwd);
 
@@ -63,12 +63,12 @@ int InMemoryFileSystem::OpenFile(const std::string& pathname, int flags, int /*m
     return fd;
 }
 
-int InMemoryFileSystem::CloseFile(int fd) {
+int InMemoryFileSystem::LocalCloseFile(int fd) {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_openHandles.erase(fd) > 0 ? 0 : -1;
 }
 
-ssize_t InMemoryFileSystem::ReadFile(int fd, void* buf, size_t count) {
+ssize_t InMemoryFileSystem::LocalReadFile(int fd, void* buf, size_t count) {
     std::lock_guard<std::mutex> lock(m_mutex);
     auto handleIt = m_openHandles.find(fd);
     if (handleIt == m_openHandles.end()) {
@@ -89,7 +89,7 @@ ssize_t InMemoryFileSystem::ReadFile(int fd, void* buf, size_t count) {
     return static_cast<ssize_t>(toCopy);
 }
 
-ssize_t InMemoryFileSystem::WriteFile(int fd, const void* buf, size_t count) {
+ssize_t InMemoryFileSystem::LocalWriteFile(int fd, const void* buf, size_t count) {
     std::lock_guard<std::mutex> lock(m_mutex);
     auto handleIt = m_openHandles.find(fd);
     if (handleIt == m_openHandles.end()) {
@@ -112,7 +112,7 @@ ssize_t InMemoryFileSystem::WriteFile(int fd, const void* buf, size_t count) {
     return static_cast<ssize_t>(count);
 }
 
-int InMemoryFileSystem::CreateDirectory(const std::string& pathname, int /*mode*/) {
+int InMemoryFileSystem::LocalCreateDirectory(const std::string& pathname, int /*mode*/) {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::string normalized = NormalizeVirtualPath(pathname, m_cwd);
     if (m_nodes.count(normalized) > 0) {
@@ -126,7 +126,7 @@ int InMemoryFileSystem::CreateDirectory(const std::string& pathname, int /*mode*
     return 0;
 }
 
-int InMemoryFileSystem::RemoveDirectory(const std::string& pathname) {
+int InMemoryFileSystem::LocalRemoveDirectory(const std::string& pathname) {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::string normalized = NormalizeVirtualPath(pathname, m_cwd);
     auto it = m_nodes.find(normalized);
@@ -163,7 +163,7 @@ char* InMemoryFileSystem::GetCurrentDirectory(std::string& buf, size_t size) {
     return &buf[0];
 }
 
-std::vector<DirectoryEntry> InMemoryFileSystem::ReadDirectory(const std::string& path) {
+std::vector<DirectoryEntry> InMemoryFileSystem::LocalReadDirectory(const std::string& path) {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::string normalized = NormalizeVirtualPath(path, m_cwd);
     auto it = m_nodes.find(normalized);
@@ -181,6 +181,16 @@ std::vector<DirectoryEntry> InMemoryFileSystem::ReadDirectory(const std::string&
         }
     }
     return entries;
+}
+
+
+std::string InMemoryFileSystem::CwdSnapshot() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_cwd;
+}
+
+std::string InMemoryFileSystem::AbsolutePathFor(const std::string& path) const {
+    return NormalizeVirtualPath(path, CwdSnapshot());
 }
 
 }

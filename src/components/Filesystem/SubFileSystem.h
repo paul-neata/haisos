@@ -2,6 +2,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include "MountableFileSystem.h"
 #include "interfaces/IFilesystemService.h"
 
 namespace Haisos {
@@ -12,23 +13,27 @@ namespace Haisos {
 // lexically against this filesystem's own virtual root, so escaping the sub-path
 // (e.g. via "..") is structurally impossible: every resolved path is always
 // at or below basePath within root.
-class SubFileSystem : public IFileSystem {
+class SubFileSystem : public MountableFileSystem {
 public:
     SubFileSystem(std::shared_ptr<IFileSystem> root, const std::string& basePath);
     ~SubFileSystem() override;
 
-    int OpenFile(const std::string& pathname, int flags) override;
-    int OpenFile(const std::string& pathname, int flags, int mode) override;
-    int CloseFile(int fd) override;
-    ssize_t ReadFile(int fd, void* buf, size_t count) override;
-    ssize_t WriteFile(int fd, const void* buf, size_t count) override;
+    int LocalOpenFile(const std::string& pathname, int flags) override;
+    int LocalOpenFile(const std::string& pathname, int flags, int mode) override;
+    int LocalCloseFile(int fd) override;
+    ssize_t LocalReadFile(int fd, void* buf, size_t count) override;
+    ssize_t LocalWriteFile(int fd, const void* buf, size_t count) override;
 
-    int CreateDirectory(const std::string& pathname, int mode) override;
-    int RemoveDirectory(const std::string& pathname) override;
+    int LocalCreateDirectory(const std::string& pathname, int mode) override;
+    int LocalRemoveDirectory(const std::string& pathname) override;
     int ChangeDirectory(const std::string& path) override;
     char* GetCurrentDirectory(std::string& buf, size_t size) override;
 
-    std::vector<DirectoryEntry> ReadDirectory(const std::string& path) override;
+    std::vector<DirectoryEntry> LocalReadDirectory(const std::string& path) override;
+
+    std::string AbsolutePathFor(const std::string& path) const override;
+    // A copy of the current directory, taken under m_cwdMutex.
+    std::string CwdSnapshot() const;
 
 private:
     std::string ResolveInRoot(const std::string& path) const;

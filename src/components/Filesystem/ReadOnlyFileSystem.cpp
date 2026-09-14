@@ -12,37 +12,37 @@ std::string ReadOnlyFileSystem::GetCwd() const {
     return m_cwd;
 }
 
-int ReadOnlyFileSystem::OpenFile(const std::string& pathname, int flags) {
+int ReadOnlyFileSystem::LocalOpenFile(const std::string& pathname, int flags) {
     if (RequestsWriteAccess(flags)) {
         return -1;
     }
     return m_inner->OpenFile(NormalizeVirtualPath(pathname, GetCwd()), flags);
 }
 
-int ReadOnlyFileSystem::OpenFile(const std::string& pathname, int flags, int mode) {
+int ReadOnlyFileSystem::LocalOpenFile(const std::string& pathname, int flags, int mode) {
     if (RequestsWriteAccess(flags)) {
         return -1;
     }
     return m_inner->OpenFile(NormalizeVirtualPath(pathname, GetCwd()), flags, mode);
 }
 
-int ReadOnlyFileSystem::CloseFile(int fd) {
+int ReadOnlyFileSystem::LocalCloseFile(int fd) {
     return m_inner->CloseFile(fd);
 }
 
-ssize_t ReadOnlyFileSystem::ReadFile(int fd, void* buf, size_t count) {
+ssize_t ReadOnlyFileSystem::LocalReadFile(int fd, void* buf, size_t count) {
     return m_inner->ReadFile(fd, buf, count);
 }
 
-ssize_t ReadOnlyFileSystem::WriteFile(int /*fd*/, const void* /*buf*/, size_t /*count*/) {
+ssize_t ReadOnlyFileSystem::LocalWriteFile(int /*fd*/, const void* /*buf*/, size_t /*count*/) {
     return -1;
 }
 
-int ReadOnlyFileSystem::CreateDirectory(const std::string& /*pathname*/, int /*mode*/) {
+int ReadOnlyFileSystem::LocalCreateDirectory(const std::string& /*pathname*/, int /*mode*/) {
     return -1;
 }
 
-int ReadOnlyFileSystem::RemoveDirectory(const std::string& /*pathname*/) {
+int ReadOnlyFileSystem::LocalRemoveDirectory(const std::string& /*pathname*/) {
     return -1;
 }
 
@@ -62,8 +62,13 @@ char* ReadOnlyFileSystem::GetCurrentDirectory(std::string& buf, size_t size) {
     return &buf[0];
 }
 
-std::vector<DirectoryEntry> ReadOnlyFileSystem::ReadDirectory(const std::string& path) {
+std::vector<DirectoryEntry> ReadOnlyFileSystem::LocalReadDirectory(const std::string& path) {
     return m_inner->ReadDirectory(NormalizeVirtualPath(path, GetCwd()));
+}
+
+
+std::string ReadOnlyFileSystem::AbsolutePathFor(const std::string& path) const {
+    return NormalizeVirtualPath(path, GetCwd());
 }
 
 }

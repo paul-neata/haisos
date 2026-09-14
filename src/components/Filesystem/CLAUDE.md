@@ -9,6 +9,14 @@ call to whichever underlying filesystem owns that path, and that filesystem
 decides what the call means. Mounting a `PhysicalFileSystem` inside an
 `InMemoryFileSystem` therefore still writes those paths to real disk.
 
+There are two ways to combine filesystems. `IFileSystem::Mount`/`Unmount` change
+a filesystem **in place**, adding or removing a mount point on it.
+`IFilesystemService::CreateComposedFileSystem` leaves both operands untouched and
+returns a **new** filesystem instead. Both share one implementation: the routing,
+file-descriptor translation and mount-point listing all live in
+`MountableFileSystem`, which every filesystem here derives from, so mounting
+behaves identically no matter what you mount onto.
+
 ## Responsibilities
 
 - Provides file operations: open, close, read, write
@@ -32,6 +40,8 @@ decides what the call means. Mounting a `PhysicalFileSystem` inside an
 - `InMemoryFileSystem` - an empty, in-memory read/write `IFileSystem` (no real disk); files are plain byte buffers keyed by normalized path
 - `ReadOnlyFileSystem` - wraps another `IFileSystem`, rejecting every write/create/remove
 - `SubFileSystem` - confines access to a sub-path of another `IFileSystem`, resolved purely lexically (no real disk access, unlike `PhysicalFileSystem`); cannot actually escape its base path by construction
-- `ComposedFileSystem` - overlays one `IFileSystem` inside another at a path; the mount point is synthesized as a directory on listing even if the main filesystem has none there. It hands out its **own** file descriptors mapped to `(which side, inner fd)`: the two underlying filesystems allocate descriptors independently (in-memory and real POSIX fds both start at 3), so the underlying numbers overlap and cannot be used to tell the sides apart.
+- `ComposedFileSystem` - overlays one `IFileSystem` inside another at a path, without touching either; it is a filesystem that delegates to `main` with the overlay registered as a mount point
+- `MountableFileSystem` - the base every filesystem here derives from; implements `Mount`/`Unmount` and the routing they need, so a subclass only implements the `Local*` operations for the paths it owns itself
+- `MountPoints` - the mount table behind that: longest-prefix path matching, plus the file-descriptor translation a mount requires (the two filesystems hand out descriptors from independent namespaces that both start at 3, so a mounted file's descriptor is re-issued from a range far above any real one and can never be confused with the host's)
 
 These four are created via `IFilesystemService` (`src/components/FileSystemService/`), not directly.

@@ -96,6 +96,10 @@ public:
         return m_getcwdReturn;
     }
 
+    // The mock records calls rather than routing, so mounting is a no-op here.
+    void Mount(const std::string&, std::shared_ptr<IFileSystem>) override {}
+    void Unmount(const std::string&) override {}
+
     std::vector<DirectoryEntry> ReadDirectory(const std::string& path) override {
         m_readdirCalls.push_back({path});
         return m_readdirReturn;

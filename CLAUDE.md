@@ -184,11 +184,15 @@ ENV GREETING=${greeting}      # set one outright
 FS workspace PHYSICAL .              # a real disk directory (relative to this file, or absolute)
 FS scratch MEM                       # an empty, in-memory read/write filesystem
 FS readonly RO workspace             # a read-only view of another declared filesystem
-FS inner SUB workspace tools         # a filesystem confined to a sub-path of another filesystem
+FS inner SUB workspace tools         # confined to a sub-path of another filesystem
 
-# MOUNT overlays one filesystem inside another at a path, overriding
+# MOUNT overlays one filesystem inside another at a path, in place, overriding
 # anything already there: MOUNT <main_fs> <path> <fs_to_mount>
 MOUNT workspace /scratch scratch
+
+# FS ... COMPOSED does the same without touching either operand, declaring the
+# result under a new name: FS <name> COMPOSED <main_fs> <path> <fs_to_mount>
+FS combined COMPOSED workspace /scratch scratch
 
 ROOT workspace                 # which declared filesystem (by name) becomes the OS's root
 RUN agent.md                   # start an initial process (.md agent or .lua script); may repeat

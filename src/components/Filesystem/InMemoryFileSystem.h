@@ -3,6 +3,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "MountableFileSystem.h"
 #include "interfaces/IFilesystemService.h"
 
 namespace Haisos {
@@ -11,23 +12,27 @@ namespace Haisos {
 // buffers keyed by normalized path; there is no backing real disk. Intended
 // for scratch/temporary filesystems and as a mount target (see
 // IFilesystemService::CreateComposedFileSystem).
-class InMemoryFileSystem : public IFileSystem {
+class InMemoryFileSystem : public MountableFileSystem {
 public:
     InMemoryFileSystem();
     ~InMemoryFileSystem() override;
 
-    int OpenFile(const std::string& pathname, int flags) override;
-    int OpenFile(const std::string& pathname, int flags, int mode) override;
-    int CloseFile(int fd) override;
-    ssize_t ReadFile(int fd, void* buf, size_t count) override;
-    ssize_t WriteFile(int fd, const void* buf, size_t count) override;
+    int LocalOpenFile(const std::string& pathname, int flags) override;
+    int LocalOpenFile(const std::string& pathname, int flags, int mode) override;
+    int LocalCloseFile(int fd) override;
+    ssize_t LocalReadFile(int fd, void* buf, size_t count) override;
+    ssize_t LocalWriteFile(int fd, const void* buf, size_t count) override;
 
-    int CreateDirectory(const std::string& pathname, int mode) override;
-    int RemoveDirectory(const std::string& pathname) override;
+    int LocalCreateDirectory(const std::string& pathname, int mode) override;
+    int LocalRemoveDirectory(const std::string& pathname) override;
     int ChangeDirectory(const std::string& path) override;
     char* GetCurrentDirectory(std::string& buf, size_t size) override;
 
-    std::vector<DirectoryEntry> ReadDirectory(const std::string& path) override;
+    std::vector<DirectoryEntry> LocalReadDirectory(const std::string& path) override;
+
+    std::string AbsolutePathFor(const std::string& path) const override;
+    // A copy of the current directory, taken under m_mutex.
+    std::string CwdSnapshot() const;
 
 private:
     struct Node {

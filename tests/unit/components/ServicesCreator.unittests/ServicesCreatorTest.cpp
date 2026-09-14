@@ -22,7 +22,7 @@ constexpr int kWriteCreateTruncate = O_WRONLY | O_CREAT | O_TRUNC;
 
 TEST(ServicesCreatorTest, CreateNetworkServiceCreatesHTTPClient) {
     Factory factory;
-    auto servicesCreator = CreateServicesCreator(factory);
+    auto servicesCreator = CreateServicesCreator();
 
     auto networkService = servicesCreator->CreateNetworkService();
     ASSERT_NE(networkService, nullptr);
@@ -33,7 +33,7 @@ TEST(ServicesCreatorTest, CreateNetworkServiceCreatesHTTPClient) {
 
 TEST(ServicesCreatorTest, CreateLLMServiceCreatesAgent) {
     Factory factory;
-    auto servicesCreator = CreateServicesCreator(factory);
+    auto servicesCreator = CreateServicesCreator();
     auto networkService = servicesCreator->CreateNetworkService();
 
     auto llmService = servicesCreator->CreateLLMService(*networkService, "http://localhost:11434/api/chat", "llama3", "");
@@ -54,7 +54,7 @@ TEST(ServicesCreatorTest, CreateLLMServiceCreatesAgent) {
 
 TEST(ServicesCreatorTest, LLMServiceExposesToolFactory) {
     Factory factory;
-    auto servicesCreator = CreateServicesCreator(factory);
+    auto servicesCreator = CreateServicesCreator();
     auto networkService = servicesCreator->CreateNetworkService();
 
     auto llmService = servicesCreator->CreateLLMService(*networkService, "http://localhost:11434/api/chat", "llama3", "");
@@ -65,7 +65,7 @@ TEST(ServicesCreatorTest, LLMServiceExposesToolFactory) {
 
 TEST(ServicesCreatorTest, CreateEmptyInMemFileSystemIsReadWrite) {
     Factory factory;
-    auto servicesCreator = CreateServicesCreator(factory);
+    auto servicesCreator = CreateServicesCreator();
     auto filesystemService = servicesCreator->CreateFileSystemService();
 
     auto fs = filesystemService->CreateEmptyInMemFileSystem();
@@ -87,7 +87,7 @@ TEST(ServicesCreatorTest, CreateEmptyInMemFileSystemIsReadWrite) {
 
 TEST(ServicesCreatorTest, CreateReadOnlyFileSystemRejectsWrites) {
     Factory factory;
-    auto servicesCreator = CreateServicesCreator(factory);
+    auto servicesCreator = CreateServicesCreator();
     auto filesystemService = servicesCreator->CreateFileSystemService();
 
     auto inner = filesystemService->CreateEmptyInMemFileSystem();
@@ -100,7 +100,7 @@ TEST(ServicesCreatorTest, CreateReadOnlyFileSystemRejectsWrites) {
 
 TEST(ServicesCreatorTest, CreateSubFileSystemConfinesToBasePath) {
     Factory factory;
-    auto servicesCreator = CreateServicesCreator(factory);
+    auto servicesCreator = CreateServicesCreator();
     auto filesystemService = servicesCreator->CreateFileSystemService();
 
     auto root = filesystemService->CreateEmptyInMemFileSystem();
@@ -126,7 +126,7 @@ TEST(ServicesCreatorTest, CreateSubFileSystemConfinesToBasePath) {
 
 TEST(ServicesCreatorTest, MountFileSystemOverlaysAtMountPoint) {
     Factory factory;
-    auto servicesCreator = CreateServicesCreator(factory);
+    auto servicesCreator = CreateServicesCreator();
     auto filesystemService = servicesCreator->CreateFileSystemService();
 
     auto main = filesystemService->CreateEmptyInMemFileSystem();

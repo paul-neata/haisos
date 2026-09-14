@@ -5,7 +5,7 @@ namespace Haisos {
 
 class ServicesCreator : public IServicesCreator {
 public:
-    explicit ServicesCreator(IFactory& factory);
+    ServicesCreator();
     ~ServicesCreator() override;
 
     std::unique_ptr<IFilesystemService> CreateFileSystemService() override;
@@ -15,9 +15,6 @@ public:
         const std::string& endpoint,
         const std::string& modelName,
         const std::string& apiKey) override;
-
-private:
-    IFactory& m_factory;
 };
 
 }

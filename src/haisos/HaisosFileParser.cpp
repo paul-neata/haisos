@@ -159,6 +159,28 @@ HaisosFileParseResult ParseHaisosFile(
                 return result;
             }
             values[name] = value;
+        } else if (key == "ENV") {
+            if (rest.empty()) {
+                result.error = "Error: line " + std::to_string(lineNumber) + ": ENV requires a name\n";
+                return result;
+            }
+            HaisosFileEnvEntry entry;
+            auto eq = rest.find('=');
+            if (eq == std::string::npos) {
+                // `ENV NAME`: import NAME from the host environment.
+                entry.name = Trim(rest);
+                entry.importFromHost = true;
+            } else {
+                entry.name = Trim(rest.substr(0, eq));
+                if (!SubstituteOrFail(rest.substr(eq + 1), values, lineNumber, &entry.value, &result.error)) {
+                    return result;
+                }
+            }
+            if (entry.name.empty()) {
+                result.error = "Error: line " + std::to_string(lineNumber) + ": ENV requires a name\n";
+                return result;
+            }
+            result.config.envEntries.push_back(std::move(entry));
         } else if (key == "ROOT") {
             if (sawRoot) {
                 result.error = "Error: line " + std::to_string(lineNumber) + ": only one ROOT directive is allowed\n";
@@ -289,12 +311,24 @@ std::string GetHaisosFileTemplate() {
         "# declared above it.\n"
         "VAR greeting=Hello-${name}\n"
         "\n"
+        "# ENV sets a variable in this OS's environment, which every process and\n"
+        "# sub-OS inherits. `ENV NAME=value` sets it outright; `ENV NAME` alone\n"
+        "# imports NAME from the host OS -- the only way a host variable gets in.\n"
+        "#\n"
+        "# The LLM configuration is read from here and has no built-in default:\n"
+        "# whatever these say is what agents will talk to. Swap either line for\n"
+        "# the bare `ENV HAISOS_ENDPOINT` form to take the host's value instead.\n"
+        "ENV HAISOS_ENDPOINT=http://localhost:11434/api/chat\n"
+        "ENV HAISOS_MODEL=llama3\n"
+        "# ENV HAISOS_API_KEY          # import the host's key, if one is needed\n"
+        "# ENV GREETING=${greeting}\n"
+        "\n"
         "# FS declares a named filesystem: FS <name> <type> <args...>\n"
         "#   FS <name> PHYSICAL <folder>       a real disk directory (relative to\n"
         "#                                     this file, or absolute; may use . and ..)\n"
-        "#   FS <name> RO <other_fs>           a read-only view of another declared FS\n"
+        "#   FS <name> RO <other_fs>           a read-only wrapper over another declared FS\n"
         "#   FS <name> MEM                     an empty, in-memory read/write FS\n"
-        "#   FS <name> SUB <other_fs> <folder> a view confined to a sub-path of another FS\n"
+        "#   FS <name> SUB <other_fs> <folder> a filesystem confined to a sub-path of another FS\n"
         "FS workspace PHYSICAL .\n"
         "\n"
         "# MOUNT overlays one filesystem inside another at a path, overriding\n"

@@ -1,11 +1,18 @@
 # Factory
 
-Low-level factory for real/physical primitives.
+Factory for the root concepts: the things that must exist before anything else
+can.
 
 ## Responsibilities
 
-- Creates real primitives only: a physical console, an HTTP client, and disk-backed filesystems (unrooted and `PhysicalFileSystem`)
-- Knows nothing about agents, LLM communication, or tool factories -- that all lives in `ILLMService` (see `src/components/LLMService/`)
+- Creates a physical console, a disk-backed `PhysicalFileSystem`, the services
+  layer (`IServicesCreator`), and the OS itself (`IHaisosOS`)
+- Hands out no unrooted filesystem: every filesystem it creates is anchored
+  somewhere, and an OS receives its root at creation and can never step outside
+  it -- it can only compose further filesystems on top of that root
+- Knows nothing about agents, LLM communication, or tool factories -- that all
+  lives in `ILLMService` (see `src/components/LLMService/`). HTTP clients come
+  from `INetworkService`, not from here.
 
 ## Key Classes
 

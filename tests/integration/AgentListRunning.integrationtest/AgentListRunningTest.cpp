@@ -14,7 +14,7 @@ bool TestAgentListRunning() {
     auto [endpoint, model, apiKey] = IntegrationTest::GetEndpointModelAndApiKey();
 
     Factory factory;
-    auto servicesCreator = CreateServicesCreator(factory);
+    auto servicesCreator = CreateServicesCreator();
     auto networkService = std::shared_ptr<INetworkService>(servicesCreator->CreateNetworkService());
     auto llmService = servicesCreator->CreateLLMService(*networkService, endpoint, model, apiKey);
 

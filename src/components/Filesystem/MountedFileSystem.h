@@ -7,11 +7,11 @@
 
 namespace Haisos {
 
-// A view of |main| with |mounted| overlaid at |whereToMount|: paths at or
+// A composition of |main| with |mounted| overlaid at |whereToMount|: paths at or
 // under whereToMount are served by mounted (translated to be relative to
 // mounted's own root), overriding anything main has there; every other path
 // is served by main, unchanged. Neither main nor mounted is mutated -- this
-// is a new composite view, not an in-place operation. ReadDirectory on an
+// is a new composed filesystem, not an in-place operation. ReadDirectory on an
 // ancestor of whereToMount synthesizes the next path segment towards it as a
 // directory entry, even if main has no real directory there, so the mount
 // point is always reachable by listing down from the root.
@@ -37,7 +37,7 @@ private:
     // Which of the two underlying filesystems an open file lives on.
     enum class Side { Main, Mounted };
 
-    // What a synthetic fd handed out by this view actually refers to.
+    // What a synthetic fd handed out by this filesystem actually refers to.
     struct Handle {
         Side side = Side::Main;
         int innerFd = -1;
@@ -50,9 +50,9 @@ private:
 
     const std::shared_ptr<IFileSystem>& FileSystemFor(Side side) const;
     // Takes the fd an underlying filesystem returned and gives back the
-    // synthetic fd callers of this view see (or the underlying error value).
+    // synthetic fd callers of this filesystem see (or the underlying error value).
     int RegisterFd(Side side, int innerFd);
-    // Returns false if |fd| was not handed out by this view (or is already
+    // Returns false if |fd| was not handed out by this filesystem (or is already
     // closed); otherwise fills in |handle|.
     bool LookupFd(int fd, Handle& handle) const;
     // Returns the next synthetic fd that is not currently live, or -1 if there
@@ -62,8 +62,8 @@ private:
     std::shared_ptr<IFileSystem> m_main;
     std::string m_mountPoint;
     std::shared_ptr<IFileSystem> m_mounted;
-    // This view's own current directory; not delegated to main/mounted (they
-    // may be shared by other views/processes). Guarded by m_cwdMutex: this
+    // This filesystem's own current directory; not delegated to main/mounted (they
+    // may be shared by other composed filesystems and processes). Guarded by m_cwdMutex: this
     // filesystem instance may itself be shared by multiple concurrently-
     // running processes, each on its own thread.
     mutable std::mutex m_cwdMutex;
@@ -72,7 +72,7 @@ private:
     // main and mounted have independent fd namespaces that routinely overlap
     // (InMemoryFileSystem hands out fds from 3 up, and PhysicalFileSystem
     // returns real OS fds, which also start around 3), so an underlying fd
-    // alone cannot say which side owns it. This view therefore hands out fds
+    // alone cannot say which side owns it. This filesystem therefore hands out fds
     // from its own namespace and maps each one to the side it was opened on
     // plus the fd that side returned; every fd-taking method translates back
     // before dispatching.

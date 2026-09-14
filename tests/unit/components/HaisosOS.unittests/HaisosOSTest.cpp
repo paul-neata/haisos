@@ -28,7 +28,7 @@ protected:
     }
 
     std::shared_ptr<IHaisosOS> BuildOS(bool allowStartProcess = true) {
-        auto servicesCreator = CreateServicesCreator(m_factory);
+        auto servicesCreator = CreateServicesCreator();
         auto* servicesCreatorPtr = servicesCreator.get();
         m_servicesCreators.push_back(std::move(servicesCreator));
 
@@ -38,11 +38,15 @@ protected:
         // The root OS created via CreateHaisosOS always allows starting
         // processes; a restricted root for tests is built via CreateSubOS
         // (matching how any other caller would restrict it).
-        auto os = CreateHaisosOS(*servicesCreatorPtr, rootFileSystem, physicalConsole, kUnreachableEndpoint, "llama3", "");
+        OSEnvironment environment{
+            {kEnvEndpoint, kUnreachableEndpoint},
+            {kEnvModel, "llama3"},
+        };
+        auto os = m_factory.CreateHaisosOS(rootFileSystem, *servicesCreatorPtr, physicalConsole, environment, 0);
         if (!allowStartProcess) {
             SubOSPermissions permissions;
             permissions.allowStartProcess = false;
-            os = os->CreateSubOS(permissions);
+            os = os->CreateSubOS(permissions, /*creatorProcessPid=*/0);
         }
         return os;
     }
@@ -119,7 +123,7 @@ TEST_F(HaisosOSTest, CreateSubOSConfinesToSubRoot) {
     auto os = BuildOS();
     SubOSPermissions permissions;
     permissions.subRootRelativePath = "sub";
-    auto subOS = os->CreateSubOS(permissions);
+    auto subOS = os->CreateSubOS(permissions, /*creatorProcessPid=*/0);
     ASSERT_NE(subOS, nullptr);
 
     EXPECT_NE(subOS->StartProcess("inner.md", {}, nullptr), nullptr);
@@ -131,14 +135,14 @@ TEST_F(HaisosOSTest, CreateSubOSRejectsEscapingRoot) {
     auto os = BuildOS();
     SubOSPermissions permissions;
     permissions.subRootRelativePath = "../../etc";
-    EXPECT_EQ(os->CreateSubOS(permissions), nullptr);
+    EXPECT_EQ(os->CreateSubOS(permissions, /*creatorProcessPid=*/0), nullptr);
 }
 
 TEST_F(HaisosOSTest, CreateSubOSDisallowsStartProcessWhenRequested) {
     auto os = BuildOS();
     SubOSPermissions permissions;
     permissions.allowStartProcess = false;
-    auto subOS = os->CreateSubOS(permissions);
+    auto subOS = os->CreateSubOS(permissions, /*creatorProcessPid=*/0);
     ASSERT_NE(subOS, nullptr);
 
     EXPECT_EQ(subOS->StartProcess("hello.md", {}, nullptr), nullptr);

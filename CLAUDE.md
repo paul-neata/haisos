@@ -132,11 +132,18 @@ node ./output/wasm/haisos.js
 
 ## Environment Variables
 
-| Variable | Description | Default |
+| Variable | Description | Typical value |
 |----------|-------------|---------|
 | `HAISOS_ENDPOINT` | LLM API endpoint URL | `http://localhost:11434/api/chat` |
 | `HAISOS_MODEL` | Model name | `kimi-k2.6:cloud` |
 | `HAISOS_API_KEY` | API key (optional for local Ollama) | (empty) |
+
+These are read from the **OS's own environment**, not the host's, and have no
+built-in default: whatever the haisosfile's `ENV` directives say is what agents
+talk to. Set them outright with `ENV HAISOS_MODEL=llama3`, or take the host's
+value with the bare `ENV HAISOS_MODEL` form. `haisos --init` writes the defaults
+above into the generated haisosfile. Because they live in the environment, a
+sub-OS inherits the LLM configuration along with everything else.
 
 ## Command-Line Arguments
 
@@ -167,11 +174,17 @@ A small Dockerfile-style language (parsed by `HaisosFileParser` in `src/haisos/`
 ARG name=default_value        # declares an argument; overridable via `-- name=value`
 VAR greeting=Hello-${name}    # declares a variable; RHS may reference ${ARG}/${VAR} names
 
+# ENV sets a variable in the OS's environment, inherited by every process and
+# sub-OS it starts. `ENV NAME=value` sets it; `ENV NAME` alone imports NAME
+# from the host OS -- the only way a host variable reaches the Haisos OS.
+ENV HAISOS_ENDPOINT           # import the host's HAISOS_ENDPOINT, if set
+ENV GREETING=${greeting}      # set one outright
+
 # FS declares a named filesystem: FS <name> <type> <args...>
 FS workspace PHYSICAL .              # a real disk directory (relative to this file, or absolute)
 FS scratch MEM                       # an empty, in-memory read/write filesystem
 FS readonly RO workspace             # a read-only view of another declared filesystem
-FS inner SUB workspace tools         # a view confined to a sub-path of another filesystem
+FS inner SUB workspace tools         # a filesystem confined to a sub-path of another filesystem
 
 # MOUNT overlays one filesystem inside another at a path, overriding
 # anything already there: MOUNT <main_fs> <path> <fs_to_mount>
@@ -253,11 +266,11 @@ Each component lives in its own folder under `src/components/` and has its own `
 | **Console** | `src/components/Console/` | Async physical console output, plus adapters giving agents a write-only view onto it (or onto memory only) |
 | **Logger** | `src/components/Logger/` | Thread-safe logging with configurable receivers |
 | **HTTPClient** | `src/components/HTTPClient/` | Platform-specific HTTP implementation (Curl/WinHTTP/Fetch) |
-| **Factory** | `src/components/Factory/` | Dependency injection factory |
+| **Factory** | `src/components/Factory/` | Creates the root concepts: physical console, disk-backed filesystem, the services layer, and the OS itself |
 | **Filesystem** | `src/components/Filesystem/` | Composable `IFileSystem` implementations: an unrooted passthrough, a `PhysicalFileSystem` jailed to a real disk path, plus in-memory, read-only, sub-path and mounted/overlay views |
 | **ServicesCreator** | `src/components/ServicesCreator/` | Factory-of-services built on `IFactory`; creates `IFilesystemService`/`INetworkService`/`ILLMService`, passing each the services it depends on |
 | **NetworkService** | `src/components/NetworkService/` | Service-layer wrapper over network access (creates `IHTTPClient`) |
-| **FileSystemService** | `src/components/FileSystemService/` | Stateless factory that composes filesystem views (read-only / in-memory / sub / mount); holds no filesystem of its own |
+| **FileSystemService** | `src/components/FileSystemService/` | Stateless factory that composes filesystems (read-only / in-memory / sub / mount); holds no filesystem of its own |
 | **LLMService** | `src/components/LLMService/` | Service-layer entry point for creating LLM-backed agents; exposes the shared agent-management tool set |
 | **HaisosOS** | `src/components/HaisosOS/` | An OS instance: owns a rooted filesystem, physical console, and services; starts processes (`.md` agents, `.lua` scripts) and sub-OS instances |
 

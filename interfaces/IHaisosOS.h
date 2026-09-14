@@ -4,6 +4,7 @@
 #include <vector>
 #include "IProcess.h"
 #include "IServicesCreator.h"
+#include "IOSEnvironment.h"
 
 namespace Haisos {
 
@@ -37,28 +38,29 @@ public:
 
     virtual std::vector<std::shared_ptr<IProcess>> GetRunningProcesses() const = 0;
 
-    virtual std::shared_ptr<IHaisosOS> CreateSubOS(const SubOSPermissions& permissions) = 0;
+    // creatorProcessPid is the pid of the process spawning the sub-OS; it becomes
+    // the sub-OS's GetOSProcessID(). The sub-OS inherits this OS's environment.
+    virtual std::shared_ptr<IHaisosOS> CreateSubOS(
+        const SubOSPermissions& permissions,
+        uint64_t creatorProcessPid) = 0;
 
-    // The OS's own mounted root filesystem.
-    virtual IFileSystem& GetFileSystem() = 0;
-    // The filesystem-composition factory (read-only/in-memory/sub/mount views).
+    // The OS's root filesystem, fixed at creation. An OS cannot step outside it;
+    // GetFileSystemService() below composes further filesystems on top of it.
+    virtual IFileSystem& GetRootFileSystem() = 0;
+    // The filesystem-composition factory (read-only/in-memory/sub/mount).
     virtual IFilesystemService& GetFileSystemService() = 0;
+    // Access to this OS's own (sandboxed) services.
     virtual IServicesCreator& GetServicesCreator() = 0;
+
+    // The environment this OS was created with, inherited by every process and
+    // sub-OS it starts.
+    virtual const OSEnvironment& GetOsEnvironment() const = 0;
+
+    // 0 for the initial OS; for a sub-OS, the pid of the process that created it.
+    virtual uint64_t GetOSProcessID() const = 0;
 };
 
-// Builds the root IHaisosOS. networkService/llmService/filesystem-service are
-// not passed in -- they are created internally via servicesCreator (llmService
-// using endpoint/modelName/apiKey); rootFileSystem becomes the OS's initial
-// mounted root (build one via IFactory::CreatePhysicalFileSystem for a real
-// disk directory, or via a filesystem service's CreateEmptyInMemFileSystem/
-// etc. for anything else). The root OS always allows starting processes;
-// only a sub-OS (see CreateSubOS) can be more restricted.
-std::shared_ptr<IHaisosOS> CreateHaisosOS(
-    IServicesCreator& servicesCreator,
-    std::shared_ptr<IFileSystem> rootFileSystem,
-    std::shared_ptr<IPhysicalConsole> physicalConsole,
-    const std::string& endpoint,
-    const std::string& modelName,
-    const std::string& apiKey);
+// Allocates a process id that is unique across every OS in this program.
+uint64_t AllocateUniquePid();
 
 }

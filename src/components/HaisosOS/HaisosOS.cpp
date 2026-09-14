@@ -55,7 +55,8 @@ HaisosOS::HaisosOS(
     std::shared_ptr<IFileSystem> rootFileSystem,
     std::shared_ptr<IPhysicalConsole> physicalConsole,
     bool allowStartProcess,
-    std::shared_ptr<std::atomic<uint64_t>> pidCounter)
+    OSEnvironment environment,
+    uint64_t osProcessId)
     : m_servicesCreator(servicesCreator)
     , m_networkService(std::move(networkService))
     , m_llmService(std::move(llmService))
@@ -63,7 +64,8 @@ HaisosOS::HaisosOS(
     , m_rootFileSystem(std::move(rootFileSystem))
     , m_physicalConsole(std::move(physicalConsole))
     , m_allowStartProcess(allowStartProcess)
-    , m_pidCounter(std::move(pidCounter))
+    , m_environment(std::move(environment))
+    , m_osProcessId(osProcessId)
     , m_osToolFactory(*this, allowStartProcess)
 {
 }
@@ -186,7 +188,7 @@ std::shared_ptr<IProcess> HaisosOS::StartAgentProcess(const std::string& program
     // "injection" phrasing buys nothing against whoever wrote the file, while its
     // lossy rewriting (it deletes anything between '<' and '>', drops whole lines,
     // and caps at 64KB) would silently corrupt the program being run.
-    uint64_t pid = m_pidCounter->fetch_add(1);
+    uint64_t pid = AllocateUniquePid();
     std::string name = GetStem(programPath) + "_" + std::to_string(pid);
 
     auto console = std::make_unique<AgentConsoleAdapter>(m_physicalConsole, name);
@@ -225,7 +227,7 @@ std::shared_ptr<IProcess> HaisosOS::StartLuaProcess(const std::string& programPa
         return nullptr;
     }
 
-    uint64_t pid = m_pidCounter->fetch_add(1);
+    uint64_t pid = AllocateUniquePid();
     std::string name = GetStem(programPath) + "_" + std::to_string(pid);
 
     auto console = std::make_shared<AgentConsoleAdapter>(m_physicalConsole, name);
@@ -286,7 +288,7 @@ std::vector<std::shared_ptr<IProcess>> HaisosOS::GetRunningProcesses() const {
     return m_processes;
 }
 
-std::shared_ptr<IHaisosOS> HaisosOS::CreateSubOS(const SubOSPermissions& permissions) {
+std::shared_ptr<IHaisosOS> HaisosOS::CreateSubOS(const SubOSPermissions& permissions, uint64_t creatorProcessPid) {
     // SubFileSystem itself cannot actually escape (it clamps a climbing ".."
     // at its own virtual root), but a caller that passed a path escaping this
     // OS's root almost certainly made a mistake and wants an error, not a
@@ -323,10 +325,11 @@ std::shared_ptr<IHaisosOS> HaisosOS::CreateSubOS(const SubOSPermissions& permiss
         subFileSystem,
         m_physicalConsole,
         m_allowStartProcess && permissions.allowStartProcess,
-        m_pidCounter);
+        m_environment,
+        creatorProcessPid);
 }
 
-IFileSystem& HaisosOS::GetFileSystem() {
+IFileSystem& HaisosOS::GetRootFileSystem() {
     return *m_rootFileSystem;
 }
 
@@ -338,14 +341,56 @@ IServicesCreator& HaisosOS::GetServicesCreator() {
     return m_servicesCreator;
 }
 
+const OSEnvironment& HaisosOS::GetOsEnvironment() const {
+    return m_environment;
+}
+
+uint64_t HaisosOS::GetOSProcessID() const {
+    return m_osProcessId;
+}
+
+uint64_t AllocateUniquePid() {
+    // One allocator for the whole program, so a pid identifies a process (and,
+    // through GetOSProcessID(), the OS it owns) uniquely no matter which OS tree
+    // it came from. Starts at 1: 0 means "no parent"/"the initial OS".
+    static std::atomic<uint64_t> counter{1};
+    return counter.fetch_add(1);
+}
+
+namespace {
+
+std::string EnvValue(const OSEnvironment& environment, const char* key) {
+    auto it = environment.find(key);
+    return (it == environment.end()) ? std::string() : it->second;
+}
+
+} // namespace
+
 std::shared_ptr<IHaisosOS> CreateHaisosOS(
-    IServicesCreator& servicesCreator,
     std::shared_ptr<IFileSystem> rootFileSystem,
+    IServicesCreator& servicesCreator,
     std::shared_ptr<IPhysicalConsole> physicalConsole,
-    const std::string& endpoint,
-    const std::string& modelName,
-    const std::string& apiKey)
+    const OSEnvironment& environment,
+    uint64_t osProcessId)
 {
+    // The LLM configuration is part of the OS's environment rather than a set of
+    // constructor parameters, so a sub-OS inherits it along with everything else.
+    // There are deliberately no built-in defaults: the haisosfile's ENV
+    // directives are the single source of truth, so the configuration a run used
+    // is always readable from the haisosfile rather than half of it living here.
+    std::string endpoint = EnvValue(environment, kEnvEndpoint);
+    std::string modelName = EnvValue(environment, kEnvModel);
+    std::string apiKey = EnvValue(environment, kEnvApiKey);
+
+    if (endpoint.empty() || modelName.empty()) {
+        LogWarning(
+            "HaisosOS: %s is not set in the OS environment; agents will fail to reach an LLM. "
+            "Set it in the haisosfile with `ENV %s=<value>`, or import the host's with `ENV %s`.",
+            endpoint.empty() ? kEnvEndpoint : kEnvModel,
+            endpoint.empty() ? kEnvEndpoint : kEnvModel,
+            endpoint.empty() ? kEnvEndpoint : kEnvModel);
+    }
+
     std::shared_ptr<INetworkService> networkService = servicesCreator.CreateNetworkService();
     std::shared_ptr<ILLMService> llmService = servicesCreator.CreateLLMService(*networkService, endpoint, modelName, apiKey);
     auto filesystemServiceFactory = servicesCreator.CreateFileSystemService();
@@ -358,7 +403,8 @@ std::shared_ptr<IHaisosOS> CreateHaisosOS(
         std::move(rootFileSystem),
         std::move(physicalConsole),
         /*allowStartProcess=*/true,
-        std::make_shared<std::atomic<uint64_t>>(1));
+        environment,
+        osProcessId);
 }
 
 }

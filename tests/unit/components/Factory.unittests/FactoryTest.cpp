@@ -13,16 +13,10 @@ TEST(FactoryTest, CreatePhysicalConsole) {
     EXPECT_NE(consoleWithLog, nullptr);
 }
 
-TEST(FactoryTest, CreateHTTPClient) {
+TEST(FactoryTest, CreateServicesCreator) {
     Factory factory;
-    auto httpClient = factory.CreateHTTPClient();
-    EXPECT_NE(httpClient, nullptr);
-}
-
-TEST(FactoryTest, CreateFilesystem) {
-    Factory factory;
-    auto filesystem = factory.CreateFilesystem();
-    EXPECT_NE(filesystem, nullptr);
+    auto servicesCreator = factory.CreateServicesCreator();
+    EXPECT_NE(servicesCreator, nullptr);
 }
 
 TEST(FactoryTest, CreatePhysicalFileSystem) {

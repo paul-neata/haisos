@@ -170,3 +170,50 @@ TEST(HaisosFileParserTest, TemplateParsesCleanly) {
     ASSERT_EQ(result.config.runEntries.size(), 1u);
     EXPECT_EQ(result.config.runEntries[0].programPath, "agent.md");
 }
+
+TEST(HaisosFileParserTest, EnvSetsValueDirectly) {
+    auto result = ParseHaisosFile("ENV GREETING=hello\nRUN agent.md\n", {});
+
+    EXPECT_TRUE(result.error.empty());
+    ASSERT_EQ(result.config.envEntries.size(), 1u);
+    EXPECT_EQ(result.config.envEntries[0].name, "GREETING");
+    EXPECT_EQ(result.config.envEntries[0].value, "hello");
+    EXPECT_FALSE(result.config.envEntries[0].importFromHost);
+}
+
+TEST(HaisosFileParserTest, EnvWithoutValueImportsFromHost) {
+    auto result = ParseHaisosFile("ENV HAISOS_MODEL\nRUN agent.md\n", {});
+
+    EXPECT_TRUE(result.error.empty());
+    ASSERT_EQ(result.config.envEntries.size(), 1u);
+    EXPECT_EQ(result.config.envEntries[0].name, "HAISOS_MODEL");
+    EXPECT_TRUE(result.config.envEntries[0].importFromHost);
+}
+
+TEST(HaisosFileParserTest, EnvValueSupportsSubstitution) {
+    auto result = ParseHaisosFile("ARG who=world\nENV GREETING=hi-${who}\nRUN agent.md\n", {});
+
+    EXPECT_TRUE(result.error.empty());
+    ASSERT_EQ(result.config.envEntries.size(), 1u);
+    EXPECT_EQ(result.config.envEntries[0].value, "hi-world");
+}
+
+TEST(HaisosFileParserTest, EnvRequiresAName) {
+    auto result = ParseHaisosFile("ENV\nRUN agent.md\n", {});
+
+    EXPECT_FALSE(result.error.empty());
+}
+
+TEST(HaisosFileParserTest, EnvRejectsEmptyNameBeforeEquals) {
+    auto result = ParseHaisosFile("ENV =value\nRUN agent.md\n", {});
+
+    EXPECT_FALSE(result.error.empty());
+}
+
+TEST(HaisosFileParserTest, TemplateDeclaresEnvAndParsesCleanly) {
+    // --init must emit a haisosfile that actually parses, including its ENV lines.
+    auto result = ParseHaisosFile(GetHaisosFileTemplate(), {});
+
+    EXPECT_TRUE(result.error.empty()) << result.error;
+    EXPECT_FALSE(result.config.envEntries.empty());
+}

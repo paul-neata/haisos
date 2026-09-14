@@ -47,7 +47,7 @@ bool FileExists(IFileSystem& fs, const std::string& path) {
 } // namespace
 
 TEST_F(HaisosFileSystemBuilderTest, NoFsStepsUsesHaisosFileDirWhenRootEmpty) {
-    auto servicesCreator = CreateServicesCreator(factory);
+    auto servicesCreator = CreateServicesCreator();
     auto filesystemService = servicesCreator->CreateFileSystemService();
 
     HaisosFileConfig config;
@@ -60,7 +60,7 @@ TEST_F(HaisosFileSystemBuilderTest, NoFsStepsUsesHaisosFileDirWhenRootEmpty) {
 }
 
 TEST_F(HaisosFileSystemBuilderTest, NoFsStepsWithLegacyRootPath) {
-    auto servicesCreator = CreateServicesCreator(factory);
+    auto servicesCreator = CreateServicesCreator();
     auto filesystemService = servicesCreator->CreateFileSystemService();
 
     HaisosFileConfig config;
@@ -74,7 +74,7 @@ TEST_F(HaisosFileSystemBuilderTest, NoFsStepsWithLegacyRootPath) {
 }
 
 TEST_F(HaisosFileSystemBuilderTest, RootByNameSelectsDeclaredFilesystem) {
-    auto servicesCreator = CreateServicesCreator(factory);
+    auto servicesCreator = CreateServicesCreator();
     auto filesystemService = servicesCreator->CreateFileSystemService();
 
     HaisosFileConfig config;
@@ -100,7 +100,7 @@ TEST_F(HaisosFileSystemBuilderTest, RootByNameSelectsDeclaredFilesystem) {
 }
 
 TEST_F(HaisosFileSystemBuilderTest, NoRootUsesLastDeclaredFilesystem) {
-    auto servicesCreator = CreateServicesCreator(factory);
+    auto servicesCreator = CreateServicesCreator();
     auto filesystemService = servicesCreator->CreateFileSystemService();
 
     HaisosFileConfig config;
@@ -124,7 +124,7 @@ TEST_F(HaisosFileSystemBuilderTest, NoRootUsesLastDeclaredFilesystem) {
 }
 
 TEST_F(HaisosFileSystemBuilderTest, RoReferencingUnknownFilesystemIsError) {
-    auto servicesCreator = CreateServicesCreator(factory);
+    auto servicesCreator = CreateServicesCreator();
     auto filesystemService = servicesCreator->CreateFileSystemService();
 
     HaisosFileConfig config;
@@ -142,7 +142,7 @@ TEST_F(HaisosFileSystemBuilderTest, RoReferencingUnknownFilesystemIsError) {
 }
 
 TEST_F(HaisosFileSystemBuilderTest, MountRetargetsNamedFilesystem) {
-    auto servicesCreator = CreateServicesCreator(factory);
+    auto servicesCreator = CreateServicesCreator();
     auto filesystemService = servicesCreator->CreateFileSystemService();
 
     HaisosFileConfig config;
@@ -178,7 +178,7 @@ TEST_F(HaisosFileSystemBuilderTest, MountRetargetsNamedFilesystem) {
 }
 
 TEST_F(HaisosFileSystemBuilderTest, RootNotMatchingAnyDeclaredNameFallsBackToLegacyPath) {
-    auto servicesCreator = CreateServicesCreator(factory);
+    auto servicesCreator = CreateServicesCreator();
     auto filesystemService = servicesCreator->CreateFileSystemService();
 
     HaisosFileConfig config;

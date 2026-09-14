@@ -6,10 +6,10 @@
 
 namespace Haisos {
 
-// A view confined to a sub-path of an existing IFileSystem, addressed
+// A filesystem confined to a sub-path of an existing IFileSystem, addressed
 // through the IFileSystem abstraction itself (no real disk access) -- unlike
 // PhysicalFileSystem, which jails a real disk directory. Paths are resolved
-// lexically against this view's own virtual root, so escaping the sub-path
+// lexically against this filesystem's own virtual root, so escaping the sub-path
 // (e.g. via "..") is structurally impossible: every resolved path is always
 // at or below basePath within root.
 class SubFileSystem : public IFileSystem {
@@ -35,8 +35,8 @@ private:
 
     std::shared_ptr<IFileSystem> m_root;
     std::string m_basePath;
-    // This view's own current directory, relative to basePath. Not delegated
-    // to root's ChangeDirectory (root may be shared by other views/processes).
+    // This filesystem's own current directory, relative to basePath. Not delegated
+    // to root's ChangeDirectory (root may be shared by other composed filesystems and processes).
     // Guarded by m_cwdMutex: this filesystem instance may be shared by
     // multiple concurrently-running processes, each on its own thread.
     mutable std::mutex m_cwdMutex;

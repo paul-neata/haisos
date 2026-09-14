@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include "interfaces/IFactory.h"
 #include "interfaces/IServicesCreator.h"
 #include "HaisosFileParser.h"
 

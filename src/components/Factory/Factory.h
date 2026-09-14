@@ -12,9 +12,14 @@ public:
 
     // IFactory interface
     std::shared_ptr<IPhysicalConsole> CreatePhysicalConsole(bool registerAsLogMessageReceiver) override;
-    std::unique_ptr<IHTTPClient> CreateHTTPClient() override;
-    std::unique_ptr<IFileSystem> CreateFilesystem() override;
     std::unique_ptr<IFileSystem> CreatePhysicalFileSystem(const std::string& rootPath) override;
+    std::unique_ptr<IServicesCreator> CreateServicesCreator() override;
+    std::shared_ptr<IHaisosOS> CreateHaisosOS(
+        std::shared_ptr<IFileSystem> rootFileSystem,
+        IServicesCreator& servicesCreator,
+        std::shared_ptr<IPhysicalConsole> physicalConsole,
+        const OSEnvironment& environment,
+        uint64_t osProcessId) override;
 };
 
 std::unique_ptr<IFactory> CreateFactory();

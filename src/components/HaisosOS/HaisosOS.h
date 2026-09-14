@@ -4,6 +4,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <vector>
+#include "interfaces/IFactory.h"
 #include "interfaces/IHaisosOS.h"
 #include "OSToolFactory.h"
 
@@ -19,7 +20,8 @@ public:
         std::shared_ptr<IFileSystem> rootFileSystem,
         std::shared_ptr<IPhysicalConsole> physicalConsole,
         bool allowStartProcess,
-        std::shared_ptr<std::atomic<uint64_t>> pidCounter);
+        OSEnvironment environment,
+        uint64_t osProcessId);
     ~HaisosOS() override;
 
     std::shared_ptr<IProcess> StartProcess(
@@ -27,10 +29,14 @@ public:
         const std::vector<std::string>& args,
         std::shared_ptr<IAgent> callerAgent) override;
     std::vector<std::shared_ptr<IProcess>> GetRunningProcesses() const override;
-    std::shared_ptr<IHaisosOS> CreateSubOS(const SubOSPermissions& permissions) override;
-    IFileSystem& GetFileSystem() override;
+    std::shared_ptr<IHaisosOS> CreateSubOS(
+        const SubOSPermissions& permissions,
+        uint64_t creatorProcessPid) override;
+    IFileSystem& GetRootFileSystem() override;
     IFilesystemService& GetFileSystemService() override;
     IServicesCreator& GetServicesCreator() override;
+    const OSEnvironment& GetOsEnvironment() const override;
+    uint64_t GetOSProcessID() const override;
 
 private:
     // Erases finished processes (and their m_agentToPid entries).
@@ -50,7 +56,8 @@ private:
     std::shared_ptr<IFileSystem> m_rootFileSystem;
     std::shared_ptr<IPhysicalConsole> m_physicalConsole;
     bool m_allowStartProcess;
-    std::shared_ptr<std::atomic<uint64_t>> m_pidCounter;
+    OSEnvironment m_environment;
+    uint64_t m_osProcessId = 0;
     OSToolFactory m_osToolFactory;
 
     // Set by the destructor before draining, so no further process can be started.
@@ -70,5 +77,16 @@ private:
     mutable std::mutex m_agentPidMutex;
     std::unordered_map<IAgent*, AgentPidEntry> m_agentToPid;
 };
+
+// Builds a root IHaisosOS. Not part of IHaisosOS's public surface: callers go
+// through IFactory::CreateHaisosOS, which forwards here. The network/LLM/
+// filesystem services are created internally from servicesCreator, the LLM ones
+// configured from `environment`.
+std::shared_ptr<IHaisosOS> CreateHaisosOS(
+    std::shared_ptr<IFileSystem> rootFileSystem,
+    IServicesCreator& servicesCreator,
+    std::shared_ptr<IPhysicalConsole> physicalConsole,
+    const OSEnvironment& environment,
+    uint64_t osProcessId);
 
 }

@@ -1,8 +1,8 @@
 #include "Factory.h"
 #include "src/components/Console/Console.h"
-#include "src/components/HTTPClient/HTTPClient.h"
-#include "src/components/Filesystem/Filesystem.h"
 #include "src/components/Filesystem/PhysicalFileSystem.h"
+#include "src/components/HaisosOS/HaisosOS.h"
+#include "src/components/ServicesCreator/ServicesCreator.h"
 
 namespace Haisos {
 
@@ -13,16 +13,23 @@ std::shared_ptr<IPhysicalConsole> Factory::CreatePhysicalConsole(bool registerAs
     return std::make_shared<Console>(registerAsLogMessageReceiver);
 }
 
-std::unique_ptr<IHTTPClient> Factory::CreateHTTPClient() {
-    return ::Haisos::CreateHTTPClient();
-}
-
-std::unique_ptr<IFileSystem> Factory::CreateFilesystem() {
-    return std::make_unique<FileSystem>();
-}
-
 std::unique_ptr<IFileSystem> Factory::CreatePhysicalFileSystem(const std::string& rootPath) {
     return std::make_unique<PhysicalFileSystem>(rootPath);
+}
+
+std::unique_ptr<IServicesCreator> Factory::CreateServicesCreator() {
+    return ::Haisos::CreateServicesCreator();
+}
+
+std::shared_ptr<IHaisosOS> Factory::CreateHaisosOS(
+    std::shared_ptr<IFileSystem> rootFileSystem,
+    IServicesCreator& servicesCreator,
+    std::shared_ptr<IPhysicalConsole> physicalConsole,
+    const OSEnvironment& environment,
+    uint64_t osProcessId)
+{
+    return ::Haisos::CreateHaisosOS(
+        std::move(rootFileSystem), servicesCreator, std::move(physicalConsole), environment, osProcessId);
 }
 
 std::unique_ptr<IFactory> CreateFactory() {

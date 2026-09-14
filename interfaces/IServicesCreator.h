@@ -4,7 +4,6 @@
 #include "ILLMService.h"
 #include "INetworkService.h"
 #include "IFilesystemService.h"
-#include "IFactory.h"
 
 namespace Haisos {
 
@@ -24,6 +23,6 @@ public:
         const std::string& apiKey) = 0;
 };
 
-std::unique_ptr<IServicesCreator> CreateServicesCreator(IFactory& factory);
+std::unique_ptr<IServicesCreator> CreateServicesCreator();
 
 }

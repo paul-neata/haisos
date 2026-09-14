@@ -43,7 +43,7 @@ ToolResult OSWriteFileTool::Call(std::shared_ptr<IAgent> /*callerAgent*/, const 
 
     LogDebug("OSWriteFileTool: writing file '%s' append=%d", path.c_str(), append ? 1 : 0);
 
-    auto& fs = m_os.GetFileSystem();
+    auto& fs = m_os.GetRootFileSystem();
     int fd = fs.OpenFile(path, append ? kFileOpenWriteCreateAppend : kFileOpenWriteCreateTruncate, kFileCreateMode);
     if (fd < 0) {
         LogWarning("OSWriteFileTool: failed to open file '%s' for writing (fd=%d)", path.c_str(), fd);

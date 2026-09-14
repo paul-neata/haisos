@@ -233,15 +233,31 @@ int main(int argc, char* argv[]) {
     // haisosfile's own directory.
     std::filesystem::path haisosFileDir = std::filesystem::absolute(haisosFilePath).parent_path();
 
-    std::string endpoint = std::getenv("HAISOS_ENDPOINT") ? std::getenv("HAISOS_ENDPOINT") : "http://localhost:11434/api/chat";
-    std::string model = std::getenv("HAISOS_MODEL") ? std::getenv("HAISOS_MODEL") : "llama3";
-    std::string apiKey = std::getenv("HAISOS_API_KEY") ? std::getenv("HAISOS_API_KEY") : "";
+    // The OS's environment comes only from the haisosfile's ENV directives: the
+    // host's variables are not inherited wholesale, so `ENV NAME` is the single,
+    // explicit way one gets in. The LLM configuration is read from here too.
+    OSEnvironment environment;
+    for (const auto& env : parseResult.config.envEntries) {
+        if (!env.importFromHost) {
+            environment[env.name] = env.value;
+            continue;
+        }
+        if (const char* hostValue = std::getenv(env.name.c_str())) {
+            environment[env.name] = hostValue;
+        } else {
+            LogDebug("ENV %s: not set in the host environment, leaving it unset", env.name.c_str());
+        }
+    }
 
     // The key itself is deliberately never logged, only whether one was supplied.
-    LogInfo("Haisos configuration: haisosfile='%s' endpoint='%s' model='%s' api_key_set=%d",
-        haisosFilePath.c_str(), endpoint.c_str(), model.c_str(), apiKey.empty() ? 0 : 1);
+    LogInfo("Haisos configuration: haisosfile='%s' endpoint='%s' model='%s' api_key_set=%d env_vars=%zu",
+        haisosFilePath.c_str(),
+        environment.count(kEnvEndpoint) ? environment[kEnvEndpoint].c_str() : "(default)",
+        environment.count(kEnvModel) ? environment[kEnvModel].c_str() : "(default)",
+        environment.count(kEnvApiKey) && !environment[kEnvApiKey].empty() ? 1 : 0,
+        environment.size());
 
-    auto servicesCreator = CreateServicesCreator(*factory);
+    auto servicesCreator = factory->CreateServicesCreator();
     auto filesystemService = servicesCreator->CreateFileSystemService();
 
     std::string fsError;
@@ -255,7 +271,8 @@ int main(int argc, char* argv[]) {
     auto physicalConsole = factory->CreatePhysicalConsole(false);
     physicalConsole->Start();
 
-    auto os = CreateHaisosOS(*servicesCreator, rootFileSystem, physicalConsole, endpoint, model, apiKey);
+    // The initial OS belongs to no process, hence pid 0.
+    auto os = factory->CreateHaisosOS(rootFileSystem, *servicesCreator, physicalConsole, environment, 0);
 
     std::vector<std::shared_ptr<IProcess>> processes;
     for (const auto& runEntry : parseResult.config.runEntries) {

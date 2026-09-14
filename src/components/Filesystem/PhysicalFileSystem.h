@@ -5,7 +5,7 @@
 
 namespace Haisos {
 
-// A FileSystem view jailed to a real disk directory: every path passed in is
+// A FileSystem jailed to a real disk directory: every path passed in is
 // resolved and validated to stay within rootPath before being forwarded to the
 // real filesystem (a request that would escape rootPath via ".." fails).
 //

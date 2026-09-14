@@ -5,7 +5,7 @@
 
 namespace Haisos {
 
-ServicesCreator::ServicesCreator(IFactory& factory) : m_factory(factory) {}
+ServicesCreator::ServicesCreator() = default;
 ServicesCreator::~ServicesCreator() = default;
 
 std::unique_ptr<IFilesystemService> ServicesCreator::CreateFileSystemService() {
@@ -13,7 +13,7 @@ std::unique_ptr<IFilesystemService> ServicesCreator::CreateFileSystemService() {
 }
 
 std::unique_ptr<INetworkService> ServicesCreator::CreateNetworkService() {
-    return std::make_unique<NetworkService>(m_factory);
+    return std::make_unique<NetworkService>();
 }
 
 std::unique_ptr<ILLMService> ServicesCreator::CreateLLMService(
@@ -25,8 +25,8 @@ std::unique_ptr<ILLMService> ServicesCreator::CreateLLMService(
     return std::make_unique<LLMService>(networkService, endpoint, modelName, apiKey);
 }
 
-std::unique_ptr<IServicesCreator> CreateServicesCreator(IFactory& factory) {
-    return std::make_unique<ServicesCreator>(factory);
+std::unique_ptr<IServicesCreator> CreateServicesCreator() {
+    return std::make_unique<ServicesCreator>();
 }
 
 }

@@ -87,12 +87,12 @@ public:
     // Creates an empty, in-memory read/write filesystem (no backing real disk).
     virtual std::shared_ptr<IFileSystem> CreateEmptyInMemFileSystem() = 0;
 
-    // Creates a view confined to a sub-path of an existing filesystem, working
+    // Creates a filesystem confined to a sub-path of an existing filesystem, working
     // purely through the IFileSystem abstraction (no real disk access, unlike
     // IFactory::CreatePhysicalFileSystem).
     virtual std::shared_ptr<IFileSystem> CreateSubFileSystem(std::shared_ptr<IFileSystem> root, const std::string& path) = 0;
 
-    // Creates a new view of `main` with `toBeMounted` overlaid at
+    // Creates a new filesystem composing `main` with `toBeMounted` overlaid at
     // `whereToMount`: paths at or under whereToMount are served by
     // toBeMounted, overriding anything main has there; the mount point is
     // synthesized as a directory on listing even if main has none there.

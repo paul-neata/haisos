@@ -42,6 +42,16 @@ struct HaisosFileFsStep {
     HaisosFileMount mount;            // valid when isMount
 };
 
+// One ENV directive. `ENV NAME=value` sets the variable outright;
+// `ENV NAME` (no '=') imports NAME from the host OS's environment, which is
+// the only way a host variable reaches the Haisos OS. Importing a name the
+// host does not define leaves it unset rather than failing.
+struct HaisosFileEnvEntry {
+    std::string name;
+    std::string value;
+    bool importFromHost = false;
+};
+
 struct HaisosFileConfig {
     // The value given after ROOT, or empty if omitted. Resolved by the
     // caller: if it names a filesystem declared via FS, that filesystem is
@@ -52,6 +62,9 @@ struct HaisosFileConfig {
     std::string rootPath;
     std::vector<HaisosFileFsStep> fsSteps;
     std::vector<HaisosFileRunEntry> runEntries;
+    // ENV directives, in file order. Applied to the OS's initial environment,
+    // which every process and sub-OS then inherits.
+    std::vector<HaisosFileEnvEntry> envEntries;
 };
 
 struct HaisosFileParseResult {

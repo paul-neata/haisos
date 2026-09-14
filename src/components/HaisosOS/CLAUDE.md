@@ -29,14 +29,25 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   its base by construction; an explicit `..`-escaping path is still rejected
   up front so a typo fails loudly rather than silently landing elsewhere) and,
   optionally, a tool set without `os_start_process`
-- `CreateHaisosOS(...)` builds `INetworkService`/`ILLMService`/the filesystem-
-  composition factory internally via the given `IServicesCreator`, rather than
-  receiving them pre-built; the caller supplies only the root `IFileSystem`
-  (e.g. from `IFactory::CreatePhysicalFileSystem`) and endpoint/model/apiKey.
-  The root OS always allows starting processes; only `CreateSubOS` can restrict it.
-- `GetFileSystem()` exposes the OS's actual root filesystem directly (what the
-  `os_*` tools operate on); `GetFileSystemService()` exposes the stateless
-  composition factory (read-only/in-memory/sub/mount views)
+- Built via `IFactory::CreateHaisosOS(rootFileSystem, servicesCreator,
+  physicalConsole, environment, osProcessId)`. The network/LLM/filesystem
+  services are created internally from the `IServicesCreator` rather than being
+  passed in pre-built. The root OS always allows starting processes; only
+  `CreateSubOS` can restrict it.
+- Holds an **environment** (`GetOsEnvironment()`): plain key/value strings fixed
+  at creation and inherited by every process and sub-OS it starts. The LLM
+  endpoint/model/API key are read from it (`HAISOS_ENDPOINT`/`HAISOS_MODEL`/
+  `HAISOS_API_KEY`), so a sub-OS inherits the LLM configuration for free. It is
+  populated from the haisosfile's `ENV` directives -- the host's environment is
+  never inherited wholesale.
+- `GetOSProcessID()` identifies the process this OS belongs to: 0 for the
+  initial OS, and the creating process's pid for a sub-OS. Process ids come from
+  `AllocateUniquePid()`, one allocator for the whole program, so these are
+  unique across every OS.
+- `GetRootFileSystem()` exposes the OS's root directly (what the `os_*` tools
+  operate on). An OS cannot step outside that root; `GetFileSystemService()`
+  only composes further filesystems on top of it. `GetServicesCreator()` gives
+  access to this OS's own sandboxed services.
 
 ## Key Classes
 

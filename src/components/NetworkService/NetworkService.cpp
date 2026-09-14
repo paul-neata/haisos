@@ -1,12 +1,13 @@
 #include "NetworkService.h"
+#include "src/components/HTTPClient/HTTPClient.h"
 
 namespace Haisos {
 
-NetworkService::NetworkService(IFactory& factory) : m_factory(factory) {}
+NetworkService::NetworkService() = default;
 NetworkService::~NetworkService() = default;
 
 std::unique_ptr<IHTTPClient> NetworkService::CreateHTTPClient() {
-    return m_factory.CreateHTTPClient();
+    return ::Haisos::CreateHTTPClient();
 }
 
 }

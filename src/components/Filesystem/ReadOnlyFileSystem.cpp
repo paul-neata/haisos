@@ -47,7 +47,7 @@ int ReadOnlyFileSystem::RemoveDirectory(const std::string& /*pathname*/) {
 }
 
 int ReadOnlyFileSystem::ChangeDirectory(const std::string& path) {
-    // Kept purely virtual (see header): inner may be shared by other views.
+    // Kept purely virtual (see header): inner may be shared by other composed filesystems.
     std::lock_guard<std::mutex> lock(m_cwdMutex);
     m_cwd = NormalizeVirtualPath(path, m_cwd);
     return 0;

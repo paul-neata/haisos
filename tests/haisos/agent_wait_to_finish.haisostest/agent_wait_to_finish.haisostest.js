@@ -10,11 +10,20 @@ const prompt = "Start a subagent with prompt 'What is 3+3?' using agent_start wi
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent_wait_to_finish-haisostest-'));
 fs.writeFileSync(path.join(tmpDir, 'agent.md'), prompt);
-fs.writeFileSync(path.join(tmpDir, 'haisosfile'), "ROOT .\nRUN agent.md\n");
+// The OS environment is not inherited from the host: HAISOS_* must be
+// imported explicitly with ENV, or the agent falls back to the defaults and
+// this test silently exercises nothing.
+fs.writeFileSync(path.join(tmpDir, 'haisosfile'),
+    "ENV HAISOS_ENDPOINT\nENV HAISOS_MODEL\nENV HAISOS_API_KEY\nROOT .\nRUN agent.md\n");
 
 try {
     const result = execSync(`${haisosPath} haisosfile`, { encoding: 'utf8', timeout: 120000, cwd: tmpDir });
     console.log(result);
+    // haisos exits 0 even when the agent itself fails, so assert on the output.
+    if (/Error:/.test(result)) {
+        console.error("agent_wait_to_finish haisos test failed: the agent reported an error");
+        process.exit(1);
+    }
     console.log("agent_wait_to_finish haisos test passed");
 } catch (e) {
     console.error("agent_wait_to_finish haisos test failed:", e.message);

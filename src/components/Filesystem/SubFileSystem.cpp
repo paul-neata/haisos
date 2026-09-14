@@ -53,7 +53,7 @@ int SubFileSystem::RemoveDirectory(const std::string& pathname) {
 }
 
 int SubFileSystem::ChangeDirectory(const std::string& path) {
-    // Kept purely virtual (see header): root may be shared by other views.
+    // Kept purely virtual (see header): root may be shared by other composed filesystems.
     std::lock_guard<std::mutex> lock(m_cwdMutex);
     m_cwd = NormalizeVirtualPath(path, m_cwd);
     return 0;

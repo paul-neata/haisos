@@ -158,3 +158,17 @@ TEST(ServicesCreatorTest, ComposedFileSystemOverlaysAtMountPoint) {
     }
     EXPECT_TRUE(foundData);
 }
+
+TEST(ServicesCreatorTest, CloneProducesAnIndependentServicesCreator) {
+    auto servicesCreator = CreateServicesCreator();
+
+    auto clone = servicesCreator->Clone();
+    ASSERT_NE(clone, nullptr);
+    EXPECT_NE(clone.get(), servicesCreator.get());
+
+    // The clone is usable on its own, and outlives the original -- which is the
+    // point: a sub-OS must not depend on its parent's services creator.
+    servicesCreator.reset();
+    EXPECT_NE(clone->CreateFileSystemService(), nullptr);
+    EXPECT_NE(clone->CreateNetworkService(), nullptr);
+}

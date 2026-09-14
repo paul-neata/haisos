@@ -9,7 +9,7 @@
 
 namespace Haisos {
 
-OSToolFactory::OSToolFactory(IHaisosOS& os, bool allowStartProcess) : m_os(os) {
+OSToolFactory::OSToolFactory(IHaisosOS& os) : m_os(os) {
     m_registry = {
         ToolEntry{
             Tools::OSReadFileTool::ToolName,
@@ -35,16 +35,13 @@ OSToolFactory::OSToolFactory(IHaisosOS& os, bool allowStartProcess) : m_os(os) {
             []() { return Tools::OSListProcessesTool::GetDefaultParametersSchema(); },
             [this]() -> std::unique_ptr<ITool> { return std::make_unique<Tools::OSListProcessesTool>(m_os); }
         },
-    };
-
-    if (allowStartProcess) {
-        m_registry.push_back(ToolEntry{
+        ToolEntry{
             Tools::OSStartProcessTool::ToolName,
             []() { return Tools::OSStartProcessTool::ToolDefaultDescription; },
             []() { return Tools::OSStartProcessTool::GetDefaultParametersSchema(); },
             [this]() -> std::unique_ptr<ITool> { return std::make_unique<Tools::OSStartProcessTool>(m_os); }
-        });
-    }
+        },
+    };
 }
 
 std::unique_ptr<ITool> OSToolFactory::CreateTool(const std::string& name, std::shared_ptr<IAgent> /*callerAgent*/) {

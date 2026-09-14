@@ -5,19 +5,9 @@
 #include "IProcess.h"
 #include "IServicesCreator.h"
 #include "IOSEnvironment.h"
+#include "IPhysicalConsole.h"
 
 namespace Haisos {
-
-// Permissions for a sub-OS created via IHaisosOS::CreateSubOS. This is
-// deliberately scoped to logical/application-level confinement for now:
-// a filesystem sub-root and a coarse process-start toggle. Deeper
-// permissioning (network access, ...) is future work.
-struct SubOSPermissions {
-    // Directory (relative to the parent OS's root) the sub-OS is confined to.
-    // Empty means "same root as the parent" (i.e. no extra filesystem confinement).
-    std::string subRootRelativePath;
-    bool allowStartProcess = true;
-};
 
 // An instance of an operating system: owns a rooted filesystem, a physical
 // console, and a services layer, and can start processes (agent- or
@@ -38,11 +28,15 @@ public:
 
     virtual std::vector<std::shared_ptr<IProcess>> GetRunningProcesses() const = 0;
 
-    // creatorProcessPid is the pid of the process spawning the sub-OS; it becomes
-    // the sub-OS's GetOSProcessID(). The sub-OS inherits this OS's environment.
+    // Same shape as IFactory::CreateHaisosOS: a sub-OS is an OS like any other,
+    // and it is confined by the root filesystem it is handed rather than by a
+    // permission flag. osProcessId is the pid of the process spawning it.
     virtual std::shared_ptr<IHaisosOS> CreateSubOS(
-        const SubOSPermissions& permissions,
-        uint64_t creatorProcessPid) = 0;
+        std::shared_ptr<IServicesCreator> servicesCreator,
+        std::shared_ptr<IPhysicalConsole> physicalConsole,
+        std::shared_ptr<IFileSystem> rootFileSystem,
+        const OSEnvironment& environment,
+        uint64_t osProcessId) = 0;
 
     // The OS's root filesystem, fixed at creation. An OS cannot step outside it;
     // GetFileSystemService() below composes further filesystems on top of it.

@@ -12,7 +12,7 @@ namespace Haisos {
 // agent-backed process is started by an IHaisosOS.
 class OSToolFactory : public IToolFactory {
 public:
-    OSToolFactory(IHaisosOS& os, bool allowStartProcess);
+    OSToolFactory(IHaisosOS& os);
 
     OSToolFactory(const OSToolFactory&) = delete;
     OSToolFactory& operator=(const OSToolFactory&) = delete;

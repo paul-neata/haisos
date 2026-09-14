@@ -14,6 +14,11 @@ class IServicesCreator {
 public:
     virtual ~IServicesCreator() = default;
 
+    // An independent services creator equivalent to this one. A sub-OS gets its
+    // own rather than sharing its parent's, so the services it creates are its
+    // own and its lifetime is not tied to the parent's.
+    virtual std::shared_ptr<IServicesCreator> Clone() const = 0;
+
     virtual std::unique_ptr<IFilesystemService> CreateFileSystemService() = 0;
     virtual std::unique_ptr<INetworkService> CreateNetworkService() = 0;
     virtual std::unique_ptr<ILLMService> CreateLLMService(

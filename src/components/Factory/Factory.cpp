@@ -22,14 +22,14 @@ std::unique_ptr<IServicesCreator> Factory::CreateServicesCreator() {
 }
 
 std::shared_ptr<IHaisosOS> Factory::CreateHaisosOS(
-    std::shared_ptr<IFileSystem> rootFileSystem,
-    IServicesCreator& servicesCreator,
+    std::shared_ptr<IServicesCreator> servicesCreator,
     std::shared_ptr<IPhysicalConsole> physicalConsole,
+    std::shared_ptr<IFileSystem> rootFileSystem,
     const OSEnvironment& environment,
     uint64_t osProcessId)
 {
     return ::Haisos::CreateHaisosOS(
-        std::move(rootFileSystem), servicesCreator, std::move(physicalConsole), environment, osProcessId);
+        std::move(servicesCreator), std::move(physicalConsole), std::move(rootFileSystem), environment, osProcessId);
 }
 
 std::unique_ptr<IFactory> CreateFactory() {

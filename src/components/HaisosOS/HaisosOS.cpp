@@ -48,25 +48,23 @@ constexpr int MAX_DRAIN_PASSES = 8;
 } // namespace
 
 HaisosOS::HaisosOS(
-    IServicesCreator& servicesCreator,
+    std::shared_ptr<IServicesCreator> servicesCreator,
     std::shared_ptr<INetworkService> networkService,
     std::shared_ptr<ILLMService> llmService,
     std::unique_ptr<IFilesystemService> filesystemServiceFactory,
     std::shared_ptr<IFileSystem> rootFileSystem,
     std::shared_ptr<IPhysicalConsole> physicalConsole,
-    bool allowStartProcess,
     OSEnvironment environment,
     uint64_t osProcessId)
-    : m_servicesCreator(servicesCreator)
+    : m_servicesCreator(std::move(servicesCreator))
     , m_networkService(std::move(networkService))
     , m_llmService(std::move(llmService))
     , m_filesystemServiceFactory(std::move(filesystemServiceFactory))
     , m_rootFileSystem(std::move(rootFileSystem))
     , m_physicalConsole(std::move(physicalConsole))
-    , m_allowStartProcess(allowStartProcess)
     , m_environment(std::move(environment))
     , m_osProcessId(osProcessId)
-    , m_osToolFactory(*this, allowStartProcess)
+    , m_osToolFactory(*this)
 {
 }
 
@@ -248,11 +246,6 @@ std::shared_ptr<IProcess> HaisosOS::StartProcess(
     const std::vector<std::string>& args,
     std::shared_ptr<IAgent> callerAgent)
 {
-    if (!m_allowStartProcess) {
-        LogWarning("HaisosOS: starting processes is not permitted on this OS");
-        return nullptr;
-    }
-
     if (m_shuttingDown) {
         LogWarning("HaisosOS: refusing to start '%s': this OS is shutting down", programPath.c_str());
         return nullptr;
@@ -288,45 +281,22 @@ std::vector<std::shared_ptr<IProcess>> HaisosOS::GetRunningProcesses() const {
     return m_processes;
 }
 
-std::shared_ptr<IHaisosOS> HaisosOS::CreateSubOS(const SubOSPermissions& permissions, uint64_t creatorProcessPid) {
-    // SubFileSystem itself cannot actually escape (it clamps a climbing ".."
-    // at its own virtual root), but a caller that passed a path escaping this
-    // OS's root almost certainly made a mistake and wants an error, not a
-    // silent reinterpretation as some other sub-path -- so reject it here.
-    if (!permissions.subRootRelativePath.empty()) {
-        std::istringstream iss(permissions.subRootRelativePath);
-        std::string segment;
-        int depth = 0;
-        while (std::getline(iss, segment, '/')) {
-            if (segment.empty() || segment == ".") {
-                continue;
-            }
-            if (segment == "..") {
-                if (depth == 0) {
-                    LogWarning("HaisosOS: sub-OS root escapes parent root: %s", permissions.subRootRelativePath.c_str());
-                    return nullptr;
-                }
-                --depth;
-            } else {
-                ++depth;
-            }
-        }
-    }
-
-    std::shared_ptr<IFileSystem> subFileSystem = permissions.subRootRelativePath.empty()
-        ? m_rootFileSystem
-        : m_filesystemServiceFactory->CreateSubFileSystem(m_rootFileSystem, permissions.subRootRelativePath);
-
-    return std::make_shared<HaisosOS>(
-        m_servicesCreator,
-        m_networkService,
-        m_llmService,
-        m_servicesCreator.CreateFileSystemService(),
-        subFileSystem,
-        m_physicalConsole,
-        m_allowStartProcess && permissions.allowStartProcess,
-        m_environment,
-        creatorProcessPid);
+std::shared_ptr<IHaisosOS> HaisosOS::CreateSubOS(
+    std::shared_ptr<IServicesCreator> servicesCreator,
+    std::shared_ptr<IPhysicalConsole> physicalConsole,
+    std::shared_ptr<IFileSystem> rootFileSystem,
+    const OSEnvironment& environment,
+    uint64_t osProcessId)
+{
+    // A sub-OS is an ordinary OS; what confines it is the root filesystem the
+    // caller hands it (typically this OS's root narrowed with
+    // IFilesystemService::CreateSubFileSystem), not anything enforced here.
+    return ::Haisos::CreateHaisosOS(
+        std::move(servicesCreator),
+        std::move(physicalConsole),
+        std::move(rootFileSystem),
+        environment,
+        osProcessId);
 }
 
 IFileSystem& HaisosOS::GetRootFileSystem() {
@@ -338,7 +308,7 @@ IFilesystemService& HaisosOS::GetFileSystemService() {
 }
 
 IServicesCreator& HaisosOS::GetServicesCreator() {
-    return m_servicesCreator;
+    return *m_servicesCreator;
 }
 
 const OSEnvironment& HaisosOS::GetOsEnvironment() const {
@@ -367,9 +337,9 @@ std::string EnvValue(const OSEnvironment& environment, const char* key) {
 } // namespace
 
 std::shared_ptr<IHaisosOS> CreateHaisosOS(
-    std::shared_ptr<IFileSystem> rootFileSystem,
-    IServicesCreator& servicesCreator,
+    std::shared_ptr<IServicesCreator> servicesCreator,
     std::shared_ptr<IPhysicalConsole> physicalConsole,
+    std::shared_ptr<IFileSystem> rootFileSystem,
     const OSEnvironment& environment,
     uint64_t osProcessId)
 {
@@ -391,18 +361,17 @@ std::shared_ptr<IHaisosOS> CreateHaisosOS(
             endpoint.empty() ? kEnvEndpoint : kEnvModel);
     }
 
-    std::shared_ptr<INetworkService> networkService = servicesCreator.CreateNetworkService();
-    std::shared_ptr<ILLMService> llmService = servicesCreator.CreateLLMService(*networkService, endpoint, modelName, apiKey);
-    auto filesystemServiceFactory = servicesCreator.CreateFileSystemService();
+    std::shared_ptr<INetworkService> networkService = servicesCreator->CreateNetworkService();
+    std::shared_ptr<ILLMService> llmService = servicesCreator->CreateLLMService(*networkService, endpoint, modelName, apiKey);
+    auto filesystemServiceFactory = servicesCreator->CreateFileSystemService();
 
     return std::make_shared<HaisosOS>(
-        servicesCreator,
+        std::move(servicesCreator),
         std::move(networkService),
         std::move(llmService),
         std::move(filesystemServiceFactory),
         std::move(rootFileSystem),
         std::move(physicalConsole),
-        /*allowStartProcess=*/true,
         environment,
         osProcessId);
 }

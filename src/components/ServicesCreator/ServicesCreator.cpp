@@ -8,6 +8,11 @@ namespace Haisos {
 ServicesCreator::ServicesCreator() = default;
 ServicesCreator::~ServicesCreator() = default;
 
+std::shared_ptr<IServicesCreator> ServicesCreator::Clone() const {
+    // ServicesCreator holds no state of its own, so a clone is simply a new one.
+    return std::make_shared<ServicesCreator>();
+}
+
 std::unique_ptr<IFilesystemService> ServicesCreator::CreateFileSystemService() {
     return std::make_unique<FileSystemService>();
 }

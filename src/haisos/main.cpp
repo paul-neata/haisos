@@ -257,7 +257,7 @@ int main(int argc, char* argv[]) {
         environment.count(kEnvApiKey) && !environment[kEnvApiKey].empty() ? 1 : 0,
         environment.size());
 
-    auto servicesCreator = factory->CreateServicesCreator();
+    std::shared_ptr<IServicesCreator> servicesCreator = factory->CreateServicesCreator();
     auto filesystemService = servicesCreator->CreateFileSystemService();
 
     std::string fsError;
@@ -272,7 +272,7 @@ int main(int argc, char* argv[]) {
     physicalConsole->Start();
 
     // The initial OS belongs to no process, hence pid 0.
-    auto os = factory->CreateHaisosOS(rootFileSystem, *servicesCreator, physicalConsole, environment, 0);
+    auto os = factory->CreateHaisosOS(servicesCreator, physicalConsole, rootFileSystem, environment, 0);
 
     std::vector<std::shared_ptr<IProcess>> processes;
     for (const auto& runEntry : parseResult.config.runEntries) {

@@ -27,32 +27,22 @@ protected:
         std::filesystem::remove_all(kTestRoot);
     }
 
-    std::shared_ptr<IHaisosOS> BuildOS(bool allowStartProcess = true) {
-        auto servicesCreator = CreateServicesCreator();
-        auto* servicesCreatorPtr = servicesCreator.get();
-        m_servicesCreators.push_back(std::move(servicesCreator));
-
-        std::shared_ptr<IFileSystem> rootFileSystem = m_factory.CreatePhysicalFileSystem(kTestRoot);
-        auto physicalConsole = m_factory.CreatePhysicalConsole(false);
-
-        // The root OS created via CreateHaisosOS always allows starting
-        // processes; a restricted root for tests is built via CreateSubOS
-        // (matching how any other caller would restrict it).
-        OSEnvironment environment{
+    OSEnvironment TestEnvironment() const {
+        return OSEnvironment{
             {kEnvEndpoint, kUnreachableEndpoint},
             {kEnvModel, "llama3"},
         };
-        auto os = m_factory.CreateHaisosOS(rootFileSystem, *servicesCreatorPtr, physicalConsole, environment, 0);
-        if (!allowStartProcess) {
-            SubOSPermissions permissions;
-            permissions.allowStartProcess = false;
-            os = os->CreateSubOS(permissions, /*creatorProcessPid=*/0);
-        }
-        return os;
+    }
+
+    std::shared_ptr<IHaisosOS> BuildOS() {
+        std::shared_ptr<IServicesCreator> servicesCreator = m_factory.CreateServicesCreator();
+        std::shared_ptr<IFileSystem> rootFileSystem = m_factory.CreatePhysicalFileSystem(kTestRoot);
+        auto physicalConsole = m_factory.CreatePhysicalConsole(false);
+        return m_factory.CreateHaisosOS(
+            std::move(servicesCreator), physicalConsole, rootFileSystem, TestEnvironment(), 0);
     }
 
     Factory m_factory;
-    std::vector<std::unique_ptr<IServicesCreator>> m_servicesCreators;
 };
 
 TEST_F(HaisosOSTest, StartProcessAssignsIncrementingTopLevelPids) {
@@ -99,11 +89,6 @@ TEST_F(HaisosOSTest, StartProcessLuaMissingFileReturnsNull) {
     EXPECT_EQ(os->StartProcess("missing.lua", {}, nullptr), nullptr);
 }
 
-TEST_F(HaisosOSTest, StartProcessWhenDisallowedReturnsNull) {
-    auto os = BuildOS(false);
-    EXPECT_EQ(os->StartProcess("hello.md", {}, nullptr), nullptr);
-}
-
 TEST_F(HaisosOSTest, GetRunningProcessesIncludesStartedProcess) {
     auto os = BuildOS();
     auto process = os->StartProcess("hello.md", {}, nullptr);
@@ -119,11 +104,19 @@ TEST_F(HaisosOSTest, GetRunningProcessesIncludesStartedProcess) {
     EXPECT_TRUE(found);
 }
 
-TEST_F(HaisosOSTest, CreateSubOSConfinesToSubRoot) {
+TEST_F(HaisosOSTest, CreateSubOSIsConfinedByTheRootItIsGiven) {
+    // A sub-OS is confined by the filesystem handed to it, not by a permission
+    // flag: narrowing the root to "sub" is what puts the parent's files
+    // out of reach.
     auto os = BuildOS();
-    SubOSPermissions permissions;
-    permissions.subRootRelativePath = "sub";
-    auto subOS = os->CreateSubOS(permissions, /*creatorProcessPid=*/0);
+    auto subRoot = os->GetFileSystemService().CreateSubFileSystem(
+        m_factory.CreatePhysicalFileSystem(kTestRoot), "sub");
+    auto subOS = os->CreateSubOS(
+        os->GetServicesCreator().Clone(),
+        m_factory.CreatePhysicalConsole(false),
+        subRoot,
+        TestEnvironment(),
+        /*osProcessId=*/7);
     ASSERT_NE(subOS, nullptr);
 
     EXPECT_NE(subOS->StartProcess("inner.md", {}, nullptr), nullptr);
@@ -131,21 +124,32 @@ TEST_F(HaisosOSTest, CreateSubOSConfinesToSubRoot) {
     EXPECT_EQ(subOS->StartProcess("hello.md", {}, nullptr), nullptr);
 }
 
-TEST_F(HaisosOSTest, CreateSubOSRejectsEscapingRoot) {
+TEST_F(HaisosOSTest, CreateSubOSCarriesTheCreatingProcessPid) {
     auto os = BuildOS();
-    SubOSPermissions permissions;
-    permissions.subRootRelativePath = "../../etc";
-    EXPECT_EQ(os->CreateSubOS(permissions, /*creatorProcessPid=*/0), nullptr);
+    EXPECT_EQ(os->GetOSProcessID(), 0u);
+
+    auto subOS = os->CreateSubOS(
+        os->GetServicesCreator().Clone(),
+        m_factory.CreatePhysicalConsole(false),
+        m_factory.CreatePhysicalFileSystem(kTestRoot),
+        TestEnvironment(),
+        /*osProcessId=*/42);
+    ASSERT_NE(subOS, nullptr);
+    EXPECT_EQ(subOS->GetOSProcessID(), 42u);
 }
 
-TEST_F(HaisosOSTest, CreateSubOSDisallowsStartProcessWhenRequested) {
+TEST_F(HaisosOSTest, SubOSInheritsTheEnvironmentItIsGiven) {
     auto os = BuildOS();
-    SubOSPermissions permissions;
-    permissions.allowStartProcess = false;
-    auto subOS = os->CreateSubOS(permissions, /*creatorProcessPid=*/0);
-    ASSERT_NE(subOS, nullptr);
+    EXPECT_EQ(os->GetOsEnvironment().at(kEnvModel), "llama3");
 
-    EXPECT_EQ(subOS->StartProcess("hello.md", {}, nullptr), nullptr);
+    auto subOS = os->CreateSubOS(
+        os->GetServicesCreator().Clone(),
+        m_factory.CreatePhysicalConsole(false),
+        m_factory.CreatePhysicalFileSystem(kTestRoot),
+        os->GetOsEnvironment(),
+        /*osProcessId=*/1);
+    ASSERT_NE(subOS, nullptr);
+    EXPECT_EQ(subOS->GetOsEnvironment().at(kEnvModel), "llama3");
 }
 
 } // namespace

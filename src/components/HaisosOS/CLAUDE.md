@@ -24,16 +24,17 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   tool globals. This is a security boundary, not an oversight -- the exact set
   of libraries and globals is defined by the library-opening helper in
   `LuaProcess.cpp`, which is the ground truth.
-- `CreateSubOS` builds a logically-confined child OS: a filesystem sub-root
-  (via `IFilesystemService::CreateSubFileSystem`, which cannot actually escape
-  its base by construction; an explicit `..`-escaping path is still rejected
-  up front so a typo fails loudly rather than silently landing elsewhere) and,
-  optionally, a tool set without `os_start_process`
-- Built via `IFactory::CreateHaisosOS(rootFileSystem, servicesCreator,
-  physicalConsole, environment, osProcessId)`. The network/LLM/filesystem
+- `CreateSubOS` takes the same arguments as `IFactory::CreateHaisosOS`, because a
+  sub-OS is an ordinary OS. What confines it is the root filesystem the caller
+  hands it -- typically this OS's root narrowed with
+  `IFilesystemService::CreateSubFileSystem` -- rather than a permissions struct.
+  Give it its own services creator via `IServicesCreator::Clone()`, so it does
+  not depend on the parent's lifetime.
+- Built via `IFactory::CreateHaisosOS(servicesCreator, physicalConsole,
+  rootFileSystem, environment, osProcessId)`. The network/LLM/filesystem
   services are created internally from the `IServicesCreator` rather than being
-  passed in pre-built. The root OS always allows starting processes; only
-  `CreateSubOS` can restrict it.
+  passed in pre-built. Every OS can start processes; the
+  process-start restriction that `SubOSPermissions` used to carry is gone.
 - Holds an **environment** (`GetOsEnvironment()`): plain key/value strings fixed
   at creation and inherited by every process and sub-OS it starts. The LLM
   endpoint/model/API key are read from it (`HAISOS_ENDPOINT`/`HAISOS_MODEL`/

@@ -2,12 +2,7 @@
 #include <gmock/gmock.h>
 #include "AgentStartTool.h"
 #include "tests/mocks/MockAgent.h"
-#include "interfaces/IFactory.h"
-#include "interfaces/ILLMCommunicator.h"
-#include "interfaces/IToolFactory.h"
-#include "interfaces/IConsole.h"
-#include "interfaces/IHTTPClient.h"
-#include "interfaces/IHaisosEngine.h"
+#include "interfaces/ILLMService.h"
 
 using namespace Haisos;
 using namespace Haisos::Tools;
@@ -15,48 +10,30 @@ using namespace Haisos::Mocks;
 
 namespace {
 
-class DummyConsole : public IConsole {
+class DummyAgentConsole : public IAgentConsole {
 public:
     void Write(const std::string&) override {}
-    void Write(const IAgent&, const std::string&) override {}
-    void Start() override {}
-    void Stop() override {}
-};
-
-class DummyHTTPClient : public IHTTPClient {
-public:
-    HTTPResponse Get(const std::string&) override { return HTTPResponse{200, "", ""}; }
-    HTTPResponse Post(const std::string&, const std::string&) override { return HTTPResponse{200, "", ""}; }
-    HTTPResponse Post(const std::string&, const std::string&, const std::vector<HTTPHeader>&) override { return HTTPResponse{200, "", ""}; }
-};
-
-class DummyLLMCommunicator : public ILLMCommunicator {
-public:
-    LLMResponse Call(const std::vector<LLMMessage>&, const std::vector<std::tuple<std::string, std::string, nlohmann::json>>&, const SystemCallbacks&) override {
-        LLMResponse response;
-        response.message.role = "assistant";
-        response.message.content = "";
-        response.done = true;
-        return response;
-    }
 };
 
 class DummyToolFactory : public IToolFactory {
 public:
     std::unique_ptr<ITool> CreateTool(const std::string&, std::shared_ptr<IAgent>) override { return nullptr; }
+    bool HasTool(const std::string&) const override { return false; }
     std::vector<std::string> GetAvailableTools() const override { return {}; }
     std::vector<std::tuple<std::string, std::string, nlohmann::json>> GetAvailableToolDescriptions() const override { return {}; }
 };
 
-class TestFactory : public IFactory {
+class TestLLMService : public ILLMService {
 public:
-    std::unique_ptr<IConsole> CreateConsole(bool) override { return std::make_unique<DummyConsole>(); }
-    std::unique_ptr<IHTTPClient> CreateHTTPClient() override { return std::make_unique<DummyHTTPClient>(); }
-    std::unique_ptr<ILLMCommunicator> CreateLLMCommunicator(std::unique_ptr<IHTTPClient>, const std::string&, const std::string&, const std::string&) override {
-        return std::make_unique<DummyLLMCommunicator>();
-    }
-    std::unique_ptr<IToolFactory> CreateToolFactory(IFactory&) override { return std::make_unique<DummyToolFactory>(); }
-    std::shared_ptr<IAgent> CreateAgent(std::unique_ptr<ILLMCommunicator>, std::unique_ptr<IToolFactory>, std::unique_ptr<IConsole>, const std::vector<std::string>&, const std::string& name, std::shared_ptr<IAgent> parent, const std::string& startTime, bool longRunning) override {
+    std::shared_ptr<IAgent> CreateAgent(
+        const std::vector<std::string>&,
+        const std::string& name,
+        std::shared_ptr<IAgent> parent,
+        std::unique_ptr<IAgentConsole>,
+        const std::string& startTime,
+        bool longRunning,
+        IToolFactory*) override
+    {
         auto agent = std::make_shared<MockAgent>();
         agent->SetName(name);
         agent->SetStartTime(startTime);
@@ -67,16 +44,15 @@ public:
         }
         return agent;
     }
-    std::unique_ptr<IHaisosEngine> CreateHaisosEngine(IFactory&) override { return nullptr; }
-    std::unique_ptr<IFileSystem> CreateFilesystem() override { return nullptr; }
 
-    SystemCallbacks GetSystemCallbacks() const override { return m_callbacks; }
-    void SetSystemCallbacks(const SystemCallbacks& callbacks) override { m_callbacks = callbacks; }
+    IToolFactory& GetToolFactory() override { return m_toolFactory; }
+    std::unique_ptr<IAgentConsole> CreateAgentConsole() override { return std::make_unique<DummyAgentConsole>(); }
 
     std::shared_ptr<MockAgent> GetLastAgent() const { return m_lastAgent; }
+
 private:
+    DummyToolFactory m_toolFactory;
     std::shared_ptr<MockAgent> m_lastAgent;
-    SystemCallbacks m_callbacks;
 };
 
 } // namespace
@@ -98,9 +74,9 @@ TEST(AgentStartToolTest, GetParametersSchemaIsValid) {
 }
 
 TEST(AgentStartToolTest, StartReturnsName) {
-    TestFactory factory;
+    TestLLMService llmService;
     auto callerAgent = std::make_shared<MockAgent>();
-    AgentStartTool tool(factory);
+    AgentStartTool tool(llmService);
 
     nlohmann::json args;
     args["user_prompt"] = "Hello";
@@ -109,13 +85,13 @@ TEST(AgentStartToolTest, StartReturnsName) {
     auto result = tool.Call(callerAgent, args);
 
     EXPECT_FALSE(result.content.empty());
-    EXPECT_EQ(result.content, factory.GetLastAgent()->Name());
+    EXPECT_EQ(result.content, llmService.GetLastAgent()->Name());
 }
 
 TEST(AgentStartToolTest, StartWithSystemPrompt) {
-    TestFactory factory;
+    TestLLMService llmService;
     auto callerAgent = std::make_shared<MockAgent>();
-    AgentStartTool tool(factory);
+    AgentStartTool tool(llmService);
 
     nlohmann::json args;
     args["user_prompt"] = "Hello";
@@ -128,9 +104,9 @@ TEST(AgentStartToolTest, StartWithSystemPrompt) {
 }
 
 TEST(AgentStartToolTest, MissingUserPromptReturnsError) {
-    TestFactory factory;
+    TestLLMService llmService;
     auto callerAgent = std::make_shared<MockAgent>();
-    AgentStartTool tool(factory);
+    AgentStartTool tool(llmService);
 
     nlohmann::json args;
     auto result = tool.Call(callerAgent, args);
@@ -140,7 +116,7 @@ TEST(AgentStartToolTest, MissingUserPromptReturnsError) {
 }
 
 TEST(AgentStartToolTest, RecursionDepthExceededReturnsError) {
-    TestFactory factory;
+    TestLLMService llmService;
     // Build a chain so the caller depth >= 5
     auto p1 = std::make_shared<MockAgent>();
     auto p2 = std::make_shared<MockAgent>();
@@ -154,7 +130,7 @@ TEST(AgentStartToolTest, RecursionDepthExceededReturnsError) {
     auto p6 = std::make_shared<MockAgent>();
     p6->SetParent(p5);
 
-    AgentStartTool tool(factory);
+    AgentStartTool tool(llmService);
 
     nlohmann::json args;
     args["user_prompt"] = "Hello";

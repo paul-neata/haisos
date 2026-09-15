@@ -1,6 +1,5 @@
 #pragma once
-#include "interfaces/ITool.h"
-#include "interfaces/IAgent.h"
+#include "interfaces/ILLMService.h"
 #include "interfaces/IFactory.h"
 #include <nlohmann/json.hpp>
 #include <memory>

@@ -3,17 +3,18 @@
 #include <vector>
 #include <memory>
 #include <functional>
-#include "interfaces/IToolFactory.h"
+#include "interfaces/ILLMService.h"
 #include "src/components/Logger/Logger.h"
 
 namespace Haisos {
 
-class IFactory;
-
 class ToolFactory : public IToolFactory {
 public:
     ToolFactory();
-    explicit ToolFactory(IFactory& factory);
+    // llmService is used to give the agent_start tool a way to create
+    // subagents; when null, agent_start is unavailable (matches how a
+    // missing caller agent is handled).
+    explicit ToolFactory(ILLMService& llmService);
 
     ToolFactory(const ToolFactory&) = delete;
     ToolFactory& operator=(const ToolFactory&) = delete;
@@ -22,6 +23,7 @@ public:
 
     // IToolFactory interface
     std::unique_ptr<ITool> CreateTool(const std::string& name, std::shared_ptr<IAgent> callerAgent = nullptr) override;
+    bool HasTool(const std::string& name) const override;
     std::vector<std::string> GetAvailableTools() const override;
     std::vector<std::tuple<std::string, std::string, nlohmann::json>> GetAvailableToolDescriptions() const override;
 
@@ -34,7 +36,7 @@ private:
     };
 
     std::vector<ToolEntry> m_registry;
-    IFactory* m_factory = nullptr;
+    ILLMService* m_llmService = nullptr;
 };
 
 } // namespace Haisos

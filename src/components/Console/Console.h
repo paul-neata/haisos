@@ -2,13 +2,15 @@
 #include <string>
 #include <memory>
 #include <thread>
-#include "interfaces/IConsole.h"
+#include "interfaces/IFactory.h"
 #include "src/components/libheaders/SynchronizedQueue.h"
 #include "src/components/Logger/Logger.h"
 
 namespace Haisos {
 
-class Console : public IConsole {
+// The real, physical console. Background-thread-driven so writers never block
+// on stdout; optionally mirrors the Logger's messages too.
+class Console : public IPhysicalConsole {
 public:
     explicit Console(bool registerAsLogMessageReceiver = false);
     ~Console() override;
@@ -17,7 +19,7 @@ public:
     Console& operator=(const Console&) = delete;
 
     void Write(const std::string& message) override;
-    void Write(const IAgent& agent, const std::string& message) override;
+    void Write(const std::string& sourceName, const std::string& message) override;
 
     void Start() override;
     void Stop() override;

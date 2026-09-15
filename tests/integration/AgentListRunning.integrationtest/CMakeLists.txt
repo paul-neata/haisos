@@ -2,6 +2,7 @@ add_executable(AgentListRunning.integrationtest AgentListRunningTest.cpp)
 target_include_directories(AgentListRunning.integrationtest PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(AgentListRunning.integrationtest PRIVATE
     Factory
+    ServicesCreator
     Agent
     LLMCommunicator
     HTTPClient

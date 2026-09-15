@@ -9,6 +9,7 @@ namespace Haisos {
 
 constexpr size_t MAX_HISTORY_SIZE = 100;
 constexpr size_t MAX_MESSAGE_CONTENT_SIZE = 100 * 1024;
+constexpr size_t MAX_LOGGED_TOOL_RESULT_SIZE = 1024;
 
 static void TrimHistory(std::vector<LLMMessage>& history) {
     if (history.size() <= MAX_HISTORY_SIZE) {
@@ -40,10 +41,10 @@ static void TrimHistory(std::vector<LLMMessage>& history) {
                   history.begin() + static_cast<std::ptrdiff_t>(systemCount + toRemove));
 }
 
-static void TruncateIfNeeded(std::string& content) {
+static void TruncateIfNeeded(std::string& content, size_t maxSize = MAX_MESSAGE_CONTENT_SIZE) {
     constexpr size_t truncatedNoticeSize = 11; // strlen("[truncated]")
-    if (content.size() > MAX_MESSAGE_CONTENT_SIZE) {
-        content.resize(MAX_MESSAGE_CONTENT_SIZE - truncatedNoticeSize);
+    if (content.size() > maxSize && maxSize > truncatedNoticeSize) {
+        content.resize(maxSize - truncatedNoticeSize);
         content += "[truncated]";
     }
 }
@@ -51,12 +52,11 @@ static void TruncateIfNeeded(std::string& content) {
 Agent::Agent(
     std::shared_ptr<ILLMCommunicator> llmCommunicator,
     std::shared_ptr<IToolFactory> toolFactory,
-    std::shared_ptr<IConsole> console,
+    std::shared_ptr<IAgentConsole> console,
     const std::vector<std::string>& systemPrompts,
     const std::string& name,
     std::shared_ptr<IAgent> parent,
     const std::string& startTime,
-    const SystemCallbacks& callbacks,
     bool longRunning)
     : m_llmCommunicator(std::move(llmCommunicator))
     , m_toolFactory(std::move(toolFactory))
@@ -65,9 +65,11 @@ Agent::Agent(
     , m_name(name)
     , m_startTime(startTime)
     , m_parent(std::move(parent))
-    , m_callbacks(callbacks)
     , m_longRunning(longRunning)
 {
+    if (m_toolFactory) {
+        m_cachedToolDescriptions = m_toolFactory->GetAvailableToolDescriptions();
+    }
     m_thread = std::thread(&Agent::RunThread, this);
 }
 
@@ -253,16 +255,18 @@ std::vector<std::tuple<std::string, std::string, std::string, bool>> Agent::Exec
             continue;
         }
 
-        LogInfo("Agent '%s' - Tool call received: %s", m_name.c_str(), toolName.c_str());
+        LogDebug("Agent '%s' - Tool call received: %s", m_name.c_str(), toolName.c_str());
         auto tool = m_toolFactory->CreateTool(toolName, shared_from_this());
         if (tool) {
             ToolResult result = tool->Call(shared_from_this(), args);
             toolResults.emplace_back(toolName, result.content, toolCallId, result.isError);
-            LogTrace("Agent '%s' - Tool result: %s", m_name.c_str(), result.content.c_str());
+            std::string loggedResult = result.content;
+            TruncateIfNeeded(loggedResult, MAX_LOGGED_TOOL_RESULT_SIZE);
+            LogVerboseDebug("Agent '%s' - Tool result: %s", m_name.c_str(), loggedResult.c_str());
         } else {
-            LogError("Agent '%s' - Unknown tool: %s", m_name.c_str(), toolName.c_str());
+            LogWarning("Agent '%s' - Unknown tool: %s", m_name.c_str(), toolName.c_str());
             if (m_console) {
-                m_console->Write(*this, "Error: Unknown tool - " + toolName);
+                m_console->Write("Error: Unknown tool - " + toolName);
             }
             m_messageBuffer.Append("[" + m_name + "] Error: Unknown tool - " + toolName + "\n");
             toolResults.emplace_back(toolName, "Error: Unknown tool - " + toolName, toolCallId, true);
@@ -273,30 +277,6 @@ std::vector<std::tuple<std::string, std::string, std::string, bool>> Agent::Exec
 }
 
 void Agent::RunThread() {
-    SystemCallbacks llmCallbacks;
-    if (m_callbacks.on_send_with_name) {
-        llmCallbacks.on_send = [this](const std::string& json) {
-            LogDebug("Agent '%s' sending JSON (%zu bytes)", m_name.c_str(), json.size());
-            m_callbacks.on_send_with_name(m_name, json);
-        };
-    } else if (m_callbacks.on_send) {
-        llmCallbacks.on_send = [this](const std::string& json) {
-            LogDebug("Agent '%s' sending JSON (%zu bytes)", m_name.c_str(), json.size());
-            m_callbacks.on_send(json);
-        };
-    }
-    if (m_callbacks.on_received_with_name) {
-        llmCallbacks.on_received = [this](const std::string& json) {
-            LogDebug("Agent '%s' received JSON (%zu bytes)", m_name.c_str(), json.size());
-            m_callbacks.on_received_with_name(m_name, json);
-        };
-    } else if (m_callbacks.on_received) {
-        llmCallbacks.on_received = [this](const std::string& json) {
-            LogDebug("Agent '%s' received JSON (%zu bytes)", m_name.c_str(), json.size());
-            m_callbacks.on_received(json);
-        };
-    }
-
     for (const auto& prompt : m_systemPrompts) {
         LLMMessage systemMsg;
         systemMsg.role = "system";
@@ -343,23 +323,18 @@ void Agent::RunThread() {
 
                 LogVerboseDebug("Agent '%s' LLM round %d starting", m_name.c_str(), rounds);
 
-                std::vector<std::tuple<std::string, std::string, nlohmann::json>> tools;
-                if (m_toolFactory) {
-                    tools = m_toolFactory->GetAvailableToolDescriptions();
-                }
-
                 std::vector<LLMMessage> localHistory;
                 {
                     std::lock_guard<std::mutex> lock(m_historyMutex);
                     localHistory = m_history;
                 }
 
-                LLMResponse response = m_llmCommunicator->Call(localHistory, tools, llmCallbacks);
+                LLMResponse response = m_llmCommunicator->Call(localHistory, m_cachedToolDescriptions);
                 TruncateIfNeeded(response.message.content);
 
                 if (!response.message.content.empty()) {
                     if (m_console) {
-                        m_console->Write(*this, response.message.content);
+                        m_console->Write(response.message.content);
                     }
                     m_messageBuffer.Append("[" + m_name + "] " + response.message.content + "\n");
                 }
@@ -379,11 +354,17 @@ void Agent::RunThread() {
                         for (const auto& tr : toolResults) {
                             LLMMessage toolMsg;
                             toolMsg.role = "tool";
+                            // Tool results are untrusted content, but they are structured data
+                            // (file contents, JSON) that must reach the LLM verbatim. Instead of
+                            // filtering them, delimit them the same way user input is delimited
+                            // so the model can tell data from instructions. The delimiters are
+                            // added after truncation so they are never cut off.
                             toolMsg.content = std::get<1>(tr);
                             toolMsg.is_error = std::get<3>(tr);
                             if (!toolMsg.is_error) {
                                 TruncateIfNeeded(toolMsg.content);
                             }
+                            toolMsg.content = "\n--- BEGIN TOOL RESULT ---\n" + toolMsg.content + "\n--- END TOOL RESULT ---\n";
                             toolMsg.name = std::get<0>(tr);
                             toolMsg.tool_call_id = std::get<2>(tr);
                             m_history.push_back(toolMsg);

@@ -70,6 +70,21 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/nlohmann_json)
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/googletest)
 
+# Lua interpreter (embedded, vendored source -- see extern/lua). Upstream ships
+# a Makefile, not CMake, so the library is built directly here: lua.c/onelua.c
+# (the standalone binaries' own main()s) and ltests.c (internal test
+# instrumentation) are excluded from the embeddable library. Built as plain/
+# generic C (no LUA_USE_LINUX etc.) so it compiles unchanged under GCC/Clang,
+# MSVC, and Emscripten.
+file(GLOB LUA_LIB_SOURCES ${CMAKE_SOURCE_DIR}/extern/lua/*.c)
+list(REMOVE_ITEM LUA_LIB_SOURCES
+    ${CMAKE_SOURCE_DIR}/extern/lua/lua.c
+    ${CMAKE_SOURCE_DIR}/extern/lua/onelua.c
+    ${CMAKE_SOURCE_DIR}/extern/lua/ltests.c
+)
+add_library(lua_lib STATIC ${LUA_LIB_SOURCES})
+target_include_directories(lua_lib PUBLIC ${CMAKE_SOURCE_DIR}/extern/lua)
+
 # Find libcurl on Linux
 if(PLATFORM_LINUX)
     find_package(CURL REQUIRED)
@@ -81,18 +96,28 @@ enable_testing()
 # Components subdirectories
 add_subdirectory(src/components/Logger)
 add_subdirectory(src/components/Filesystem)
+add_subdirectory(src/components/Environment)
 add_subdirectory(src/components/Factory)
 add_subdirectory(src/components/Console)
 add_subdirectory(src/components/HTTPClient)
 add_subdirectory(src/components/LLMCommunicator)
 add_subdirectory(src/components/ToolFactory)
-add_subdirectory(src/components/HaisosEngine)
 add_subdirectory(src/components/Agent)
+add_subdirectory(src/components/NetworkService)
+add_subdirectory(src/components/FileSystemService)
+add_subdirectory(src/components/LLMService)
+add_subdirectory(src/components/ServicesCreator)
 add_subdirectory(src/tools/get_current_date_time)
 add_subdirectory(src/tools/agent_start)
 add_subdirectory(src/tools/agent_wait_to_finish)
 add_subdirectory(src/tools/agent_query)
 add_subdirectory(src/tools/agent_stop)
 add_subdirectory(src/tools/agent_list_running)
+add_subdirectory(src/tools/os_read_file)
+add_subdirectory(src/tools/os_write_file)
+add_subdirectory(src/tools/os_list_directory)
+add_subdirectory(src/tools/os_start_process)
+add_subdirectory(src/tools/os_list_processes)
+add_subdirectory(src/components/HaisosOS)
 add_subdirectory(src/haisos)
 add_subdirectory(tests)

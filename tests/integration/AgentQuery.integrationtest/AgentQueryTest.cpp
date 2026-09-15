@@ -1,4 +1,6 @@
 #include "src/components/Factory/Factory.h"
+#include "src/components/ServicesCreator/ServicesCreator.h"
+#include "src/components/Console/AgentConsoleAdapter.h"
 #include "tests/integration/helpers/IntegrationTestHelpers.h"
 #include "tests/integration/helpers/IntegrationTestLogCapture.h"
 #include "src/tools/agent_query/AgentQueryTool.h"
@@ -15,29 +17,23 @@ bool TestAgentQuery() {
     auto [endpoint, model, apiKey] = IntegrationTest::GetEndpointModelAndApiKey();
 
     Factory factory;
-    auto console = factory.CreateConsole(false);
-    console->Start();
-    auto httpClient = factory.CreateHTTPClient();
-    auto toolFactory = factory.CreateToolFactory(factory);
-    auto llmCommunicator = factory.CreateLLMCommunicator(
-        std::move(httpClient), endpoint, model, apiKey);
+    auto servicesCreator = CreateServicesCreator();
+    auto networkService = std::shared_ptr<INetworkService>(servicesCreator->CreateNetworkService());
+    auto llmService = servicesCreator->CreateLLMService(*networkService, endpoint, model, apiKey);
 
-    SystemCallbacks callbacks;
-    callbacks.on_send_with_name = IntegrationTest::MakeLLMJsonLoggerWithName("send");
-    callbacks.on_received_with_name = IntegrationTest::MakeLLMJsonLoggerWithName("receive");
-    factory.SetSystemCallbacks(callbacks);
+    auto physicalConsole = factory.CreatePhysicalConsole(false);
+    physicalConsole->Start();
+    auto console = std::make_unique<AgentConsoleAdapter>(physicalConsole, "root");
 
-    auto agent = factory.CreateAgent(
-        std::move(llmCommunicator),
-        std::move(toolFactory),
-        std::move(console),
+    auto agent = llmService->CreateAgent(
         std::vector<std::string>{"You are a helpful AI assistant."},
         "root",
-        nullptr);
+        nullptr,
+        std::move(console));
 
     // Create a subagent directly under the main agent
     auto subagent = Tools::CreateAndStartSubagent(
-        factory,
+        *llmService,
         agent,
         "What is 4+4?",
         std::vector<std::string>{"You are a helpful AI assistant."});

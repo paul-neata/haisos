@@ -17,7 +17,7 @@ TEST(LLMCommunicatorTest, ResponseParsing) {
     userMsg.content = "User prompt";
     messages.push_back(userMsg);
 
-    LLMResponse response = llm.Call(messages, {}, {});
+    LLMResponse response = llm.Call(messages, {});
 
     EXPECT_EQ(response.message.content, "Test response");
     EXPECT_TRUE(response.done);
@@ -35,7 +35,7 @@ TEST(LLMCommunicatorTest, CallPostsToEndpoint) {
     userMsg.content = "user";
     messages.push_back(userMsg);
 
-    llm.Call(messages, {}, {});
+    llm.Call(messages, {});
 
     auto* rawHttp = llm.GetHttpClient();
     ASSERT_NE(rawHttp, nullptr);
@@ -57,7 +57,7 @@ TEST(LLMCommunicatorTest, GetLastAssembledMessage) {
     userMsg.content = "user";
     messages.push_back(userMsg);
 
-    LLMResponse response = llm.Call(messages, {}, {});
+    LLMResponse response = llm.Call(messages, {});
 
     EXPECT_EQ(response.message.content, "assembled message content");
 }

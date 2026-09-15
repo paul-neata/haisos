@@ -27,10 +27,6 @@ bool TestCallLocalOllama() {
     std::string toolCalled;
     std::string toolInput;
 
-    SystemCallbacks callbacks;
-    callbacks.on_send_with_name = IntegrationTest::MakeLLMJsonLoggerWithName("send");
-    callbacks.on_received_with_name = IntegrationTest::MakeLLMJsonLoggerWithName("receive");
-
     std::vector<LLMMessage> messages;
     LLMMessage systemMsg;
     systemMsg.role = "system";
@@ -42,7 +38,7 @@ bool TestCallLocalOllama() {
     userMsg.content = "What is the mathematical sum of 2 and 3 ?";
     messages.push_back(userMsg);
 
-    LLMResponse response = llm.Call(messages, {}, callbacks);
+    LLMResponse response = llm.Call(messages, {});
     responseReceived = response.message.content;
 
     LogInfo("Response received: %s", responseReceived.c_str());

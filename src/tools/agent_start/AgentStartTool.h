@@ -1,7 +1,5 @@
 #pragma once
-#include "interfaces/ITool.h"
-#include "interfaces/IAgent.h"
-#include "interfaces/IFactory.h"
+#include "interfaces/ILLMService.h"
 #include <nlohmann/json.hpp>
 #include <memory>
 
@@ -12,17 +10,17 @@ public:
     static const std::string ToolName;
     static const std::string ToolDefaultDescription;
 
-    AgentStartTool(IFactory& factory);
+    AgentStartTool(ILLMService& llmService);
     ToolResult Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) override;
     static nlohmann::json GetDefaultParametersSchema();
     nlohmann::json GetParametersSchema() const override { return GetDefaultParametersSchema(); }
 
 private:
-    IFactory& m_factory;
+    ILLMService& m_llmService;
 };
 
 std::shared_ptr<IAgent> CreateAndStartSubagent(
-    IFactory& factory,
+    ILLMService& llmService,
     std::shared_ptr<IAgent> parent,
     const std::string& userPrompt,
     const std::vector<std::string>& systemPrompts,

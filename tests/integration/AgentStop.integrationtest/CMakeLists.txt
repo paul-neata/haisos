@@ -2,6 +2,7 @@ add_executable(AgentStop.integrationtest AgentStopTest.cpp)
 target_include_directories(AgentStop.integrationtest PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(AgentStop.integrationtest PRIVATE
     Factory
+    ServicesCreator
     Agent
     LLMCommunicator
     HTTPClient

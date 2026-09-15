@@ -2,6 +2,7 @@ add_executable(AgentQuery.integrationtest AgentQueryTest.cpp)
 target_include_directories(AgentQuery.integrationtest PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(AgentQuery.integrationtest PRIVATE
     Factory
+    ServicesCreator
     Agent
     LLMCommunicator
     HTTPClient

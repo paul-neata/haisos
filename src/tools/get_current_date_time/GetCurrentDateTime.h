@@ -1,6 +1,6 @@
 #pragma once
 #include <string>
-#include "interfaces/ITool.h"
+#include "interfaces/ILLMService.h"
 
 namespace Haisos::Tools {
 

@@ -30,54 +30,45 @@ protected:
     }
 };
 
-TEST_F(CliParserTest, FileLongFlag) {
-    auto result = Parse({"--file", "prompt.md"});
-    EXPECT_TRUE(result.error.empty());
-    EXPECT_TRUE(result.options.useFile);
-    EXPECT_EQ(result.options.userPrompt, "prompt.md");
-}
-
-TEST_F(CliParserTest, FileShortFlag) {
-    auto result = Parse({"-f", "prompt.md"});
-    EXPECT_TRUE(result.error.empty());
-    EXPECT_TRUE(result.options.useFile);
-    EXPECT_EQ(result.options.userPrompt, "prompt.md");
-}
-
-TEST_F(CliParserTest, PromptLongFlag) {
-    auto result = Parse({"--prompt", "Hello world"});
-    EXPECT_TRUE(result.error.empty());
-    EXPECT_FALSE(result.options.useFile);
-    EXPECT_EQ(result.options.userPrompt, "Hello world");
-}
-
-TEST_F(CliParserTest, PromptShortFlag) {
-    auto result = Parse({"-p", "Hello"});
-    EXPECT_TRUE(result.error.empty());
-    EXPECT_FALSE(result.options.useFile);
-    EXPECT_EQ(result.options.userPrompt, "Hello");
-}
-
-TEST_F(CliParserTest, SystemPromptLongFlag) {
-    auto result = Parse({"--prompt", "Hello", "--system-prompt", "Be concise"});
-    EXPECT_TRUE(result.error.empty());
-    EXPECT_EQ(result.options.systemPrompt, "Be concise");
-}
-
-TEST_F(CliParserTest, PositionalArgument) {
-    auto result = Parse({"prompt.md"});
-    EXPECT_TRUE(result.error.empty());
-    EXPECT_TRUE(result.options.useFile);
-    EXPECT_EQ(result.options.userPrompt, "prompt.md");
-}
-
-TEST_F(CliParserTest, MissingInputReturnsError) {
+TEST_F(CliParserTest, NoArgsDefaultsHaisosFilePathToEmpty) {
     auto result = Parse({});
+    EXPECT_TRUE(result.error.empty());
+    EXPECT_TRUE(result.options.haisosFilePath.empty());
+    EXPECT_TRUE(result.options.argOverrides.empty());
+}
+
+TEST_F(CliParserTest, PositionalHaisosFilePath) {
+    auto result = Parse({"myfile"});
+    EXPECT_TRUE(result.error.empty());
+    EXPECT_EQ(result.options.haisosFilePath, "myfile");
+}
+
+TEST_F(CliParserTest, MultiplePositionalArgsReturnsError) {
+    auto result = Parse({"file1", "file2"});
     EXPECT_FALSE(result.error.empty());
 }
 
-TEST_F(CliParserTest, PromptAndTakeStdinReturnsError) {
-    auto result = Parse({"--prompt", "Hello", "--take-stdin"});
+TEST_F(CliParserTest, ArgOverridesAfterDoubleDash) {
+    auto result = Parse({"myfile", "--", "name=value", "other=thing"});
+    EXPECT_TRUE(result.error.empty());
+    EXPECT_EQ(result.options.haisosFilePath, "myfile");
+    ASSERT_EQ(result.options.argOverrides.size(), 2u);
+    EXPECT_EQ(result.options.argOverrides[0].first, "name");
+    EXPECT_EQ(result.options.argOverrides[0].second, "value");
+    EXPECT_EQ(result.options.argOverrides[1].first, "other");
+    EXPECT_EQ(result.options.argOverrides[1].second, "thing");
+}
+
+TEST_F(CliParserTest, ArgOverridesWithoutHaisosFilePath) {
+    auto result = Parse({"--", "name=value"});
+    EXPECT_TRUE(result.error.empty());
+    EXPECT_TRUE(result.options.haisosFilePath.empty());
+    ASSERT_EQ(result.options.argOverrides.size(), 1u);
+    EXPECT_EQ(result.options.argOverrides[0].first, "name");
+}
+
+TEST_F(CliParserTest, ArgOverrideMissingEqualsReturnsError) {
+    auto result = Parse({"--", "notkeyvalue"});
     EXPECT_FALSE(result.error.empty());
 }
 
@@ -93,8 +84,20 @@ TEST_F(CliParserTest, HelpShortFlag) {
     EXPECT_TRUE(result.options.help);
 }
 
+TEST_F(CliParserTest, VersionFlag) {
+    auto result = Parse({"--version"});
+    EXPECT_TRUE(result.error.empty());
+    EXPECT_TRUE(result.options.version);
+}
+
+TEST_F(CliParserTest, InitFlag) {
+    auto result = Parse({"--init"});
+    EXPECT_TRUE(result.error.empty());
+    EXPECT_TRUE(result.options.init);
+}
+
 TEST_F(CliParserTest, LogToConsole) {
-    auto result = Parse({"--prompt", "Hello", "--log-to-console"});
+    auto result = Parse({"--log-to-console"});
     EXPECT_TRUE(result.error.empty());
     EXPECT_TRUE(result.options.logToConsole);
 }
@@ -105,60 +108,21 @@ TEST_F(CliParserTest, UnknownFlagReturnsError) {
 }
 
 TEST_F(CliParserTest, LogLevel) {
-    auto result = Parse({"--prompt", "Hello", "--log-level", "debug"});
+    auto result = Parse({"--log-level", "debug"});
     EXPECT_TRUE(result.error.empty());
     EXPECT_EQ(result.options.logLevel, LogLevel::Debug);
 }
 
 TEST_F(CliParserTest, LogJsonInTemp) {
-    auto result = Parse({"--prompt", "Hello", "--log-json-in-temp"});
+    auto result = Parse({"--log-json-in-temp"});
     EXPECT_TRUE(result.error.empty());
     EXPECT_TRUE(result.options.logJsonInTemp);
 }
 
 TEST_F(CliParserTest, LogToFile) {
-    auto result = Parse({"--prompt", "Hello", "--log-to-file", "/tmp/log.txt"});
+    auto result = Parse({"--log-to-file", "/tmp/log.txt"});
     EXPECT_TRUE(result.error.empty());
     EXPECT_EQ(result.options.logFilePath, "/tmp/log.txt");
-}
-
-TEST_F(CliParserTest, SystemPromptFile) {
-    auto result = Parse({"--prompt", "Hello", "--system-prompt-file", "system.txt"});
-    EXPECT_TRUE(result.error.empty());
-    EXPECT_EQ(result.options.systemPromptFile, "system.txt");
-}
-
-TEST_F(CliParserTest, TakeStdinFlag) {
-    auto result = Parse({"--take-stdin"});
-    EXPECT_TRUE(result.error.empty());
-    EXPECT_TRUE(result.options.takeStdin);
-    EXPECT_FALSE(result.options.useFile);
-    EXPECT_TRUE(result.options.userPrompt.empty());
-}
-
-TEST_F(CliParserTest, MultiplePositionalArgsReturnsError) {
-    auto result = Parse({"file1.md", "file2.md"});
-    EXPECT_FALSE(result.error.empty());
-}
-
-TEST_F(CliParserTest, FileFlagMissingValue) {
-    auto result = Parse({"--file"});
-    EXPECT_FALSE(result.error.empty());
-}
-
-TEST_F(CliParserTest, PromptFlagMissingValue) {
-    auto result = Parse({"--prompt"});
-    EXPECT_FALSE(result.error.empty());
-}
-
-TEST_F(CliParserTest, SystemPromptFlagMissingValue) {
-    auto result = Parse({"--system-prompt"});
-    EXPECT_FALSE(result.error.empty());
-}
-
-TEST_F(CliParserTest, SystemPromptFileMissingValue) {
-    auto result = Parse({"--system-prompt-file"});
-    EXPECT_FALSE(result.error.empty());
 }
 
 TEST_F(CliParserTest, LogToFileMissingValue) {
@@ -169,4 +133,12 @@ TEST_F(CliParserTest, LogToFileMissingValue) {
 TEST_F(CliParserTest, LogLevelMissingValue) {
     auto result = Parse({"--log-level"});
     EXPECT_FALSE(result.error.empty());
+}
+
+TEST_F(CliParserTest, FlagsBeforeAndArgOverridesAfterDoubleDash) {
+    auto result = Parse({"myfile", "--log-to-console", "--", "name=value"});
+    EXPECT_TRUE(result.error.empty());
+    EXPECT_EQ(result.options.haisosFilePath, "myfile");
+    EXPECT_TRUE(result.options.logToConsole);
+    ASSERT_EQ(result.options.argOverrides.size(), 1u);
 }

@@ -3,7 +3,6 @@
 #include <memory>
 #include <vector>
 #include <nlohmann/json.hpp>
-#include "SystemCallbacks.h"
 
 namespace Haisos {
 
@@ -31,8 +30,7 @@ public:
 
     virtual LLMResponse Call(
         const std::vector<LLMMessage>& messages,
-        const std::vector<std::tuple<std::string, std::string, nlohmann::json>>& availableTools,
-        const SystemCallbacks& callbacks) = 0;
+        const std::vector<std::tuple<std::string, std::string, nlohmann::json>>& availableTools) = 0;
 };
 
 }

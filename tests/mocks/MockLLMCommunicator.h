@@ -2,7 +2,7 @@
 #include <string>
 #include <functional>
 #include "interfaces/ILLMCommunicator.h"
-#include "interfaces/IToolFactory.h"
+#include "interfaces/ILLMService.h"
 
 namespace Haisos::Mocks {
 
@@ -15,8 +15,7 @@ public:
 
     LLMResponse Call(
         const std::vector<LLMMessage>& messages,
-        const std::vector<std::tuple<std::string, std::string, nlohmann::json>>& /*availableTools*/,
-        const SystemCallbacks& /*callbacks*/) override
+        const std::vector<std::tuple<std::string, std::string, nlohmann::json>>& /*availableTools*/) override
     {
         m_lastMessages = messages;
         ++m_callCount;

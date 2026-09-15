@@ -11,11 +11,13 @@ LLMCommunicator::LLMCommunicator(
     std::unique_ptr<IHTTPClient> httpClient,
     const std::string& endpoint,
     const std::string& modelName,
-    const std::string& apiKey)
+    const std::string& apiKey,
+    const std::string& sourceName)
     : m_httpClient(std::move(httpClient))
     , m_endpoint(endpoint)
     , m_modelName(modelName)
     , m_apiKey(apiKey)
+    , m_sourceName(sourceName)
 {
 }
 
@@ -69,7 +71,7 @@ std::string LLMCommunicator::BuildRequestJson(
     return request.dump();
 }
 
-LLMResponse LLMCommunicator::ParseResponseJson(const std::string& jsonResponse, const SystemCallbacks& /*callbacks*/) {
+LLMResponse LLMCommunicator::ParseResponseJson(const std::string& jsonResponse) {
     LLMResponse response;
     response.done = true;
 
@@ -180,18 +182,17 @@ LLMResponse LLMCommunicator::ParseResponseJson(const std::string& jsonResponse, 
 
 LLMResponse LLMCommunicator::Call(
     const std::vector<LLMMessage>& messages,
-    const std::vector<std::tuple<std::string, std::string, nlohmann::json>>& availableTools,
-    const SystemCallbacks& callbacks)
+    const std::vector<std::tuple<std::string, std::string, nlohmann::json>>& availableTools)
 {
-    LogInfo("LLMCommunicator::Call - Endpoint: %s", m_endpoint.c_str());
+    std::string sourceTag = m_sourceName.empty() ? "" : ("[" + m_sourceName + "]");
+
+    // Per-request internal detail, not a lifecycle event: keep it at Debug so it
+    // does not flood the log (or the console) on every LLM round trip.
+    LogDebug("LLMCommunicator::Call%s - Endpoint: %s", sourceTag.c_str(), m_endpoint.c_str());
 
     std::string requestJson = BuildRequestJson(m_modelName, messages, availableTools);
 
-    LogVerboseDebug("[JSON_REQUEST] %s", requestJson.c_str());
-
-    if (callbacks.on_send) {
-        callbacks.on_send(requestJson);
-    }
+    LogVerboseDebug("[JSON_REQUEST]%s %s", sourceTag.c_str(), requestJson.c_str());
 
     std::vector<HTTPHeader> headers;
     headers.push_back({"Content-Type", "application/json"});
@@ -241,13 +242,9 @@ LLMResponse LLMCommunicator::Call(
         return response;
     }
 
-    if (callbacks.on_received) {
-        callbacks.on_received(httpResponse.body);
-    }
+    LogVerboseDebug("[JSON_RESPONSE]%s %s", sourceTag.c_str(), httpResponse.body.c_str());
 
-    LogVerboseDebug("[JSON_RESPONSE] %s", httpResponse.body.c_str());
-
-    return ParseResponseJson(httpResponse.body, callbacks);
+    return ParseResponseJson(httpResponse.body);
 }
 
 }

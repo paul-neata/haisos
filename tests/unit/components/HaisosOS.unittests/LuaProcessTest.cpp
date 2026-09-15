@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include "Environment.h"
 #include "LuaProcess.h"
 #include "tests/mocks/MockAgentConsole.h"
 
@@ -50,7 +51,7 @@ public:
 
 std::shared_ptr<LuaProcess> RunScript(TestToolFactory& toolFactory, std::shared_ptr<MockAgentConsole> console,
                                        const std::string& script, std::vector<std::string> args = {}) {
-    auto process = std::make_shared<LuaProcess>(1, 0, "test_lua", script, std::move(args), toolFactory, console);
+    auto process = std::make_shared<LuaProcess>(1, 0, CreateEnvironment(), "test_lua", script, std::move(args), toolFactory, console);
     process->WaitToFinish(2000);
     return process;
 }
@@ -122,7 +123,8 @@ TEST(LuaProcessTest, ScriptErrorFinishesWithoutCrashing) {
 TEST(LuaProcessTest, KillStopsABusyLoop) {
     TestToolFactory toolFactory;
     auto console = std::make_shared<MockAgentConsole>();
-    auto process = std::make_shared<LuaProcess>(1, 0, "busy_lua", "while true do end", std::vector<std::string>{}, toolFactory, console);
+    auto process = std::make_shared<LuaProcess>(
+        1, 0, CreateEnvironment(), "busy_lua", "while true do end", std::vector<std::string>{}, toolFactory, console);
 
     process->Kill();
     EXPECT_TRUE(process->WaitToFinish(2000));

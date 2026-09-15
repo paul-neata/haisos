@@ -30,7 +30,7 @@ ToolResult OSReadFileTool::Call(std::shared_ptr<IAgent> /*callerAgent*/, const n
     LogDebug("OSReadFileTool: reading file '%s'", path.c_str());
 
     std::string content;
-    if (!ReadWholeFile(m_os.GetRootFileSystem(), path, content)) {
+    if (!ReadWholeFile(*m_os.GetRootFileSystem(), path, content)) {
         LogWarning("OSReadFileTool: failed to read file '%s'", path.c_str());
         return ToolResult{"Failed to read file: " + path, true};
     }

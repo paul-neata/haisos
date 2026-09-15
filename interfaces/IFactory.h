@@ -7,7 +7,7 @@
 #include "INetworkService.h"
 #include "ILLMCommunicator.h"
 #include "IFilesystemService.h"
-#include "IOSEnvironment.h"
+#include "IEnvironment.h"
 #include "IPhysicalConsole.h"
 #include "IServicesCreator.h"
 #include "IHaisosOS.h"
@@ -17,8 +17,9 @@ namespace Haisos {
 
 
 // IFactory creates the root concepts -- the things that have to exist before
-// anything else can: a physical console, a disk-backed filesystem, the
-// services layer, and the OS itself. (HTTP clients come from INetworkService.) It deliberately knows
+// anything else can: a physical console, a disk-backed filesystem, an
+// environment, the services layer, and the OS itself. (HTTP clients come from
+// INetworkService.) It deliberately knows
 // nothing about agents, LLM communication, or tool factories; that all lives in
 // ILLMService (see IServicesCreator), which is what the rest of the platform
 // should generally depend on.
@@ -41,20 +42,29 @@ public:
     // filesystem owns the path and that filesystem decides what the call means.
     virtual std::unique_ptr<IFileSystem> CreatePhysicalFileSystem(const std::string& rootPath) = 0;
 
+    // A new, empty environment, to be filled in and then handed to an OS, a
+    // process or a sub-OS. An existing one is duplicated with
+    // IEnvironment::Clone() rather than rebuilt here.
+    virtual std::shared_ptr<IEnvironment> CreateEnvironment() = 0;
+
     virtual std::unique_ptr<IServicesCreator> CreateServicesCreator() = 0;
 
     // Builds an IHaisosOS around an already-built root filesystem, which becomes
-    // the OS's root for its whole life. environment is the OS's initial
-    // environment, inherited by every process and sub-OS it goes on to create,
-    // and is where the LLM endpoint/model/API key are read from.
+    // the OS's root for its whole life. environment becomes the OS's own
+    // environment, and is where the LLM endpoint/model/API key are read from.
+    // Typically -- but not automatically -- it is what its processes and sub-OS
+    // instances go on to run with: each of those is passed an environment
+    // explicitly (see IHaisosOS::StartProcess and IHaisosOS::CreateSubOS),
+    // usually a Clone() of this one.
     // osProcessId identifies the process this OS belongs to: 0 for the initial
-    // OS, and the pid of the creating process for a sub-OS. Process ids come
-    // from a single global allocator, so these are unique across every OS.
+    // OS, and the pid of the creating process for a sub-OS. Process ids are
+    // unique across every OS in this program (see
+    // IHaisosOS::GetNextGloballyUniquePID).
     virtual std::shared_ptr<IHaisosOS> CreateHaisosOS(
         std::shared_ptr<IServicesCreator> servicesCreator,
         std::shared_ptr<IPhysicalConsole> physicalConsole,
         std::shared_ptr<IFileSystem> rootFileSystem,
-        const OSEnvironment& environment,
+        std::shared_ptr<IEnvironment> environment,
         uint64_t osProcessId) = 0;
 };
 

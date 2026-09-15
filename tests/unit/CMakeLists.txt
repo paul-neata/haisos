@@ -1,6 +1,7 @@
 add_subdirectory(components/Console.unittests)
 add_subdirectory(components/Filesystem.unittests)
 add_subdirectory(components/Factory.unittests)
+add_subdirectory(components/Environment.unittests)
 add_subdirectory(components/Agent.unittests)
 add_subdirectory(components/LLMCommunicator.unittests)
 add_subdirectory(components/ToolFactory.unittests)

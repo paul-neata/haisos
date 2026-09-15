@@ -5,9 +5,17 @@ console, and a services layer; starts processes and spawns sub-OS instances.
 
 ## Responsibilities
 
-- Assigns PIDs and tracks parent/child relationships between processes (parent
-  is resolved from the calling agent, when there is one; top-most processes
-  have parent PID 0)
+- Assigns PIDs through `GetNextGloballyUniquePID()`: one allocator for the whole
+  program, so a pid live in one OS can never appear in another. Processes
+  started here are top-most (parent PID 0) -- `StartProcess` is deliberately not
+  told which agent called it, because a process is opaque (whether it is an
+  agent is its own business, and an agent's subagents stay inside it rather than
+  becoming processes). Process parentage will be redefined along with that split.
+- Every process is started with an environment passed by the caller
+  (`StartProcess(environment, programPath, args)`) -- typically
+  `GetOsEnvironment()->Clone()`. It is never taken from the OS behind the
+  caller's back: a null one is refused. The process keeps it
+  (`IProcess::GetEnvironment()`).
 - Dispatches `StartProcess` by file extension: `.md` starts an LLM agent (its
   content becomes the agent's prompt); `.lua` starts an embedded Lua script
   (via the vendored `extern/lua` interpreter, see `LuaProcess`)
@@ -29,26 +37,25 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   hands it -- typically this OS's root narrowed with
   `IFilesystemService::CreateSubFileSystem` -- rather than a permissions struct.
   Give it its own services creator via `IServicesCreator::Clone()`, so it does
-  not depend on the parent's lifetime.
+  not depend on the parent's lifetime, and its own environment via
+  `IEnvironment::Clone()`.
 - Built via `IFactory::CreateHaisosOS(servicesCreator, physicalConsole,
-  rootFileSystem, environment, osProcessId)`. The network/LLM/filesystem
-  services are created internally from the `IServicesCreator` rather than being
-  passed in pre-built. Every OS can start processes; the
+  rootFileSystem, environment, osProcessId)`. The network and LLM services are
+  created internally from the `IServicesCreator` rather than being passed in
+  pre-built. Every OS can start processes; the
   process-start restriction that `SubOSPermissions` used to carry is gone.
-- Holds an **environment** (`GetOsEnvironment()`): plain key/value strings fixed
-  at creation and inherited by every process and sub-OS it starts. The LLM
-  endpoint/model/API key are read from it (`HAISOS_ENDPOINT`/`HAISOS_MODEL`/
-  `HAISOS_API_KEY`), so a sub-OS inherits the LLM configuration for free. It is
-  populated from the haisosfile's `ENV` directives -- the host's environment is
-  never inherited wholesale.
+- Holds an **environment** (`GetOsEnvironment()`, an `IEnvironment` fixed at
+  creation; creating an OS without one fails). The LLM endpoint/model/API key
+  are read from its variables (`HAISOS_ENDPOINT`/`HAISOS_MODEL`/
+  `HAISOS_API_KEY`), so a sub-OS handed a `Clone()` of it gets the LLM
+  configuration for free. It is populated from the haisosfile's `ENV`
+  directives -- the host's environment is never inherited wholesale.
 - `GetOSProcessID()` identifies the process this OS belongs to: 0 for the
-  initial OS, and the creating process's pid for a sub-OS. Process ids come from
-  `AllocateUniquePid()`, one allocator for the whole program, so these are
-  unique across every OS.
-- `GetRootFileSystem()` exposes the OS's root directly (what the `os_*` tools
-  operate on). An OS cannot step outside that root; `GetFileSystemService()`
-  only composes further filesystems on top of it. `GetServicesCreator()` gives
-  access to this OS's own sandboxed services.
+  initial OS, and the creating process's pid for a sub-OS.
+- `GetRootFileSystem()` exposes the OS's root (what the `os_*` tools operate
+  on). An OS cannot step outside that root, but it can compose further
+  filesystems on top of it, through the filesystem service that
+  `GetServicesCreator()` -- this OS's own sandboxed services -- creates.
 
 ## Key Classes
 

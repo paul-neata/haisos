@@ -25,7 +25,7 @@ ToolResult OSListDirectoryTool::Call(std::shared_ptr<IAgent> /*callerAgent*/, co
     std::string path = args.value("path", ".");
     LogDebug("OSListDirectoryTool: listing directory '%s'", path.c_str());
 
-    auto entries = m_os.GetRootFileSystem().ReadDirectory(path);
+    auto entries = m_os.GetRootFileSystem()->ReadDirectory(path);
 
     nlohmann::json result = nlohmann::json::array();
     for (const auto& entry : entries) {

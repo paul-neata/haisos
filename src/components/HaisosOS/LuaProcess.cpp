@@ -175,6 +175,7 @@ void KillHookTrampoline(lua_State* L, lua_Debug* /*ar*/) {
 LuaProcess::LuaProcess(
     uint64_t pid,
     uint64_t parentPid,
+    std::shared_ptr<IEnvironment> environment,
     const std::string& name,
     std::string scriptContent,
     std::vector<std::string> args,
@@ -182,6 +183,7 @@ LuaProcess::LuaProcess(
     std::shared_ptr<IAgentConsole> console)
     : m_pid(pid)
     , m_parentPid(parentPid)
+    , m_environment(std::move(environment))
     , m_name(name)
     , m_scriptContent(std::move(scriptContent))
     , m_args(std::move(args))
@@ -209,6 +211,10 @@ uint64_t LuaProcess::GetParentPid() const {
 
 std::string LuaProcess::Name() const {
     return m_name;
+}
+
+std::shared_ptr<IEnvironment> LuaProcess::GetEnvironment() const {
+    return m_environment;
 }
 
 bool LuaProcess::IsFinished() const {

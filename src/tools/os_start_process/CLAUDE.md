@@ -1,8 +1,12 @@
 # os_start_process
 
 Starts a new OS process (a `.md` agent or a `.lua` script, resolved against the
-OS's filesystem root) as a child of the calling process. Returns immediately;
-does not wait for the new process to finish.
+OS's filesystem root). Returns immediately; does not wait for the new process
+to finish. The new process runs with a `Clone()` of the OS's environment, so it
+inherits what the OS was given and its own edits stay its own. It is top-most
+(parent pid 0): the calling agent is deliberately not passed to
+`IHaisosOS::StartProcess`, because a process is opaque -- whether it happens to
+be an agent is its own business.
 
 ## Arguments
 

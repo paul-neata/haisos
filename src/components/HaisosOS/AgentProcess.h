@@ -8,12 +8,18 @@ namespace Haisos {
 // An IProcess whose runtime is an LLM agent.
 class AgentProcess : public IProcess {
 public:
-    AgentProcess(uint64_t pid, uint64_t parentPid, const std::string& name, std::shared_ptr<IAgent> agent);
+    AgentProcess(
+        uint64_t pid,
+        uint64_t parentPid,
+        std::shared_ptr<IEnvironment> environment,
+        const std::string& name,
+        std::shared_ptr<IAgent> agent);
     ~AgentProcess() override;
 
     uint64_t GetPid() const override;
     uint64_t GetParentPid() const override;
     std::string Name() const override;
+    std::shared_ptr<IEnvironment> GetEnvironment() const override;
 
     bool IsFinished() const override;
     void WaitToFinish() override;
@@ -26,6 +32,7 @@ public:
 private:
     uint64_t m_pid;
     uint64_t m_parentPid;
+    std::shared_ptr<IEnvironment> m_environment;
     std::string m_name;
     std::shared_ptr<IAgent> m_agent;
 };

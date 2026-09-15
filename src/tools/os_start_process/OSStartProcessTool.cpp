@@ -4,7 +4,7 @@
 namespace Haisos::Tools {
 
 const std::string OSStartProcessTool::ToolName = "os_start_process";
-const std::string OSStartProcessTool::ToolDefaultDescription = "Start a new OS process (a .md agent or a .lua script, resolved against the OS's filesystem root) as a child of the calling process. Returns immediately with the new process's pid; does not wait for it to finish.";
+const std::string OSStartProcessTool::ToolDefaultDescription = "Start a new OS process (a .md agent or a .lua script, resolved against the OS's filesystem root). Returns immediately with the new process's pid; does not wait for it to finish.";
 
 OSStartProcessTool::OSStartProcessTool(IHaisosOS& os) : m_os(os) {}
 
@@ -43,7 +43,9 @@ ToolResult OSStartProcessTool::Call(std::shared_ptr<IAgent> callerAgent, const n
 
     LogDebug("OSStartProcessTool: starting process '%s' with %zu arg(s)", path.c_str(), programArgs.size());
 
-    auto process = m_os.StartProcess(path, programArgs, callerAgent);
+    // The new process runs with a copy of the OS's environment: it inherits
+    // what the OS was given, and its own edits stay its own.
+    auto process = m_os.StartProcess(m_os.GetOsEnvironment()->Clone(), path, programArgs);
     if (!process) {
         LogWarning("OSStartProcessTool: failed to start process '%s'", path.c_str());
         return ToolResult{"Failed to start process: " + path, true};

@@ -51,15 +51,13 @@ HaisosOS::HaisosOS(
     std::shared_ptr<IServicesCreator> servicesCreator,
     std::shared_ptr<INetworkService> networkService,
     std::shared_ptr<ILLMService> llmService,
-    std::unique_ptr<IFilesystemService> filesystemServiceFactory,
     std::shared_ptr<IFileSystem> rootFileSystem,
     std::shared_ptr<IPhysicalConsole> physicalConsole,
-    OSEnvironment environment,
+    std::shared_ptr<IEnvironment> environment,
     uint64_t osProcessId)
     : m_servicesCreator(std::move(servicesCreator))
     , m_networkService(std::move(networkService))
     , m_llmService(std::move(llmService))
-    , m_filesystemServiceFactory(std::move(filesystemServiceFactory))
     , m_rootFileSystem(std::move(rootFileSystem))
     , m_physicalConsole(std::move(physicalConsole))
     , m_environment(std::move(environment))
@@ -122,49 +120,17 @@ void HaisosOS::DrainProcess(const std::shared_ptr<IProcess>& process) {
 }
 
 void HaisosOS::CleanupFinishedProcesses() {
-    std::vector<IAgent*> finishedAgents;
     m_processes.erase(
         std::remove_if(m_processes.begin(), m_processes.end(),
-            [&finishedAgents](const std::shared_ptr<IProcess>& process) {
-                if (!process->IsFinished()) {
-                    return false;
-                }
-                if (auto agent = process->AsAgent()) {
-                    finishedAgents.push_back(agent.get());
-                }
-                return true;
+            [](const std::shared_ptr<IProcess>& process) {
+                return process->IsFinished();
             }),
         m_processes.end());
-
-    if (finishedAgents.empty()) {
-        return;
-    }
-    // Called with m_processesMutex held; m_agentPidMutex is only ever taken
-    // nested under it, never the other way around.
-    std::lock_guard<std::mutex> lock(m_agentPidMutex);
-    for (IAgent* agent : finishedAgents) {
-        m_agentToPid.erase(agent);
-    }
 }
 
-uint64_t HaisosOS::ResolveParentPid(const std::shared_ptr<IAgent>& callerAgent) const {
-    if (!callerAgent) {
-        return 0;
-    }
-    std::lock_guard<std::mutex> lock(m_agentPidMutex);
-    auto it = m_agentToPid.find(callerAgent.get());
-    if (it == m_agentToPid.end()) {
-        return 0;
-    }
-    // Guard against a recycled address: only trust the entry if it still
-    // refers to this very agent instance, not to a dead one it outlived.
-    if (it->second.agent.lock() != callerAgent) {
-        return 0;
-    }
-    return it->second.pid;
-}
-
-std::shared_ptr<IProcess> HaisosOS::StartAgentProcess(const std::string& programPath, const std::vector<std::string>& args, uint64_t parentPid) {
+std::shared_ptr<IProcess> HaisosOS::StartAgentProcess(
+    std::shared_ptr<IEnvironment> environment, const std::string& programPath, const std::vector<std::string>& args)
+{
     std::string content;
     if (!ReadWholeFile(*m_rootFileSystem, programPath, content)) {
         LogError("HaisosOS: failed to read process file: %s", programPath.c_str());
@@ -186,7 +152,7 @@ std::shared_ptr<IProcess> HaisosOS::StartAgentProcess(const std::string& program
     // "injection" phrasing buys nothing against whoever wrote the file, while its
     // lossy rewriting (it deletes anything between '<' and '>', drops whole lines,
     // and caps at 64KB) would silently corrupt the program being run.
-    uint64_t pid = AllocateUniquePid();
+    uint64_t pid = GetNextGloballyUniquePID();
     std::string name = GetStem(programPath) + "_" + std::to_string(pid);
 
     auto console = std::make_unique<AgentConsoleAdapter>(m_physicalConsole, name);
@@ -199,53 +165,63 @@ std::shared_ptr<IProcess> HaisosOS::StartAgentProcess(const std::string& program
         false,
         &m_osToolFactory);
 
-    {
-        std::lock_guard<std::mutex> lock(m_agentPidMutex);
-        m_agentToPid[agent.get()] = AgentPidEntry{agent, pid};
-    }
-
     agent->Post(content);
 
-    auto process = std::make_shared<AgentProcess>(pid, parentPid, name, agent);
+    // Parent pid 0: a process started here is top-most. Parentage used to be
+    // resolved from the calling agent, but a process is opaque -- whether it is
+    // an agent is its own business -- and the process/agent relationship is
+    // being redefined, so nothing claims to know a parent for now.
+    auto process = std::make_shared<AgentProcess>(pid, /*parentPid=*/0, std::move(environment), name, agent);
 
     {
         std::lock_guard<std::mutex> lock(m_processesMutex);
         CleanupFinishedProcesses();
         m_processes.push_back(process);
     }
-    LogInfo("HaisosOS: started agent process pid=%llu parent_pid=%llu name='%s' program='%s'",
-        static_cast<unsigned long long>(pid), static_cast<unsigned long long>(parentPid), name.c_str(), programPath.c_str());
+    LogInfo("HaisosOS: started agent process pid=%llu name='%s' program='%s'",
+        static_cast<unsigned long long>(pid), name.c_str(), programPath.c_str());
     return process;
 }
 
-std::shared_ptr<IProcess> HaisosOS::StartLuaProcess(const std::string& programPath, const std::vector<std::string>& args, uint64_t parentPid) {
+std::shared_ptr<IProcess> HaisosOS::StartLuaProcess(
+    std::shared_ptr<IEnvironment> environment, const std::string& programPath, const std::vector<std::string>& args)
+{
     std::string content;
     if (!ReadWholeFile(*m_rootFileSystem, programPath, content)) {
         LogError("HaisosOS: failed to read process file: %s", programPath.c_str());
         return nullptr;
     }
 
-    uint64_t pid = AllocateUniquePid();
+    uint64_t pid = GetNextGloballyUniquePID();
     std::string name = GetStem(programPath) + "_" + std::to_string(pid);
 
     auto console = std::make_shared<AgentConsoleAdapter>(m_physicalConsole, name);
-    auto process = std::make_shared<LuaProcess>(pid, parentPid, name, std::move(content), args, m_osToolFactory, console);
+    auto process = std::make_shared<LuaProcess>(
+        pid, /*parentPid=*/0, std::move(environment), name, std::move(content), args, m_osToolFactory, console);
 
     {
         std::lock_guard<std::mutex> lock(m_processesMutex);
         CleanupFinishedProcesses();
         m_processes.push_back(process);
     }
-    LogInfo("HaisosOS: started lua process pid=%llu parent_pid=%llu name='%s' program='%s'",
-        static_cast<unsigned long long>(pid), static_cast<unsigned long long>(parentPid), name.c_str(), programPath.c_str());
+    LogInfo("HaisosOS: started lua process pid=%llu name='%s' program='%s'",
+        static_cast<unsigned long long>(pid), name.c_str(), programPath.c_str());
     return process;
 }
 
 std::shared_ptr<IProcess> HaisosOS::StartProcess(
+    std::shared_ptr<IEnvironment> environment,
     const std::string& programPath,
-    const std::vector<std::string>& args,
-    std::shared_ptr<IAgent> callerAgent)
+    const std::vector<std::string>& args)
 {
+    // The environment is never taken from the OS behind the caller's back: a
+    // process runs with what it was handed, so a missing one is a bug in the
+    // caller rather than something to paper over with the OS's own.
+    if (!environment) {
+        LogError("HaisosOS: refusing to start '%s': no environment was passed", programPath.c_str());
+        return nullptr;
+    }
+
     if (m_shuttingDown) {
         LogWarning("HaisosOS: refusing to start '%s': this OS is shutting down", programPath.c_str());
         return nullptr;
@@ -263,14 +239,13 @@ std::shared_ptr<IProcess> HaisosOS::StartProcess(
         }
     }
 
-    uint64_t parentPid = ResolveParentPid(callerAgent);
     std::string extension = GetExtension(programPath);
 
     if (extension == ".md") {
-        return StartAgentProcess(programPath, args, parentPid);
+        return StartAgentProcess(std::move(environment), programPath, args);
     }
     if (extension == ".lua") {
-        return StartLuaProcess(programPath, args, parentPid);
+        return StartLuaProcess(std::move(environment), programPath, args);
     }
     LogWarning("HaisosOS: unsupported program type: %s", programPath.c_str());
     return nullptr;
@@ -285,7 +260,7 @@ std::shared_ptr<IHaisosOS> HaisosOS::CreateSubOS(
     std::shared_ptr<IServicesCreator> servicesCreator,
     std::shared_ptr<IPhysicalConsole> physicalConsole,
     std::shared_ptr<IFileSystem> rootFileSystem,
-    const OSEnvironment& environment,
+    std::shared_ptr<IEnvironment> environment,
     uint64_t osProcessId)
 {
     // A sub-OS is an ordinary OS; what confines it is the root filesystem the
@@ -295,23 +270,19 @@ std::shared_ptr<IHaisosOS> HaisosOS::CreateSubOS(
         std::move(servicesCreator),
         std::move(physicalConsole),
         std::move(rootFileSystem),
-        environment,
+        std::move(environment),
         osProcessId);
 }
 
-IFileSystem& HaisosOS::GetRootFileSystem() {
-    return *m_rootFileSystem;
+std::shared_ptr<IFileSystem> HaisosOS::GetRootFileSystem() {
+    return m_rootFileSystem;
 }
 
-IFilesystemService& HaisosOS::GetFileSystemService() {
-    return *m_filesystemServiceFactory;
+std::shared_ptr<IServicesCreator> HaisosOS::GetServicesCreator() {
+    return m_servicesCreator;
 }
 
-IServicesCreator& HaisosOS::GetServicesCreator() {
-    return *m_servicesCreator;
-}
-
-const OSEnvironment& HaisosOS::GetOsEnvironment() const {
+std::shared_ptr<IEnvironment> HaisosOS::GetOsEnvironment() const {
     return m_environment;
 }
 
@@ -319,19 +290,19 @@ uint64_t HaisosOS::GetOSProcessID() const {
     return m_osProcessId;
 }
 
-uint64_t AllocateUniquePid() {
-    // One allocator for the whole program, so a pid identifies a process (and,
-    // through GetOSProcessID(), the OS it owns) uniquely no matter which OS tree
-    // it came from. Starts at 1: 0 means "no parent"/"the initial OS".
+uint64_t HaisosOS::GetNextGloballyUniquePID() {
+    // One allocator for the whole program, not one per OS, so a pid identifies a
+    // process (and, through GetOSProcessID(), the OS it owns) uniquely no matter
+    // which OS tree it came from: a pid live in one OS can never appear in
+    // another. Starts at 1: 0 means "no parent"/"the initial OS".
     static std::atomic<uint64_t> counter{1};
     return counter.fetch_add(1);
 }
 
 namespace {
 
-std::string EnvValue(const OSEnvironment& environment, const char* key) {
-    auto it = environment.find(key);
-    return (it == environment.end()) ? std::string() : it->second;
+std::string EnvValue(const IEnvironment& environment, const char* key) {
+    return environment.GetVariable(key).value_or(std::string());
 }
 
 } // namespace
@@ -340,17 +311,22 @@ std::shared_ptr<IHaisosOS> CreateHaisosOS(
     std::shared_ptr<IServicesCreator> servicesCreator,
     std::shared_ptr<IPhysicalConsole> physicalConsole,
     std::shared_ptr<IFileSystem> rootFileSystem,
-    const OSEnvironment& environment,
+    std::shared_ptr<IEnvironment> environment,
     uint64_t osProcessId)
 {
+    if (!environment) {
+        LogError("HaisosOS: refusing to create an OS without an environment");
+        return nullptr;
+    }
+
     // The LLM configuration is part of the OS's environment rather than a set of
     // constructor parameters, so a sub-OS inherits it along with everything else.
     // There are deliberately no built-in defaults: the haisosfile's ENV
     // directives are the single source of truth, so the configuration a run used
     // is always readable from the haisosfile rather than half of it living here.
-    std::string endpoint = EnvValue(environment, kEnvEndpoint);
-    std::string modelName = EnvValue(environment, kEnvModel);
-    std::string apiKey = EnvValue(environment, kEnvApiKey);
+    std::string endpoint = EnvValue(*environment, kEnvEndpoint);
+    std::string modelName = EnvValue(*environment, kEnvModel);
+    std::string apiKey = EnvValue(*environment, kEnvApiKey);
 
     if (endpoint.empty() || modelName.empty()) {
         LogWarning(
@@ -363,16 +339,14 @@ std::shared_ptr<IHaisosOS> CreateHaisosOS(
 
     std::shared_ptr<INetworkService> networkService = servicesCreator->CreateNetworkService();
     std::shared_ptr<ILLMService> llmService = servicesCreator->CreateLLMService(*networkService, endpoint, modelName, apiKey);
-    auto filesystemServiceFactory = servicesCreator->CreateFileSystemService();
 
     return std::make_shared<HaisosOS>(
         std::move(servicesCreator),
         std::move(networkService),
         std::move(llmService),
-        std::move(filesystemServiceFactory),
         std::move(rootFileSystem),
         std::move(physicalConsole),
-        environment,
+        std::move(environment),
         osProcessId);
 }
 

@@ -29,6 +29,7 @@ haisos/
 │   ├── components/        - Component implementations (each has its own CLAUDE.md)
 │   │   ├── Agent/
 │   │   ├── Console/
+│   │   ├── Environment/
 │   │   ├── Factory/
 │   │   ├── FileSystemService/
 │   │   ├── Filesystem/
@@ -55,7 +56,7 @@ haisos/
 │   │   ├── os_start_process/
 │   │   └── os_list_processes/
 │   └── haisos/            - Entry point, CLI parser, haisosfile parser, and root-filesystem builder
-├── interfaces/             - Service-based interfaces (IFactory.h [IPhysicalConsole], IServicesCreator.h, IHaisosOS.h, IProcess.h, ILLMService.h [IAgent, ITool, IToolFactory, IAgentConsole], INetworkService.h [IHTTPClient], IFilesystemService.h [IFileSystem], ILLMCommunicator.h)
+├── interfaces/             - Service-based interfaces (IFactory.h [IPhysicalConsole], IServicesCreator.h, IHaisosOS.h, IProcess.h, IEnvironment.h [LLMIdentifier], ILLMService.h [IAgent, ITool, IToolFactory, IAgentConsole], INetworkService.h [IHTTPClient], IFilesystemService.h [IFileSystem], ILLMCommunicator.h)
 ├── tests/                 - All tests
 │   ├── mocks/             - Mock classes for testing
 │   ├── unit/              - Unit tests (Google Test)
@@ -138,12 +139,15 @@ node ./output/wasm/haisos.js
 | `HAISOS_MODEL` | Model name | `kimi-k2.6:cloud` |
 | `HAISOS_API_KEY` | API key (optional for local Ollama) | (empty) |
 
-These are read from the **OS's own environment**, not the host's, and have no
-built-in default: whatever the haisosfile's `ENV` directives say is what agents
-talk to. Set them outright with `ENV HAISOS_MODEL=llama3`, or take the host's
-value with the bare `ENV HAISOS_MODEL` form. `haisos --init` writes the defaults
-above into the generated haisosfile. Because they live in the environment, a
-sub-OS inherits the LLM configuration along with everything else.
+These are read from the **OS's own environment** (`IEnvironment`), not the
+host's, and have no built-in default: whatever the haisosfile's `ENV` directives
+say is what agents talk to. Set them outright with `ENV HAISOS_MODEL=llama3`, or
+take the host's value with the bare `ENV HAISOS_MODEL` form. `haisos --init`
+writes the defaults above into the generated haisosfile. Because they are
+variables in the environment, a sub-OS or process handed a `Clone()` of it gets
+the LLM configuration along with everything else -- but nothing is inherited
+implicitly: an `IEnvironment` is passed explicitly when an OS, a process or a
+sub-OS is created.
 
 ## Command-Line Arguments
 
@@ -267,6 +271,7 @@ Each component lives in its own folder under `src/components/` and has its own `
 | **Agent** | `src/components/Agent/` | Manages LLM conversations with parent/child agent relationships; supports subagents via agent tools |
 | **LLMCommunicator** | `src/components/LLMCommunicator/` | Handles LLM API communication, request/response formatting, and tool call parsing (HTTP is handled by HTTPClient) |
 | **ToolFactory** | `src/components/ToolFactory/` | Creates tool instances by name, including context-aware tools like `agent_start` |
+| **Environment** | `src/components/Environment/` | An OS's or a process's environment: variables, secrets (nameable but not readable), and LLM identifiers; `Clone()`d rather than shared |
 | **Console** | `src/components/Console/` | Async physical console output, plus adapters giving agents a write-only view onto it (or onto memory only) |
 | **Logger** | `src/components/Logger/` | Thread-safe logging with configurable receivers |
 | **HTTPClient** | `src/components/HTTPClient/` | Platform-specific HTTP implementation (Curl/WinHTTP/Fetch) |

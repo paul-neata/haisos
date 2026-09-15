@@ -21,6 +21,7 @@ public:
     LuaProcess(
         uint64_t pid,
         uint64_t parentPid,
+        std::shared_ptr<IEnvironment> environment,
         const std::string& name,
         std::string scriptContent,
         std::vector<std::string> args,
@@ -31,6 +32,7 @@ public:
     uint64_t GetPid() const override;
     uint64_t GetParentPid() const override;
     std::string Name() const override;
+    std::shared_ptr<IEnvironment> GetEnvironment() const override;
 
     bool IsFinished() const override;
     void WaitToFinish() override;
@@ -53,6 +55,7 @@ private:
 
     uint64_t m_pid;
     uint64_t m_parentPid;
+    std::shared_ptr<IEnvironment> m_environment;
     std::string m_name;
     std::string m_scriptContent;
     std::vector<std::string> m_args;

@@ -236,26 +236,28 @@ int main(int argc, char* argv[]) {
     // The OS's environment comes only from the haisosfile's ENV directives: the
     // host's variables are not inherited wholesale, so `ENV NAME` is the single,
     // explicit way one gets in. The LLM configuration is read from here too.
-    OSEnvironment environment;
+    std::shared_ptr<IEnvironment> environment = factory->CreateEnvironment();
     for (const auto& env : parseResult.config.envEntries) {
         if (!env.importFromHost) {
-            environment[env.name] = env.value;
+            environment->SetVariable(env.name, env.value);
             continue;
         }
         if (const char* hostValue = std::getenv(env.name.c_str())) {
-            environment[env.name] = hostValue;
+            environment->SetVariable(env.name, hostValue);
         } else {
             LogDebug("ENV %s: not set in the host environment, leaving it unset", env.name.c_str());
         }
     }
 
     // The key itself is deliberately never logged, only whether one was supplied.
+    std::string endpoint = environment->GetVariable(kEnvEndpoint).value_or("(unset)");
+    std::string model = environment->GetVariable(kEnvModel).value_or("(unset)");
     LogInfo("Haisos configuration: haisosfile='%s' endpoint='%s' model='%s' api_key_set=%d env_vars=%zu",
         haisosFilePath.c_str(),
-        environment.count(kEnvEndpoint) ? environment[kEnvEndpoint].c_str() : "(default)",
-        environment.count(kEnvModel) ? environment[kEnvModel].c_str() : "(default)",
-        environment.count(kEnvApiKey) && !environment[kEnvApiKey].empty() ? 1 : 0,
-        environment.size());
+        endpoint.c_str(),
+        model.c_str(),
+        environment->GetVariable(kEnvApiKey).value_or("").empty() ? 0 : 1,
+        environment->GetVariableNames().size());
 
     std::shared_ptr<IServicesCreator> servicesCreator = factory->CreateServicesCreator();
     auto filesystemService = servicesCreator->CreateFileSystemService();
@@ -273,10 +275,18 @@ int main(int argc, char* argv[]) {
 
     // The initial OS belongs to no process, hence pid 0.
     auto os = factory->CreateHaisosOS(servicesCreator, physicalConsole, rootFileSystem, environment, 0);
+    if (!os) {
+        LogError("Failed to create the OS for '%s'", haisosFilePath.c_str());
+        std::cerr << "Error: failed to create the OS\n";
+        physicalConsole->Stop();
+        return 1;
+    }
 
     std::vector<std::shared_ptr<IProcess>> processes;
     for (const auto& runEntry : parseResult.config.runEntries) {
-        auto process = os->StartProcess(runEntry.programPath, runEntry.args, nullptr);
+        // Each RUN gets its own copy of the OS's environment: nothing is
+        // inherited implicitly, and one process's edits never reach another's.
+        auto process = os->StartProcess(os->GetOsEnvironment()->Clone(), runEntry.programPath, runEntry.args);
         if (!process) {
             LogError("Failed to start process: %s", runEntry.programPath.c_str());
             std::cerr << "Error: Failed to start process: " << runEntry.programPath << "\n";

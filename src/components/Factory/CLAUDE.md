@@ -5,8 +5,9 @@ can.
 
 ## Responsibilities
 
-- Creates a physical console, a disk-backed `PhysicalFileSystem`, the services
-  layer (`IServicesCreator`), and the OS itself (`IHaisosOS`)
+- Creates a physical console, a disk-backed `PhysicalFileSystem`, an empty
+  `IEnvironment`, the services layer (`IServicesCreator`), and the OS itself
+  (`IHaisosOS`)
 - Hands out no unrooted filesystem: every filesystem it creates is anchored
   somewhere, and an OS receives its root at creation and can never step outside
   it -- it can only compose further filesystems on top of that root

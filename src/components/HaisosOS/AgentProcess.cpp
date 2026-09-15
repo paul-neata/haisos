@@ -2,9 +2,15 @@
 
 namespace Haisos {
 
-AgentProcess::AgentProcess(uint64_t pid, uint64_t parentPid, const std::string& name, std::shared_ptr<IAgent> agent)
+AgentProcess::AgentProcess(
+    uint64_t pid,
+    uint64_t parentPid,
+    std::shared_ptr<IEnvironment> environment,
+    const std::string& name,
+    std::shared_ptr<IAgent> agent)
     : m_pid(pid)
     , m_parentPid(parentPid)
+    , m_environment(std::move(environment))
     , m_name(name)
     , m_agent(std::move(agent))
 {
@@ -22,6 +28,10 @@ uint64_t AgentProcess::GetParentPid() const {
 
 std::string AgentProcess::Name() const {
     return m_name;
+}
+
+std::shared_ptr<IEnvironment> AgentProcess::GetEnvironment() const {
+    return m_environment;
 }
 
 bool AgentProcess::IsFinished() const {

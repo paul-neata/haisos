@@ -3,6 +3,10 @@
 
 namespace Haisos {
 
+std::shared_ptr<SubFileSystem> SubFileSystem::Create(std::shared_ptr<IFileSystem> root, const std::string& basePath) {
+    return std::shared_ptr<SubFileSystem>(new SubFileSystem(std::move(root), basePath));
+}
+
 SubFileSystem::SubFileSystem(std::shared_ptr<IFileSystem> root, const std::string& basePath)
     : m_root(std::move(root))
     , m_basePath(NormalizeVirtualPath(basePath))

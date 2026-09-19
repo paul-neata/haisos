@@ -4,7 +4,6 @@
 #include "src/tools/agent_start/AgentStartTool.h"
 #include "src/tools/agent_wait_to_finish/AgentWaitToFinishTool.h"
 #include "src/tools/agent_query/AgentQueryTool.h"
-#include "src/tools/agent_stop/AgentStopTool.h"
 #include "src/tools/agent_list_running/AgentListRunningTool.h"
 
 namespace Haisos {
@@ -15,15 +14,15 @@ ToolFactory::ToolFactory() : m_llmService(nullptr) {
             Tools::GetCurrentDateTime::ToolName,
             []() { return Tools::GetCurrentDateTime::ToolDefaultDescription; },
             []() { return Tools::GetCurrentDateTime::GetDefaultParametersSchema(); },
-            [](std::shared_ptr<IAgent>) { return std::make_unique<Tools::GetCurrentDateTime>(); }
+            [](std::shared_ptr<IAgent>) { return Tools::GetCurrentDateTime::Create(); }
         },
         ToolEntry{
             Tools::AgentStartTool::ToolName,
             []() { return Tools::AgentStartTool::ToolDefaultDescription; },
             []() { return Tools::AgentStartTool::GetDefaultParametersSchema(); },
-            [this](std::shared_ptr<IAgent> callerAgent) -> std::unique_ptr<ITool> {
+            [this](std::shared_ptr<IAgent> callerAgent) -> std::shared_ptr<ITool> {
                 if (m_llmService && callerAgent) {
-                    return std::make_unique<Tools::AgentStartTool>(*m_llmService);
+                    return Tools::AgentStartTool::Create(*m_llmService);
                 }
                 LogWarning("ToolFactory: agent_start requested but LLM service or caller agent is missing");
                 return nullptr;
@@ -33,9 +32,9 @@ ToolFactory::ToolFactory() : m_llmService(nullptr) {
             Tools::AgentWaitToFinishTool::ToolName,
             []() { return Tools::AgentWaitToFinishTool::ToolDefaultDescription; },
             []() { return Tools::AgentWaitToFinishTool::GetDefaultParametersSchema(); },
-            [](std::shared_ptr<IAgent> callerAgent) -> std::unique_ptr<ITool> {
+            [](std::shared_ptr<IAgent> callerAgent) -> std::shared_ptr<ITool> {
                 if (callerAgent) {
-                    return std::make_unique<Tools::AgentWaitToFinishTool>();
+                    return Tools::AgentWaitToFinishTool::Create();
                 }
                 LogWarning("ToolFactory: agent_wait_to_finish requested but caller agent is missing");
                 return nullptr;
@@ -45,23 +44,11 @@ ToolFactory::ToolFactory() : m_llmService(nullptr) {
             Tools::AgentQueryTool::ToolName,
             []() { return Tools::AgentQueryTool::ToolDefaultDescription; },
             []() { return Tools::AgentQueryTool::GetDefaultParametersSchema(); },
-            [](std::shared_ptr<IAgent> callerAgent) -> std::unique_ptr<ITool> {
+            [](std::shared_ptr<IAgent> callerAgent) -> std::shared_ptr<ITool> {
                 if (callerAgent) {
-                    return std::make_unique<Tools::AgentQueryTool>();
+                    return Tools::AgentQueryTool::Create();
                 }
                 LogWarning("ToolFactory: agent_query requested but caller agent is missing");
-                return nullptr;
-            }
-        },
-        ToolEntry{
-            Tools::AgentStopTool::ToolName,
-            []() { return Tools::AgentStopTool::ToolDefaultDescription; },
-            []() { return Tools::AgentStopTool::GetDefaultParametersSchema(); },
-            [](std::shared_ptr<IAgent> callerAgent) -> std::unique_ptr<ITool> {
-                if (callerAgent) {
-                    return std::make_unique<Tools::AgentStopTool>();
-                }
-                LogWarning("ToolFactory: agent_stop requested but caller agent is missing");
                 return nullptr;
             }
         },
@@ -69,9 +56,9 @@ ToolFactory::ToolFactory() : m_llmService(nullptr) {
             Tools::AgentListRunningTool::ToolName,
             []() { return Tools::AgentListRunningTool::ToolDefaultDescription; },
             []() { return Tools::AgentListRunningTool::GetDefaultParametersSchema(); },
-            [](std::shared_ptr<IAgent> callerAgent) -> std::unique_ptr<ITool> {
+            [](std::shared_ptr<IAgent> callerAgent) -> std::shared_ptr<ITool> {
                 if (callerAgent) {
-                    return std::make_unique<Tools::AgentListRunningTool>();
+                    return Tools::AgentListRunningTool::Create();
                 }
                 LogWarning("ToolFactory: agent_list_running requested but caller agent is missing");
                 return nullptr;
@@ -84,7 +71,7 @@ ToolFactory::ToolFactory(ILLMService& llmService) : ToolFactory() {
     m_llmService = &llmService;
 }
 
-std::unique_ptr<ITool> ToolFactory::CreateTool(const std::string& name, std::shared_ptr<IAgent> callerAgent) {
+std::shared_ptr<ITool> ToolFactory::CreateTool(const std::string& name, std::shared_ptr<IAgent> callerAgent) {
     for (const auto& entry : m_registry) {
         if (entry.name == name) {
             return entry.create(callerAgent);

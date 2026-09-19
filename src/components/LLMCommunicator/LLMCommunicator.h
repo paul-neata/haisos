@@ -15,8 +15,8 @@ public:
     // restoring what the old SystemCallbacks on_send_with_name/
     // on_received_with_name gave test/debug tooling, without the callback
     // plumbing.
-    LLMCommunicator(
-        std::unique_ptr<IHTTPClient> httpClient,
+    static std::shared_ptr<LLMCommunicator> Create(
+        std::shared_ptr<IHTTPClient> httpClient,
         const std::string& endpoint,
         const std::string& modelName,
         const std::string& apiKey,
@@ -36,9 +36,16 @@ public:
     IHTTPClient* GetHttpClient() const { return m_httpClient.get(); }
 
 private:
+    LLMCommunicator(
+        std::shared_ptr<IHTTPClient> httpClient,
+        const std::string& endpoint,
+        const std::string& modelName,
+        const std::string& apiKey,
+        const std::string& sourceName);
+
     LLMResponse ParseResponseJson(const std::string& jsonResponse);
 
-    std::unique_ptr<IHTTPClient> m_httpClient;
+    std::shared_ptr<IHTTPClient> m_httpClient;
     std::string m_endpoint;
     std::string m_modelName;
     std::string m_apiKey;

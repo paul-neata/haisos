@@ -7,7 +7,9 @@ namespace Haisos {
 
 class FileSystem : public MountableFileSystem {
 public:
-    FileSystem() = default;
+    static std::shared_ptr<FileSystem> Create() {
+        return std::shared_ptr<FileSystem>(new FileSystem());
+    }
     ~FileSystem() override = default;
 
     int LocalOpenFile(const std::string& pathname, int flags) override;
@@ -25,6 +27,9 @@ public:
     std::string AbsolutePathFor(const std::string& path) const override {
         return NormalizeVirtualPath(path, "/");
     }
+
+private:
+    FileSystem() = default;
 };
 
 } // namespace Haisos

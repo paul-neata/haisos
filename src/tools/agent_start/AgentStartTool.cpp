@@ -15,15 +15,15 @@ std::shared_ptr<IAgent> CreateAndStartSubagent(
     std::shared_ptr<IAgent> parent,
     const std::string& userPrompt,
     const std::vector<std::string>& systemPrompts,
-    bool longRunning)
+    bool interactive)
 {
     std::string name = GenerateAgentName();
     std::string startTime = GetCurrentTimestamp();
 
     // Prompts can embed large pasted content (whole files), so only their sizes
     // are logged at Debug; the full text belongs at VerboseDebug.
-    LogDebug("CreateAndStartSubagent: creating subagent '%s' promptLength=%zu systemPrompts=%zu longRunning=%d",
-             name.c_str(), userPrompt.size(), systemPrompts.size(), longRunning ? 1 : 0);
+    LogDebug("CreateAndStartSubagent: creating subagent '%s' promptLength=%zu systemPrompts=%zu interactive=%d",
+             name.c_str(), userPrompt.size(), systemPrompts.size(), interactive ? 1 : 0);
     LogVerboseDebug("CreateAndStartSubagent: subagent '%s' user prompt: '%s'", name.c_str(), userPrompt.c_str());
     for (const auto& systemPrompt : systemPrompts) {
         LogVerboseDebug("CreateAndStartSubagent: subagent '%s' system prompt: '%s'", name.c_str(), systemPrompt.c_str());
@@ -35,7 +35,7 @@ std::shared_ptr<IAgent> CreateAndStartSubagent(
         parent,
         llmService.CreateAgentConsole(),
         startTime,
-        longRunning);
+        interactive);
 
     agent->Post(userPrompt);
     LogDebug("CreateAndStartSubagent: subagent '%s' posted prompt", name.c_str());
@@ -89,7 +89,7 @@ ToolResult AgentStartTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohm
     if (oneShot) {
         LogDebug("AgentStartTool: subagent '%s' started as one-shot", agent->Name().c_str());
     } else {
-        LogDebug("AgentStartTool: subagent '%s' started as long-running", agent->Name().c_str());
+        LogDebug("AgentStartTool: subagent '%s' started as interactive", agent->Name().c_str());
     }
 
     return ToolResult{agent->Name(), false};

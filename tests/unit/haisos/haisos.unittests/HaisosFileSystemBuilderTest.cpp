@@ -32,7 +32,7 @@ protected:
         std::filesystem::remove_all(kTestDir);
     }
 
-    Factory factory;
+    std::shared_ptr<IFactory> factory = CreateFactory();
 };
 
 bool FileExists(IFileSystem& fs, const std::string& path) {
@@ -52,7 +52,7 @@ TEST_F(HaisosFileSystemBuilderTest, NoFsStepsUsesHaisosFileDirWhenRootEmpty) {
 
     HaisosFileConfig config;
     std::string error;
-    auto fs = BuildRootFileSystem(factory, *filesystemService, config, kTestDir, error);
+    auto fs = BuildRootFileSystem(*factory, *filesystemService, config, kTestDir, error);
 
     ASSERT_NE(fs, nullptr);
     EXPECT_TRUE(error.empty());
@@ -66,7 +66,7 @@ TEST_F(HaisosFileSystemBuilderTest, NoFsStepsWithLegacyRootPath) {
     HaisosFileConfig config;
     config.rootPath = "sub";
     std::string error;
-    auto fs = BuildRootFileSystem(factory, *filesystemService, config, kTestDir, error);
+    auto fs = BuildRootFileSystem(*factory, *filesystemService, config, kTestDir, error);
 
     ASSERT_NE(fs, nullptr);
     EXPECT_TRUE(FileExists(*fs, "marker.txt"));
@@ -91,7 +91,7 @@ TEST_F(HaisosFileSystemBuilderTest, RootByNameSelectsDeclaredFilesystem) {
 
     config.rootPath = "scratch";
     std::string error;
-    auto fs = BuildRootFileSystem(factory, *filesystemService, config, kTestDir, error);
+    auto fs = BuildRootFileSystem(*factory, *filesystemService, config, kTestDir, error);
 
     ASSERT_NE(fs, nullptr);
     EXPECT_TRUE(error.empty());
@@ -116,7 +116,7 @@ TEST_F(HaisosFileSystemBuilderTest, NoRootUsesLastDeclaredFilesystem) {
     config.fsSteps.push_back(mem);
 
     std::string error;
-    auto fs = BuildRootFileSystem(factory, *filesystemService, config, kTestDir, error);
+    auto fs = BuildRootFileSystem(*factory, *filesystemService, config, kTestDir, error);
 
     ASSERT_NE(fs, nullptr);
     // "scratch" (the last declared FS) is empty, so the disk marker isn't visible.
@@ -135,7 +135,7 @@ TEST_F(HaisosFileSystemBuilderTest, RoReferencingUnknownFilesystemIsError) {
     config.fsSteps.push_back(ro);
 
     std::string error;
-    auto fs = BuildRootFileSystem(factory, *filesystemService, config, kTestDir, error);
+    auto fs = BuildRootFileSystem(*factory, *filesystemService, config, kTestDir, error);
 
     EXPECT_EQ(fs, nullptr);
     EXPECT_FALSE(error.empty());
@@ -166,7 +166,7 @@ TEST_F(HaisosFileSystemBuilderTest, MountRetargetsNamedFilesystem) {
 
     config.rootPath = "main";
     std::string error;
-    auto fs = BuildRootFileSystem(factory, *filesystemService, config, kTestDir, error);
+    auto fs = BuildRootFileSystem(*factory, *filesystemService, config, kTestDir, error);
 
     ASSERT_NE(fs, nullptr);
     EXPECT_TRUE(error.empty());
@@ -191,7 +191,7 @@ TEST_F(HaisosFileSystemBuilderTest, RootNotMatchingAnyDeclaredNameFallsBackToLeg
     // plain directory path (legacy shorthand), resolved against haisosFileDir.
     config.rootPath = "sub";
     std::string error;
-    auto fs = BuildRootFileSystem(factory, *filesystemService, config, kTestDir, error);
+    auto fs = BuildRootFileSystem(*factory, *filesystemService, config, kTestDir, error);
 
     ASSERT_NE(fs, nullptr);
     EXPECT_TRUE(FileExists(*fs, "marker.txt"));

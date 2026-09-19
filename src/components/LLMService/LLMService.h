@@ -4,13 +4,14 @@
 #include <string>
 #include <vector>
 #include "interfaces/IServicesCreator.h"
+#include "src/components/Agent/Agent.h"
 
 namespace Haisos {
 
 class LLMService : public ILLMService {
 public:
-    LLMService(
-        INetworkService& networkService,
+    static std::shared_ptr<LLMService> Create(
+        std::shared_ptr<INetworkService> networkService,
         const std::string& endpoint,
         const std::string& modelName,
         const std::string& apiKey);
@@ -20,28 +21,36 @@ public:
         const std::vector<std::string>& systemPrompts,
         const std::string& name,
         std::shared_ptr<IAgent> parent,
-        std::unique_ptr<IAgentConsole> console,
+        std::shared_ptr<IAgentConsole> console,
         const std::string& startTime = "",
-        bool longRunning = true,
-        IToolFactory* additionalTools = nullptr) override;
+        bool interactive = true,
+        std::shared_ptr<IToolFactory> additionalTools = nullptr) override;
 
-    IToolFactory& GetToolFactory() override;
-    std::unique_ptr<IAgentConsole> CreateAgentConsole() override;
+    std::shared_ptr<IToolFactory> GetToolFactory() override;
+    std::shared_ptr<IAgentConsole> CreateAgentConsole() override;
 
 private:
+    LLMService(
+        std::shared_ptr<INetworkService> networkService,
+        const std::string& endpoint,
+        const std::string& modelName,
+        const std::string& apiKey);
+
     void CleanupFinishedAgents();
 
-    INetworkService& m_networkService;
+    std::shared_ptr<INetworkService> m_networkService;
     std::string m_endpoint;
     std::string m_modelName;
     std::string m_apiKey;
-    std::unique_ptr<IToolFactory> m_toolFactory;
+    std::shared_ptr<IToolFactory> m_toolFactory;
 
     // Every agent this service creates is kept alive here: a parent only
     // holds a weak_ptr to its children (see Agent::AddChild), so nothing else
     // would otherwise keep e.g. an agent_start-created subagent alive once
-    // the tool call that created it returns.
-    std::vector<std::shared_ptr<IAgent>> m_agents;
+    // the tool call that created it returns. They are held as concrete Agents
+    // rather than IAgents because stopping one is not part of IAgent: this
+    // service owns their lifetime, so it is what has to be able to end it.
+    std::vector<std::shared_ptr<Agent>> m_agents;
     std::mutex m_agentsMutex;
 };
 

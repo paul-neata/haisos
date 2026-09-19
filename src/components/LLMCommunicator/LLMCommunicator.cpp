@@ -7,8 +7,19 @@ using json = nlohmann::json;
 
 namespace Haisos {
 
+std::shared_ptr<LLMCommunicator> LLMCommunicator::Create(
+    std::shared_ptr<IHTTPClient> httpClient,
+    const std::string& endpoint,
+    const std::string& modelName,
+    const std::string& apiKey,
+    const std::string& sourceName)
+{
+    return std::shared_ptr<LLMCommunicator>(
+        new LLMCommunicator(std::move(httpClient), endpoint, modelName, apiKey, sourceName));
+}
+
 LLMCommunicator::LLMCommunicator(
-    std::unique_ptr<IHTTPClient> httpClient,
+    std::shared_ptr<IHTTPClient> httpClient,
     const std::string& endpoint,
     const std::string& modelName,
     const std::string& apiKey,

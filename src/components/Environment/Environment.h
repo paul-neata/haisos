@@ -10,7 +10,9 @@ namespace Haisos {
 // threads (a process per thread, plus tool calls on the agents' threads).
 class Environment : public IEnvironment {
 public:
-    Environment() = default;
+    static std::shared_ptr<Environment> Create() {
+        return std::shared_ptr<Environment>(new Environment());
+    }
     ~Environment() override = default;
 
     std::shared_ptr<IEnvironment> Clone() const override;
@@ -39,6 +41,7 @@ protected:
     std::optional<std::string> ReadSecretValue(const std::string& name) const override;
 
 private:
+    Environment() = default;
     Environment(
         std::map<std::string, std::string> variables,
         std::map<std::string, std::string> secrets,

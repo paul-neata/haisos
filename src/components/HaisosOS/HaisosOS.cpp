@@ -5,6 +5,7 @@
 #include "LuaProcess.h"
 #include "src/components/Console/AgentConsoleAdapter.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
+#include "src/components/libheaders/GloballyUniquePID.h"
 #include "src/components/Logger/Logger.h"
 
 namespace Haisos {
@@ -62,7 +63,6 @@ HaisosOS::HaisosOS(
     , m_physicalConsole(std::move(physicalConsole))
     , m_environment(std::move(environment))
     , m_osProcessId(osProcessId)
-    , m_osToolFactory(*this)
 {
 }
 
@@ -152,26 +152,33 @@ std::shared_ptr<IProcess> HaisosOS::StartAgentProcess(
     // "injection" phrasing buys nothing against whoever wrote the file, while its
     // lossy rewriting (it deletes anything between '<' and '>', drops whole lines,
     // and caps at 64KB) would silently corrupt the program being run.
-    uint64_t pid = GetNextGloballyUniquePID();
+    uint64_t pid = NextGloballyUniquePID();
     std::string name = GetStem(programPath) + "_" + std::to_string(pid);
 
-    auto console = std::make_unique<AgentConsoleAdapter>(m_physicalConsole, name);
+    auto console = AgentConsoleAdapter::Create(m_physicalConsole, name);
+    // A process's agent is not interactive: it answers what its program asked
+    // and then finishes, which is what makes the process finish too.
     auto agent = m_llmService->CreateAgent(
         {"You are a helpful AI assistant."},
         name,
         nullptr,
         std::move(console),
         "",
-        false,
-        &m_osToolFactory);
+        /*interactive=*/false,
+        m_osToolFactory);
+    auto concreteAgent = std::dynamic_pointer_cast<Agent>(agent);
+    if (!concreteAgent) {
+        LogError("HaisosOS: the LLM service returned an agent this OS cannot own: %s", programPath.c_str());
+        return nullptr;
+    }
 
-    agent->Post(content);
+    concreteAgent->Post(content);
 
     // Parent pid 0: a process started here is top-most. Parentage used to be
     // resolved from the calling agent, but a process is opaque -- whether it is
     // an agent is its own business -- and the process/agent relationship is
     // being redefined, so nothing claims to know a parent for now.
-    auto process = std::make_shared<AgentProcess>(pid, /*parentPid=*/0, std::move(environment), name, agent);
+    auto process = AgentProcess::Create(pid, /*parentPid=*/0, std::move(environment), name, std::move(concreteAgent));
 
     {
         std::lock_guard<std::mutex> lock(m_processesMutex);
@@ -192,12 +199,12 @@ std::shared_ptr<IProcess> HaisosOS::StartLuaProcess(
         return nullptr;
     }
 
-    uint64_t pid = GetNextGloballyUniquePID();
+    uint64_t pid = NextGloballyUniquePID();
     std::string name = GetStem(programPath) + "_" + std::to_string(pid);
 
-    auto console = std::make_shared<AgentConsoleAdapter>(m_physicalConsole, name);
-    auto process = std::make_shared<LuaProcess>(
-        pid, /*parentPid=*/0, std::move(environment), name, std::move(content), args, m_osToolFactory, console);
+    auto console = AgentConsoleAdapter::Create(m_physicalConsole, name);
+    auto process = LuaProcess::Create(
+        pid, /*parentPid=*/0, std::move(environment), name, std::move(content), args, m_osToolFactory, std::move(console));
 
     {
         std::lock_guard<std::mutex> lock(m_processesMutex);
@@ -260,18 +267,19 @@ std::shared_ptr<IHaisosOS> HaisosOS::CreateSubOS(
     std::shared_ptr<IServicesCreator> servicesCreator,
     std::shared_ptr<IPhysicalConsole> physicalConsole,
     std::shared_ptr<IFileSystem> rootFileSystem,
-    std::shared_ptr<IEnvironment> environment,
-    uint64_t osProcessId)
+    std::shared_ptr<IEnvironment> environment)
 {
     // A sub-OS is an ordinary OS; what confines it is the root filesystem the
     // caller hands it (typically this OS's root narrowed with
     // IFilesystemService::CreateSubFileSystem), not anything enforced here.
-    return ::Haisos::CreateHaisosOS(
+    // It carries this OS's pid: it is the same OS, seen through a narrower
+    // root, not a new one belonging to some other process.
+    return HaisosOS::Create(
         std::move(servicesCreator),
         std::move(physicalConsole),
         std::move(rootFileSystem),
         std::move(environment),
-        osProcessId);
+        m_osProcessId);
 }
 
 std::shared_ptr<IFileSystem> HaisosOS::GetRootFileSystem() {
@@ -290,15 +298,6 @@ uint64_t HaisosOS::GetOSProcessID() const {
     return m_osProcessId;
 }
 
-uint64_t HaisosOS::GetNextGloballyUniquePID() {
-    // One allocator for the whole program, not one per OS, so a pid identifies a
-    // process (and, through GetOSProcessID(), the OS it owns) uniquely no matter
-    // which OS tree it came from: a pid live in one OS can never appear in
-    // another. Starts at 1: 0 means "no parent"/"the initial OS".
-    static std::atomic<uint64_t> counter{1};
-    return counter.fetch_add(1);
-}
-
 namespace {
 
 std::string EnvValue(const IEnvironment& environment, const char* key) {
@@ -307,7 +306,7 @@ std::string EnvValue(const IEnvironment& environment, const char* key) {
 
 } // namespace
 
-std::shared_ptr<IHaisosOS> CreateHaisosOS(
+std::shared_ptr<HaisosOS> HaisosOS::Create(
     std::shared_ptr<IServicesCreator> servicesCreator,
     std::shared_ptr<IPhysicalConsole> physicalConsole,
     std::shared_ptr<IFileSystem> rootFileSystem,
@@ -338,16 +337,20 @@ std::shared_ptr<IHaisosOS> CreateHaisosOS(
     }
 
     std::shared_ptr<INetworkService> networkService = servicesCreator->CreateNetworkService();
-    std::shared_ptr<ILLMService> llmService = servicesCreator->CreateLLMService(*networkService, endpoint, modelName, apiKey);
+    std::shared_ptr<ILLMService> llmService = servicesCreator->CreateLLMService(networkService, endpoint, modelName, apiKey);
 
-    return std::make_shared<HaisosOS>(
+    auto os = std::shared_ptr<HaisosOS>(new HaisosOS(
         std::move(servicesCreator),
         std::move(networkService),
         std::move(llmService),
         std::move(rootFileSystem),
         std::move(physicalConsole),
         std::move(environment),
-        osProcessId);
+        osProcessId));
+    // The tool factory holds a reference to the OS, so it is built only once
+    // the OS itself is.
+    os->m_osToolFactory = OSToolFactory::Create(*os);
+    return os;
 }
 
 }

@@ -19,15 +19,15 @@ public:
     // own and its lifetime is not tied to the parent's.
     virtual std::shared_ptr<IServicesCreator> Clone() const = 0;
 
-    virtual std::unique_ptr<IFilesystemService> CreateFileSystemService() = 0;
-    virtual std::unique_ptr<INetworkService> CreateNetworkService() = 0;
-    virtual std::unique_ptr<ILLMService> CreateLLMService(
-        INetworkService& networkService,
+    virtual std::shared_ptr<IFilesystemService> CreateFileSystemService() = 0;
+    virtual std::shared_ptr<INetworkService> CreateNetworkService() = 0;
+    virtual std::shared_ptr<ILLMService> CreateLLMService(
+        std::shared_ptr<INetworkService> networkService,
         const std::string& endpoint,
         const std::string& modelName,
         const std::string& apiKey) = 0;
 };
 
-std::unique_ptr<IServicesCreator> CreateServicesCreator();
+std::shared_ptr<IServicesCreator> CreateServicesCreator();
 
 }

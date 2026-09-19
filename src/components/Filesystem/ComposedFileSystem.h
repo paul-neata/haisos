@@ -19,7 +19,7 @@ namespace Haisos {
 // delegates to main.
 class ComposedFileSystem : public MountableFileSystem {
 public:
-    ComposedFileSystem(std::shared_ptr<IFileSystem> main, const std::string& whereToMount, std::shared_ptr<IFileSystem> mounted);
+    static std::shared_ptr<ComposedFileSystem> Create(std::shared_ptr<IFileSystem> main, const std::string& whereToMount, std::shared_ptr<IFileSystem> mounted);
     ~ComposedFileSystem() override;
 
     int ChangeDirectory(const std::string& path) override;
@@ -38,6 +38,8 @@ protected:
     std::vector<DirectoryEntry> LocalReadDirectory(const std::string& path) override;
 
 private:
+    ComposedFileSystem(std::shared_ptr<IFileSystem> main, const std::string& whereToMount, std::shared_ptr<IFileSystem> mounted);
+
     // A copy of the current directory, taken under m_cwdMutex.
     std::string CwdSnapshot() const;
 

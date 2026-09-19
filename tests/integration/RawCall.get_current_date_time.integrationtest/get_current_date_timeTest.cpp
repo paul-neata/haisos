@@ -14,7 +14,7 @@ namespace {
 bool TestToolCallIntegration() {
     IntegrationTest::IntegrationTestLogCapture logCapture;
 
-    auto toolFactory = std::make_unique<ToolFactory>();
+    auto toolFactory = ToolFactory::Create();
 
     auto tool = toolFactory->CreateTool("get_current_date_time");
     if (!tool) {

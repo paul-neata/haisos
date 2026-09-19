@@ -4,25 +4,30 @@
 #include "src/components/Filesystem/PhysicalFileSystem.h"
 #include "src/components/HaisosOS/HaisosOS.h"
 #include "src/components/ServicesCreator/ServicesCreator.h"
+#include "src/components/libheaders/GloballyUniquePID.h"
 
 namespace Haisos {
+
+std::shared_ptr<Factory> Factory::Create() {
+    return std::shared_ptr<Factory>(new Factory());
+}
 
 Factory::Factory() = default;
 Factory::~Factory() = default;
 
 std::shared_ptr<IPhysicalConsole> Factory::CreatePhysicalConsole(bool registerAsLogMessageReceiver) {
-    return std::make_shared<Console>(registerAsLogMessageReceiver);
+    return Console::Create(registerAsLogMessageReceiver);
 }
 
-std::unique_ptr<IFileSystem> Factory::CreatePhysicalFileSystem(const std::string& rootPath) {
-    return std::make_unique<PhysicalFileSystem>(rootPath);
+std::shared_ptr<IFileSystem> Factory::CreatePhysicalFileSystem(const std::string& rootPath) {
+    return PhysicalFileSystem::Create(rootPath);
 }
 
 std::shared_ptr<IEnvironment> Factory::CreateEnvironment() {
     return ::Haisos::CreateEnvironment();
 }
 
-std::unique_ptr<IServicesCreator> Factory::CreateServicesCreator() {
+std::shared_ptr<IServicesCreator> Factory::CreateServicesCreator() {
     return ::Haisos::CreateServicesCreator();
 }
 
@@ -30,15 +35,24 @@ std::shared_ptr<IHaisosOS> Factory::CreateHaisosOS(
     std::shared_ptr<IServicesCreator> servicesCreator,
     std::shared_ptr<IPhysicalConsole> physicalConsole,
     std::shared_ptr<IFileSystem> rootFileSystem,
-    std::shared_ptr<IEnvironment> environment,
-    uint64_t osProcessId)
+    std::shared_ptr<IEnvironment> environment)
 {
-    return ::Haisos::CreateHaisosOS(
-        std::move(servicesCreator), std::move(physicalConsole), std::move(rootFileSystem), std::move(environment), osProcessId);
+    // Every OS created here is a root of its own tree, so it is given a pid of
+    // its own rather than borrowing one; only CreateSubOS passes an existing pid on.
+    return HaisosOS::Create(
+        std::move(servicesCreator),
+        std::move(physicalConsole),
+        std::move(rootFileSystem),
+        std::move(environment),
+        GetNextGloballyUniquePID());
 }
 
-std::unique_ptr<IFactory> CreateFactory() {
-    return std::make_unique<Factory>();
+uint64_t Factory::GetNextGloballyUniquePID() {
+    return NextGloballyUniquePID();
+}
+
+std::shared_ptr<IFactory> CreateFactory() {
+    return Factory::Create();
 }
 
 }

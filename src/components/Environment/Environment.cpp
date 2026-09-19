@@ -136,7 +136,7 @@ std::optional<std::string> Environment::ReadSecretValue(const std::string& name)
 }
 
 std::shared_ptr<IEnvironment> CreateEnvironment() {
-    return std::make_shared<Environment>();
+    return Environment::Create();
 }
 
 }

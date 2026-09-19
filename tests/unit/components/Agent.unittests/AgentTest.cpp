@@ -14,9 +14,9 @@ using namespace Haisos::Mocks;
 TEST(AgentTest, Construction) {
     auto mockLLM = std::make_shared<MockLLMCommunicator>();
     auto mockConsole = std::make_shared<MockAgentConsole>();
-    auto toolFactory = std::make_unique<ToolFactory>();
+    auto toolFactory = ToolFactory::Create();
 
-    auto agent = std::make_shared<Agent>(mockLLM, std::move(toolFactory), mockConsole,
+    auto agent = Agent::Create(mockLLM, std::move(toolFactory), mockConsole,
         std::vector<std::string>{"You are a helpful AI assistant."},
         "test_agent", nullptr);
 
@@ -31,9 +31,9 @@ TEST(AgentTest, PostAndWaitToFinish) {
     auto mockLLM = std::make_shared<MockLLMCommunicator>();
     mockLLM->SetMessageResponse("Hello from agent");
     auto mockConsole = std::make_shared<MockAgentConsole>();
-    auto toolFactory = std::make_unique<ToolFactory>();
+    auto toolFactory = ToolFactory::Create();
 
-    auto agent = std::make_shared<Agent>(mockLLM, std::move(toolFactory), mockConsole,
+    auto agent = Agent::Create(mockLLM, std::move(toolFactory), mockConsole,
         std::vector<std::string>{"You are a helpful AI assistant."},
         "test_agent", nullptr);
 
@@ -48,9 +48,9 @@ TEST(AgentTest, CommandProcessingWritesToConsole) {
     auto mockLLM = std::make_shared<MockLLMCommunicator>();
     mockLLM->SetMessageResponse("Agent response");
     auto mockConsole = std::make_shared<MockAgentConsole>();
-    auto toolFactory = std::make_unique<ToolFactory>();
+    auto toolFactory = ToolFactory::Create();
 
-    auto agent = std::make_shared<Agent>(mockLLM, std::move(toolFactory), mockConsole,
+    auto agent = Agent::Create(mockLLM, std::move(toolFactory), mockConsole,
         std::vector<std::string>{"You are a helpful AI assistant."},
         "test_agent", nullptr);
 
@@ -68,12 +68,12 @@ TEST(AgentTest, CommandProcessingWritesToConsole) {
 }
 
 TEST(AgentTest, CommandProcessingWritesToConsoleOutput) {
-    auto mockLLM = std::make_unique<MockLLMCommunicator>();
+    auto mockLLM = std::make_shared<MockLLMCommunicator>();
     mockLLM->SetMessageResponse("Virtual response");
-    auto mockConsole = std::make_unique<InMemoryAgentConsole>();
-    auto toolFactory = std::make_unique<ToolFactory>();
+    auto mockConsole = InMemoryAgentConsole::Create();
+    auto toolFactory = ToolFactory::Create();
 
-    auto agent = std::make_shared<Agent>(
+    auto agent = Agent::Create(
         std::move(mockLLM),
         std::move(toolFactory),
         std::move(mockConsole),
@@ -93,9 +93,9 @@ TEST(AgentTest, MultiplePosts) {
     auto mockLLM = std::make_shared<MockLLMCommunicator>();
     mockLLM->SetMessageResponse("Response");
     auto mockConsole = std::make_shared<MockAgentConsole>();
-    auto toolFactory = std::make_unique<ToolFactory>();
+    auto toolFactory = ToolFactory::Create();
 
-    auto agent = std::make_shared<Agent>(mockLLM, std::move(toolFactory), mockConsole,
+    auto agent = Agent::Create(mockLLM, std::move(toolFactory), mockConsole,
         std::vector<std::string>{"You are a helpful AI assistant."},
         "test_agent", nullptr);
 
@@ -110,9 +110,9 @@ TEST(AgentTest, MultiplePosts) {
 TEST(AgentTest, StopWithoutPost) {
     auto mockLLM = std::make_shared<MockLLMCommunicator>();
     auto mockConsole = std::make_shared<MockAgentConsole>();
-    auto toolFactory = std::make_unique<ToolFactory>();
+    auto toolFactory = ToolFactory::Create();
 
-    auto agent = std::make_shared<Agent>(mockLLM, std::move(toolFactory), mockConsole,
+    auto agent = Agent::Create(mockLLM, std::move(toolFactory), mockConsole,
         std::vector<std::string>{"You are a helpful AI assistant."},
         "test_agent", nullptr);
 
@@ -123,11 +123,11 @@ TEST(AgentTest, StopWithoutPost) {
 }
 
 TEST(AgentTest, ParentChildRelationship) {
-    auto mockLLM = std::make_unique<MockLLMCommunicator>();
-    auto mockConsole = std::make_unique<InMemoryAgentConsole>();
-    auto toolFactory = std::make_unique<ToolFactory>();
+    auto mockLLM = std::make_shared<MockLLMCommunicator>();
+    auto mockConsole = InMemoryAgentConsole::Create();
+    auto toolFactory = ToolFactory::Create();
 
-    auto parent = std::make_shared<Agent>(
+    auto parent = Agent::Create(
         std::move(mockLLM),
         std::move(toolFactory),
         std::move(mockConsole),
@@ -135,10 +135,10 @@ TEST(AgentTest, ParentChildRelationship) {
         "parent",
         nullptr);
 
-    auto childLLM = std::make_unique<MockLLMCommunicator>();
-    auto childConsole = std::make_unique<InMemoryAgentConsole>();
-    auto childToolFactory = std::make_unique<ToolFactory>();
-    auto child = std::make_shared<Agent>(
+    auto childLLM = std::make_shared<MockLLMCommunicator>();
+    auto childConsole = InMemoryAgentConsole::Create();
+    auto childToolFactory = ToolFactory::Create();
+    auto child = Agent::Create(
         std::move(childLLM),
         std::move(childToolFactory),
         std::move(childConsole),
@@ -147,7 +147,7 @@ TEST(AgentTest, ParentChildRelationship) {
         parent);
     parent->AddChild(child);
 
-    auto children = parent->GetChildren();
+    auto children = parent->GetChildren(/*onlyDirectChildren=*/true);
     ASSERT_EQ(children.size(), 1u);
     EXPECT_EQ(children[0]->Name(), "child");
 
@@ -158,11 +158,11 @@ TEST(AgentTest, ParentChildRelationship) {
 }
 
 TEST(AgentTest, ChildKnowsParent) {
-    auto mockLLM = std::make_unique<MockLLMCommunicator>();
-    auto mockConsole = std::make_unique<InMemoryAgentConsole>();
-    auto toolFactory = std::make_unique<ToolFactory>();
+    auto mockLLM = std::make_shared<MockLLMCommunicator>();
+    auto mockConsole = InMemoryAgentConsole::Create();
+    auto toolFactory = ToolFactory::Create();
 
-    auto parent = std::make_shared<Agent>(
+    auto parent = Agent::Create(
         std::move(mockLLM),
         std::move(toolFactory),
         std::move(mockConsole),
@@ -170,10 +170,10 @@ TEST(AgentTest, ChildKnowsParent) {
         "parent",
         nullptr);
 
-    auto childLLM = std::make_unique<MockLLMCommunicator>();
-    auto childConsole = std::make_unique<InMemoryAgentConsole>();
-    auto childToolFactory = std::make_unique<ToolFactory>();
-    auto child = std::make_shared<Agent>(
+    auto childLLM = std::make_shared<MockLLMCommunicator>();
+    auto childConsole = InMemoryAgentConsole::Create();
+    auto childToolFactory = ToolFactory::Create();
+    auto child = Agent::Create(
         std::move(childLLM),
         std::move(childToolFactory),
         std::move(childConsole),
@@ -191,11 +191,11 @@ TEST(AgentTest, ChildKnowsParent) {
 }
 
 TEST(AgentTest, ChildDestructionRemovesFromParent) {
-    auto mockLLM = std::make_unique<MockLLMCommunicator>();
-    auto mockConsole = std::make_unique<InMemoryAgentConsole>();
-    auto toolFactory = std::make_unique<ToolFactory>();
+    auto mockLLM = std::make_shared<MockLLMCommunicator>();
+    auto mockConsole = InMemoryAgentConsole::Create();
+    auto toolFactory = ToolFactory::Create();
 
-    auto parent = std::make_shared<Agent>(
+    auto parent = Agent::Create(
         std::move(mockLLM),
         std::move(toolFactory),
         std::move(mockConsole),
@@ -208,10 +208,10 @@ TEST(AgentTest, ChildDestructionRemovesFromParent) {
     // of scope except parent's own weak_ptr -- so this test now specifically
     // verifies that GetChildren() prunes a child that's actually gone.
     {
-        auto childLLM = std::make_unique<MockLLMCommunicator>();
-        auto childConsole = std::make_unique<InMemoryAgentConsole>();
-        auto childToolFactory = std::make_unique<ToolFactory>();
-        auto child = std::make_shared<Agent>(
+        auto childLLM = std::make_shared<MockLLMCommunicator>();
+        auto childConsole = InMemoryAgentConsole::Create();
+        auto childToolFactory = ToolFactory::Create();
+        auto child = Agent::Create(
             std::move(childLLM),
             std::move(childToolFactory),
             std::move(childConsole),
@@ -220,24 +220,24 @@ TEST(AgentTest, ChildDestructionRemovesFromParent) {
             parent);
         parent->AddChild(child);
 
-        EXPECT_EQ(parent->GetChildren().size(), 1u);
+        EXPECT_EQ(parent->GetChildren(/*onlyDirectChildren=*/true).size(), 1u);
         child->Stop(0);
         child->WaitToFinish();
     }
 
-    EXPECT_EQ(parent->GetChildren().size(), 0u);
+    EXPECT_EQ(parent->GetChildren(/*onlyDirectChildren=*/true).size(), 0u);
 
     parent->Stop(0);
     parent->WaitToFinish();
 }
 
 TEST(AgentTest, GetHistoryContainsUserMessage) {
-    auto mockLLM = std::make_unique<MockLLMCommunicator>();
+    auto mockLLM = std::make_shared<MockLLMCommunicator>();
     mockLLM->SetMessageResponse("Agent response");
-    auto mockConsole = std::make_unique<InMemoryAgentConsole>();
-    auto toolFactory = std::make_unique<ToolFactory>();
+    auto mockConsole = InMemoryAgentConsole::Create();
+    auto toolFactory = ToolFactory::Create();
 
-    auto agent = std::make_shared<Agent>(
+    auto agent = Agent::Create(
         std::move(mockLLM),
         std::move(toolFactory),
         std::move(mockConsole),
@@ -266,9 +266,9 @@ TEST(AgentTest, GetHistoryContainsUserMessage) {
 TEST(AgentTest, KillSetsKilledFlag) {
     auto mockLLM = std::make_shared<MockLLMCommunicator>();
     auto mockConsole = std::make_shared<MockAgentConsole>();
-    auto toolFactory = std::make_unique<ToolFactory>();
+    auto toolFactory = ToolFactory::Create();
 
-    auto agent = std::make_shared<Agent>(mockLLM, std::move(toolFactory), mockConsole,
+    auto agent = Agent::Create(mockLLM, std::move(toolFactory), mockConsole,
         std::vector<std::string>{"You are a helpful AI assistant."},
         "test_agent", nullptr);
 
@@ -281,9 +281,9 @@ TEST(AgentTest, KillSetsKilledFlag) {
 TEST(AgentTest, WaitToFinishWithTimeoutReturnsFalseIfNotFinished) {
     auto mockLLM = std::make_shared<MockLLMCommunicator>();
     auto mockConsole = std::make_shared<MockAgentConsole>();
-    auto toolFactory = std::make_unique<ToolFactory>();
+    auto toolFactory = ToolFactory::Create();
 
-    auto agent = std::make_shared<Agent>(mockLLM, std::move(toolFactory), mockConsole,
+    auto agent = Agent::Create(mockLLM, std::move(toolFactory), mockConsole,
         std::vector<std::string>{"You are a helpful AI assistant."},
         "test_agent", nullptr);
 
@@ -299,9 +299,9 @@ TEST(AgentTest, StopWithTimeoutWaitsForFinish) {
     auto mockLLM = std::make_shared<MockLLMCommunicator>();
     mockLLM->SetMessageResponse("quick");
     auto mockConsole = std::make_shared<MockAgentConsole>();
-    auto toolFactory = std::make_unique<ToolFactory>();
+    auto toolFactory = ToolFactory::Create();
 
-    auto agent = std::make_shared<Agent>(mockLLM, std::move(toolFactory), mockConsole,
+    auto agent = Agent::Create(mockLLM, std::move(toolFactory), mockConsole,
         std::vector<std::string>{"You are a helpful AI assistant."},
         "test_agent", nullptr);
 
@@ -314,9 +314,9 @@ TEST(AgentTest, GetConsoleOutputContainsAgentMessages) {
     auto mockLLM = std::make_shared<MockLLMCommunicator>();
     mockLLM->SetMessageResponse("Hello world");
     auto mockConsole = std::make_shared<MockAgentConsole>();
-    auto toolFactory = std::make_unique<ToolFactory>();
+    auto toolFactory = ToolFactory::Create();
 
-    auto agent = std::make_shared<Agent>(mockLLM, std::move(toolFactory), mockConsole,
+    auto agent = Agent::Create(mockLLM, std::move(toolFactory), mockConsole,
         std::vector<std::string>{"You are a helpful AI assistant."},
         "test_agent", nullptr);
 

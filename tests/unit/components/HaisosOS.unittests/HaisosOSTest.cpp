@@ -28,21 +28,21 @@ protected:
     }
 
     std::shared_ptr<IEnvironment> TestEnvironment() {
-        auto environment = m_factory.CreateEnvironment();
+        auto environment = m_factory->CreateEnvironment();
         environment->SetVariable(kEnvEndpoint, kUnreachableEndpoint);
         environment->SetVariable(kEnvModel, "llama3");
         return environment;
     }
 
     std::shared_ptr<IHaisosOS> BuildOS() {
-        std::shared_ptr<IServicesCreator> servicesCreator = m_factory.CreateServicesCreator();
-        std::shared_ptr<IFileSystem> rootFileSystem = m_factory.CreatePhysicalFileSystem(kTestRoot);
-        auto physicalConsole = m_factory.CreatePhysicalConsole(false);
-        return m_factory.CreateHaisosOS(
-            std::move(servicesCreator), physicalConsole, rootFileSystem, TestEnvironment(), 0);
+        std::shared_ptr<IServicesCreator> servicesCreator = m_factory->CreateServicesCreator();
+        std::shared_ptr<IFileSystem> rootFileSystem = m_factory->CreatePhysicalFileSystem(kTestRoot);
+        auto physicalConsole = m_factory->CreatePhysicalConsole(false);
+        return m_factory->CreateHaisosOS(
+            std::move(servicesCreator), physicalConsole, rootFileSystem, TestEnvironment());
     }
 
-    Factory m_factory;
+    std::shared_ptr<IFactory> m_factory = CreateFactory();
 };
 
 TEST_F(HaisosOSTest, StartProcessAssignsUniqueTopLevelPids) {
@@ -59,18 +59,13 @@ TEST_F(HaisosOSTest, StartProcessAssignsUniqueTopLevelPids) {
     EXPECT_NE(p1->AsAgent(), nullptr);
 }
 
-TEST_F(HaisosOSTest, GetNextGloballyUniquePIDNeverRepeatsAcrossOSes) {
+TEST_F(HaisosOSTest, EveryOSGetsAPidOfItsOwn) {
     auto os = BuildOS();
     auto other = BuildOS();
 
-    uint64_t first = os->GetNextGloballyUniquePID();
-    uint64_t second = other->GetNextGloballyUniquePID();
-    uint64_t third = os->GetNextGloballyUniquePID();
-
-    EXPECT_NE(first, 0u);
-    EXPECT_NE(first, second);
-    EXPECT_NE(second, third);
-    EXPECT_NE(first, third);
+    EXPECT_NE(os->GetOSProcessID(), 0u);
+    EXPECT_NE(other->GetOSProcessID(), 0u);
+    EXPECT_NE(os->GetOSProcessID(), other->GetOSProcessID());
 }
 
 TEST_F(HaisosOSTest, StartProcessKeepsTheEnvironmentItWasGiven) {
@@ -132,13 +127,12 @@ TEST_F(HaisosOSTest, CreateSubOSIsConfinedByTheRootItIsGiven) {
     auto os = BuildOS();
     auto filesystemService = os->GetServicesCreator()->CreateFileSystemService();
     auto subRoot = filesystemService->CreateSubFileSystem(
-        m_factory.CreatePhysicalFileSystem(kTestRoot), "sub");
+        m_factory->CreatePhysicalFileSystem(kTestRoot), "sub");
     auto subOS = os->CreateSubOS(
         os->GetServicesCreator()->Clone(),
-        m_factory.CreatePhysicalConsole(false),
+        m_factory->CreatePhysicalConsole(false),
         subRoot,
-        os->GetOsEnvironment()->Clone(),
-        /*osProcessId=*/7);
+        os->GetOsEnvironment()->Clone());
     ASSERT_NE(subOS, nullptr);
 
     EXPECT_NE(subOS->StartProcess(TestEnvironment(), "inner.md", {}), nullptr);
@@ -146,18 +140,18 @@ TEST_F(HaisosOSTest, CreateSubOSIsConfinedByTheRootItIsGiven) {
     EXPECT_EQ(subOS->StartProcess(TestEnvironment(), "hello.md", {}), nullptr);
 }
 
-TEST_F(HaisosOSTest, CreateSubOSCarriesTheCreatingProcessPid) {
+TEST_F(HaisosOSTest, CreateSubOSCarriesTheParentOSPid) {
     auto os = BuildOS();
-    EXPECT_EQ(os->GetOSProcessID(), 0u);
 
     auto subOS = os->CreateSubOS(
         os->GetServicesCreator()->Clone(),
-        m_factory.CreatePhysicalConsole(false),
-        m_factory.CreatePhysicalFileSystem(kTestRoot),
-        os->GetOsEnvironment()->Clone(),
-        /*osProcessId=*/42);
+        m_factory->CreatePhysicalConsole(false),
+        m_factory->CreatePhysicalFileSystem(kTestRoot),
+        os->GetOsEnvironment()->Clone());
     ASSERT_NE(subOS, nullptr);
-    EXPECT_EQ(subOS->GetOSProcessID(), 42u);
+    // A sub-OS is the same OS seen through a narrower root, so it keeps the
+    // pid rather than taking one of its own.
+    EXPECT_EQ(subOS->GetOSProcessID(), os->GetOSProcessID());
 }
 
 TEST_F(HaisosOSTest, SubOSGetsACopyOfTheEnvironmentItIsGiven) {
@@ -166,10 +160,9 @@ TEST_F(HaisosOSTest, SubOSGetsACopyOfTheEnvironmentItIsGiven) {
 
     auto subOS = os->CreateSubOS(
         os->GetServicesCreator()->Clone(),
-        m_factory.CreatePhysicalConsole(false),
-        m_factory.CreatePhysicalFileSystem(kTestRoot),
-        os->GetOsEnvironment()->Clone(),
-        /*osProcessId=*/1);
+        m_factory->CreatePhysicalConsole(false),
+        m_factory->CreatePhysicalFileSystem(kTestRoot),
+        os->GetOsEnvironment()->Clone());
     ASSERT_NE(subOS, nullptr);
     EXPECT_EQ(subOS->GetOsEnvironment()->GetVariable(kEnvModel).value_or(""), "llama3");
 
@@ -179,11 +172,11 @@ TEST_F(HaisosOSTest, SubOSGetsACopyOfTheEnvironmentItIsGiven) {
 }
 
 TEST_F(HaisosOSTest, CreateHaisosOSWithoutAnEnvironmentReturnsNull) {
-    std::shared_ptr<IServicesCreator> servicesCreator = m_factory.CreateServicesCreator();
-    std::shared_ptr<IFileSystem> rootFileSystem = m_factory.CreatePhysicalFileSystem(kTestRoot);
-    auto physicalConsole = m_factory.CreatePhysicalConsole(false);
+    std::shared_ptr<IServicesCreator> servicesCreator = m_factory->CreateServicesCreator();
+    std::shared_ptr<IFileSystem> rootFileSystem = m_factory->CreatePhysicalFileSystem(kTestRoot);
+    auto physicalConsole = m_factory->CreatePhysicalConsole(false);
     EXPECT_EQ(
-        m_factory.CreateHaisosOS(std::move(servicesCreator), physicalConsole, rootFileSystem, nullptr, 0),
+        m_factory->CreateHaisosOS(std::move(servicesCreator), physicalConsole, rootFileSystem, nullptr),
         nullptr);
 }
 

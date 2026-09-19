@@ -11,9 +11,16 @@ public:
     static const std::string ToolName;
     static const std::string ToolDefaultDescription;
 
+    static std::shared_ptr<AgentListRunningTool> Create() {
+        return std::shared_ptr<AgentListRunningTool>(new AgentListRunningTool());
+    }
+
     ToolResult Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) override;
     static nlohmann::json GetDefaultParametersSchema();
     nlohmann::json GetParametersSchema() const override { return GetDefaultParametersSchema(); }
+
+private:
+    AgentListRunningTool() = default;
 };
 
 } // namespace Haisos::Tools

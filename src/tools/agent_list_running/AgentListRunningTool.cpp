@@ -36,7 +36,7 @@ ToolResult AgentListRunningTool::Call(std::shared_ptr<IAgent> callerAgent, const
 
     std::string commaSeparatedNames;
     size_t runningCount = 0;
-    for (const auto& child : callerAgent->GetChildren()) {
+    for (const auto& child : callerAgent->GetChildren(/*onlyDirectChildren=*/true)) {
         std::string name = child->Name();
         if (!filterNames.empty()) {
             bool found = false;
@@ -49,7 +49,9 @@ ToolResult AgentListRunningTool::Call(std::shared_ptr<IAgent> callerAgent, const
             if (!found) continue;
         }
 
-        if (!child->IsFinished() && !child->IsKilled()) {
+        // WaitToFinish(0) does not wait; it just reports whether the agent
+        // has finished.
+        if (!child->WaitToFinish(0)) {
             LogVerboseDebug("AgentListRunningTool: found running agent '%s'", name.c_str());
             if (!commaSeparatedNames.empty()) {
                 commaSeparatedNames += ",";

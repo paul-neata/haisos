@@ -11,4 +11,4 @@ Factory-of-services built on top of `IFactory`.
 ## Key Classes
 
 - `ServicesCreator` - Main implementation of `IServicesCreator`
-- `CreateServicesCreator(IFactory&)` - Free function to create one
+- `CreateServicesCreator()` - Free function returning a `shared_ptr<IServicesCreator>`

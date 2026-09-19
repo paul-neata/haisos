@@ -1,6 +1,7 @@
 #include "src/components/Factory/Factory.h"
 #include "src/components/ServicesCreator/ServicesCreator.h"
 #include "src/components/Console/AgentConsoleAdapter.h"
+#include "src/components/Logger/Logger.h"
 #include "tests/integration/helpers/IntegrationTestHelpers.h"
 #include "tests/integration/helpers/IntegrationTestLogCapture.h"
 
@@ -8,29 +9,39 @@ using namespace Haisos;
 
 namespace {
 
+// Generous: a real LLM round trip, not a unit-test-scale wait.
+constexpr uint64_t kAgentTimeoutMs = 5 * 60 * 1000;
+
 bool TestAgentPostAndProcess() {
     IntegrationTest::IntegrationTestLogCapture logCapture;
 
     auto [endpoint, model, apiKey] = IntegrationTest::GetEndpointModelAndApiKey();
 
-    Factory factory;
+    auto factory = Factory::Create();
     auto servicesCreator = CreateServicesCreator();
-    auto networkService = std::shared_ptr<INetworkService>(servicesCreator->CreateNetworkService());
-    auto llmService = servicesCreator->CreateLLMService(*networkService, endpoint, model, apiKey);
+    auto networkService = servicesCreator->CreateNetworkService();
+    auto llmService = servicesCreator->CreateLLMService(networkService, endpoint, model, apiKey);
 
-    auto physicalConsole = factory.CreatePhysicalConsole(false);
+    auto physicalConsole = factory->CreatePhysicalConsole(false);
     physicalConsole->Start();
-    auto console = std::make_unique<AgentConsoleAdapter>(physicalConsole, "root");
+    auto console = AgentConsoleAdapter::Create(physicalConsole, "root");
 
     auto agent = llmService->CreateAgent(
         std::vector<std::string>{"You are a helpful AI assistant."},
         "root",
         nullptr,
-        std::move(console));
+        std::move(console),
+        "",
+        // Not interactive: the agent answers the prompt below and then finishes,
+        // which is what this test waits for. IAgent has no Stop().
+        /*interactive=*/false);
 
     agent->Post("What is 2+2?");
-    agent->Stop(0);
-    agent->WaitToFinish();
+    if (!agent->WaitToFinish(kAgentTimeoutMs)) {
+        LogError("Agent did not finish within %llums", static_cast<unsigned long long>(kAgentTimeoutMs));
+        logCapture.DumpIfFailed(true);
+        return false;
+    }
 
     bool success = true;
     logCapture.DumpIfFailed(!success);

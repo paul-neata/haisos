@@ -15,36 +15,36 @@ OSToolFactory::OSToolFactory(IHaisosOS& os) : m_os(os) {
             Tools::OSReadFileTool::ToolName,
             []() { return Tools::OSReadFileTool::ToolDefaultDescription; },
             []() { return Tools::OSReadFileTool::GetDefaultParametersSchema(); },
-            [this]() -> std::unique_ptr<ITool> { return std::make_unique<Tools::OSReadFileTool>(m_os); }
+            [this]() -> std::shared_ptr<ITool> { return Tools::OSReadFileTool::Create(m_os); }
         },
         ToolEntry{
             Tools::OSWriteFileTool::ToolName,
             []() { return Tools::OSWriteFileTool::ToolDefaultDescription; },
             []() { return Tools::OSWriteFileTool::GetDefaultParametersSchema(); },
-            [this]() -> std::unique_ptr<ITool> { return std::make_unique<Tools::OSWriteFileTool>(m_os); }
+            [this]() -> std::shared_ptr<ITool> { return Tools::OSWriteFileTool::Create(m_os); }
         },
         ToolEntry{
             Tools::OSListDirectoryTool::ToolName,
             []() { return Tools::OSListDirectoryTool::ToolDefaultDescription; },
             []() { return Tools::OSListDirectoryTool::GetDefaultParametersSchema(); },
-            [this]() -> std::unique_ptr<ITool> { return std::make_unique<Tools::OSListDirectoryTool>(m_os); }
+            [this]() -> std::shared_ptr<ITool> { return Tools::OSListDirectoryTool::Create(m_os); }
         },
         ToolEntry{
             Tools::OSListProcessesTool::ToolName,
             []() { return Tools::OSListProcessesTool::ToolDefaultDescription; },
             []() { return Tools::OSListProcessesTool::GetDefaultParametersSchema(); },
-            [this]() -> std::unique_ptr<ITool> { return std::make_unique<Tools::OSListProcessesTool>(m_os); }
+            [this]() -> std::shared_ptr<ITool> { return Tools::OSListProcessesTool::Create(m_os); }
         },
         ToolEntry{
             Tools::OSStartProcessTool::ToolName,
             []() { return Tools::OSStartProcessTool::ToolDefaultDescription; },
             []() { return Tools::OSStartProcessTool::GetDefaultParametersSchema(); },
-            [this]() -> std::unique_ptr<ITool> { return std::make_unique<Tools::OSStartProcessTool>(m_os); }
+            [this]() -> std::shared_ptr<ITool> { return Tools::OSStartProcessTool::Create(m_os); }
         },
     };
 }
 
-std::unique_ptr<ITool> OSToolFactory::CreateTool(const std::string& name, std::shared_ptr<IAgent> /*callerAgent*/) {
+std::shared_ptr<ITool> OSToolFactory::CreateTool(const std::string& name, std::shared_ptr<IAgent> /*callerAgent*/) {
     for (const auto& entry : m_registry) {
         if (entry.name == name) {
             return entry.create();

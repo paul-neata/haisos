@@ -51,8 +51,8 @@ protected:
     void SetUp() override {
         ::unlink((kRootDir + "/inside.txt").c_str());
         ::rmdir(kRootDir.c_str());
-        FileSystem fs;
-        ASSERT_EQ(fs.CreateDirectory(kRootDir, S_IRWXU), 0);
+        auto fs = FileSystem::Create();
+        ASSERT_EQ(fs->CreateDirectory(kRootDir, S_IRWXU), 0);
     }
 
     void TearDown() override {
@@ -62,37 +62,37 @@ protected:
 };
 
 TEST_F(PhysicalFileSystemTest, WriteAndReadWithinRootSucceeds) {
-    PhysicalFileSystem fs(kRootDir);
+    auto fs = PhysicalFileSystem::Create(kRootDir);
 
-    int fd = fs.OpenFile("inside.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    int fd = fs->OpenFile("inside.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
     ASSERT_GE(fd, 0);
     const char* data = "hello";
-    EXPECT_EQ(fs.WriteFile(fd, data, std::strlen(data)), static_cast<ssize_t>(std::strlen(data)));
-    fs.CloseFile(fd);
+    EXPECT_EQ(fs->WriteFile(fd, data, std::strlen(data)), static_cast<ssize_t>(std::strlen(data)));
+    fs->CloseFile(fd);
 
-    fd = fs.OpenFile("inside.txt", O_RDONLY);
+    fd = fs->OpenFile("inside.txt", O_RDONLY);
     ASSERT_GE(fd, 0);
     char buf[16] = {};
-    ssize_t n = fs.ReadFile(fd, buf, sizeof(buf) - 1);
-    fs.CloseFile(fd);
+    ssize_t n = fs->ReadFile(fd, buf, sizeof(buf) - 1);
+    fs->CloseFile(fd);
     EXPECT_EQ(std::string(buf, static_cast<size_t>(n)), "hello");
 }
 
 TEST_F(PhysicalFileSystemTest, TraversalOutsideRootIsRejected) {
-    PhysicalFileSystem fs(kRootDir);
+    auto fs = PhysicalFileSystem::Create(kRootDir);
 
-    int fd = fs.OpenFile("../outside.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    int fd = fs->OpenFile("../outside.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
     EXPECT_EQ(fd, -1);
 }
 
 TEST_F(PhysicalFileSystemTest, ReadDirectoryListsCreatedFile) {
-    PhysicalFileSystem fs(kRootDir);
+    auto fs = PhysicalFileSystem::Create(kRootDir);
 
-    int fd = fs.OpenFile("inside.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    int fd = fs->OpenFile("inside.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
     ASSERT_GE(fd, 0);
-    fs.CloseFile(fd);
+    fs->CloseFile(fd);
 
-    auto entries = fs.ReadDirectory(".");
+    auto entries = fs->ReadDirectory(".");
     bool found = false;
     for (const auto& entry : entries) {
         if (entry.name == "inside.txt") {

@@ -15,7 +15,7 @@ namespace Haisos {
 // at or below basePath within root.
 class SubFileSystem : public MountableFileSystem {
 public:
-    SubFileSystem(std::shared_ptr<IFileSystem> root, const std::string& basePath);
+    static std::shared_ptr<SubFileSystem> Create(std::shared_ptr<IFileSystem> root, const std::string& basePath);
     ~SubFileSystem() override;
 
     int LocalOpenFile(const std::string& pathname, int flags) override;
@@ -36,6 +36,8 @@ public:
     std::string CwdSnapshot() const;
 
 private:
+    SubFileSystem(std::shared_ptr<IFileSystem> root, const std::string& basePath);
+
     std::string ResolveInRoot(const std::string& path) const;
 
     std::shared_ptr<IFileSystem> m_root;

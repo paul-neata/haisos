@@ -13,7 +13,6 @@ target_link_libraries(AgentWaitToFinish.integrationtest PRIVATE
     AgentStartTool
     AgentWaitToFinishTool
     AgentQueryTool
-    AgentStopTool
     AgentListRunningTool
     nlohmann_json::nlohmann_json
 )

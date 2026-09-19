@@ -1,6 +1,5 @@
 #include "LLMService.h"
 #include <algorithm>
-#include "src/components/Agent/Agent.h"
 #include "src/components/LLMCommunicator/LLMCommunicator.h"
 #include "src/components/ToolFactory/ToolFactory.h"
 #include "src/components/ToolFactory/CompositeToolFactory.h"
@@ -9,16 +8,26 @@
 
 namespace Haisos {
 
-LLMService::LLMService(
-    INetworkService& networkService,
+std::shared_ptr<LLMService> LLMService::Create(
+    std::shared_ptr<INetworkService> networkService,
     const std::string& endpoint,
     const std::string& modelName,
     const std::string& apiKey)
-    : m_networkService(networkService)
+{
+    return std::shared_ptr<LLMService>(
+        new LLMService(std::move(networkService), endpoint, modelName, apiKey));
+}
+
+LLMService::LLMService(
+    std::shared_ptr<INetworkService> networkService,
+    const std::string& endpoint,
+    const std::string& modelName,
+    const std::string& apiKey)
+    : m_networkService(std::move(networkService))
     , m_endpoint(endpoint)
     , m_modelName(modelName)
     , m_apiKey(apiKey)
-    , m_toolFactory(std::make_unique<ToolFactory>(*this))
+    , m_toolFactory(ToolFactory::Create(*this))
 {
 }
 
@@ -28,7 +37,7 @@ void LLMService::CleanupFinishedAgents() {
     size_t sizeBefore = m_agents.size();
     m_agents.erase(
         std::remove_if(m_agents.begin(), m_agents.end(),
-            [](const std::shared_ptr<IAgent>& agent) {
+            [](const std::shared_ptr<Agent>& agent) {
                 return agent->IsFinished();
             }),
         m_agents.end());
@@ -42,24 +51,29 @@ std::shared_ptr<IAgent> LLMService::CreateAgent(
     const std::vector<std::string>& systemPrompts,
     const std::string& name,
     std::shared_ptr<IAgent> parent,
-    std::unique_ptr<IAgentConsole> console,
+    std::shared_ptr<IAgentConsole> console,
     const std::string& startTime,
-    bool longRunning,
-    IToolFactory* additionalTools)
+    bool interactive,
+    std::shared_ptr<IToolFactory> additionalTools)
 {
-    LogInfo("LLMService::CreateAgent: creating agent '%s' parent='%s' longRunning=%d",
+    LogInfo("LLMService::CreateAgent: creating agent '%s' parent='%s' interactive=%d",
         name.c_str(),
         parent ? parent->Name().c_str() : "(none)",
-        longRunning ? 1 : 0);
+        interactive ? 1 : 0);
 
-    auto httpClient = m_networkService.CreateHTTPClient();
-    auto llmCommunicator = std::make_unique<LLMCommunicator>(std::move(httpClient), m_endpoint, m_modelName, m_apiKey, name);
-    std::unique_ptr<IToolFactory> toolFactory = std::make_unique<ToolFactory>(*this);
-    if (additionalTools) {
-        toolFactory = std::make_unique<CompositeToolFactory>(*additionalTools, std::move(toolFactory));
+    if (!m_networkService) {
+        LogError("LLMService::CreateAgent: refusing to create agent '%s': no network service", name.c_str());
+        return nullptr;
     }
 
-    auto agent = std::make_shared<Agent>(
+    auto httpClient = m_networkService->CreateHTTPClient();
+    auto llmCommunicator = LLMCommunicator::Create(std::move(httpClient), m_endpoint, m_modelName, m_apiKey, name);
+    std::shared_ptr<IToolFactory> toolFactory = ToolFactory::Create(*this);
+    if (additionalTools) {
+        toolFactory = CompositeToolFactory::Create(std::move(additionalTools), std::move(toolFactory));
+    }
+
+    auto agent = Agent::Create(
         std::move(llmCommunicator),
         std::move(toolFactory),
         std::move(console),
@@ -67,7 +81,7 @@ std::shared_ptr<IAgent> LLMService::CreateAgent(
         name,
         parent,
         startTime,
-        longRunning);
+        interactive);
 
     if (parent) {
         parent->AddChild(agent);
@@ -79,12 +93,12 @@ std::shared_ptr<IAgent> LLMService::CreateAgent(
     return agent;
 }
 
-IToolFactory& LLMService::GetToolFactory() {
-    return *m_toolFactory;
+std::shared_ptr<IToolFactory> LLMService::GetToolFactory() {
+    return m_toolFactory;
 }
 
-std::unique_ptr<IAgentConsole> LLMService::CreateAgentConsole() {
-    return std::make_unique<InMemoryAgentConsole>();
+std::shared_ptr<IAgentConsole> LLMService::CreateAgentConsole() {
+    return InMemoryAgentConsole::Create();
 }
 
 }

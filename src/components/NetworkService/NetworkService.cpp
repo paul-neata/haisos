@@ -3,10 +3,14 @@
 
 namespace Haisos {
 
+std::shared_ptr<NetworkService> NetworkService::Create() {
+    return std::shared_ptr<NetworkService>(new NetworkService());
+}
+
 NetworkService::NetworkService() = default;
 NetworkService::~NetworkService() = default;
 
-std::unique_ptr<IHTTPClient> NetworkService::CreateHTTPClient() {
+std::shared_ptr<IHTTPClient> NetworkService::CreateHTTPClient() {
     return ::Haisos::CreateHTTPClient();
 }
 

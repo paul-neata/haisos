@@ -23,20 +23,20 @@ private:
 
 class TestToolFactory : public IToolFactory {
 public:
-    std::unique_ptr<ITool> CreateTool(const std::string& name, std::shared_ptr<IAgent>) override {
+    std::shared_ptr<ITool> CreateTool(const std::string& name, std::shared_ptr<IAgent>) override {
         if (name == "echo") {
-            return std::make_unique<TestTool>([](const nlohmann::json& args) {
+            return std::make_shared<TestTool>([](const nlohmann::json& args) {
                 return ToolResult{args.value("text", ""), false};
             });
         }
         if (name == "list_things") {
-            return std::make_unique<TestTool>([](const nlohmann::json&) {
+            return std::make_shared<TestTool>([](const nlohmann::json&) {
                 nlohmann::json arr = nlohmann::json::array({"a", "b", "c"});
                 return ToolResult{arr.dump(), false};
             });
         }
         if (name == "fail_tool") {
-            return std::make_unique<TestTool>([](const nlohmann::json&) {
+            return std::make_shared<TestTool>([](const nlohmann::json&) {
                 return ToolResult{"boom", true};
             });
         }
@@ -49,9 +49,10 @@ public:
     std::vector<std::tuple<std::string, std::string, nlohmann::json>> GetAvailableToolDescriptions() const override { return {}; }
 };
 
-std::shared_ptr<LuaProcess> RunScript(TestToolFactory& toolFactory, std::shared_ptr<MockAgentConsole> console,
+std::shared_ptr<LuaProcess> RunScript(std::shared_ptr<TestToolFactory> toolFactory, std::shared_ptr<MockAgentConsole> console,
                                        const std::string& script, std::vector<std::string> args = {}) {
-    auto process = std::make_shared<LuaProcess>(1, 0, CreateEnvironment(), "test_lua", script, std::move(args), toolFactory, console);
+    auto process = LuaProcess::Create(
+        1, 0, CreateEnvironment(), "test_lua", script, std::move(args), std::move(toolFactory), std::move(console));
     process->WaitToFinish(2000);
     return process;
 }
@@ -59,7 +60,7 @@ std::shared_ptr<LuaProcess> RunScript(TestToolFactory& toolFactory, std::shared_
 } // namespace
 
 TEST(LuaProcessTest, PrintRoutesToConsole) {
-    TestToolFactory toolFactory;
+    auto toolFactory = std::make_shared<TestToolFactory>();
     auto console = std::make_shared<MockAgentConsole>();
     RunScript(toolFactory, console, "print('hello from lua')");
 
@@ -68,7 +69,7 @@ TEST(LuaProcessTest, PrintRoutesToConsole) {
 }
 
 TEST(LuaProcessTest, ToolCallReturnsStringAndErrorFlag) {
-    TestToolFactory toolFactory;
+    auto toolFactory = std::make_shared<TestToolFactory>();
     auto console = std::make_shared<MockAgentConsole>();
     RunScript(toolFactory, console, R"(
         local result, is_error = echo({text = "round-trip"})
@@ -80,7 +81,7 @@ TEST(LuaProcessTest, ToolCallReturnsStringAndErrorFlag) {
 }
 
 TEST(LuaProcessTest, ToolCallErrorFlagIsTrueOnFailure) {
-    TestToolFactory toolFactory;
+    auto toolFactory = std::make_shared<TestToolFactory>();
     auto console = std::make_shared<MockAgentConsole>();
     RunScript(toolFactory, console, R"(
         local result, is_error = fail_tool({})
@@ -92,7 +93,7 @@ TEST(LuaProcessTest, ToolCallErrorFlagIsTrueOnFailure) {
 }
 
 TEST(LuaProcessTest, JsonArrayResultBecomesLuaTable) {
-    TestToolFactory toolFactory;
+    auto toolFactory = std::make_shared<TestToolFactory>();
     auto console = std::make_shared<MockAgentConsole>();
     RunScript(toolFactory, console, R"(
         local things = list_things({})
@@ -104,7 +105,7 @@ TEST(LuaProcessTest, JsonArrayResultBecomesLuaTable) {
 }
 
 TEST(LuaProcessTest, ArgsAreExposedAsArgGlobal) {
-    TestToolFactory toolFactory;
+    auto toolFactory = std::make_shared<TestToolFactory>();
     auto console = std::make_shared<MockAgentConsole>();
     RunScript(toolFactory, console, "print(arg[1] .. arg[2])", {"foo", "bar"});
 
@@ -113,7 +114,7 @@ TEST(LuaProcessTest, ArgsAreExposedAsArgGlobal) {
 }
 
 TEST(LuaProcessTest, ScriptErrorFinishesWithoutCrashing) {
-    TestToolFactory toolFactory;
+    auto toolFactory = std::make_shared<TestToolFactory>();
     auto console = std::make_shared<MockAgentConsole>();
     auto process = RunScript(toolFactory, console, "error('boom')");
 
@@ -121,9 +122,9 @@ TEST(LuaProcessTest, ScriptErrorFinishesWithoutCrashing) {
 }
 
 TEST(LuaProcessTest, KillStopsABusyLoop) {
-    TestToolFactory toolFactory;
+    auto toolFactory = std::make_shared<TestToolFactory>();
     auto console = std::make_shared<MockAgentConsole>();
-    auto process = std::make_shared<LuaProcess>(
+    auto process = LuaProcess::Create(
         1, 0, CreateEnvironment(), "busy_lua", "while true do end", std::vector<std::string>{}, toolFactory, console);
 
     process->Kill();
@@ -135,7 +136,7 @@ TEST(LuaProcessTest, KillStopsABusyLoop) {
 // os_start_process. These tests pin the boundary so it cannot regress silently.
 
 TEST(LuaProcessTest, SandboxOmitsHostAccessLibraries) {
-    TestToolFactory toolFactory;
+    auto toolFactory = std::make_shared<TestToolFactory>();
     auto console = std::make_shared<MockAgentConsole>();
     RunScript(toolFactory, console, R"(
         print(tostring(io) .. "|" .. tostring(os) .. "|" .. tostring(package) .. "|" .. tostring(debug))
@@ -146,7 +147,7 @@ TEST(LuaProcessTest, SandboxOmitsHostAccessLibraries) {
 }
 
 TEST(LuaProcessTest, SandboxRemovesChunkLoadingGlobals) {
-    TestToolFactory toolFactory;
+    auto toolFactory = std::make_shared<TestToolFactory>();
     auto console = std::make_shared<MockAgentConsole>();
     RunScript(toolFactory, console, R"(
         print(tostring(dofile) .. "|" .. tostring(loadfile) .. "|" .. tostring(load) .. "|" .. tostring(warn))
@@ -157,7 +158,7 @@ TEST(LuaProcessTest, SandboxRemovesChunkLoadingGlobals) {
 }
 
 TEST(LuaProcessTest, SandboxKeepsSafeLibraries) {
-    TestToolFactory toolFactory;
+    auto toolFactory = std::make_shared<TestToolFactory>();
     auto console = std::make_shared<MockAgentConsole>();
     RunScript(toolFactory, console, R"(
         print(#table.concat({"a","b"}) .. string.upper("x") .. tostring(math.floor(1.5)))
@@ -172,7 +173,7 @@ TEST(LuaProcessTest, PrecompiledBytecodeIsRefused) {
     // chunk would hand a script arbitrary memory access. A chunk starting with
     // the Lua binary signature ("\x1bLua") must be rejected at load time, which
     // means the script never runs and nothing reaches the console.
-    TestToolFactory toolFactory;
+    auto toolFactory = std::make_shared<TestToolFactory>();
     auto console = std::make_shared<MockAgentConsole>();
     std::string bytecode = "\x1b" "Lua" "\x54\x00\x19\x93\r\n\x1a\n";
     auto process = RunScript(toolFactory, console, bytecode);

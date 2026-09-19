@@ -28,7 +28,7 @@ public:
 class INetworkService {
 public:
     virtual ~INetworkService() = default;
-    virtual std::unique_ptr<IHTTPClient> CreateHTTPClient() = 0;
+    virtual std::shared_ptr<IHTTPClient> CreateHTTPClient() = 0;
 };
 
 }

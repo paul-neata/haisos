@@ -17,7 +17,7 @@ bool TestHandlesErrorGracefully() {
         return false;
     }
 
-    LLMCommunicator llm(std::move(httpClient), "http://localhost:9999/api/chat", "llama3", "");
+    auto llm = LLMCommunicator::Create(std::move(httpClient), "http://localhost:9999/api/chat", "llama3", "");
 
     std::vector<LLMMessage> messages;
     LLMMessage systemMsg;
@@ -30,7 +30,7 @@ bool TestHandlesErrorGracefully() {
     userMsg.content = "User";
     messages.push_back(userMsg);
 
-    LLMResponse response = llm.Call(messages, {});
+    LLMResponse response = llm->Call(messages, {});
 
     LogInfo("Callback was called: %s", !response.message.content.empty() ? "yes" : "no");
 

@@ -4,6 +4,10 @@
 
 namespace Haisos {
 
+std::shared_ptr<ReadOnlyFileSystem> ReadOnlyFileSystem::Create(std::shared_ptr<IFileSystem> inner) {
+    return std::shared_ptr<ReadOnlyFileSystem>(new ReadOnlyFileSystem(std::move(inner)));
+}
+
 ReadOnlyFileSystem::ReadOnlyFileSystem(std::shared_ptr<IFileSystem> inner) : m_inner(std::move(inner)) {}
 ReadOnlyFileSystem::~ReadOnlyFileSystem() = default;
 

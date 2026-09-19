@@ -3,6 +3,14 @@
 
 namespace Haisos {
 
+std::shared_ptr<ComposedFileSystem> ComposedFileSystem::Create(
+    std::shared_ptr<IFileSystem> main,
+    const std::string& whereToMount,
+    std::shared_ptr<IFileSystem> mounted)
+{
+    return std::shared_ptr<ComposedFileSystem>(new ComposedFileSystem(std::move(main), whereToMount, std::move(mounted)));
+}
+
 ComposedFileSystem::ComposedFileSystem(
     std::shared_ptr<IFileSystem> main,
     const std::string& whereToMount,

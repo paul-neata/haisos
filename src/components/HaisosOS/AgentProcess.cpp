@@ -2,12 +2,23 @@
 
 namespace Haisos {
 
+std::shared_ptr<AgentProcess> AgentProcess::Create(
+    uint64_t pid,
+    uint64_t parentPid,
+    std::shared_ptr<IEnvironment> environment,
+    const std::string& name,
+    std::shared_ptr<Agent> agent)
+{
+    return std::shared_ptr<AgentProcess>(
+        new AgentProcess(pid, parentPid, std::move(environment), name, std::move(agent)));
+}
+
 AgentProcess::AgentProcess(
     uint64_t pid,
     uint64_t parentPid,
     std::shared_ptr<IEnvironment> environment,
     const std::string& name,
-    std::shared_ptr<IAgent> agent)
+    std::shared_ptr<Agent> agent)
     : m_pid(pid)
     , m_parentPid(parentPid)
     , m_environment(std::move(environment))

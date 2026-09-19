@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 #include "ServicesCreator.h"
-#include "Factory.h"
 
 using namespace Haisos;
 
@@ -21,7 +20,6 @@ constexpr int kWriteCreateTruncate = O_WRONLY | O_CREAT | O_TRUNC;
 }
 
 TEST(ServicesCreatorTest, CreateNetworkServiceCreatesHTTPClient) {
-    Factory factory;
     auto servicesCreator = CreateServicesCreator();
 
     auto networkService = servicesCreator->CreateNetworkService();
@@ -32,11 +30,10 @@ TEST(ServicesCreatorTest, CreateNetworkServiceCreatesHTTPClient) {
 }
 
 TEST(ServicesCreatorTest, CreateLLMServiceCreatesAgent) {
-    Factory factory;
     auto servicesCreator = CreateServicesCreator();
     auto networkService = servicesCreator->CreateNetworkService();
 
-    auto llmService = servicesCreator->CreateLLMService(*networkService, "http://localhost:11434/api/chat", "llama3", "");
+    auto llmService = servicesCreator->CreateLLMService(networkService, "http://localhost:11434/api/chat", "llama3", "");
     ASSERT_NE(llmService, nullptr);
 
     auto agent = llmService->CreateAgent(
@@ -47,24 +44,22 @@ TEST(ServicesCreatorTest, CreateLLMServiceCreatesAgent) {
 
     ASSERT_NE(agent, nullptr);
     EXPECT_EQ(agent->Name(), "test_agent");
-
-    agent->Stop(0);
-    agent->WaitToFinish();
+    // Nothing stops the agent here: IAgent has no Stop(), and the LLM service
+    // that created it stops and joins it when it goes out of scope.
 }
 
 TEST(ServicesCreatorTest, LLMServiceExposesToolFactory) {
-    Factory factory;
     auto servicesCreator = CreateServicesCreator();
     auto networkService = servicesCreator->CreateNetworkService();
 
-    auto llmService = servicesCreator->CreateLLMService(*networkService, "http://localhost:11434/api/chat", "llama3", "");
+    auto llmService = servicesCreator->CreateLLMService(networkService, "http://localhost:11434/api/chat", "llama3", "");
 
-    auto& toolFactory = llmService->GetToolFactory();
-    EXPECT_FALSE(toolFactory.GetAvailableTools().empty());
+    auto toolFactory = llmService->GetToolFactory();
+    ASSERT_NE(toolFactory, nullptr);
+    EXPECT_FALSE(toolFactory->GetAvailableTools().empty());
 }
 
 TEST(ServicesCreatorTest, CreateEmptyInMemFileSystemIsReadWrite) {
-    Factory factory;
     auto servicesCreator = CreateServicesCreator();
     auto filesystemService = servicesCreator->CreateFileSystemService();
 
@@ -86,7 +81,6 @@ TEST(ServicesCreatorTest, CreateEmptyInMemFileSystemIsReadWrite) {
 }
 
 TEST(ServicesCreatorTest, CreateReadOnlyFileSystemRejectsWrites) {
-    Factory factory;
     auto servicesCreator = CreateServicesCreator();
     auto filesystemService = servicesCreator->CreateFileSystemService();
 
@@ -99,7 +93,6 @@ TEST(ServicesCreatorTest, CreateReadOnlyFileSystemRejectsWrites) {
 }
 
 TEST(ServicesCreatorTest, CreateSubFileSystemConfinesToBasePath) {
-    Factory factory;
     auto servicesCreator = CreateServicesCreator();
     auto filesystemService = servicesCreator->CreateFileSystemService();
 
@@ -125,7 +118,6 @@ TEST(ServicesCreatorTest, CreateSubFileSystemConfinesToBasePath) {
 }
 
 TEST(ServicesCreatorTest, ComposedFileSystemOverlaysAtMountPoint) {
-    Factory factory;
     auto servicesCreator = CreateServicesCreator();
     auto filesystemService = servicesCreator->CreateFileSystemService();
 

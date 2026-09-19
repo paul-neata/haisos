@@ -6,10 +6,10 @@ using namespace Haisos;
 using namespace Haisos::Mocks;
 
 TEST(LLMCommunicatorTest, ResponseParsing) {
-    auto mockHttp = std::make_unique<MockHTTPClient>();
+    auto mockHttp = std::make_shared<MockHTTPClient>();
     mockHttp->SetPostResponse(R"({"content": "Test response", "done": true})");
 
-    LLMCommunicator llm(std::move(mockHttp), "http://localhost:11434/api/chat", "llama3", "");
+    auto llm = LLMCommunicator::Create(std::move(mockHttp), "http://localhost:11434/api/chat", "llama3", "");
 
     std::vector<LLMMessage> messages;
     LLMMessage userMsg;
@@ -17,17 +17,17 @@ TEST(LLMCommunicatorTest, ResponseParsing) {
     userMsg.content = "User prompt";
     messages.push_back(userMsg);
 
-    LLMResponse response = llm.Call(messages, {});
+    LLMResponse response = llm->Call(messages, {});
 
     EXPECT_EQ(response.message.content, "Test response");
     EXPECT_TRUE(response.done);
 }
 
 TEST(LLMCommunicatorTest, CallPostsToEndpoint) {
-    auto mockHttp = std::make_unique<MockHTTPClient>();
+    auto mockHttp = std::make_shared<MockHTTPClient>();
     mockHttp->SetPostResponse(R"({"content": "ok"})");
 
-    LLMCommunicator llm(std::move(mockHttp), "http://test.com/api", "test-model", "api-key");
+    auto llm = LLMCommunicator::Create(std::move(mockHttp), "http://test.com/api", "test-model", "api-key");
 
     std::vector<LLMMessage> messages;
     LLMMessage userMsg;
@@ -35,9 +35,9 @@ TEST(LLMCommunicatorTest, CallPostsToEndpoint) {
     userMsg.content = "user";
     messages.push_back(userMsg);
 
-    llm.Call(messages, {});
+    llm->Call(messages, {});
 
-    auto* rawHttp = llm.GetHttpClient();
+    auto* rawHttp = llm->GetHttpClient();
     ASSERT_NE(rawHttp, nullptr);
     auto* mock = static_cast<MockHTTPClient*>(rawHttp);
     EXPECT_EQ(mock->GetLastUrl(), "http://test.com/api");
@@ -46,10 +46,10 @@ TEST(LLMCommunicatorTest, CallPostsToEndpoint) {
 }
 
 TEST(LLMCommunicatorTest, GetLastAssembledMessage) {
-    auto mockHttp = std::make_unique<MockHTTPClient>();
+    auto mockHttp = std::make_shared<MockHTTPClient>();
     mockHttp->SetPostResponse(R"({"content": "assembled message content"})");
 
-    LLMCommunicator llm(std::move(mockHttp), "http://localhost:11434/api/chat", "llama3", "");
+    auto llm = LLMCommunicator::Create(std::move(mockHttp), "http://localhost:11434/api/chat", "llama3", "");
 
     std::vector<LLMMessage> messages;
     LLMMessage userMsg;
@@ -57,7 +57,7 @@ TEST(LLMCommunicatorTest, GetLastAssembledMessage) {
     userMsg.content = "user";
     messages.push_back(userMsg);
 
-    LLMResponse response = llm.Call(messages, {});
+    LLMResponse response = llm->Call(messages, {});
 
     EXPECT_EQ(response.message.content, "assembled message content");
 }

@@ -4,20 +4,20 @@
 using namespace Haisos;
 
 TEST(ToolFactoryTest, CreateToolWithName) {
-    ToolFactory factory;
-    auto tool = factory.CreateTool("get_current_date_time");
+    auto factory = ToolFactory::Create();
+    auto tool = factory->CreateTool("get_current_date_time");
     EXPECT_NE(tool, nullptr);
 }
 
 TEST(ToolFactoryTest, CreateUnknownToolReturnsNullptr) {
-    ToolFactory factory;
-    auto tool = factory.CreateTool("unknown_tool_xyz");
+    auto factory = ToolFactory::Create();
+    auto tool = factory->CreateTool("unknown_tool_xyz");
     EXPECT_EQ(tool, nullptr);
 }
 
 TEST(ToolFactoryTest, GetCurrentDateTimeToolReturnsValidFormat) {
-    ToolFactory factory;
-    auto tool = factory.CreateTool("get_current_date_time");
+    auto factory = ToolFactory::Create();
+    auto tool = factory->CreateTool("get_current_date_time");
     ASSERT_NE(tool, nullptr);
 
     ToolResult result = tool->Call(nullptr, {});
@@ -37,8 +37,8 @@ TEST(ToolFactoryTest, GetCurrentDateTimeToolReturnsValidFormat) {
 }
 
 TEST(ToolFactoryTest, GetAvailableTools) {
-    ToolFactory factory;
-    auto tools = factory.GetAvailableTools();
+    auto factory = ToolFactory::Create();
+    auto tools = factory->GetAvailableTools();
     EXPECT_FALSE(tools.empty());
 
     bool found = false;
@@ -52,8 +52,8 @@ TEST(ToolFactoryTest, GetAvailableTools) {
 }
 
 TEST(ToolFactoryTest, GetAvailableToolDescriptionsIncludeSchemas) {
-    ToolFactory factory;
-    auto descriptions = factory.GetAvailableToolDescriptions();
+    auto factory = ToolFactory::Create();
+    auto descriptions = factory->GetAvailableToolDescriptions();
     EXPECT_FALSE(descriptions.empty());
 
     bool found = false;

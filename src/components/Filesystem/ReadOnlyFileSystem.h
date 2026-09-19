@@ -12,7 +12,7 @@ namespace Haisos {
 // alive for as long as this filesystem is.
 class ReadOnlyFileSystem : public MountableFileSystem {
 public:
-    explicit ReadOnlyFileSystem(std::shared_ptr<IFileSystem> inner);
+    static std::shared_ptr<ReadOnlyFileSystem> Create(std::shared_ptr<IFileSystem> inner);
     ~ReadOnlyFileSystem() override;
 
     int LocalOpenFile(const std::string& pathname, int flags) override;
@@ -31,6 +31,8 @@ public:
     std::string AbsolutePathFor(const std::string& path) const override;
 
 private:
+    explicit ReadOnlyFileSystem(std::shared_ptr<IFileSystem> inner);
+
     std::string GetCwd() const;
 
     std::shared_ptr<IFileSystem> m_inner;

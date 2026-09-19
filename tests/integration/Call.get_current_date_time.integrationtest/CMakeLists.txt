@@ -13,7 +13,6 @@ target_link_libraries(Call.get_current_date_time.integrationtest PRIVATE
     AgentStartTool
     AgentWaitToFinishTool
     AgentQueryTool
-    AgentStopTool
     AgentListRunningTool
     nlohmann_json::nlohmann_json
 )

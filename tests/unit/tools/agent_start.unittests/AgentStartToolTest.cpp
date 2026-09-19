@@ -17,7 +17,7 @@ public:
 
 class DummyToolFactory : public IToolFactory {
 public:
-    std::unique_ptr<ITool> CreateTool(const std::string&, std::shared_ptr<IAgent>) override { return nullptr; }
+    std::shared_ptr<ITool> CreateTool(const std::string&, std::shared_ptr<IAgent>) override { return nullptr; }
     bool HasTool(const std::string&) const override { return false; }
     std::vector<std::string> GetAvailableTools() const override { return {}; }
     std::vector<std::tuple<std::string, std::string, nlohmann::json>> GetAvailableToolDescriptions() const override { return {}; }
@@ -29,15 +29,15 @@ public:
         const std::vector<std::string>&,
         const std::string& name,
         std::shared_ptr<IAgent> parent,
-        std::unique_ptr<IAgentConsole>,
+        std::shared_ptr<IAgentConsole>,
         const std::string& startTime,
-        bool longRunning,
-        IToolFactory*) override
+        bool interactive,
+        std::shared_ptr<IToolFactory>) override
     {
         auto agent = std::make_shared<MockAgent>();
         agent->SetName(name);
         agent->SetStartTime(startTime);
-        agent->SetLongRunning(longRunning);
+        agent->SetInteractive(interactive);
         m_lastAgent = agent;
         if (parent) {
             parent->AddChild(agent);
@@ -45,13 +45,13 @@ public:
         return agent;
     }
 
-    IToolFactory& GetToolFactory() override { return m_toolFactory; }
-    std::unique_ptr<IAgentConsole> CreateAgentConsole() override { return std::make_unique<DummyAgentConsole>(); }
+    std::shared_ptr<IToolFactory> GetToolFactory() override { return m_toolFactory; }
+    std::shared_ptr<IAgentConsole> CreateAgentConsole() override { return std::make_shared<DummyAgentConsole>(); }
 
     std::shared_ptr<MockAgent> GetLastAgent() const { return m_lastAgent; }
 
 private:
-    DummyToolFactory m_toolFactory;
+    std::shared_ptr<DummyToolFactory> m_toolFactory = std::make_shared<DummyToolFactory>();
     std::shared_ptr<MockAgent> m_lastAgent;
 };
 
@@ -76,13 +76,13 @@ TEST(AgentStartToolTest, GetParametersSchemaIsValid) {
 TEST(AgentStartToolTest, StartReturnsName) {
     TestLLMService llmService;
     auto callerAgent = std::make_shared<MockAgent>();
-    AgentStartTool tool(llmService);
+    auto tool = AgentStartTool::Create(llmService);
 
     nlohmann::json args;
     args["user_prompt"] = "Hello";
     args["oneShot"] = true;
 
-    auto result = tool.Call(callerAgent, args);
+    auto result = tool->Call(callerAgent, args);
 
     EXPECT_FALSE(result.content.empty());
     EXPECT_EQ(result.content, llmService.GetLastAgent()->Name());
@@ -91,14 +91,14 @@ TEST(AgentStartToolTest, StartReturnsName) {
 TEST(AgentStartToolTest, StartWithSystemPrompt) {
     TestLLMService llmService;
     auto callerAgent = std::make_shared<MockAgent>();
-    AgentStartTool tool(llmService);
+    auto tool = AgentStartTool::Create(llmService);
 
     nlohmann::json args;
     args["user_prompt"] = "Hello";
     args["system_prompt"] = "You are a helpful assistant";
     args["oneShot"] = true;
 
-    auto result = tool.Call(callerAgent, args);
+    auto result = tool->Call(callerAgent, args);
 
     EXPECT_FALSE(result.content.empty());
 }
@@ -106,10 +106,10 @@ TEST(AgentStartToolTest, StartWithSystemPrompt) {
 TEST(AgentStartToolTest, MissingUserPromptReturnsError) {
     TestLLMService llmService;
     auto callerAgent = std::make_shared<MockAgent>();
-    AgentStartTool tool(llmService);
+    auto tool = AgentStartTool::Create(llmService);
 
     nlohmann::json args;
-    auto result = tool.Call(callerAgent, args);
+    auto result = tool->Call(callerAgent, args);
 
     EXPECT_TRUE(result.isError);
     EXPECT_TRUE(result.content.find("user_prompt") != std::string::npos);
@@ -130,13 +130,13 @@ TEST(AgentStartToolTest, RecursionDepthExceededReturnsError) {
     auto p6 = std::make_shared<MockAgent>();
     p6->SetParent(p5);
 
-    AgentStartTool tool(llmService);
+    auto tool = AgentStartTool::Create(llmService);
 
     nlohmann::json args;
     args["user_prompt"] = "Hello";
     args["oneShot"] = true;
 
-    auto result = tool.Call(p6, args);
+    auto result = tool->Call(p6, args);
 
     EXPECT_TRUE(result.isError);
     EXPECT_TRUE(result.content.find("depth") != std::string::npos);

@@ -23,7 +23,7 @@ bool TestRunWithSimplePrompt() {
         return false;
     }
 
-    LLMCommunicator llm(std::move(httpClient), endpoint, model, apiKey);
+    auto llm = LLMCommunicator::Create(std::move(httpClient), endpoint, model, apiKey);
 
     std::string responseReceived;
 
@@ -38,7 +38,7 @@ bool TestRunWithSimplePrompt() {
     userMsg.content = "Hello, say hello back.";
     messages.push_back(userMsg);
 
-    LLMResponse response = llm.Call(messages, {});
+    LLMResponse response = llm->Call(messages, {});
     responseReceived = response.message.content;
 
     LogInfo("Response received: %s", responseReceived.c_str());

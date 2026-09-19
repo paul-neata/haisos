@@ -36,14 +36,14 @@ public:
     // Same shape as IFactory::CreateHaisosOS: a sub-OS is an OS like any other,
     // and it is confined by the root filesystem it is handed rather than by a
     // permission flag. It is likewise given its environment explicitly --
-    // typically GetOsEnvironment()->Clone(). osProcessId is the pid of the
-    // process spawning it.
+    // typically GetOsEnvironment()->Clone(). It carries this OS's process id
+    // rather than a fresh one: a sub-OS is a narrowing of the same OS, not a
+    // new one belonging to some other process.
     virtual std::shared_ptr<IHaisosOS> CreateSubOS(
         std::shared_ptr<IServicesCreator> servicesCreator,
         std::shared_ptr<IPhysicalConsole> physicalConsole,
         std::shared_ptr<IFileSystem> rootFileSystem,
-        std::shared_ptr<IEnvironment> environment,
-        uint64_t osProcessId) = 0;
+        std::shared_ptr<IEnvironment> environment) = 0;
 
     // The OS's root filesystem, fixed at creation. An OS cannot step outside
     // it, but it can compose further filesystems on top of it -- narrowing this
@@ -59,14 +59,10 @@ public:
     // a process or a sub-OS, so their edits do not reach back into this one.
     virtual std::shared_ptr<IEnvironment> GetOsEnvironment() const = 0;
 
-    // 0 for the initial OS; for a sub-OS, the pid of the process that created it.
+    // The pid identifying this OS, allocated when it was created (see
+    // IFactory::GetNextGloballyUniquePID). Every sub-OS created from it shares
+    // the same id.
     virtual uint64_t GetOSProcessID() const = 0;
-
-    // Allocates a process id that is unique across every OS in this program: a
-    // pid that exists in one OS can never turn up in another, so a pid
-    // identifies a process (and, through GetOSProcessID(), the OS it owns) on
-    // its own. 0 is never allocated: it means "no parent"/"the initial OS".
-    virtual uint64_t GetNextGloballyUniquePID() = 0;
 };
 
 }

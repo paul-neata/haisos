@@ -45,7 +45,6 @@ haisos/
 │   ├── tools/             - Tool implementations (each has its own CLAUDE.md)
 │   │   ├── get_current_date_time/
 │   │   ├── agent_start/
-│   │   ├── agent_stop/
 │   │   ├── agent_query/
 │   │   ├── agent_wait_to_finish/
 │   │   ├── agent_list_running/
@@ -266,6 +265,23 @@ ctest --output-on-failure
 
 Each component lives in its own folder under `src/components/` and has its own `CLAUDE.md` with detailed documentation.
 
+### Creating things: private constructors and `Create()`
+
+Every class implementing an interface from `interfaces/` has **private
+constructors** and a public static `Create(...)` returning a `shared_ptr`; these
+classes are only ever held by `shared_ptr`, never by value, by `unique_ptr`, or
+on the stack. Every factory method across the interfaces returns a `shared_ptr`
+too, so there is one ownership story end to end and a created object can safely
+hand itself out (`Agent`, for instance, starts its thread in `Create()` rather
+than in its constructor, because the thread passes `shared_from_this()` to every
+tool it calls).
+
+The exception is a back-reference to the owner: `ToolFactory` holds an
+`ILLMService&`, `OSToolFactory` and the `os_*` tools hold an `IHaisosOS&`, and
+`AgentStartTool` holds an `ILLMService&`. These stay raw references on purpose
+-- the referent owns the holder, so a `shared_ptr` back would close an ownership
+cycle and nothing would ever be freed.
+
 | Component | Path | Description |
 |-----------|------|-------------|
 | **Agent** | `src/components/Agent/` | Manages LLM conversations with parent/child agent relationships; supports subagents via agent tools |
@@ -289,7 +305,6 @@ Each component lives in its own folder under `src/components/` and has its own `
 |------|------|-------------|
 | `get_current_date_time` | `src/tools/get_current_date_time/` | Returns the current date and time |
 | `agent_start` | `src/tools/agent_start/` | Starts a subagent with a given prompt |
-| `agent_stop` | `src/tools/agent_stop/` | Stops a running subagent |
 | `agent_query` | `src/tools/agent_query/` | Queries a subagent's status and output |
 | `agent_wait_to_finish` | `src/tools/agent_wait_to_finish/` | Waits for a subagent to finish |
 | `agent_list_running` | `src/tools/agent_list_running/` | Lists all running subagents |

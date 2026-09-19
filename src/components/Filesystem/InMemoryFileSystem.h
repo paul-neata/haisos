@@ -14,7 +14,7 @@ namespace Haisos {
 // IFilesystemService::CreateComposedFileSystem).
 class InMemoryFileSystem : public MountableFileSystem {
 public:
-    InMemoryFileSystem();
+    static std::shared_ptr<InMemoryFileSystem> Create();
     ~InMemoryFileSystem() override;
 
     int LocalOpenFile(const std::string& pathname, int flags) override;
@@ -35,6 +35,8 @@ public:
     std::string CwdSnapshot() const;
 
 private:
+    InMemoryFileSystem();
+
     struct Node {
         bool isDirectory = false;
         std::vector<char> data;

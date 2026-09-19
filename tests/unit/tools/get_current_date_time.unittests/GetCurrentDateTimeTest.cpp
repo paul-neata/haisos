@@ -8,16 +8,16 @@ using namespace Haisos;
 using namespace Haisos::Tools;
 
 TEST(GetCurrentDateTimeTest, CallReturnsNonEmptyString) {
-    GetCurrentDateTime tool;
-    auto result = tool.Call(nullptr, {});
+    auto tool = GetCurrentDateTime::Create();
+    auto result = tool->Call(nullptr, {});
 
     EXPECT_FALSE(result.content.empty());
     EXPECT_FALSE(result.isError);
 }
 
 TEST(GetCurrentDateTimeTest, CallReturnsLocalTimeByDefault) {
-    GetCurrentDateTime tool;
-    auto result = tool.Call(nullptr, {});
+    auto tool = GetCurrentDateTime::Create();
+    auto result = tool->Call(nullptr, {});
 
     EXPECT_FALSE(result.isError);
     std::string content = result.content;
@@ -28,10 +28,10 @@ TEST(GetCurrentDateTimeTest, CallReturnsLocalTimeByDefault) {
 }
 
 TEST(GetCurrentDateTimeTest, CallReturnsLocalTimeWhenGetGmtIsFalse) {
-    GetCurrentDateTime tool;
+    auto tool = GetCurrentDateTime::Create();
     nlohmann::json args;
     args["get_gmt"] = false;
-    auto result = tool.Call(nullptr, args);
+    auto result = tool->Call(nullptr, args);
 
     EXPECT_FALSE(result.isError);
     std::string content = result.content;
@@ -42,10 +42,10 @@ TEST(GetCurrentDateTimeTest, CallReturnsLocalTimeWhenGetGmtIsFalse) {
 }
 
 TEST(GetCurrentDateTimeTest, CallReturnsGMTTimeWhenGetGmtIsTrue) {
-    GetCurrentDateTime tool;
+    auto tool = GetCurrentDateTime::Create();
     nlohmann::json args;
     args["get_gmt"] = true;
-    auto result = tool.Call(nullptr, args);
+    auto result = tool->Call(nullptr, args);
 
     EXPECT_FALSE(result.isError);
     std::string content = result.content;
@@ -56,15 +56,15 @@ TEST(GetCurrentDateTimeTest, CallReturnsGMTTimeWhenGetGmtIsTrue) {
 }
 
 TEST(GetCurrentDateTimeTest, CallReturnsIsErrorFalse) {
-    GetCurrentDateTime tool;
-    auto result = tool.Call(nullptr, {});
+    auto tool = GetCurrentDateTime::Create();
+    auto result = tool->Call(nullptr, {});
 
     EXPECT_FALSE(result.isError);
 }
 
 TEST(GetCurrentDateTimeTest, CallReturnsCurrentLocalTime) {
-    GetCurrentDateTime tool;
-    auto result = tool.Call(nullptr, {});
+    auto tool = GetCurrentDateTime::Create();
+    auto result = tool->Call(nullptr, {});
 
     std::string content = result.content;
 
@@ -91,8 +91,8 @@ TEST(GetCurrentDateTimeTest, ToolDefaultDescriptionIsSet) {
 }
 
 TEST(GetCurrentDateTimeTest, GetParametersSchemaIsValid) {
-    GetCurrentDateTime tool;
-    auto schema = tool.GetParametersSchema();
+    auto tool = GetCurrentDateTime::Create();
+    auto schema = tool->GetParametersSchema();
 
     EXPECT_TRUE(schema.is_object());
     EXPECT_EQ(schema.value("type", ""), "object");
@@ -100,8 +100,8 @@ TEST(GetCurrentDateTimeTest, GetParametersSchemaIsValid) {
 }
 
 TEST(GetCurrentDateTimeTest, GetParametersSchemaContainsGetGmt) {
-    GetCurrentDateTime tool;
-    auto schema = tool.GetParametersSchema();
+    auto tool = GetCurrentDateTime::Create();
+    auto schema = tool->GetParametersSchema();
 
     ASSERT_TRUE(schema.contains("properties"));
     auto properties = schema["properties"];

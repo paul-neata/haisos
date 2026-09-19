@@ -11,9 +11,16 @@ public:
     static const std::string ToolName;
     static const std::string ToolDefaultDescription;
 
+    static std::shared_ptr<AgentQueryTool> Create() {
+        return std::shared_ptr<AgentQueryTool>(new AgentQueryTool());
+    }
+
     ToolResult Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) override;
     static nlohmann::json GetDefaultParametersSchema();
     nlohmann::json GetParametersSchema() const override { return GetDefaultParametersSchema(); }
+
+private:
+    AgentQueryTool() = default;
 };
 
 } // namespace Haisos::Tools

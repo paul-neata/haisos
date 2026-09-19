@@ -39,44 +39,44 @@ private:
 }
 
 TEST(ConsoleTest, Construction) {
-    Console console(false);
+    auto console = Console::Create(false);
     // Should not crash
 }
 
 TEST(ConsoleTest, WriteWithoutStartDoesNotCrash) {
-    Console console(false);
-    console.Write("test message");
+    auto console = Console::Create(false);
+    console->Write("test message");
     // Messages are queued but not processed until Start()
 }
 
 TEST(ConsoleTest, StartStopIdempotent) {
-    Console console(false);
-    console.Start();
-    console.Start(); // second start should be no-op
-    console.Stop();
-    console.Stop(); // second stop should be no-op
+    auto console = Console::Create(false);
+    console->Start();
+    console->Start(); // second start should be no-op
+    console->Stop();
+    console->Stop(); // second stop should be no-op
 }
 
 TEST(ConsoleTest, ProcessesMessages) {
-    Console console(false);
-    console.Start();
-    console.Write("message 1");
-    console.Write("message 2");
+    auto console = Console::Create(false);
+    console->Start();
+    console->Write("message 1");
+    console->Write("message 2");
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    console.Stop();
+    console->Stop();
 }
 
 TEST(ConsoleTest, RegisterAsLogReceiverReceivesMessages) {
     LogClearMessageReceivers();
 
     {
-        Console console(true);
-        console.Start();
+        auto console = Console::Create(true);
+        console->Start();
 
         LogInfo("Test log message");
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-        console.Stop();
+        console->Stop();
     }
 
     // After console is destroyed, it should unregister itself
@@ -87,26 +87,26 @@ TEST(ConsoleTest, RegisterAsLogReceiverReceivesMessages) {
 TEST(ConsoleTest, MultipleConsolesRegisterIndependentReceivers) {
     LogClearMessageReceivers();
 
-    Console console1(true);
-    Console console2(true);
+    auto console1 = Console::Create(true);
+    auto console2 = Console::Create(true);
 
-    console1.Start();
-    console2.Start();
+    console1->Start();
+    console2->Start();
 
     LogInfo("Message for both consoles");
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    console1.Stop();
-    console2.Stop();
+    console1->Stop();
+    console2->Stop();
 
     // After both consoles are stopped, log receivers should be empty
 }
 
 TEST(AgentConsoleAdapterTest, ForwardsWriteWithSourceNameExactlyOnceUntagged) {
     auto physical = std::make_shared<RecordingPhysicalConsole>();
-    AgentConsoleAdapter adapter(physical, "my_process");
+    auto adapter = AgentConsoleAdapter::Create(physical, "my_process");
 
-    adapter.Write("hello");
+    adapter->Write("hello");
 
     auto calls = physical->GetCalls();
     ASSERT_EQ(calls.size(), 1u);

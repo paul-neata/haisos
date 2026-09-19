@@ -273,8 +273,7 @@ int main(int argc, char* argv[]) {
     auto physicalConsole = factory->CreatePhysicalConsole(false);
     physicalConsole->Start();
 
-    // The initial OS belongs to no process, hence pid 0.
-    auto os = factory->CreateHaisosOS(servicesCreator, physicalConsole, rootFileSystem, environment, 0);
+    auto os = factory->CreateHaisosOS(servicesCreator, physicalConsole, rootFileSystem, environment);
     if (!os) {
         LogError("Failed to create the OS for '%s'", haisosFilePath.c_str());
         std::cerr << "Error: failed to create the OS\n";

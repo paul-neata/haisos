@@ -1,6 +1,7 @@
 #include "Agent.h"
 #include <algorithm>
 #include <chrono>
+#include <iterator>
 #include <nlohmann/json.hpp>
 #include "src/components/Logger/Logger.h"
 #include "src/components/libheaders/SanitizeUserInput.h"
@@ -49,6 +50,31 @@ static void TruncateIfNeeded(std::string& content, size_t maxSize = MAX_MESSAGE_
     }
 }
 
+std::shared_ptr<Agent> Agent::Create(
+    std::shared_ptr<ILLMCommunicator> llmCommunicator,
+    std::shared_ptr<IToolFactory> toolFactory,
+    std::shared_ptr<IAgentConsole> console,
+    const std::vector<std::string>& systemPrompts,
+    const std::string& name,
+    std::shared_ptr<IAgent> parent,
+    const std::string& startTime,
+    bool interactive)
+{
+    auto agent = std::shared_ptr<Agent>(new Agent(
+        std::move(llmCommunicator),
+        std::move(toolFactory),
+        std::move(console),
+        systemPrompts,
+        name,
+        std::move(parent),
+        startTime,
+        interactive));
+    // Only now that the owning shared_ptr exists may the thread run: it hands
+    // shared_from_this() to every tool it calls.
+    agent->Start();
+    return agent;
+}
+
 Agent::Agent(
     std::shared_ptr<ILLMCommunicator> llmCommunicator,
     std::shared_ptr<IToolFactory> toolFactory,
@@ -57,7 +83,7 @@ Agent::Agent(
     const std::string& name,
     std::shared_ptr<IAgent> parent,
     const std::string& startTime,
-    bool longRunning)
+    bool interactive)
     : m_llmCommunicator(std::move(llmCommunicator))
     , m_toolFactory(std::move(toolFactory))
     , m_console(std::move(console))
@@ -65,11 +91,14 @@ Agent::Agent(
     , m_name(name)
     , m_startTime(startTime)
     , m_parent(std::move(parent))
-    , m_longRunning(longRunning)
+    , m_interactive(interactive)
 {
     if (m_toolFactory) {
         m_cachedToolDescriptions = m_toolFactory->GetAvailableToolDescriptions();
     }
+}
+
+void Agent::Start() {
     m_thread = std::thread(&Agent::RunThread, this);
 }
 
@@ -135,15 +164,32 @@ void Agent::AddChild(std::shared_ptr<IAgent> child) {
     m_children.push_back(child);
 }
 
-std::vector<std::shared_ptr<IAgent>> Agent::GetChildren() const {
-    std::lock_guard<std::mutex> lock(m_childrenMutex);
-    std::vector<std::shared_ptr<IAgent>> result;
-    for (const auto& wp : m_children) {
-        if (auto sp = wp.lock()) {
-            result.push_back(sp);
+std::vector<std::shared_ptr<IAgent>> Agent::GetChildren(bool onlyDirectChildren) const {
+    std::vector<std::shared_ptr<IAgent>> directChildren;
+    {
+        std::lock_guard<std::mutex> lock(m_childrenMutex);
+        for (const auto& wp : m_children) {
+            if (auto sp = wp.lock()) {
+                directChildren.push_back(std::move(sp));
+            }
         }
     }
-    return result;
+    if (onlyDirectChildren) {
+        return directChildren;
+    }
+
+    // Depth-first: each child, then everything below it. m_childrenMutex is
+    // already released, so a child's own lock is never taken while holding this
+    // agent's. The agent hierarchy is a tree, so the walk always terminates.
+    std::vector<std::shared_ptr<IAgent>> subtree;
+    for (const auto& child : directChildren) {
+        subtree.push_back(child);
+        auto descendants = child->GetChildren(/*onlyDirectChildren=*/false);
+        subtree.insert(subtree.end(),
+            std::make_move_iterator(descendants.begin()),
+            std::make_move_iterator(descendants.end()));
+    }
+    return subtree;
 }
 
 nlohmann::json Agent::GetHistory() const {
@@ -194,8 +240,8 @@ int Agent::GetDepth() const {
     return depth;
 }
 
-bool Agent::IsLongRunning() const {
-    return m_longRunning;
+bool Agent::IsInteractive() const {
+    return m_interactive;
 }
 
 std::vector<std::tuple<std::string, std::string, std::string, bool>> Agent::ExecuteToolCalls(const LLMMessage& message) {
@@ -379,8 +425,8 @@ void Agent::RunThread() {
                 break;
             }
 
-            if (!m_longRunning) {
-                LogVerboseDebug("Agent '%s' short-running: finished processing command, exiting outer loop", m_name.c_str());
+            if (!m_interactive) {
+                LogVerboseDebug("Agent '%s' not interactive: finished processing command, exiting outer loop", m_name.c_str());
                 break;
             }
         } catch (const std::exception& e) {

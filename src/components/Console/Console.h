@@ -12,7 +12,9 @@ namespace Haisos {
 // on stdout; optionally mirrors the Logger's messages too.
 class Console : public IPhysicalConsole {
 public:
-    explicit Console(bool registerAsLogMessageReceiver = false);
+    static std::shared_ptr<Console> Create(bool registerAsLogMessageReceiver = false) {
+        return std::shared_ptr<Console>(new Console(registerAsLogMessageReceiver));
+    }
     ~Console() override;
 
     Console(const Console&) = delete;
@@ -25,6 +27,8 @@ public:
     void Stop() override;
 
 private:
+    explicit Console(bool registerAsLogMessageReceiver);
+
     void ProcessQueue();
 
     SynchronizedQueue<std::string> m_queue;

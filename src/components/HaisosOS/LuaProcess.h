@@ -18,14 +18,14 @@ namespace Haisos {
 // thread, matching Agent's lifecycle shape.
 class LuaProcess : public IProcess {
 public:
-    LuaProcess(
+    static std::shared_ptr<LuaProcess> Create(
         uint64_t pid,
         uint64_t parentPid,
         std::shared_ptr<IEnvironment> environment,
         const std::string& name,
         std::string scriptContent,
         std::vector<std::string> args,
-        IToolFactory& toolFactory,
+        std::shared_ptr<IToolFactory> toolFactory,
         std::shared_ptr<IAgentConsole> console);
     ~LuaProcess() override;
 
@@ -47,6 +47,20 @@ public:
     bool IsKillRequested() const;
 
 private:
+    LuaProcess(
+        uint64_t pid,
+        uint64_t parentPid,
+        std::shared_ptr<IEnvironment> environment,
+        const std::string& name,
+        std::string scriptContent,
+        std::vector<std::string> args,
+        std::shared_ptr<IToolFactory> toolFactory,
+        std::shared_ptr<IAgentConsole> console);
+
+    // Starts the script's thread. Called by Create() once the process is fully
+    // built, so the thread never observes a half-constructed object.
+    void Start();
+
     void RunThread();
     void RegisterBindings(lua_State* L);
 
@@ -59,7 +73,7 @@ private:
     std::string m_name;
     std::string m_scriptContent;
     std::vector<std::string> m_args;
-    IToolFactory& m_toolFactory;
+    std::shared_ptr<IToolFactory> m_toolFactory;
     std::shared_ptr<IAgentConsole> m_console;
 
     lua_State* m_luaState = nullptr;

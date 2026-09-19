@@ -72,7 +72,7 @@ inline std::string GetCurrentTimestampISO8601() {
 
 inline std::shared_ptr<IAgent> FindChildByName(std::shared_ptr<IAgent> parent, const std::string& name) {
     if (!parent) return nullptr;
-    for (const auto& child : parent->GetChildren()) {
+    for (const auto& child : parent->GetChildren(/*onlyDirectChildren=*/true)) {
         if (child->Name() == name) {
             LogVerboseDebug("FindChildByName: found child '%s' under parent '%s'", name.c_str(), parent->Name().c_str());
             return child;

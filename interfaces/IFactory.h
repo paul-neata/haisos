@@ -40,14 +40,14 @@ public:
     // one inside another filesystem (an in-memory one, say) keeps that property
     // for the paths it covers, because each call is routed to whichever
     // filesystem owns the path and that filesystem decides what the call means.
-    virtual std::unique_ptr<IFileSystem> CreatePhysicalFileSystem(const std::string& rootPath) = 0;
+    virtual std::shared_ptr<IFileSystem> CreatePhysicalFileSystem(const std::string& rootPath) = 0;
 
     // A new, empty environment, to be filled in and then handed to an OS, a
     // process or a sub-OS. An existing one is duplicated with
     // IEnvironment::Clone() rather than rebuilt here.
     virtual std::shared_ptr<IEnvironment> CreateEnvironment() = 0;
 
-    virtual std::unique_ptr<IServicesCreator> CreateServicesCreator() = 0;
+    virtual std::shared_ptr<IServicesCreator> CreateServicesCreator() = 0;
 
     // Builds an IHaisosOS around an already-built root filesystem, which becomes
     // the OS's root for its whole life. environment becomes the OS's own
@@ -56,18 +56,24 @@ public:
     // instances go on to run with: each of those is passed an environment
     // explicitly (see IHaisosOS::StartProcess and IHaisosOS::CreateSubOS),
     // usually a Clone() of this one.
-    // osProcessId identifies the process this OS belongs to: 0 for the initial
-    // OS, and the pid of the creating process for a sub-OS. Process ids are
-    // unique across every OS in this program (see
-    // IHaisosOS::GetNextGloballyUniquePID).
+    // The new OS is given a fresh pid from GetNextGloballyUniquePID(): every OS
+    // created here is a root of its own tree, so it borrows no process's
+    // identity (see IHaisosOS::CreateSubOS for the sub-OS case, which does).
     virtual std::shared_ptr<IHaisosOS> CreateHaisosOS(
         std::shared_ptr<IServicesCreator> servicesCreator,
         std::shared_ptr<IPhysicalConsole> physicalConsole,
         std::shared_ptr<IFileSystem> rootFileSystem,
-        std::shared_ptr<IEnvironment> environment,
-        uint64_t osProcessId) = 0;
+        std::shared_ptr<IEnvironment> environment) = 0;
+
+    // Allocates a process id that is unique across every OS in this program: a
+    // pid that exists in one OS can never turn up in another, so a pid
+    // identifies a process (and, through IHaisosOS::GetOSProcessID(), the OS it
+    // runs under) on its own. The counter is the program's, not this factory's,
+    // so two factories still never hand out the same id. 0 is never allocated:
+    // it means "no parent".
+    virtual uint64_t GetNextGloballyUniquePID() = 0;
 };
 
-std::unique_ptr<IFactory> CreateFactory();
+std::shared_ptr<IFactory> CreateFactory();
 
 }

@@ -11,12 +11,15 @@ namespace Haisos {
 
 class HaisosOS : public IHaisosOS, public std::enable_shared_from_this<HaisosOS> {
 public:
-    HaisosOS(
+    // Builds an IHaisosOS. Not part of IHaisosOS's public surface: callers go
+    // through IFactory::CreateHaisosOS (which allocates a fresh pid) or through
+    // CreateSubOS (which passes this OS's own). The network and LLM services
+    // are created internally from servicesCreator, the LLM ones configured from
+    // `environment`.
+    static std::shared_ptr<HaisosOS> Create(
         std::shared_ptr<IServicesCreator> servicesCreator,
-        std::shared_ptr<INetworkService> networkService,
-        std::shared_ptr<ILLMService> llmService,
-        std::shared_ptr<IFileSystem> rootFileSystem,
         std::shared_ptr<IPhysicalConsole> physicalConsole,
+        std::shared_ptr<IFileSystem> rootFileSystem,
         std::shared_ptr<IEnvironment> environment,
         uint64_t osProcessId);
     ~HaisosOS() override;
@@ -30,15 +33,22 @@ public:
         std::shared_ptr<IServicesCreator> servicesCreator,
         std::shared_ptr<IPhysicalConsole> physicalConsole,
         std::shared_ptr<IFileSystem> rootFileSystem,
-        std::shared_ptr<IEnvironment> environment,
-        uint64_t osProcessId) override;
+        std::shared_ptr<IEnvironment> environment) override;
     std::shared_ptr<IFileSystem> GetRootFileSystem() override;
     std::shared_ptr<IServicesCreator> GetServicesCreator() override;
     std::shared_ptr<IEnvironment> GetOsEnvironment() const override;
     uint64_t GetOSProcessID() const override;
-    uint64_t GetNextGloballyUniquePID() override;
 
 private:
+    HaisosOS(
+        std::shared_ptr<IServicesCreator> servicesCreator,
+        std::shared_ptr<INetworkService> networkService,
+        std::shared_ptr<ILLMService> llmService,
+        std::shared_ptr<IFileSystem> rootFileSystem,
+        std::shared_ptr<IPhysicalConsole> physicalConsole,
+        std::shared_ptr<IEnvironment> environment,
+        uint64_t osProcessId);
+
     // Erases finished processes. Must be called with m_processesMutex held.
     void CleanupFinishedProcesses();
     // Stops one process, escalating to Kill() if it does not stop in time.
@@ -56,7 +66,9 @@ private:
     std::shared_ptr<IPhysicalConsole> m_physicalConsole;
     std::shared_ptr<IEnvironment> m_environment;
     uint64_t m_osProcessId = 0;
-    OSToolFactory m_osToolFactory;
+    // Built by Create() rather than by the constructor: it holds a reference to
+    // the OS, which is not yet fully formed while the constructor runs.
+    std::shared_ptr<OSToolFactory> m_osToolFactory;
 
     // Set by the destructor before draining, so no further process can be started.
     std::atomic<bool> m_shuttingDown{false};
@@ -64,16 +76,5 @@ private:
     mutable std::mutex m_processesMutex;
     std::vector<std::shared_ptr<IProcess>> m_processes;
 };
-
-// Builds a root IHaisosOS. Not part of IHaisosOS's public surface: callers go
-// through IFactory::CreateHaisosOS, which forwards here. The network and LLM
-// services are created internally from servicesCreator, the LLM ones configured
-// from `environment`.
-std::shared_ptr<IHaisosOS> CreateHaisosOS(
-    std::shared_ptr<IServicesCreator> servicesCreator,
-    std::shared_ptr<IPhysicalConsole> physicalConsole,
-    std::shared_ptr<IFileSystem> rootFileSystem,
-    std::shared_ptr<IEnvironment> environment,
-    uint64_t osProcessId);
 
 }

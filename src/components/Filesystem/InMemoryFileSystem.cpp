@@ -24,6 +24,10 @@ std::string LastSegment(const std::string& normalizedPath) {
 
 } // namespace
 
+std::shared_ptr<InMemoryFileSystem> InMemoryFileSystem::Create() {
+    return std::shared_ptr<InMemoryFileSystem>(new InMemoryFileSystem());
+}
+
 InMemoryFileSystem::InMemoryFileSystem() {
     m_nodes["/"] = Node{true, {}};
 }

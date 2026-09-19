@@ -1,4 +1,5 @@
 #pragma once
+#include <memory>
 #include "interfaces/INetworkService.h"
 
 #ifdef __EMSCRIPTEN__
@@ -13,7 +14,9 @@ namespace Haisos {
 
 class FetchHTTPClient : public IHTTPClient {
 public:
-    FetchHTTPClient();
+    static std::shared_ptr<FetchHTTPClient> Create() {
+        return std::shared_ptr<FetchHTTPClient>(new FetchHTTPClient());
+    }
     ~FetchHTTPClient() override;
 
     // IHTTPClient interface
@@ -22,6 +25,8 @@ public:
     HTTPResponse Post(const std::string& url, const std::string& body, const std::vector<HTTPHeader>& headers) override;
 
 private:
+    FetchHTTPClient();
+
     static void FetchSuccess(emscripten_fetch_t* fetch);
     static void FetchError(emscripten_fetch_t* fetch);
 

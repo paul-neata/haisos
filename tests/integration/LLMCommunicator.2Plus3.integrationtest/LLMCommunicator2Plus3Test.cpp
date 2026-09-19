@@ -21,7 +21,7 @@ bool TestCallLocalOllama() {
         return false;
     }
 
-    LLMCommunicator llm(std::move(httpClient), endpoint, model, apiKey);
+    auto llm = LLMCommunicator::Create(std::move(httpClient), endpoint, model, apiKey);
 
     std::string responseReceived;
     std::string toolCalled;
@@ -38,7 +38,7 @@ bool TestCallLocalOllama() {
     userMsg.content = "What is the mathematical sum of 2 and 3 ?";
     messages.push_back(userMsg);
 
-    LLMResponse response = llm.Call(messages, {});
+    LLMResponse response = llm->Call(messages, {});
     responseReceived = response.message.content;
 
     LogInfo("Response received: %s", responseReceived.c_str());

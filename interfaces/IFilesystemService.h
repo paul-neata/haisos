@@ -115,6 +115,6 @@ public:
     virtual std::shared_ptr<IFileSystem> CreateComposedFileSystem(std::shared_ptr<IFileSystem> main, const std::string& whereToMount, std::shared_ptr<IFileSystem> toBeMounted) = 0;
 };
 
-std::unique_ptr<IFileSystem> CreateFilesystem();
+std::shared_ptr<IFileSystem> CreateFilesystem();
 
 } // namespace Haisos

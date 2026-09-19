@@ -5,33 +5,37 @@
 
 namespace Haisos {
 
+std::shared_ptr<ServicesCreator> ServicesCreator::Create() {
+    return std::shared_ptr<ServicesCreator>(new ServicesCreator());
+}
+
 ServicesCreator::ServicesCreator() = default;
 ServicesCreator::~ServicesCreator() = default;
 
 std::shared_ptr<IServicesCreator> ServicesCreator::Clone() const {
     // ServicesCreator holds no state of its own, so a clone is simply a new one.
-    return std::make_shared<ServicesCreator>();
+    return ServicesCreator::Create();
 }
 
-std::unique_ptr<IFilesystemService> ServicesCreator::CreateFileSystemService() {
-    return std::make_unique<FileSystemService>();
+std::shared_ptr<IFilesystemService> ServicesCreator::CreateFileSystemService() {
+    return FileSystemService::Create();
 }
 
-std::unique_ptr<INetworkService> ServicesCreator::CreateNetworkService() {
-    return std::make_unique<NetworkService>();
+std::shared_ptr<INetworkService> ServicesCreator::CreateNetworkService() {
+    return NetworkService::Create();
 }
 
-std::unique_ptr<ILLMService> ServicesCreator::CreateLLMService(
-    INetworkService& networkService,
+std::shared_ptr<ILLMService> ServicesCreator::CreateLLMService(
+    std::shared_ptr<INetworkService> networkService,
     const std::string& endpoint,
     const std::string& modelName,
     const std::string& apiKey)
 {
-    return std::make_unique<LLMService>(networkService, endpoint, modelName, apiKey);
+    return LLMService::Create(std::move(networkService), endpoint, modelName, apiKey);
 }
 
-std::unique_ptr<IServicesCreator> CreateServicesCreator() {
-    return std::make_unique<ServicesCreator>();
+std::shared_ptr<IServicesCreator> CreateServicesCreator() {
+    return ServicesCreator::Create();
 }
 
 }

@@ -1,14 +1,18 @@
 #pragma once
+#include <memory>
 #include "interfaces/INetworkService.h"
 
 namespace Haisos {
 
 class NetworkService : public INetworkService {
 public:
-    NetworkService();
+    static std::shared_ptr<NetworkService> Create();
     ~NetworkService() override;
 
-    std::unique_ptr<IHTTPClient> CreateHTTPClient() override;
+    std::shared_ptr<IHTTPClient> CreateHTTPClient() override;
+
+private:
+    NetworkService();
 };
 
 }

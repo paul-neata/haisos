@@ -89,8 +89,8 @@ std::vector<DirectoryEntry> FileSystem::LocalReadDirectory(const std::string& pa
     return entries;
 }
 
-std::unique_ptr<IFileSystem> CreateFilesystem() {
-    return std::make_unique<FileSystem>();
+std::shared_ptr<IFileSystem> CreateFilesystem() {
+    return FileSystem::Create();
 }
 
 } // namespace Haisos

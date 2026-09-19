@@ -172,6 +172,29 @@ void KillHookTrampoline(lua_State* L, lua_Debug* /*ar*/) {
 
 } // namespace
 
+std::shared_ptr<LuaProcess> LuaProcess::Create(
+    uint64_t pid,
+    uint64_t parentPid,
+    std::shared_ptr<IEnvironment> environment,
+    const std::string& name,
+    std::string scriptContent,
+    std::vector<std::string> args,
+    std::shared_ptr<IToolFactory> toolFactory,
+    std::shared_ptr<IAgentConsole> console)
+{
+    auto process = std::shared_ptr<LuaProcess>(new LuaProcess(
+        pid,
+        parentPid,
+        std::move(environment),
+        name,
+        std::move(scriptContent),
+        std::move(args),
+        std::move(toolFactory),
+        std::move(console)));
+    process->Start();
+    return process;
+}
+
 LuaProcess::LuaProcess(
     uint64_t pid,
     uint64_t parentPid,
@@ -179,7 +202,7 @@ LuaProcess::LuaProcess(
     const std::string& name,
     std::string scriptContent,
     std::vector<std::string> args,
-    IToolFactory& toolFactory,
+    std::shared_ptr<IToolFactory> toolFactory,
     std::shared_ptr<IAgentConsole> console)
     : m_pid(pid)
     , m_parentPid(parentPid)
@@ -187,9 +210,12 @@ LuaProcess::LuaProcess(
     , m_name(name)
     , m_scriptContent(std::move(scriptContent))
     , m_args(std::move(args))
-    , m_toolFactory(toolFactory)
+    , m_toolFactory(std::move(toolFactory))
     , m_console(std::move(console))
 {
+}
+
+void LuaProcess::Start() {
     m_thread = std::thread(&LuaProcess::RunThread, this);
 }
 
@@ -278,7 +304,9 @@ int LuaProcess::LuaToolTrampoline(lua_State* L) {
             args = ToJson(L, 1);
         }
 
-        auto tool = self->m_toolFactory.CreateTool(toolName ? toolName : "", nullptr);
+        auto tool = self->m_toolFactory
+            ? self->m_toolFactory->CreateTool(toolName ? toolName : "", nullptr)
+            : nullptr;
         if (!tool) {
             LogWarning("LuaProcess '%s': unknown tool '%s'", self->m_name.c_str(), toolName ? toolName : "");
             lua_pushstring(L, "unknown tool");
@@ -345,10 +373,12 @@ void LuaProcess::RegisterBindings(lua_State* L) {
     lua_pushcfunction(L, &LuaProcess::LuaPrintTrampoline);
     lua_setglobal(L, "print");
 
-    for (const auto& toolName : m_toolFactory.GetAvailableTools()) {
-        lua_pushstring(L, toolName.c_str());
-        lua_pushcclosure(L, &LuaProcess::LuaToolTrampoline, 1);
-        lua_setglobal(L, toolName.c_str());
+    if (m_toolFactory) {
+        for (const auto& toolName : m_toolFactory->GetAvailableTools()) {
+            lua_pushstring(L, toolName.c_str());
+            lua_pushcclosure(L, &LuaProcess::LuaToolTrampoline, 1);
+            lua_setglobal(L, toolName.c_str());
+        }
     }
 
     lua_newtable(L);

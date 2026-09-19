@@ -10,12 +10,20 @@ public:
     static const std::string ToolName;
     static const std::string ToolDefaultDescription;
 
-    AgentStartTool(ILLMService& llmService);
+    // llmService is held by reference, not shared: the service owns the tool
+    // factory that creates this tool, so sharing it back would close an
+    // ownership cycle.
+    static std::shared_ptr<AgentStartTool> Create(ILLMService& llmService) {
+        return std::shared_ptr<AgentStartTool>(new AgentStartTool(llmService));
+    }
+
     ToolResult Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) override;
     static nlohmann::json GetDefaultParametersSchema();
     nlohmann::json GetParametersSchema() const override { return GetDefaultParametersSchema(); }
 
 private:
+    explicit AgentStartTool(ILLMService& llmService);
+
     ILLMService& m_llmService;
 };
 
@@ -24,6 +32,6 @@ std::shared_ptr<IAgent> CreateAndStartSubagent(
     std::shared_ptr<IAgent> parent,
     const std::string& userPrompt,
     const std::vector<std::string>& systemPrompts,
-    bool longRunning = true);
+    bool interactive = true);
 
 } // namespace Haisos::Tools

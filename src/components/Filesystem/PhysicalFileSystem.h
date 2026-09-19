@@ -18,7 +18,7 @@ namespace Haisos {
 // documented future extension (see IHaisosOS).
 class PhysicalFileSystem : public MountableFileSystem {
 public:
-    explicit PhysicalFileSystem(const std::string& rootPath);
+    static std::shared_ptr<PhysicalFileSystem> Create(const std::string& rootPath);
     ~PhysicalFileSystem() override = default;
 
     int LocalOpenFile(const std::string& pathname, int flags) override;
@@ -37,12 +37,14 @@ public:
     std::string AbsolutePathFor(const std::string& path) const override;
 
 private:
+    explicit PhysicalFileSystem(const std::string& rootPath);
+
     // Resolves pathname against the root and validates it does not escape it.
     // Returns false (leaving resolved untouched) if the path is invalid.
     bool ResolveWithinRoot(const std::string& pathname, std::string& resolved) const;
 
     std::string m_rootPath;
-    FileSystem m_inner;
+    std::shared_ptr<FileSystem> m_inner;
 };
 
 } // namespace Haisos

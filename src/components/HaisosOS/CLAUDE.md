@@ -5,12 +5,13 @@ console, and a services layer; starts processes and spawns sub-OS instances.
 
 ## Responsibilities
 
-- Assigns PIDs through `GetNextGloballyUniquePID()`: one allocator for the whole
-  program, so a pid live in one OS can never appear in another. Processes
-  started here are top-most (parent PID 0) -- `StartProcess` is deliberately not
-  told which agent called it, because a process is opaque (whether it is an
-  agent is its own business, and an agent's subagents stay inside it rather than
-  becoming processes). Process parentage will be redefined along with that split.
+- Numbers the processes it starts from one program-wide pid allocator (the same
+  one behind `IFactory::GetNextGloballyUniquePID()`), so a pid live in one OS can
+  never appear in another. Processes started here are top-most (parent PID 0) --
+  `StartProcess` is deliberately not told which agent called it, because a
+  process is opaque (whether it is an agent is its own business, and an agent's
+  subagents stay inside it rather than becoming processes). Process parentage
+  will be redefined along with that split.
 - Every process is started with an environment passed by the caller
   (`StartProcess(environment, programPath, args)`) -- typically
   `GetOsEnvironment()->Clone()`. It is never taken from the OS behind the
@@ -38,20 +39,24 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   `IFilesystemService::CreateSubFileSystem` -- rather than a permissions struct.
   Give it its own services creator via `IServicesCreator::Clone()`, so it does
   not depend on the parent's lifetime, and its own environment via
-  `IEnvironment::Clone()`.
+  `IEnvironment::Clone()`. It carries the parent OS's pid rather than taking one
+  of its own: a sub-OS is the same OS seen through a narrower root.
 - Built via `IFactory::CreateHaisosOS(servicesCreator, physicalConsole,
-  rootFileSystem, environment, osProcessId)`. The network and LLM services are
-  created internally from the `IServicesCreator` rather than being passed in
-  pre-built. Every OS can start processes; the
-  process-start restriction that `SubOSPermissions` used to carry is gone.
+  rootFileSystem, environment)`, which allocates the new OS's pid itself; the
+  concrete entry point is `HaisosOS::Create(..., osProcessId)` (the constructor
+  is private and every `HaisosOS` is owned by a `shared_ptr`). The network and
+  LLM services are created internally from the `IServicesCreator` rather than
+  being passed in pre-built. Every OS can start processes; the process-start
+  restriction that `SubOSPermissions` used to carry is gone.
 - Holds an **environment** (`GetOsEnvironment()`, an `IEnvironment` fixed at
   creation; creating an OS without one fails). The LLM endpoint/model/API key
   are read from its variables (`HAISOS_ENDPOINT`/`HAISOS_MODEL`/
   `HAISOS_API_KEY`), so a sub-OS handed a `Clone()` of it gets the LLM
   configuration for free. It is populated from the haisosfile's `ENV`
   directives -- the host's environment is never inherited wholesale.
-- `GetOSProcessID()` identifies the process this OS belongs to: 0 for the
-  initial OS, and the creating process's pid for a sub-OS.
+- `GetOSProcessID()` is the pid identifying this OS, allocated when it was
+  created. Every sub-OS spawned from it shares the same id. 0 is never
+  allocated; it means "no parent".
 - `GetRootFileSystem()` exposes the OS's root (what the `os_*` tools operate
   on). An OS cannot step outside that root, but it can compose further
   filesystems on top of it, through the filesystem service that
@@ -59,7 +64,10 @@ console, and a services layer; starts processes and spawns sub-OS instances.
 
 ## Key Classes
 
-- `HaisosOS` - Main implementation of `IHaisosOS`; `CreateHaisosOS(...)` builds the root instance
-- `AgentProcess` - `IProcess` backed by an `IAgent`
+- `HaisosOS` - Main implementation of `IHaisosOS`; `HaisosOS::Create(...)` builds an instance
+- `AgentProcess` - `IProcess` backed by an agent. It holds the concrete `Agent`,
+  not an `IAgent`: stopping and killing are deliberately off `IAgent` (see the
+  Agent component's CLAUDE.md), and a process is exactly the thing that has to
+  be able to do both
 - `LuaProcess` - `IProcess` backed by an embedded Lua script, running on its own thread; `Kill()` aborts it via a Lua instruction-count hook
 - `OSToolFactory` - the OS-level tool set (`os_read_file`, `os_write_file`, `os_list_directory`, `os_start_process`, `os_list_processes`)

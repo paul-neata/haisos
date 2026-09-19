@@ -18,13 +18,13 @@ public:
     ~LLMService() override;
 
     std::shared_ptr<IAgent> CreateAgent(
-        const std::vector<std::string>& systemPrompts,
         const std::string& name,
         std::shared_ptr<IAgent> parent,
         std::shared_ptr<IAgentConsole> console,
-        const std::string& startTime = "",
-        bool interactive = true,
-        std::shared_ptr<IToolFactory> additionalTools = nullptr) override;
+        std::shared_ptr<IToolFactory> additionalTools,
+        const std::vector<std::string>& systemPrompts,
+        bool isInteractive = true,
+        const std::string& startTime = "") override;
 
     std::shared_ptr<IToolFactory> GetToolFactory() override;
     std::shared_ptr<IAgentConsole> CreateAgentConsole() override;

@@ -11,7 +11,7 @@ decides what the call means. Mounting a `PhysicalFileSystem` inside an
 
 There are two ways to combine filesystems. `IFileSystem::Mount`/`Unmount` change
 a filesystem **in place**, adding or removing a mount point on it.
-`IFilesystemService::CreateComposedFileSystem` leaves both operands untouched and
+`IFileSystemService::CreateComposedFileSystem` leaves both operands untouched and
 returns a **new** filesystem instead. Both share one implementation: the routing,
 file-descriptor translation and mount-point listing all live in
 `MountableFileSystem`, which every filesystem here derives from, so mounting
@@ -20,14 +20,14 @@ behaves identically no matter what you mount onto.
 ## Responsibilities
 
 - Provides file operations: open, close, read, write
-- Provides directory operations: mkdir, rmdir, chdir, getcwd
+- Provides directory operations: mkdir, rmdir
 - Provides custom directory listing via `ReadDirectory`
-- Composed filesystems keep their **own** virtual current directory rather than
-  mutating the filesystem they wrap -- a wrapped filesystem may be shared with
-  other composed filesystems and with other processes, so a `ChangeDirectory`
-  on one of them must not move everyone else. That state is mutex-guarded,
-  since one filesystem is reachable concurrently from every process thread
-  under an OS.
+- Holds **no current directory**. That notion belongs to a process
+  (`ICurrentProcess::ChangeDirectory`), not to a filesystem: one filesystem is
+  reachable from every process under an OS, so a cwd living here would be a
+  cwd they all shared. Every path an `IFileSystem` is handed is therefore
+  resolved against its own root -- `"foo"` and `"/foo"` mean the same thing --
+  and a process resolves against its own working directory before calling in.
 - `FileSystem` uses platform-specific backends:
   - **Linux**: POSIX calls (`linux/PosixFilesystem.cpp`)
   - **Windows**: Windows CRT (`windows/WindowsFilesystem.cpp`)
@@ -35,7 +35,7 @@ behaves identically no matter what you mount onto.
 
 ## Key Classes
 
-- `FileSystem` - Main implementation of `IFileSystem`, unrooted (operates on real, absolute/cwd-relative paths)
+- `FileSystem` - Main implementation of `IFileSystem`, unrooted (operates on real paths)
 - `PhysicalFileSystem` - `IFileSystem` jailed to a real disk directory; validates every path stays within that root before delegating to an inner `FileSystem`
 - `InMemoryFileSystem` - an empty, in-memory read/write `IFileSystem` (no real disk); files are plain byte buffers keyed by normalized path
 - `ReadOnlyFileSystem` - wraps another `IFileSystem`, rejecting every write/create/remove
@@ -44,4 +44,4 @@ behaves identically no matter what you mount onto.
 - `MountableFileSystem` - the base every filesystem here derives from; implements `Mount`/`Unmount` and the routing they need, so a subclass only implements the `Local*` operations for the paths it owns itself
 - `MountPoints` - the mount table behind that: longest-prefix path matching, plus the file-descriptor translation a mount requires (the two filesystems hand out descriptors from independent namespaces that both start at 3, so a mounted file's descriptor is re-issued from a range far above any real one and can never be confused with the host's)
 
-These four are created via `IFilesystemService` (`src/components/FileSystemService/`), not directly.
+These four are created via `IFileSystemService` (`src/components/FileSystemService/`), not directly.

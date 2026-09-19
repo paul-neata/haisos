@@ -285,7 +285,10 @@ int main(int argc, char* argv[]) {
     for (const auto& runEntry : parseResult.config.runEntries) {
         // Each RUN gets its own copy of the OS's environment: nothing is
         // inherited implicitly, and one process's edits never reach another's.
-        auto process = os->StartProcess(os->GetOsEnvironment()->Clone(), runEntry.programPath, runEntry.args);
+        // Each RUN starts at the OS's root; a haisosfile has no way to say
+        // otherwise yet.
+        auto process = os->StartProcess(
+            os->GetOsEnvironment()->Clone(), runEntry.programPath, runEntry.args, /*workingDirectory=*/"");
         if (!process) {
             LogError("Failed to start process: %s", runEntry.programPath.c_str());
             std::cerr << "Error: Failed to start process: " << runEntry.programPath << "\n";
@@ -301,9 +304,15 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // The haisos process finishes once all of its initial processes have.
+    // The haisos process finishes once all of its initial processes have. The
+    // wait is bounded rather than endless: IProcess has no untimed wait,
+    // because an interactive agent never finishes on its own.
+    constexpr uint64_t INITIAL_PROCESS_WAIT_MS = 24ULL * 60 * 60 * 1000;
     for (const auto& process : processes) {
-        process->WaitToFinish();
+        if (!process->WaitToFinish(INITIAL_PROCESS_WAIT_MS)) {
+            LogWarning("Process '%s' did not finish within %llums; shutting down anyway",
+                process->Path().c_str(), static_cast<unsigned long long>(INITIAL_PROCESS_WAIT_MS));
+        }
     }
 
     physicalConsole->Stop();

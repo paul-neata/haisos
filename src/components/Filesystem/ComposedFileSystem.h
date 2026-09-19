@@ -1,9 +1,8 @@
 #pragma once
 #include <memory>
-#include <mutex>
 #include <string>
 #include "MountableFileSystem.h"
-#include "interfaces/IFilesystemService.h"
+#include "interfaces/IFileSystemService.h"
 
 namespace Haisos {
 
@@ -22,9 +21,6 @@ public:
     static std::shared_ptr<ComposedFileSystem> Create(std::shared_ptr<IFileSystem> main, const std::string& whereToMount, std::shared_ptr<IFileSystem> mounted);
     ~ComposedFileSystem() override;
 
-    int ChangeDirectory(const std::string& path) override;
-    char* GetCurrentDirectory(std::string& buf, size_t size) override;
-
 protected:
     std::string AbsolutePathFor(const std::string& path) const override;
 
@@ -40,16 +36,7 @@ protected:
 private:
     ComposedFileSystem(std::shared_ptr<IFileSystem> main, const std::string& whereToMount, std::shared_ptr<IFileSystem> mounted);
 
-    // A copy of the current directory, taken under m_cwdMutex.
-    std::string CwdSnapshot() const;
-
     std::shared_ptr<IFileSystem> m_main;
-    // This filesystem's own current directory; not delegated to main (which may
-    // be shared by other composed filesystems and processes). Guarded by
-    // m_cwdMutex: this instance may itself be shared by several concurrently
-    // running processes, each on its own thread.
-    mutable std::mutex m_cwdMutex;
-    std::string m_cwd = "/";
 };
 
 }

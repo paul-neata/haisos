@@ -48,18 +48,18 @@ void LLMService::CleanupFinishedAgents() {
 }
 
 std::shared_ptr<IAgent> LLMService::CreateAgent(
-    const std::vector<std::string>& systemPrompts,
     const std::string& name,
     std::shared_ptr<IAgent> parent,
     std::shared_ptr<IAgentConsole> console,
-    const std::string& startTime,
-    bool interactive,
-    std::shared_ptr<IToolFactory> additionalTools)
+    std::shared_ptr<IToolFactory> additionalTools,
+    const std::vector<std::string>& systemPrompts,
+    bool isInteractive,
+    const std::string& startTime)
 {
-    LogInfo("LLMService::CreateAgent: creating agent '%s' parent='%s' interactive=%d",
+    LogInfo("LLMService::CreateAgent: creating agent '%s' parent='%s' isInteractive=%d",
         name.c_str(),
         parent ? parent->Name().c_str() : "(none)",
-        interactive ? 1 : 0);
+        isInteractive ? 1 : 0);
 
     if (!m_networkService) {
         LogError("LLMService::CreateAgent: refusing to create agent '%s': no network service", name.c_str());
@@ -81,7 +81,7 @@ std::shared_ptr<IAgent> LLMService::CreateAgent(
         name,
         parent,
         startTime,
-        interactive);
+        isInteractive);
 
     if (parent) {
         parent->AddChild(agent);

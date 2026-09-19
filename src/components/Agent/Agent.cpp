@@ -118,8 +118,14 @@ void Agent::Send(const std::string& command) {
     m_commandQueue.Send(command);
 }
 
-bool Agent::Stop(unsigned timeoutMs) {
+void Agent::TriggerStop() {
+    // Only a request: closing the queue stops new commands being taken, and the
+    // agent finishes once whatever it is already doing is done.
     m_commandQueue.Close();
+}
+
+bool Agent::Stop(unsigned timeoutMs) {
+    TriggerStop();
     if (timeoutMs > 0) {
         return WaitToFinish(timeoutMs);
     }

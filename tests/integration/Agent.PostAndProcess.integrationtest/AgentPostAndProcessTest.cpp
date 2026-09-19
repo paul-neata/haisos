@@ -27,14 +27,14 @@ bool TestAgentPostAndProcess() {
     auto console = AgentConsoleAdapter::Create(physicalConsole, "root");
 
     auto agent = llmService->CreateAgent(
-        std::vector<std::string>{"You are a helpful AI assistant."},
         "root",
-        nullptr,
+        /*parent=*/nullptr,
         std::move(console),
-        "",
+        /*additionalTools=*/nullptr,
+        std::vector<std::string>{"You are a helpful AI assistant."},
         // Not interactive: the agent answers the prompt below and then finishes,
-        // which is what this test waits for. IAgent has no Stop().
-        /*interactive=*/false);
+        // which is what this test waits for. IAgent cannot be forced down.
+        /*isInteractive=*/false);
 
     agent->Post("What is 2+2?");
     if (!agent->WaitToFinish(kAgentTimeoutMs)) {

@@ -22,28 +22,8 @@ ComposedFileSystem::ComposedFileSystem(
 
 ComposedFileSystem::~ComposedFileSystem() = default;
 
-std::string ComposedFileSystem::CwdSnapshot() const {
-    std::lock_guard<std::mutex> lock(m_cwdMutex);
-    return m_cwd;
-}
-
 std::string ComposedFileSystem::AbsolutePathFor(const std::string& path) const {
-    return NormalizeVirtualPath(path, CwdSnapshot());
-}
-
-int ComposedFileSystem::ChangeDirectory(const std::string& path) {
-    std::lock_guard<std::mutex> lock(m_cwdMutex);
-    m_cwd = NormalizeVirtualPath(path, m_cwd);
-    return 0;
-}
-
-char* ComposedFileSystem::GetCurrentDirectory(std::string& buf, size_t size) {
-    std::lock_guard<std::mutex> lock(m_cwdMutex);
-    if (m_cwd.size() + 1 > size) {
-        return nullptr;
-    }
-    buf = m_cwd;
-    return &buf[0];
+    return NormalizeVirtualPath(path);
 }
 
 int ComposedFileSystem::LocalOpenFile(const std::string& pathname, int flags) {

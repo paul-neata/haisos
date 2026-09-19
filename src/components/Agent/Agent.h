@@ -33,6 +33,7 @@ public:
     void Send(const std::string& command) override;
     std::shared_ptr<IAgent> GetParent() const override;
     std::string Name() const override;
+    void TriggerStop() override;
     bool WaitToFinish(uint64_t timeoutMs) override;
     std::vector<std::shared_ptr<IAgent>> GetChildren(bool onlyDirectChildren) const override;
     nlohmann::json GetHistory() const override;
@@ -40,10 +41,15 @@ public:
     std::string GetStartTime() const override;
     int GetDepth() const override;
     bool IsInteractive() const override;
+
+    // IAgent::AddChild is protected there, so that only LLMService may register
+    // a child. It stays public on the concrete Agent, which nothing outside
+    // this component and its tests can reach anyway.
     void AddChild(std::shared_ptr<IAgent> child) override;
 
-    // Lifetime control, deliberately outside IAgent: an agent is stopped by
-    // whoever owns it (the IProcess wrapping it, or this class's own
+    // Forcing an agent down, deliberately outside IAgent: TriggerStop is all an
+    // outsider gets. An agent is killed by whoever owns it (the IProcess
+    // wrapping it, the LLMService that created it, or this class's own
     // destructor), never by another agent or a tool holding an IAgent handle.
     bool Stop(unsigned timeoutMs);
     void Kill();

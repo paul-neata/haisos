@@ -1,4 +1,5 @@
 #include "LuaProcess.h"
+#include "ProcessWorkingDirectory.h"
 #include <algorithm>
 #include <chrono>
 #include <vector>
@@ -176,7 +177,10 @@ std::shared_ptr<LuaProcess> LuaProcess::Create(
     uint64_t pid,
     uint64_t parentPid,
     std::shared_ptr<IEnvironment> environment,
-    const std::string& name,
+    const std::string& path,
+    const std::string& workingDirectory,
+    std::shared_ptr<IFileSystem> rootFileSystem,
+    std::weak_ptr<IHaisosOS> os,
     std::string scriptContent,
     std::vector<std::string> args,
     std::shared_ptr<IToolFactory> toolFactory,
@@ -186,7 +190,10 @@ std::shared_ptr<LuaProcess> LuaProcess::Create(
         pid,
         parentPid,
         std::move(environment),
-        name,
+        path,
+        workingDirectory,
+        std::move(rootFileSystem),
+        std::move(os),
         std::move(scriptContent),
         std::move(args),
         std::move(toolFactory),
@@ -199,7 +206,10 @@ LuaProcess::LuaProcess(
     uint64_t pid,
     uint64_t parentPid,
     std::shared_ptr<IEnvironment> environment,
-    const std::string& name,
+    const std::string& path,
+    const std::string& workingDirectory,
+    std::shared_ptr<IFileSystem> rootFileSystem,
+    std::weak_ptr<IHaisosOS> os,
     std::string scriptContent,
     std::vector<std::string> args,
     std::shared_ptr<IToolFactory> toolFactory,
@@ -207,7 +217,10 @@ LuaProcess::LuaProcess(
     : m_pid(pid)
     , m_parentPid(parentPid)
     , m_environment(std::move(environment))
-    , m_name(name)
+    , m_path(path)
+    , m_rootFileSystem(std::move(rootFileSystem))
+    , m_os(std::move(os))
+    , m_workingDirectory(NormalizeWorkingDirectory(workingDirectory))
     , m_scriptContent(std::move(scriptContent))
     , m_args(std::move(args))
     , m_toolFactory(std::move(toolFactory))
@@ -222,7 +235,7 @@ void LuaProcess::Start() {
 LuaProcess::~LuaProcess() {
     Kill();
     if (!WaitToFinish(5000)) {
-        LogWarning("LuaProcess '%s' thread did not finish within 5s during destruction, waiting indefinitely", m_name.c_str());
+        LogWarning("LuaProcess '%s' thread did not finish within 5s during destruction, waiting indefinitely", m_path.c_str());
     }
     WaitToFinish();
 }
@@ -235,12 +248,35 @@ uint64_t LuaProcess::GetParentPid() const {
     return m_parentPid;
 }
 
-std::string LuaProcess::Name() const {
-    return m_name;
+std::string LuaProcess::Path() const {
+    return m_path;
+}
+
+std::string LuaProcess::StartingAgentName() const {
+    // A Lua script is not an agent.
+    return std::string();
 }
 
 std::shared_ptr<IEnvironment> LuaProcess::GetEnvironment() const {
-    return m_environment;
+    // A clone: reading a process's environment from outside must never be a way
+    // to change what the process itself sees.
+    return m_environment ? m_environment->Clone() : nullptr;
+}
+
+std::string LuaProcess::GetCurrentDirectory() const {
+    std::lock_guard<std::mutex> lock(m_workingDirectoryMutex);
+    return m_workingDirectory;
+}
+
+int LuaProcess::ChangeDirectory(const std::string& path) {
+    std::lock_guard<std::mutex> lock(m_workingDirectoryMutex);
+    return ChangeWorkingDirectory(m_rootFileSystem.get(), m_workingDirectory, path);
+}
+
+void LuaProcess::TriggerStop() {
+    // A Lua script runs to completion; there is no command queue to close, so a
+    // request to stop is the same thing as a request to abort it.
+    Kill();
 }
 
 bool LuaProcess::IsFinished() const {
@@ -280,8 +316,14 @@ void LuaProcess::Kill() {
     m_killed = true;
 }
 
-std::shared_ptr<IAgent> LuaProcess::AsAgent() const {
+std::shared_ptr<IAgent> LuaProcess::AsAgent() {
     return nullptr;
+}
+
+std::shared_ptr<IHaisosOS> LuaProcess::GetHaisosOS() const {
+    // The one door out of this process: everything the script reaches beyond
+    // its own memory comes from here (see ICurrentProcess).
+    return m_os.lock();
 }
 
 bool LuaProcess::IsKillRequested() const {
@@ -308,16 +350,16 @@ int LuaProcess::LuaToolTrampoline(lua_State* L) {
             ? self->m_toolFactory->CreateTool(toolName ? toolName : "", nullptr)
             : nullptr;
         if (!tool) {
-            LogWarning("LuaProcess '%s': unknown tool '%s'", self->m_name.c_str(), toolName ? toolName : "");
+            LogWarning("LuaProcess '%s': unknown tool '%s'", self->m_path.c_str(), toolName ? toolName : "");
             lua_pushstring(L, "unknown tool");
             lua_pushboolean(L, true);
             return 2;
         }
 
-        LogDebug("LuaProcess '%s': calling tool '%s'", self->m_name.c_str(), toolName ? toolName : "");
+        LogDebug("LuaProcess '%s': calling tool '%s'", self->m_path.c_str(), toolName ? toolName : "");
         ToolResult result = tool->Call(nullptr, args);
         LogDebug("LuaProcess '%s': tool '%s' returned is_error=%d (%zu bytes)",
-            self->m_name.c_str(), toolName ? toolName : "", result.isError ? 1 : 0, result.content.size());
+            self->m_path.c_str(), toolName ? toolName : "", result.isError ? 1 : 0, result.content.size());
 
         // Tool results that happen to be JSON (e.g. os_list_directory) are handed
         // back as a Lua table rather than a raw string, so scripts don't need
@@ -390,14 +432,14 @@ void LuaProcess::RegisterBindings(lua_State* L) {
 }
 
 void LuaProcess::RunThread() {
-    LogDebug("LuaProcess '%s' RunThread starting (%zu bytes of script)", m_name.c_str(), m_scriptContent.size());
+    LogDebug("LuaProcess '%s' RunThread starting (%zu bytes of script)", m_path.c_str(), m_scriptContent.size());
     // Anything thrown here would otherwise take down the whole program and, worse,
     // leave m_finished false so every WaitToFinish() hangs. The finished-marking
     // below therefore has to run on every path out of the Lua work.
     try {
     m_luaState = luaL_newstate();
     if (!m_luaState) {
-        LogError("LuaProcess '%s': failed to create Lua state", m_name.c_str());
+        LogError("LuaProcess '%s': failed to create Lua state", m_path.c_str());
     } else {
         OpenSafeLuaLibs(m_luaState);
         RegisterBindings(m_luaState);
@@ -407,22 +449,22 @@ void LuaProcess::RunThread() {
         // precompiled bytecode, which Lua's undump does not validate -- and a .lua
         // program is untrusted input, since an agent can write one via os_write_file
         // and then launch it via os_start_process.
-        if (luaL_loadbufferx(m_luaState, m_scriptContent.data(), m_scriptContent.size(), m_name.c_str(), "t") != LUA_OK) {
+        if (luaL_loadbufferx(m_luaState, m_scriptContent.data(), m_scriptContent.size(), m_path.c_str(), "t") != LUA_OK) {
             const char* err = lua_tostring(m_luaState, -1);
-            LogError("LuaProcess '%s': failed to load script: %s", m_name.c_str(), err ? err : "unknown error");
+            LogError("LuaProcess '%s': failed to load script: %s", m_path.c_str(), err ? err : "unknown error");
             if (m_console) {
-                m_console->Write("[" + m_name + "] Error: " + std::string(err ? err : "failed to load script"));
+                m_console->Write("[" + m_path + "] Error: " + std::string(err ? err : "failed to load script"));
             }
         } else if (lua_pcall(m_luaState, 0, 0, 0) != LUA_OK) {
             const char* err = lua_tostring(m_luaState, -1);
             if (IsKillRequested()) {
                 // Not a fault: the kill hook aborts the script by raising, so this
                 // is the expected way a killed process unwinds.
-                LogInfo("LuaProcess '%s': killed by request", m_name.c_str());
+                LogInfo("LuaProcess '%s': killed by request", m_path.c_str());
             } else {
-                LogError("LuaProcess '%s': script error: %s", m_name.c_str(), err ? err : "unknown error");
+                LogError("LuaProcess '%s': script error: %s", m_path.c_str(), err ? err : "unknown error");
                 if (m_console) {
-                    m_console->Write("[" + m_name + "] Error: " + std::string(err ? err : "script error"));
+                    m_console->Write("[" + m_path + "] Error: " + std::string(err ? err : "script error"));
                 }
             }
         }
@@ -431,9 +473,9 @@ void LuaProcess::RunThread() {
         m_luaState = nullptr;
     }
     } catch (const std::exception& e) {
-        LogError("LuaProcess '%s': unexpected exception: %s", m_name.c_str(), e.what());
+        LogError("LuaProcess '%s': unexpected exception: %s", m_path.c_str(), e.what());
     } catch (...) {
-        LogError("LuaProcess '%s': unexpected unknown exception", m_name.c_str());
+        LogError("LuaProcess '%s': unexpected unknown exception", m_path.c_str());
     }
     if (m_luaState) {
         lua_close(m_luaState);
@@ -445,7 +487,7 @@ void LuaProcess::RunThread() {
         m_finished = true;
     }
     m_finishedCv.notify_all();
-    LogDebug("LuaProcess '%s' RunThread finished", m_name.c_str());
+    LogDebug("LuaProcess '%s' RunThread finished", m_path.c_str());
 }
 
 }

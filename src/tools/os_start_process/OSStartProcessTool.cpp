@@ -44,8 +44,10 @@ ToolResult OSStartProcessTool::Call(std::shared_ptr<IAgent> callerAgent, const n
     LogDebug("OSStartProcessTool: starting process '%s' with %zu arg(s)", path.c_str(), programArgs.size());
 
     // The new process runs with a copy of the OS's environment: it inherits
-    // what the OS was given, and its own edits stay its own.
-    auto process = m_os.StartProcess(m_os.GetOsEnvironment()->Clone(), path, programArgs);
+    // what the OS was given, and its own edits stay its own. It starts at the
+    // OS's root: a tool has no handle on the calling process, so there is no
+    // working directory to inherit from it yet.
+    auto process = m_os.StartProcess(m_os.GetOsEnvironment()->Clone(), path, programArgs, /*workingDirectory=*/"");
     if (!process) {
         LogWarning("OSStartProcessTool: failed to start process '%s'", path.c_str());
         return ToolResult{"Failed to start process: " + path, true};
@@ -53,7 +55,7 @@ ToolResult OSStartProcessTool::Call(std::shared_ptr<IAgent> callerAgent, const n
 
     nlohmann::json result;
     result["pid"] = process->GetPid();
-    result["name"] = process->Name();
+    result["path"] = process->Path();
     return ToolResult{result.dump(), false};
 }
 

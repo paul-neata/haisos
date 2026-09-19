@@ -1,9 +1,8 @@
 #pragma once
 #include <memory>
-#include <mutex>
 #include <string>
 #include "MountableFileSystem.h"
-#include "interfaces/IFilesystemService.h"
+#include "interfaces/IFileSystemService.h"
 
 namespace Haisos {
 
@@ -23,8 +22,6 @@ public:
 
     int LocalCreateDirectory(const std::string& pathname, int mode) override;
     int LocalRemoveDirectory(const std::string& pathname) override;
-    int ChangeDirectory(const std::string& path) override;
-    char* GetCurrentDirectory(std::string& buf, size_t size) override;
 
     std::vector<DirectoryEntry> LocalReadDirectory(const std::string& path) override;
 
@@ -33,15 +30,7 @@ public:
 private:
     explicit ReadOnlyFileSystem(std::shared_ptr<IFileSystem> inner);
 
-    std::string GetCwd() const;
-
     std::shared_ptr<IFileSystem> m_inner;
-    // This filesystem's own current directory; not delegated to inner's
-    // ChangeDirectory (inner may be shared by other composed filesystems and processes).
-    // Guarded by m_cwdMutex: this filesystem instance may be shared by
-    // multiple concurrently-running processes, each on its own thread.
-    mutable std::mutex m_cwdMutex;
-    std::string m_cwd = "/";
 };
 
 }

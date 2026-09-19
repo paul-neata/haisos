@@ -12,11 +12,34 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   process is opaque (whether it is an agent is its own business, and an agent's
   subagents stay inside it rather than becoming processes). Process parentage
   will be redefined along with that split.
-- Every process is started with an environment passed by the caller
-  (`StartProcess(environment, programPath, args)`) -- typically
-  `GetOsEnvironment()->Clone()`. It is never taken from the OS behind the
-  caller's back: a null one is refused. The process keeps it
-  (`IProcess::GetEnvironment()`).
+- Every process is started with an environment and a working directory passed
+  by the caller (`StartProcess(environment, programPath, args, workingDirectory)`)
+  -- the environment typically `GetOsEnvironment()->Clone()`. Neither is taken
+  from the OS behind the caller's back: a null environment is refused, and an
+  empty working directory means the OS's root. The process keeps both.
+  `IProcess::GetEnvironment()` hands out a **clone**, so reading a process's
+  environment from outside can never change what the process itself sees.
+- A process owns its **working directory**: a filesystem has none (see the
+  Filesystem component), so this is the only thing a relative path is resolved
+  against, and one process moving never moves another. It is reachable only
+  from inside the process, through `ICurrentProcess`.
+- **`ICurrentProcess` is the only door out of a process.** Everything a running
+  program reaches beyond its own memory it reaches through
+  `ICurrentProcess::GetHaisosOS()` -- tools, agents and Lua scripts alike. So
+  every runtime has the same reach, and narrowing one process is a matter of
+  handing it a narrower OS (a clone confined by a different root filesystem),
+  with no runtime needing to know. The security policy that will exploit this
+  lands in a later PR; see the Security section of the root `CLAUDE.md`. The
+  reference a process holds on its OS is **weak**: an OS owns its processes, so
+  a strong one back would be a cycle neither could escape.
+- `IProcess` is the outside view of a process and `ICurrentProcess` (which
+  inherits it) the inside one. From outside you may look, ask it to stop
+  (`TriggerStop`) and wait; you may not change its environment or its working
+  directory, nor reach the agent running it -- `StartingAgentName()` gives the
+  name and nothing more. From inside, `ICurrentProcess` adds
+  `ChangeDirectory`/`GetCurrentDirectory`, `AsAgent()` and `GetHaisosOS()`. Forcing a process
+  down is on neither: `Kill()` lives on the component-internal `IOSProcess`,
+  because that is the OS's business alone.
 - Dispatches `StartProcess` by file extension: `.md` starts an LLM agent (its
   content becomes the agent's prompt); `.lua` starts an embedded Lua script
   (via the vendored `extern/lua` interpreter, see `LuaProcess`)
@@ -36,7 +59,7 @@ console, and a services layer; starts processes and spawns sub-OS instances.
 - `CreateSubOS` takes the same arguments as `IFactory::CreateHaisosOS`, because a
   sub-OS is an ordinary OS. What confines it is the root filesystem the caller
   hands it -- typically this OS's root narrowed with
-  `IFilesystemService::CreateSubFileSystem` -- rather than a permissions struct.
+  `IFileSystemService::CreateSubFileSystem` -- rather than a permissions struct.
   Give it its own services creator via `IServicesCreator::Clone()`, so it does
   not depend on the parent's lifetime, and its own environment via
   `IEnvironment::Clone()`. It carries the parent OS's pid rather than taking one
@@ -65,9 +88,11 @@ console, and a services layer; starts processes and spawns sub-OS instances.
 ## Key Classes
 
 - `HaisosOS` - Main implementation of `IHaisosOS`; `HaisosOS::Create(...)` builds an instance
-- `AgentProcess` - `IProcess` backed by an agent. It holds the concrete `Agent`,
+- `AgentProcess` - `IOSProcess` backed by an agent. It holds the concrete `Agent`,
   not an `IAgent`: stopping and killing are deliberately off `IAgent` (see the
   Agent component's CLAUDE.md), and a process is exactly the thing that has to
   be able to do both
-- `LuaProcess` - `IProcess` backed by an embedded Lua script, running on its own thread; `Kill()` aborts it via a Lua instruction-count hook
+- `LuaProcess` - `IOSProcess` backed by an embedded Lua script, running on its own thread; `Kill()` aborts it via a Lua instruction-count hook
+- `IOSProcess` (`OSProcess.h`) - `ICurrentProcess` plus `Kill()`; the type the OS tracks its processes as, so only the OS can force one down
+- `ProcessWorkingDirectory.h` - the per-process working directory shared by both runtimes
 - `OSToolFactory` - the OS-level tool set (`os_read_file`, `os_write_file`, `os_list_directory`, `os_start_process`, `os_list_processes`)

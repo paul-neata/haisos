@@ -19,7 +19,7 @@ struct HaisosFileRunEntry {
 //   MEM                          args = {}
 //   SUB <other_fs> <folder>      args = {other_fs, folder}
 // Building the actual IFileSystem is left to the caller (the parser has no
-// access to IFactory/IFilesystemService).
+// access to IFactory/IFileSystemService).
 struct HaisosFileFilesystemDecl {
     std::string name;
     std::string type;

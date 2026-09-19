@@ -27,14 +27,14 @@ bool TestAgentListRunning() {
     auto console = AgentConsoleAdapter::Create(physicalConsole, "root");
 
     auto agent = llmService->CreateAgent(
-        std::vector<std::string>{"You are a helpful AI assistant."},
         "root",
-        nullptr,
+        /*parent=*/nullptr,
         std::move(console),
-        "",
+        /*additionalTools=*/nullptr,
+        std::vector<std::string>{"You are a helpful AI assistant."},
         // Not interactive: the agent answers the prompt below and then finishes,
-        // which is what this test waits for. IAgent has no Stop().
-        /*interactive=*/false);
+        // which is what this test waits for. IAgent cannot be forced down.
+        /*isInteractive=*/false);
 
     agent->Post("Start a subagent with prompt 'What is 5+5?' and wait for it to finish, then list running agents, then stop it.");
     if (!agent->WaitToFinish(kAgentTimeoutMs)) {

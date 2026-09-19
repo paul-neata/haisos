@@ -37,10 +37,11 @@ TEST(ServicesCreatorTest, CreateLLMServiceCreatesAgent) {
     ASSERT_NE(llmService, nullptr);
 
     auto agent = llmService->CreateAgent(
-        {"You are a helpful AI assistant."},
         "test_agent",
-        nullptr,
-        llmService->CreateAgentConsole());
+        /*parent=*/nullptr,
+        llmService->CreateAgentConsole(),
+        /*additionalTools=*/nullptr,
+        {"You are a helpful AI assistant."});
 
     ASSERT_NE(agent, nullptr);
     EXPECT_EQ(agent->Name(), "test_agent");

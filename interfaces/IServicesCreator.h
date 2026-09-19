@@ -3,7 +3,7 @@
 #include <string>
 #include "ILLMService.h"
 #include "INetworkService.h"
-#include "IFilesystemService.h"
+#include "IFileSystemService.h"
 
 namespace Haisos {
 
@@ -19,7 +19,7 @@ public:
     // own and its lifetime is not tied to the parent's.
     virtual std::shared_ptr<IServicesCreator> Clone() const = 0;
 
-    virtual std::shared_ptr<IFilesystemService> CreateFileSystemService() = 0;
+    virtual std::shared_ptr<IFileSystemService> CreateFileSystemService() = 0;
     virtual std::shared_ptr<INetworkService> CreateNetworkService() = 0;
     virtual std::shared_ptr<ILLMService> CreateLLMService(
         std::shared_ptr<INetworkService> networkService,

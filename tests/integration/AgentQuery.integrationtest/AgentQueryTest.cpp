@@ -30,14 +30,14 @@ bool TestAgentQuery() {
     auto console = AgentConsoleAdapter::Create(physicalConsole, "root");
 
     auto agent = llmService->CreateAgent(
-        std::vector<std::string>{"You are a helpful AI assistant."},
         "root",
-        nullptr,
+        /*parent=*/nullptr,
         std::move(console),
-        "",
+        /*additionalTools=*/nullptr,
+        std::vector<std::string>{"You are a helpful AI assistant."},
         // Not interactive: the agent answers the prompt below and then finishes,
-        // which is what this test waits for. IAgent has no Stop().
-        /*interactive=*/false);
+        // which is what this test waits for. IAgent cannot be forced down.
+        /*isInteractive=*/false);
 
     // Create a subagent directly under the main agent
     auto subagent = Tools::CreateAndStartSubagent(

@@ -156,35 +156,6 @@ TEST_F(FilesystemTest, RemoveDirectoryNonExistentReturnsError) {
     EXPECT_LT(fs->RemoveDirectory("/tmp/haisos_nonexistent_dir_12345"), 0);
 }
 
-TEST_F(FilesystemTest, ChangeDirectoryAndGetCurrentDirectory) {
-    auto fs = FileSystem::Create();
-
-    // Save original
-    std::string original;
-    original.resize(4096);
-    char* originalCwd = ::getcwd(original.data(), original.size());
-    ASSERT_NE(originalCwd, nullptr);
-    original.resize(std::strlen(originalCwd));
-
-    // Create and change
-    fs->CreateDirectory(kTestDir, S_IRWXU);
-    EXPECT_EQ(fs->ChangeDirectory(kTestDir), 0);
-
-    std::string cwd;
-    EXPECT_NE(fs->GetCurrentDirectory(cwd, 4096), nullptr);
-    EXPECT_EQ(cwd, kTestDir);
-
-    // Restore
-    fs->ChangeDirectory(original);
-    fs->RemoveDirectory(kTestDir);
-}
-
-TEST_F(FilesystemTest, GetCurrentDirectoryNullOnZeroSize) {
-    auto fs = FileSystem::Create();
-    std::string buf;
-    EXPECT_EQ(fs->GetCurrentDirectory(buf, 0), nullptr);
-}
-
 TEST_F(FilesystemTest, ReadDirectoryListsEntries) {
     auto fs = FileSystem::Create();
 

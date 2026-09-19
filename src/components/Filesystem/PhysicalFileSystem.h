@@ -1,7 +1,7 @@
 #pragma once
 #include <string>
 #include "MountableFileSystem.h"
-#include "interfaces/IFilesystemService.h"
+#include "interfaces/IFileSystemService.h"
 #include "Filesystem.h"
 
 namespace Haisos {
@@ -10,12 +10,9 @@ namespace Haisos {
 // resolved and validated to stay within rootPath before being forwarded to the
 // real filesystem (a request that would escape rootPath via ".." fails).
 //
-// There is not yet a virtual/independent current directory for the jail:
-// ChangeDirectory still changes the real process's current directory (after
-// validating the target stays within rootPath), matching how the rest of
-// IFileSystem is a thin wrapper over real OS state. This is deliberately
-// scoped for now -- composed/temporary/copy-on-write filesystems are a
-// documented future extension (see IHaisosOS).
+// It has no current directory: every path is resolved against rootPath, so
+// "foo" and "/foo" both mean rootPath/foo. Where a Haisos process considers
+// itself to be is the process's own business (see ICurrentProcess).
 class PhysicalFileSystem : public MountableFileSystem {
 public:
     static std::shared_ptr<PhysicalFileSystem> Create(const std::string& rootPath);
@@ -29,9 +26,6 @@ public:
 
     int LocalCreateDirectory(const std::string& pathname, int mode) override;
     int LocalRemoveDirectory(const std::string& pathname) override;
-    int ChangeDirectory(const std::string& path) override;
-    char* GetCurrentDirectory(std::string& buf, size_t size) override;
-
     std::vector<DirectoryEntry> LocalReadDirectory(const std::string& path) override;
 
     std::string AbsolutePathFor(const std::string& path) const override;

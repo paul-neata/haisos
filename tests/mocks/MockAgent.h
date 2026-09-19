@@ -29,6 +29,10 @@ public:
         return m_name;
     }
 
+    void TriggerStop() override {
+        m_stopTriggered = true;
+    }
+
     bool WaitToFinish(uint64_t timeoutMs) override {
         m_waitedWithTimeout = true;
         m_waitTimeoutValue = timeoutMs;
@@ -77,12 +81,15 @@ public:
         return m_interactive;
     }
 
+    // IAgent::AddChild is protected so that only LLMService may register a
+    // child; a test double widens it again, since a test builds the hierarchy
+    // by hand rather than going through a real LLMService.
     void AddChild(std::shared_ptr<IAgent> child) override {
         m_children.push_back(child);
     }
 
-public:
     const std::vector<std::string>& GetCommands() const { return m_commands; }
+    bool WasStopTriggered() const { return m_stopTriggered; }
     bool WasWaitedWithTimeout() const { return m_waitedWithTimeout; }
     uint64_t GetWaitTimeoutValue() const { return m_waitTimeoutValue; }
     void SetName(const std::string& name) { m_name = name; }
@@ -95,6 +102,7 @@ public:
 
 private:
     std::vector<std::string> m_commands;
+    bool m_stopTriggered = false;
     bool m_waitedWithTimeout = false;
     uint64_t m_waitTimeoutValue = 0;
     bool m_finished = false;

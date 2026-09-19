@@ -5,6 +5,7 @@
 #include <vector>
 #include "interfaces/IFactory.h"
 #include "interfaces/IHaisosOS.h"
+#include "OSProcess.h"
 #include "OSToolFactory.h"
 
 namespace Haisos {
@@ -27,7 +28,8 @@ public:
     std::shared_ptr<IProcess> StartProcess(
         std::shared_ptr<IEnvironment> environment,
         const std::string& programPath,
-        const std::vector<std::string>& args) override;
+        const std::vector<std::string>& args,
+        const std::string& workingDirectory) override;
     std::vector<std::shared_ptr<IProcess>> GetRunningProcesses() const override;
     std::shared_ptr<IHaisosOS> CreateSubOS(
         std::shared_ptr<IServicesCreator> servicesCreator,
@@ -53,11 +55,17 @@ private:
     void CleanupFinishedProcesses();
     // Stops one process, escalating to Kill() if it does not stop in time.
     // Never called with m_processesMutex held.
-    static void DrainProcess(const std::shared_ptr<IProcess>& process);
-    std::shared_ptr<IProcess> StartAgentProcess(
-        std::shared_ptr<IEnvironment> environment, const std::string& programPath, const std::vector<std::string>& args);
-    std::shared_ptr<IProcess> StartLuaProcess(
-        std::shared_ptr<IEnvironment> environment, const std::string& programPath, const std::vector<std::string>& args);
+    static void DrainProcess(const std::shared_ptr<IOSProcess>& process);
+    std::shared_ptr<IOSProcess> StartAgentProcess(
+        std::shared_ptr<IEnvironment> environment,
+        const std::string& programPath,
+        const std::vector<std::string>& args,
+        const std::string& workingDirectory);
+    std::shared_ptr<IOSProcess> StartLuaProcess(
+        std::shared_ptr<IEnvironment> environment,
+        const std::string& programPath,
+        const std::vector<std::string>& args,
+        const std::string& workingDirectory);
 
     std::shared_ptr<IServicesCreator> m_servicesCreator;
     std::shared_ptr<INetworkService> m_networkService;
@@ -74,7 +82,9 @@ private:
     std::atomic<bool> m_shuttingDown{false};
 
     mutable std::mutex m_processesMutex;
-    std::vector<std::shared_ptr<IProcess>> m_processes;
+    // Tracked as IOSProcess, not IProcess: the OS is the one thing that may
+    // kill a process outright.
+    std::vector<std::shared_ptr<IOSProcess>> m_processes;
 };
 
 }

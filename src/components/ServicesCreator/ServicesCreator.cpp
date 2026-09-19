@@ -17,7 +17,7 @@ std::shared_ptr<IServicesCreator> ServicesCreator::Clone() const {
     return ServicesCreator::Create();
 }
 
-std::shared_ptr<IFilesystemService> ServicesCreator::CreateFileSystemService() {
+std::shared_ptr<IFileSystemService> ServicesCreator::CreateFileSystemService() {
     return FileSystemService::Create();
 }
 

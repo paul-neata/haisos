@@ -7,11 +7,13 @@
 
 namespace Haisos {
 
+class LLMService;
+
 // A single LLM conversation, running on its own thread. Deliberately an
-// observe-and-talk-to handle only: an agent is not stopped or killed through
-// here. Whatever owns an agent's lifetime owns it outright -- a top-level agent
-// is stopped through the IProcess wrapping it, and a subagent lives and dies
-// with the agent that started it.
+// observe-and-talk-to handle: an agent cannot be forced down through here, only
+// asked to stop. Whatever owns an agent's lifetime owns it outright -- a
+// top-level agent is stopped through the IProcess wrapping it, and a subagent
+// lives and dies with the agent that started it.
 class IAgent {
 public:
     virtual ~IAgent() = default;
@@ -19,6 +21,12 @@ public:
     virtual void Send(const std::string& command) = 0;
     virtual std::shared_ptr<IAgent> GetParent() const = 0;
     virtual std::string Name() const = 0;
+
+    // Asks the agent to stop and returns immediately: it stops accepting new
+    // commands and finishes once whatever it is already doing is done. A
+    // request, not a guarantee, so pair it with WaitToFinish. Calling it on an
+    // agent that has already stopped does nothing.
+    virtual void TriggerStop() = 0;
 
     // Waits up to timeoutMs for this agent to finish, returning whether it has.
     // A timeout of 0 does not wait at all, so WaitToFinish(0) is how to ask
@@ -49,6 +57,12 @@ public:
     // a delegated, one-shot subagent wants.
     virtual bool IsInteractive() const = 0;
 
+protected:
+    // Registering a child is not everyone's business: an agent's children are
+    // decided by whoever creates agents, not by another agent or by a tool
+    // holding an IAgent. LLMService is the only thing that creates agents, so
+    // it is the only thing that may do this.
+    friend class LLMService;
     virtual void AddChild(std::shared_ptr<IAgent> child) = 0;
 };
 
@@ -93,14 +107,17 @@ public:
     // additionalTools, when non-null, is merged with this service's own
     // agent-management tools (e.g. so an OS-started process also gets the
     // OS's tools, like reading files or starting other processes).
+    // isInteractive is what IAgent::IsInteractive will report: an interactive
+    // agent goes back to waiting for prompts once it is done, a non-interactive
+    // one finishes outright.
     virtual std::shared_ptr<IAgent> CreateAgent(
-        const std::vector<std::string>& systemPrompts,
         const std::string& name,
         std::shared_ptr<IAgent> parent,
         std::shared_ptr<IAgentConsole> console,
-        const std::string& startTime = "",
-        bool interactive = true,
-        std::shared_ptr<IToolFactory> additionalTools = nullptr) = 0;
+        std::shared_ptr<IToolFactory> additionalTools,
+        const std::vector<std::string>& systemPrompts,
+        bool isInteractive = true,
+        const std::string& startTime = "") = 0;
 
     // The agent-management tool set (agent_start, agent_query, ...), shared by
     // every agent this service creates.

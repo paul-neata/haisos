@@ -1,7 +1,7 @@
 #pragma once
 #include "MountableFileSystem.h"
 #include "VirtualPath.h"
-#include "interfaces/IFilesystemService.h"
+#include "interfaces/IFileSystemService.h"
 
 namespace Haisos {
 
@@ -20,9 +20,6 @@ public:
 
     int LocalCreateDirectory(const std::string& pathname, int mode) override;
     int LocalRemoveDirectory(const std::string& pathname) override;
-    int ChangeDirectory(const std::string& path) override;
-    char* GetCurrentDirectory(std::string& buf, size_t size) override;
-
     std::vector<DirectoryEntry> LocalReadDirectory(const std::string& path) override;
     std::string AbsolutePathFor(const std::string& path) const override {
         return NormalizeVirtualPath(path, "/");

@@ -55,7 +55,7 @@ haisos/
 │   │   ├── os_start_process/
 │   │   └── os_list_processes/
 │   └── haisos/            - Entry point, CLI parser, haisosfile parser, and root-filesystem builder
-├── interfaces/             - Service-based interfaces (IFactory.h [IPhysicalConsole], IServicesCreator.h, IHaisosOS.h, IProcess.h, IEnvironment.h [LLMIdentifier], ILLMService.h [IAgent, ITool, IToolFactory, IAgentConsole], INetworkService.h [IHTTPClient], IFilesystemService.h [IFileSystem], ILLMCommunicator.h)
+├── interfaces/             - Service-based interfaces (IFactory.h [IPhysicalConsole], IServicesCreator.h, IHaisosOS.h, IProcess.h, IEnvironment.h [LLMIdentifier], ILLMService.h [IAgent, ITool, IToolFactory, IAgentConsole], INetworkService.h [IHTTPClient], IFileSystemService.h [IFileSystem], IProcess.h [ICurrentProcess], ILLMCommunicator.h)
 ├── tests/                 - All tests
 │   ├── mocks/             - Mock classes for testing
 │   ├── unit/              - Unit tests (Google Test)
@@ -265,6 +265,34 @@ ctest --output-on-failure
 
 Each component lives in its own folder under `src/components/` and has its own `CLAUDE.md` with detailed documentation.
 
+### Security: `ICurrentProcess` is the only door out of a process
+
+**Everything a running program reaches beyond its own memory -- the filesystem,
+other processes, the services -- it reaches through `ICurrentProcess`, via
+`GetHaisosOS()`.** That holds for every runtime alike: the tools an agent calls,
+the agent itself, and the globals a Lua script gets. Nothing is handed an
+`IHaisosOS` directly, and nothing keeps a private path to one.
+
+Two things follow, and they are the whole reason for the rule:
+
+1. **Every runtime has the same reach.** A `.lua` script can do neither more nor
+   less than a `.md` agent, because both go through the same one door.
+2. **Narrowing a process is a matter of handing it a narrower OS**, with no
+   runtime needing to know. `ICurrentProcess::GetHaisosOS()` need not return the
+   OS that started the process: it may be a narrowed clone of it, confined by
+   the root filesystem it was built with. When user support arrives, the first
+   process of a user will be given an OS whose root is writable only under that
+   user's home and a temp directory -- and nothing inside the process changes.
+
+A security policy can then be enforced in one place rather than in every tool.
+**That policy is not implemented yet; it lands in a later PR.** Until then the
+rule is a design constraint to uphold, not an enforced boundary: when adding a
+tool, a runtime, or anything else a process can call, route it through
+`ICurrentProcess` rather than giving it its own handle on the OS.
+
+Not yet converted (they still take an `IHaisosOS&` directly, and are the
+mechanical follow-up to this rule): `OSToolFactory` and the five `os_*` tools.
+
 ### Creating things: private constructors and `Create()`
 
 Every class implementing an interface from `interfaces/` has **private
@@ -293,7 +321,7 @@ cycle and nothing would ever be freed.
 | **HTTPClient** | `src/components/HTTPClient/` | Platform-specific HTTP implementation (Curl/WinHTTP/Fetch) |
 | **Factory** | `src/components/Factory/` | Creates the root concepts: physical console, disk-backed filesystem, the services layer, and the OS itself |
 | **Filesystem** | `src/components/Filesystem/` | Composable `IFileSystem` implementations: an unrooted passthrough, a `PhysicalFileSystem` jailed to a real disk path, plus in-memory, read-only, sub-path and mounted/overlay views |
-| **ServicesCreator** | `src/components/ServicesCreator/` | Factory-of-services built on `IFactory`; creates `IFilesystemService`/`INetworkService`/`ILLMService`, passing each the services it depends on |
+| **ServicesCreator** | `src/components/ServicesCreator/` | Factory-of-services built on `IFactory`; creates `IFileSystemService`/`INetworkService`/`ILLMService`, passing each the services it depends on |
 | **NetworkService** | `src/components/NetworkService/` | Service-layer wrapper over network access (creates `IHTTPClient`) |
 | **FileSystemService** | `src/components/FileSystemService/` | Stateless factory that composes filesystems (read-only / in-memory / sub / mount); holds no filesystem of its own |
 | **LLMService** | `src/components/LLMService/` | Service-layer entry point for creating LLM-backed agents; exposes the shared agent-management tool set |

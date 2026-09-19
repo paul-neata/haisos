@@ -30,12 +30,13 @@ std::shared_ptr<IAgent> CreateAndStartSubagent(
     }
 
     auto agent = llmService.CreateAgent(
-        systemPrompts,
         name,
         parent,
         llmService.CreateAgentConsole(),
-        startTime,
-        interactive);
+        /*additionalTools=*/nullptr,
+        systemPrompts,
+        interactive,
+        startTime);
 
     agent->Post(userPrompt);
     LogDebug("CreateAndStartSubagent: subagent '%s' posted prompt", name.c_str());

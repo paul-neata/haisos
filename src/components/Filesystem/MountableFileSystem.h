@@ -1,7 +1,7 @@
 #pragma once
 #include <string>
 #include "MountPoints.h"
-#include "interfaces/IFilesystemService.h"
+#include "interfaces/IFileSystemService.h"
 
 namespace Haisos {
 
@@ -11,10 +11,7 @@ namespace Haisos {
 //
 // A subclass implements the Local* operations, which see only the paths this
 // filesystem itself owns: anything at or under a mount point has already been
-// routed away by the time they are called. ChangeDirectory/GetCurrentDirectory
-// are deliberately not routed -- the current directory is this filesystem's own
-// state, and a relative path is resolved against it before being matched, so a
-// cwd inside a mounted subtree still works.
+// routed away by the time they are called.
 class MountableFileSystem : public IFileSystem {
 public:
     void Mount(const std::string& whereToMount, std::shared_ptr<IFileSystem> toBeMounted) final;
@@ -31,8 +28,9 @@ public:
 
 protected:
     // How this filesystem addresses |path| absolutely (resolved against its own
-    // current directory, if it has one). Mount points are matched against this,
-    // so a subclass and its mounts agree on what a path means.
+    // root -- a filesystem has no current directory; see IFileSystem). Mount
+    // points are matched against this, so a subclass and its mounts agree on
+    // what a path means.
     virtual std::string AbsolutePathFor(const std::string& path) const = 0;
 
     virtual int LocalOpenFile(const std::string& pathname, int flags) = 0;

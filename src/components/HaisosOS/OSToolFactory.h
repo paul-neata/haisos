@@ -11,6 +11,15 @@ namespace Haisos {
 // processes, ...) -- distinct from ILLMService's agent-management tool set.
 // Merged with an agent's own tools via CompositeToolFactory when an
 // agent-backed process is started by an IHaisosOS.
+//
+// NOT YET on the rule that ICurrentProcess is the only door out of a process
+// (see the Security section of the root CLAUDE.md): this factory is built once
+// per OS and hands each tool an IHaisosOS& directly, so a tool reaches the OS
+// without going through the process that called it. It should instead be built
+// per process, around that process's ICurrentProcess, so every tool call is
+// scoped to the caller -- which is also what would let a tool resolve a
+// relative path against the calling process's working directory. That
+// conversion is the mechanical follow-up to the rule.
 class OSToolFactory : public IToolFactory {
 public:
     // os is held by reference, not shared: the OS owns this factory, so sharing

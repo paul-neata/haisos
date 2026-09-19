@@ -21,4 +21,4 @@ straight to disk, which is exactly the intent. (A filesystem that genuinely
 
 ## Key Classes
 
-- `FileSystemService` - Main implementation of `IFilesystemService`; delegates to the concrete filesystem classes in `src/components/Filesystem/`
+- `FileSystemService` - Main implementation of `IFileSystemService`; delegates to the concrete filesystem classes in `src/components/Filesystem/`

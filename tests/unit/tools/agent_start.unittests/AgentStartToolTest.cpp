@@ -26,21 +26,24 @@ public:
 class TestLLMService : public ILLMService {
 public:
     std::shared_ptr<IAgent> CreateAgent(
-        const std::vector<std::string>&,
         const std::string& name,
         std::shared_ptr<IAgent> parent,
         std::shared_ptr<IAgentConsole>,
-        const std::string& startTime,
-        bool interactive,
-        std::shared_ptr<IToolFactory>) override
+        std::shared_ptr<IToolFactory>,
+        const std::vector<std::string>&,
+        bool isInteractive,
+        const std::string& startTime) override
     {
         auto agent = std::make_shared<MockAgent>();
         agent->SetName(name);
         agent->SetStartTime(startTime);
-        agent->SetInteractive(interactive);
+        agent->SetInteractive(isInteractive);
         m_lastAgent = agent;
-        if (parent) {
-            parent->AddChild(agent);
+        // IAgent::AddChild is protected and only LLMService is its friend, so
+        // this test double registers the child through the mock's own widened
+        // override rather than through the interface.
+        if (auto mockParent = std::dynamic_pointer_cast<MockAgent>(parent)) {
+            mockParent->AddChild(agent);
         }
         return agent;
     }

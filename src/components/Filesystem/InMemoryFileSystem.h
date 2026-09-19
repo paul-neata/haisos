@@ -4,14 +4,14 @@
 #include <unordered_map>
 #include <vector>
 #include "MountableFileSystem.h"
-#include "interfaces/IFilesystemService.h"
+#include "interfaces/IFileSystemService.h"
 
 namespace Haisos {
 
 // An empty, in-memory, read/write IFileSystem. Files are held as plain byte
 // buffers keyed by normalized path; there is no backing real disk. Intended
 // for scratch/temporary filesystems and as a mount target (see
-// IFilesystemService::CreateComposedFileSystem).
+// IFileSystemService::CreateComposedFileSystem).
 class InMemoryFileSystem : public MountableFileSystem {
 public:
     static std::shared_ptr<InMemoryFileSystem> Create();
@@ -25,14 +25,9 @@ public:
 
     int LocalCreateDirectory(const std::string& pathname, int mode) override;
     int LocalRemoveDirectory(const std::string& pathname) override;
-    int ChangeDirectory(const std::string& path) override;
-    char* GetCurrentDirectory(std::string& buf, size_t size) override;
-
     std::vector<DirectoryEntry> LocalReadDirectory(const std::string& path) override;
 
     std::string AbsolutePathFor(const std::string& path) const override;
-    // A copy of the current directory, taken under m_mutex.
-    std::string CwdSnapshot() const;
 
 private:
     InMemoryFileSystem();
@@ -50,7 +45,6 @@ private:
     std::unordered_map<std::string, Node> m_nodes;
     std::unordered_map<int, OpenHandle> m_openHandles;
     int m_nextFd = 3;
-    std::string m_cwd = "/";
 };
 
 }

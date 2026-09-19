@@ -35,8 +35,9 @@ Manages LLM conversations with parent/child agent relationships. Supports subage
 
 `IAgent` is defined in `interfaces/ILLMService.h` and provides methods for:
 - Sending commands (`Post`, `Send`)
-- Waiting on an agent (`WaitToFinish(timeoutMs)`; a timeout of 0 does not wait
-  at all, so it doubles as "has it finished?")
+- Asking an agent to stop (`TriggerStop`) and waiting on it
+  (`WaitToFinish(timeoutMs)`; a timeout of 0 does not wait at all, so it
+  doubles as "has it finished?")
 - Querying status (`Name`, `IsInteractive`, `GetStartTime`, `GetHistory`, `GetConsoleOutput`)
 - Navigating hierarchy (`GetParent`, `GetChildren(onlyDirectChildren)`, `AddChild`, `GetDepth`)
 
@@ -46,10 +47,15 @@ finishes outright, which is what a delegated one-shot subagent wants.
 `GetDepth()` is the number of parent hops up to the top of the agent tree (0 for
 an agent with no parent); `agent_start` uses it to cap subagent recursion.
 
-**Lifetime control is deliberately not on `IAgent`.** `Stop()`, `Kill()`,
-the untimed `WaitToFinish()`, `IsFinished()` and `IsKilled()` are public on the
-concrete `Agent` only, so an agent is ended by whoever owns it -- the `IProcess`
-wrapping it, the `LLMService` that created it, or its own destructor -- and
-never by another agent or a tool holding an `IAgent` handle. A consequence worth
-knowing: an interactive subagent started with `agent_start` cannot be stopped
-early any more; it runs until the agent that started it is destroyed.
+**Forcing an agent down is deliberately not on `IAgent`.** `TriggerStop()` is
+all an outsider gets: it closes the command queue, so the agent takes no new
+commands and finishes once whatever it is already doing is done. `Stop()`,
+`Kill()`, the untimed `WaitToFinish()`, `IsFinished()` and `IsKilled()` are
+public on the concrete `Agent` only, so an agent is killed by whoever owns it --
+the process wrapping it, the `LLMService` that created it, or its own
+destructor -- and never by another agent or a tool holding an `IAgent` handle.
+
+`AddChild` is **protected** on `IAgent`, with `LLMService` as its only friend:
+an agent's children are decided by the one thing that creates agents, not by
+another agent or a tool. It stays public on the concrete `Agent`, which nothing
+outside this component and its tests can reach anyway.

@@ -12,6 +12,11 @@ public:
 
     // os is held by reference, not shared: the OS owns the tool factory that
     // creates this tool, so sharing it back would close an ownership cycle.
+    //
+    // TODO: take the calling process's ICurrentProcess instead and reach the OS
+    // through GetHaisosOS(). ICurrentProcess is meant to be the only door out
+    // of a process (see the Security section of the root CLAUDE.md); this tool
+    // predates that rule and still holds its own handle on the OS.
     static std::shared_ptr<OSStartProcessTool> Create(IHaisosOS& os) {
         return std::shared_ptr<OSStartProcessTool>(new OSStartProcessTool(os));
     }

@@ -37,22 +37,6 @@ int FileSystem::LocalRemoveDirectory(const std::string& pathname) {
     return ::rmdir(pathname.c_str());
 }
 
-int FileSystem::ChangeDirectory(const std::string& path) {
-    return ::chdir(path.c_str());
-}
-
-char* FileSystem::GetCurrentDirectory(std::string& buf, size_t size) {
-    buf.resize(size);
-    char* result = ::getcwd(buf.data(), size);
-    if (result != nullptr) {
-        auto len = std::strlen(buf.data());
-        buf.resize(len);
-    } else {
-        buf.clear();
-    }
-    return result;
-}
-
 std::vector<DirectoryEntry> FileSystem::LocalReadDirectory(const std::string& path) {
     std::vector<DirectoryEntry> entries;
     DIR* dir = ::opendir(path.c_str());

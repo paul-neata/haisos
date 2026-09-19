@@ -6,41 +6,55 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "OSProcess.h"
 #include "interfaces/IHaisosOS.h"
 
 struct lua_State;
 
 namespace Haisos {
 
-// An IProcess whose runtime is a Lua script. Each OS tool is exposed as a Lua
-// global function returning (content, is_error); output from Lua's print()
+// An ICurrentProcess whose runtime is a Lua script. Each OS tool is exposed as
+// a Lua global function returning (content, is_error); output from Lua's print()
 // routes through the process's IAgentConsole. Runs on its own background
 // thread, matching Agent's lifecycle shape.
-class LuaProcess : public IProcess {
+class LuaProcess : public IOSProcess {
 public:
     static std::shared_ptr<LuaProcess> Create(
         uint64_t pid,
         uint64_t parentPid,
         std::shared_ptr<IEnvironment> environment,
-        const std::string& name,
+        const std::string& path,
+        const std::string& workingDirectory,
+        std::shared_ptr<IFileSystem> rootFileSystem,
+        std::weak_ptr<IHaisosOS> os,
         std::string scriptContent,
         std::vector<std::string> args,
         std::shared_ptr<IToolFactory> toolFactory,
         std::shared_ptr<IAgentConsole> console);
     ~LuaProcess() override;
 
+    // IProcess
     uint64_t GetPid() const override;
     uint64_t GetParentPid() const override;
-    std::string Name() const override;
+    std::string Path() const override;
+    std::string StartingAgentName() const override;
     std::shared_ptr<IEnvironment> GetEnvironment() const override;
-
-    bool IsFinished() const override;
-    void WaitToFinish() override;
+    void TriggerStop() override;
     bool WaitToFinish(uint64_t timeoutMs) override;
-    bool Stop(unsigned timeoutMs) override;
+
+    // ICurrentProcess
+    std::string GetCurrentDirectory() const override;
+    int ChangeDirectory(const std::string& path) override;
+    std::shared_ptr<IAgent> AsAgent() override;
+    std::shared_ptr<IHaisosOS> GetHaisosOS() const override;
+
+    // IOSProcess: forcing the process down, which no IProcess handle can do.
     void Kill() override;
 
-    std::shared_ptr<IAgent> AsAgent() const override;
+    // Internal to this component.
+    bool Stop(unsigned timeoutMs);
+    bool IsFinished() const;
+    void WaitToFinish();
 
     // Used by the Lua kill-hook (a free function, since lua_Debug is not
     // available where this class is declared).
@@ -51,7 +65,10 @@ private:
         uint64_t pid,
         uint64_t parentPid,
         std::shared_ptr<IEnvironment> environment,
-        const std::string& name,
+        const std::string& path,
+        const std::string& workingDirectory,
+        std::shared_ptr<IFileSystem> rootFileSystem,
+        std::weak_ptr<IHaisosOS> os,
         std::string scriptContent,
         std::vector<std::string> args,
         std::shared_ptr<IToolFactory> toolFactory,
@@ -70,7 +87,15 @@ private:
     uint64_t m_pid;
     uint64_t m_parentPid;
     std::shared_ptr<IEnvironment> m_environment;
-    std::string m_name;
+    std::string m_path;
+    std::shared_ptr<IFileSystem> m_rootFileSystem;
+    // Weak: the OS owns its processes, so a strong reference back would be a
+    // cycle neither could escape.
+    std::weak_ptr<IHaisosOS> m_os;
+    // The process's own working directory, guarded because the script's thread
+    // and whoever inspects the process run concurrently.
+    mutable std::mutex m_workingDirectoryMutex;
+    std::string m_workingDirectory;
     std::string m_scriptContent;
     std::vector<std::string> m_args;
     std::shared_ptr<IToolFactory> m_toolFactory;

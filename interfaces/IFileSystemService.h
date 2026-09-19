@@ -22,6 +22,12 @@ struct DirectoryEntry {
 
 // IFileSystem is a thin abstraction over C/POSIX filesystem operations.
 //
+// A filesystem has no current directory of its own: that notion belongs to a
+// process (see ICurrentProcess::ChangeDirectory). Every path handed to an
+// IFileSystem is therefore resolved against the filesystem's own root, so
+// "foo" and "/foo" mean the same thing. A process that wants "relative to
+// where I am" resolves the path against its own working directory first.
+//
 // Mode values:
 //   The |mode| parameter is a platform-specific permission bitmask passed to the
 //   underlying C function. On Linux it uses POSIX permission bits (e.g. S_IRUSR,
@@ -59,14 +65,8 @@ public:
     // RemoveDirectory is the IFileSystem counterpart of the C rmdir() function.
     virtual int RemoveDirectory(const std::string& pathname) = 0;
 
-    // ChangeDirectory is the IFileSystem counterpart of the C chdir() function.
-    virtual int ChangeDirectory(const std::string& path) = 0;
-
-    // GetCurrentDirectory is the IFileSystem counterpart of the C getcwd() function.
-    virtual char* GetCurrentDirectory(std::string& buf, size_t size) = 0;
-
     // Mount makes |toBeMounted| serve every path at or under |whereToMount| on
-    // THIS filesystem, in place -- unlike IFilesystemService::CreateComposedFileSystem,
+    // THIS filesystem, in place -- unlike IFileSystemService::CreateComposedFileSystem,
     // which leaves its operands alone and returns a new filesystem. Calls are
     // routed to whichever filesystem owns a path, and that filesystem decides
     // what they mean, so mounting a disk-backed filesystem into an in-memory one
@@ -91,9 +91,9 @@ public:
 
 // A factory for composing filesystems. Every method returns a new,
 // independent view; none of them mutate the filesystems passed in.
-class IFilesystemService {
+class IFileSystemService {
 public:
-    virtual ~IFilesystemService() = default;
+    virtual ~IFileSystemService() = default;
 
     // Wraps an existing filesystem, allowing only read/navigation operations
     // (every write, create, or remove is rejected).

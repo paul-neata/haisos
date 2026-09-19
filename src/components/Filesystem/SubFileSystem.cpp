@@ -16,12 +16,7 @@ SubFileSystem::SubFileSystem(std::shared_ptr<IFileSystem> root, const std::strin
 SubFileSystem::~SubFileSystem() = default;
 
 std::string SubFileSystem::ResolveInRoot(const std::string& path) const {
-    std::string cwd;
-    {
-        std::lock_guard<std::mutex> lock(m_cwdMutex);
-        cwd = m_cwd;
-    }
-    std::string normalized = NormalizeVirtualPath(path, cwd);
+    std::string normalized = NormalizeVirtualPath(path);
     if (m_basePath == "/") {
         return normalized;
     }
@@ -56,34 +51,13 @@ int SubFileSystem::LocalRemoveDirectory(const std::string& pathname) {
     return m_root->RemoveDirectory(ResolveInRoot(pathname));
 }
 
-int SubFileSystem::ChangeDirectory(const std::string& path) {
-    // Kept purely virtual (see header): root may be shared by other composed filesystems.
-    std::lock_guard<std::mutex> lock(m_cwdMutex);
-    m_cwd = NormalizeVirtualPath(path, m_cwd);
-    return 0;
-}
-
-char* SubFileSystem::GetCurrentDirectory(std::string& buf, size_t size) {
-    std::lock_guard<std::mutex> lock(m_cwdMutex);
-    if (m_cwd.size() + 1 > size) {
-        return nullptr;
-    }
-    buf = m_cwd;
-    return &buf[0];
-}
-
 std::vector<DirectoryEntry> SubFileSystem::LocalReadDirectory(const std::string& path) {
     return m_root->ReadDirectory(ResolveInRoot(path));
 }
 
 
-std::string SubFileSystem::CwdSnapshot() const {
-    std::lock_guard<std::mutex> lock(m_cwdMutex);
-    return m_cwd;
-}
-
 std::string SubFileSystem::AbsolutePathFor(const std::string& path) const {
-    return NormalizeVirtualPath(path, CwdSnapshot());
+    return NormalizeVirtualPath(path);
 }
 
 }

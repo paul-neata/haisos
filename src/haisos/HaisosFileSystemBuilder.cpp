@@ -21,7 +21,7 @@ std::string JoinArgs(const std::vector<std::string>& args) {
 
 std::shared_ptr<IFileSystem> BuildRootFileSystem(
     IFactory& factory,
-    IFilesystemService& filesystemService,
+    IFileSystemService& filesystemService,
     const HaisosFileConfig& config,
     const std::filesystem::path& haisosFileDir,
     std::string& outError)

@@ -13,6 +13,10 @@ namespace Haisos {
 // An instance of an operating system: owns a rooted filesystem, a physical
 // console, and a services layer, and can start processes (agent- or
 // script-backed) and spawn more tightly-scoped sub-OS instances.
+//
+// A running process reaches its OS only through ICurrentProcess::GetHaisosOS(),
+// never through an IHaisosOS handed to it directly -- that is what lets one
+// process be given a narrower OS than another without any runtime knowing.
 class IHaisosOS {
 public:
     virtual ~IHaisosOS() = default;
@@ -26,10 +30,15 @@ public:
     // those it is is not the caller's business: a process is opaque, and an
     // agent-backed one that starts subagents keeps them inside itself rather
     // than turning them into processes.
+    // workingDirectory is where the new process starts out, and is likewise
+    // passed rather than inherited: a filesystem has no current directory of
+    // its own, so this is the only thing a relative path is resolved against
+    // (see ICurrentProcess::ChangeDirectory). Empty means the OS's root.
     virtual std::shared_ptr<IProcess> StartProcess(
         std::shared_ptr<IEnvironment> environment,
         const std::string& programPath,
-        const std::vector<std::string>& args) = 0;
+        const std::vector<std::string>& args,
+        const std::string& workingDirectory) = 0;
 
     virtual std::vector<std::shared_ptr<IProcess>> GetRunningProcesses() const = 0;
 
@@ -47,7 +56,7 @@ public:
 
     // The OS's root filesystem, fixed at creation. An OS cannot step outside
     // it, but it can compose further filesystems on top of it -- narrowing this
-    // one with IFilesystemService::CreateSubFileSystem is how a sub-OS gets a
+    // one with IFileSystemService::CreateSubFileSystem is how a sub-OS gets a
     // root inside this one.
     virtual std::shared_ptr<IFileSystem> GetRootFileSystem() = 0;
 

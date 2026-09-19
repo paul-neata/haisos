@@ -15,7 +15,7 @@ namespace Haisos {
 // PHYSICAL path (and a legacy plain-path ROOT) is resolved against.
 std::shared_ptr<IFileSystem> BuildRootFileSystem(
     IFactory& factory,
-    IFilesystemService& filesystemService,
+    IFileSystemService& filesystemService,
     const HaisosFileConfig& config,
     const std::filesystem::path& haisosFileDir,
     std::string& outError);

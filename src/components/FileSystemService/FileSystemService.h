@@ -4,7 +4,7 @@
 
 namespace Haisos {
 
-class FileSystemService : public IFilesystemService {
+class FileSystemService : public IFileSystemService {
 public:
     static std::shared_ptr<FileSystemService> Create() {
         return std::shared_ptr<FileSystemService>(new FileSystemService());

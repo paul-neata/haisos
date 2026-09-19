@@ -6,7 +6,7 @@
 #include "ILLMService.h"
 #include "INetworkService.h"
 #include "ILLMCommunicator.h"
-#include "IFilesystemService.h"
+#include "IFileSystemService.h"
 #include "IEnvironment.h"
 #include "IPhysicalConsole.h"
 #include "IServicesCreator.h"
@@ -27,7 +27,7 @@ namespace Haisos {
 // Note there is no way to obtain an unrooted filesystem here. Every filesystem
 // handed out is anchored somewhere, and an OS is given its root at creation and
 // can never step outside it: it can only compose further filesystems *on top of* that
-// root via IFilesystemService.
+// root via IFileSystemService.
 class IFactory {
 public:
     virtual ~IFactory() = default;

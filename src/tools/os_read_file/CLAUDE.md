@@ -7,7 +7,7 @@ directory), up to a 10 MB cap.
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `path` | `string` | Yes | Path to the file to read, relative to the OS's filesystem root. |
+| `path` | `string` | Yes | Path to the file to read, resolved against the calling process's working directory. |
 
 ## Output format
 

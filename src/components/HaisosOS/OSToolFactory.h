@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include "interfaces/IHaisosOS.h"
+#include "src/components/libheaders/CurrentProcessHandle.h"
 
 namespace Haisos {
 
@@ -12,20 +13,19 @@ namespace Haisos {
 // Merged with an agent's own tools via CompositeToolFactory when an
 // agent-backed process is started by an IHaisosOS.
 //
-// NOT YET on the rule that ICurrentProcess is the only door out of a process
-// (see the Security section of the root CLAUDE.md): this factory is built once
-// per OS and hands each tool an IHaisosOS& directly, so a tool reaches the OS
-// without going through the process that called it. It should instead be built
-// per process, around that process's ICurrentProcess, so every tool call is
-// scoped to the caller -- which is also what would let a tool resolve a
-// relative path against the calling process's working directory. That
-// conversion is the mechanical follow-up to the rule.
+// Built once per process, around that process rather than around an OS:
+// ICurrentProcess is the only door out of a process (see the Security section
+// of the root CLAUDE.md), so every tool here reaches exactly the OS its calling
+// process was given, and no more. It is also what lets a tool resolve a
+// relative path against the calling process's working directory.
+//
+// The process is reached through a CurrentProcessHandle rather than directly,
+// because an agent needs its tools before the process wrapping it can be built;
+// whoever builds the process fills the handle in before it goes live.
 class OSToolFactory : public IToolFactory {
 public:
-    // os is held by reference, not shared: the OS owns this factory, so sharing
-    // it back would close an ownership cycle.
-    static std::shared_ptr<OSToolFactory> Create(IHaisosOS& os) {
-        return std::shared_ptr<OSToolFactory>(new OSToolFactory(os));
+    static std::shared_ptr<OSToolFactory> Create(std::shared_ptr<CurrentProcessHandle> process) {
+        return std::shared_ptr<OSToolFactory>(new OSToolFactory(std::move(process)));
     }
 
     OSToolFactory(const OSToolFactory&) = delete;
@@ -37,7 +37,7 @@ public:
     std::vector<std::tuple<std::string, std::string, nlohmann::json>> GetAvailableToolDescriptions() const override;
 
 private:
-    explicit OSToolFactory(IHaisosOS& os);
+    explicit OSToolFactory(std::shared_ptr<CurrentProcessHandle> process);
 
     struct ToolEntry {
         std::string name;
@@ -47,7 +47,7 @@ private:
     };
 
     std::vector<ToolEntry> m_registry;
-    IHaisosOS& m_os;
+    std::shared_ptr<CurrentProcessHandle> m_process;
 };
 
 }

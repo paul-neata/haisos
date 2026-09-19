@@ -162,13 +162,18 @@ std::shared_ptr<IOSProcess> HaisosOS::StartAgentProcess(
     std::string name = GetStem(programPath) + "_" + std::to_string(pid);
 
     auto console = AgentConsoleAdapter::Create(m_physicalConsole, name);
+    // The OS tool set is built per process, around the process rather than
+    // around this OS: ICurrentProcess is the only door out of a process (see
+    // the Security section of the root CLAUDE.md). The handle exists before the
+    // process does, because the agent needs its tools first.
+    auto processHandle = CurrentProcessHandle::Create();
     // A process's agent is not interactive: it answers what its program asked
     // and then finishes, which is what makes the process finish too.
     auto agent = m_llmService->CreateAgent(
         name,
         /*parent=*/nullptr,
         std::move(console),
-        m_osToolFactory,
+        OSToolFactory::Create(processHandle),
         {"You are a helpful AI assistant."},
         /*isInteractive=*/false);
     auto concreteAgent = std::dynamic_pointer_cast<Agent>(agent);
@@ -176,8 +181,6 @@ std::shared_ptr<IOSProcess> HaisosOS::StartAgentProcess(
         LogError("HaisosOS: the LLM service returned an agent this OS cannot own: %s", programPath.c_str());
         return nullptr;
     }
-
-    concreteAgent->Post(content);
 
     // Parent pid 0: a process started here is top-most. Parentage used to be
     // resolved from the calling agent, but a process is opaque -- whether it is
@@ -188,7 +191,11 @@ std::shared_ptr<IOSProcess> HaisosOS::StartAgentProcess(
     // be strong. A narrowed per-process OS would be passed here instead.
     auto process = AgentProcess::Create(
         pid, /*parentPid=*/0, std::move(environment), programPath, workingDirectory,
-        m_rootFileSystem, weak_from_this(), std::move(concreteAgent));
+        m_rootFileSystem, weak_from_this(), processHandle, concreteAgent);
+
+    // Only now: the agent's first command may call a tool, and a tool must find
+    // the process it acts for, which AgentProcess::Create has just filled in.
+    concreteAgent->Post(content);
 
     {
         std::lock_guard<std::mutex> lock(m_processesMutex);
@@ -216,9 +223,13 @@ std::shared_ptr<IOSProcess> HaisosOS::StartLuaProcess(
     std::string name = GetStem(programPath) + "_" + std::to_string(pid);
 
     auto console = AgentConsoleAdapter::Create(m_physicalConsole, name);
+    // As for an agent process: the tool set is built around the process, and
+    // LuaProcess::Create fills the handle in before the script's thread starts.
+    auto processHandle = CurrentProcessHandle::Create();
     auto process = LuaProcess::Create(
         pid, /*parentPid=*/0, std::move(environment), programPath, workingDirectory,
-        m_rootFileSystem, weak_from_this(), std::move(content), args, m_osToolFactory, std::move(console));
+        m_rootFileSystem, weak_from_this(), processHandle, std::move(content), args,
+        OSToolFactory::Create(processHandle), std::move(console));
 
     {
         std::lock_guard<std::mutex> lock(m_processesMutex);
@@ -355,7 +366,7 @@ std::shared_ptr<HaisosOS> HaisosOS::Create(
     std::shared_ptr<INetworkService> networkService = servicesCreator->CreateNetworkService();
     std::shared_ptr<ILLMService> llmService = servicesCreator->CreateLLMService(networkService, endpoint, modelName, apiKey);
 
-    auto os = std::shared_ptr<HaisosOS>(new HaisosOS(
+    return std::shared_ptr<HaisosOS>(new HaisosOS(
         std::move(servicesCreator),
         std::move(networkService),
         std::move(llmService),
@@ -363,10 +374,6 @@ std::shared_ptr<HaisosOS> HaisosOS::Create(
         std::move(physicalConsole),
         std::move(environment),
         osProcessId));
-    // The tool factory holds a reference to the OS, so it is built only once
-    // the OS itself is.
-    os->m_osToolFactory = OSToolFactory::Create(*os);
-    return os;
 }
 
 }

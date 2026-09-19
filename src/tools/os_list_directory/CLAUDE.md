@@ -7,7 +7,7 @@ OS's mounted directory).
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `path` | `string` | No | Path to the directory to list, relative to the OS's filesystem root. Defaults to `"."` (the root). |
+| `path` | `string` | No | Path to the directory to list, resolved against the calling process's working directory. Defaults to `"."` (the working directory itself). |
 
 ## Output format
 

@@ -1,12 +1,13 @@
 #include "OSListDirectoryTool.h"
+#include "src/tools/os_tools_common/OSToolsCommon.h"
 #include "src/components/Logger/Logger.h"
 
 namespace Haisos::Tools {
 
 const std::string OSListDirectoryTool::ToolName = "os_list_directory";
-const std::string OSListDirectoryTool::ToolDefaultDescription = "List the entries (files and directories) of a directory on the OS's filesystem (rooted at the OS's mounted directory).";
+const std::string OSListDirectoryTool::ToolDefaultDescription = "List the entries (files and directories) of a directory on the OS's filesystem. A relative path is resolved against the calling process's working directory, which is also the default.";
 
-OSListDirectoryTool::OSListDirectoryTool(IHaisosOS& os) : m_os(os) {}
+OSListDirectoryTool::OSListDirectoryTool(std::shared_ptr<CurrentProcessHandle> process) : m_process(std::move(process)) {}
 
 nlohmann::json OSListDirectoryTool::GetDefaultParametersSchema() {
     return nlohmann::json{
@@ -14,7 +15,7 @@ nlohmann::json OSListDirectoryTool::GetDefaultParametersSchema() {
         {"properties", {
             {"path", {
                 {"type", "string"},
-                {"description", "Path to the directory to list, relative to the OS's filesystem root. Defaults to \".\" (the root)."}
+                {"description", "Path to the directory to list. A relative path is resolved against the process's working directory. Defaults to \".\" (the working directory itself)."}
             }}
         }},
         {"required", nlohmann::json::array()}
@@ -22,10 +23,15 @@ nlohmann::json OSListDirectoryTool::GetDefaultParametersSchema() {
 }
 
 ToolResult OSListDirectoryTool::Call(std::shared_ptr<IAgent> /*callerAgent*/, const nlohmann::json& args) {
-    std::string path = args.value("path", ".");
+    auto context = GetOSToolContext(m_process);
+    if (!context.IsValid()) {
+        return NoCurrentProcessError(ToolName);
+    }
+
+    std::string path = context.ResolvePath(args.value("path", "."));
     LogDebug("OSListDirectoryTool: listing directory '%s'", path.c_str());
 
-    auto entries = m_os.GetRootFileSystem()->ReadDirectory(path);
+    auto entries = context.os->GetRootFileSystem()->ReadDirectory(path);
 
     nlohmann::json result = nlohmann::json::array();
     for (const auto& entry : entries) {

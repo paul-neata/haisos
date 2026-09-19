@@ -7,6 +7,7 @@
 #include <thread>
 #include <vector>
 #include "OSProcess.h"
+#include "src/components/libheaders/CurrentProcessHandle.h"
 #include "interfaces/IHaisosOS.h"
 
 struct lua_State;
@@ -27,6 +28,7 @@ public:
         const std::string& workingDirectory,
         std::shared_ptr<IFileSystem> rootFileSystem,
         std::weak_ptr<IHaisosOS> os,
+        std::shared_ptr<CurrentProcessHandle> selfHandle,
         std::string scriptContent,
         std::vector<std::string> args,
         std::shared_ptr<IToolFactory> toolFactory,

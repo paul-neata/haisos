@@ -53,7 +53,7 @@ std::shared_ptr<LuaProcess> RunScript(std::shared_ptr<TestToolFactory> toolFacto
                                        const std::string& script, std::vector<std::string> args = {}) {
     auto process = LuaProcess::Create(
         1, 0, CreateEnvironment(), "test_lua.lua", /*workingDirectory=*/"", /*rootFileSystem=*/nullptr,
-        /*os=*/std::weak_ptr<IHaisosOS>{}, script, std::move(args), std::move(toolFactory), std::move(console));
+        /*os=*/std::weak_ptr<IHaisosOS>{}, /*selfHandle=*/nullptr, script, std::move(args), std::move(toolFactory), std::move(console));
     process->WaitToFinish(2000);
     return process;
 }
@@ -127,7 +127,7 @@ TEST(LuaProcessTest, KillStopsABusyLoop) {
     auto console = std::make_shared<MockAgentConsole>();
     auto process = LuaProcess::Create(
         1, 0, CreateEnvironment(), "busy_lua.lua", /*workingDirectory=*/"", /*rootFileSystem=*/nullptr,
-        /*os=*/std::weak_ptr<IHaisosOS>{}, "while true do end", std::vector<std::string>{}, toolFactory, console);
+        /*os=*/std::weak_ptr<IHaisosOS>{}, /*selfHandle=*/nullptr, "while true do end", std::vector<std::string>{}, toolFactory, console);
 
     process->Kill();
     EXPECT_TRUE(process->WaitToFinish(2000));

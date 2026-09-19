@@ -9,37 +9,37 @@
 
 namespace Haisos {
 
-OSToolFactory::OSToolFactory(IHaisosOS& os) : m_os(os) {
+OSToolFactory::OSToolFactory(std::shared_ptr<CurrentProcessHandle> process) : m_process(std::move(process)) {
     m_registry = {
         ToolEntry{
             Tools::OSReadFileTool::ToolName,
             []() { return Tools::OSReadFileTool::ToolDefaultDescription; },
             []() { return Tools::OSReadFileTool::GetDefaultParametersSchema(); },
-            [this]() -> std::shared_ptr<ITool> { return Tools::OSReadFileTool::Create(m_os); }
+            [this]() -> std::shared_ptr<ITool> { return Tools::OSReadFileTool::Create(m_process); }
         },
         ToolEntry{
             Tools::OSWriteFileTool::ToolName,
             []() { return Tools::OSWriteFileTool::ToolDefaultDescription; },
             []() { return Tools::OSWriteFileTool::GetDefaultParametersSchema(); },
-            [this]() -> std::shared_ptr<ITool> { return Tools::OSWriteFileTool::Create(m_os); }
+            [this]() -> std::shared_ptr<ITool> { return Tools::OSWriteFileTool::Create(m_process); }
         },
         ToolEntry{
             Tools::OSListDirectoryTool::ToolName,
             []() { return Tools::OSListDirectoryTool::ToolDefaultDescription; },
             []() { return Tools::OSListDirectoryTool::GetDefaultParametersSchema(); },
-            [this]() -> std::shared_ptr<ITool> { return Tools::OSListDirectoryTool::Create(m_os); }
+            [this]() -> std::shared_ptr<ITool> { return Tools::OSListDirectoryTool::Create(m_process); }
         },
         ToolEntry{
             Tools::OSListProcessesTool::ToolName,
             []() { return Tools::OSListProcessesTool::ToolDefaultDescription; },
             []() { return Tools::OSListProcessesTool::GetDefaultParametersSchema(); },
-            [this]() -> std::shared_ptr<ITool> { return Tools::OSListProcessesTool::Create(m_os); }
+            [this]() -> std::shared_ptr<ITool> { return Tools::OSListProcessesTool::Create(m_process); }
         },
         ToolEntry{
             Tools::OSStartProcessTool::ToolName,
             []() { return Tools::OSStartProcessTool::ToolDefaultDescription; },
             []() { return Tools::OSStartProcessTool::GetDefaultParametersSchema(); },
-            [this]() -> std::shared_ptr<ITool> { return Tools::OSStartProcessTool::Create(m_os); }
+            [this]() -> std::shared_ptr<ITool> { return Tools::OSStartProcessTool::Create(m_process); }
         },
     };
 }

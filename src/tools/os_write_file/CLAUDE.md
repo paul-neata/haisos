@@ -8,7 +8,7 @@ directory), creating or overwriting it by default, or appending when
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `path` | `string` | Yes | Path to the file to write, relative to the OS's filesystem root. |
+| `path` | `string` | Yes | Path to the file to write, resolved against the calling process's working directory. |
 | `content` | `string` | Yes | The content to write to the file. |
 | `append` | `boolean` | No | If `true`, append instead of overwriting. Defaults to `false`. |
 

@@ -21,6 +21,10 @@ protected:
         std::ofstream(kTestRoot + "/sub/inner.md") << "Say hi from inside sub.";
         std::ofstream(kTestRoot + "/not_a_program.txt") << "irrelevant";
         std::ofstream(kTestRoot + "/script.lua") << "os_list_directory({})";
+        // Writes through a *relative* path, so where it lands says which
+        // directory the tool resolved against.
+        std::ofstream(kTestRoot + "/write_relative.lua")
+            << "os_write_file({path = 'written.txt', content = 'hi'})";
     }
 
     void TearDown() override {
@@ -273,6 +277,31 @@ TEST_F(HaisosOSTest, ProcessDoesNotKeepItsOSAlive) {
 
     EXPECT_TRUE(osWatch.expired());
     EXPECT_EQ(process->GetHaisosOS(), nullptr);
+}
+
+// The os_* tools reach the OS only through the calling process
+// (ICurrentProcess), which is what lets them resolve a relative path against
+// that process's working directory rather than against the OS root.
+TEST_F(HaisosOSTest, ToolsResolveRelativePathsAgainstTheCallingProcessDirectory) {
+    auto os = BuildOS();
+
+    auto process = os->StartProcess(TestEnvironment(), "write_relative.lua", {}, /*workingDirectory=*/"sub");
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(5000));
+
+    EXPECT_TRUE(std::filesystem::exists(kTestRoot + "/sub/written.txt"));
+    EXPECT_FALSE(std::filesystem::exists(kTestRoot + "/written.txt"));
+}
+
+TEST_F(HaisosOSTest, ToolsResolveAgainstTheRootForAProcessStartedThere) {
+    auto os = BuildOS();
+
+    auto process = os->StartProcess(TestEnvironment(), "write_relative.lua", {}, /*workingDirectory=*/"");
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(5000));
+
+    EXPECT_TRUE(std::filesystem::exists(kTestRoot + "/written.txt"));
+    EXPECT_FALSE(std::filesystem::exists(kTestRoot + "/sub/written.txt"));
 }
 
 TEST_F(HaisosOSTest, CreateHaisosOSWithoutAnEnvironmentReturnsNull) {

@@ -74,9 +74,6 @@ private:
     std::shared_ptr<IPhysicalConsole> m_physicalConsole;
     std::shared_ptr<IEnvironment> m_environment;
     uint64_t m_osProcessId = 0;
-    // Built by Create() rather than by the constructor: it holds a reference to
-    // the OS, which is not yet fully formed while the constructor runs.
-    std::shared_ptr<OSToolFactory> m_osToolFactory;
 
     // Set by the destructor before draining, so no further process can be started.
     std::atomic<bool> m_shuttingDown{false};

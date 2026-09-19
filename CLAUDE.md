@@ -49,6 +49,7 @@ haisos/
 │   │   ├── agent_wait_to_finish/
 │   │   ├── agent_list_running/
 │   │   ├── agent_tools_common/
+│   │   ├── os_tools_common/
 │   │   ├── os_read_file/
 │   │   ├── os_write_file/
 │   │   ├── os_list_directory/
@@ -285,13 +286,22 @@ Two things follow, and they are the whole reason for the rule:
    user's home and a temp directory -- and nothing inside the process changes.
 
 A security policy can then be enforced in one place rather than in every tool.
-**That policy is not implemented yet; it lands in a later PR.** Until then the
-rule is a design constraint to uphold, not an enforced boundary: when adding a
-tool, a runtime, or anything else a process can call, route it through
-`ICurrentProcess` rather than giving it its own handle on the OS.
+**That policy is not implemented yet; it lands in a later PR.** The plumbing it
+will need is in place: when adding a tool, a runtime, or anything else a process
+can call, route it through `ICurrentProcess` rather than giving it its own
+handle on the OS.
 
-Not yet converted (they still take an `IHaisosOS&` directly, and are the
-mechanical follow-up to this rule): `OSToolFactory` and the five `os_*` tools.
+How it is wired: `OSToolFactory` and every `os_*` tool are built **per process**,
+around a `CurrentProcessHandle` (`src/components/libheaders/`) rather than
+around an `IHaisosOS`. The handle exists before the process does -- an agent
+needs its tools before the process wrapping it can be built -- and whoever
+builds the process fills it in before the process goes live, so no tool can
+observe it empty. At call time a tool asks the handle for its process, the
+process for its OS, and gets exactly the OS that process was given.
+
+The visible payoff today is path resolution: because a tool knows its caller, a
+relative path is resolved against **that process's** working directory, and
+`os_start_process` starts a child in the same directory, the way a shell would.
 
 ### Creating things: private constructors and `Create()`
 

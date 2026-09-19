@@ -181,6 +181,7 @@ std::shared_ptr<LuaProcess> LuaProcess::Create(
     const std::string& workingDirectory,
     std::shared_ptr<IFileSystem> rootFileSystem,
     std::weak_ptr<IHaisosOS> os,
+    std::shared_ptr<CurrentProcessHandle> selfHandle,
     std::string scriptContent,
     std::vector<std::string> args,
     std::shared_ptr<IToolFactory> toolFactory,
@@ -198,6 +199,11 @@ std::shared_ptr<LuaProcess> LuaProcess::Create(
         std::move(args),
         std::move(toolFactory),
         std::move(console)));
+    // The script's tools reach the process through this handle. It is filled in
+    // before Start(), so the script's thread can never observe it empty.
+    if (selfHandle) {
+        selfHandle->Set(process);
+    }
     process->Start();
     return process;
 }

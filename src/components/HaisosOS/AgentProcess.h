@@ -3,6 +3,7 @@
 #include <mutex>
 #include <string>
 #include "OSProcess.h"
+#include "src/components/libheaders/CurrentProcessHandle.h"
 #include "interfaces/IFileSystemService.h"
 #include "src/components/Agent/Agent.h"
 
@@ -21,6 +22,7 @@ public:
         const std::string& workingDirectory,
         std::shared_ptr<IFileSystem> rootFileSystem,
         std::weak_ptr<IHaisosOS> os,
+        std::shared_ptr<CurrentProcessHandle> selfHandle,
         std::shared_ptr<Agent> agent);
     ~AgentProcess() override;
 

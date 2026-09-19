@@ -11,11 +11,19 @@ std::shared_ptr<AgentProcess> AgentProcess::Create(
     const std::string& workingDirectory,
     std::shared_ptr<IFileSystem> rootFileSystem,
     std::weak_ptr<IHaisosOS> os,
+    std::shared_ptr<CurrentProcessHandle> selfHandle,
     std::shared_ptr<Agent> agent)
 {
-    return std::shared_ptr<AgentProcess>(new AgentProcess(
+    auto process = std::shared_ptr<AgentProcess>(new AgentProcess(
         pid, parentPid, std::move(environment), path, workingDirectory,
         std::move(rootFileSystem), std::move(os), std::move(agent)));
+    // The process's own tools reach it through this handle. Filling it in here
+    // -- before the agent is given anything to do -- is what guarantees no tool
+    // can ever observe it empty.
+    if (selfHandle) {
+        selfHandle->Set(process);
+    }
+    return process;
 }
 
 AgentProcess::AgentProcess(

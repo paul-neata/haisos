@@ -32,6 +32,12 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   lands in a later PR; see the Security section of the root `CLAUDE.md`. The
   reference a process holds on its OS is **weak**: an OS owns its processes, so
   a strong one back would be a cycle neither could escape.
+  The wiring is `CurrentProcessHandle`: created before the process, handed to
+  `OSToolFactory`, and filled in by `AgentProcess::Create`/`LuaProcess::Create`
+  before the process goes live -- which is why an agent process is only given
+  its first command *after* its `AgentProcess` exists. Because a tool knows its
+  caller, a relative path is resolved against that process's working
+  directory.
 - `IProcess` is the outside view of a process and `ICurrentProcess` (which
   inherits it) the inside one. From outside you may look, ask it to stop
   (`TriggerStop`) and wait; you may not change its environment or its working
@@ -95,4 +101,4 @@ console, and a services layer; starts processes and spawns sub-OS instances.
 - `LuaProcess` - `IOSProcess` backed by an embedded Lua script, running on its own thread; `Kill()` aborts it via a Lua instruction-count hook
 - `IOSProcess` (`OSProcess.h`) - `ICurrentProcess` plus `Kill()`; the type the OS tracks its processes as, so only the OS can force one down
 - `ProcessWorkingDirectory.h` - the per-process working directory shared by both runtimes
-- `OSToolFactory` - the OS-level tool set (`os_read_file`, `os_write_file`, `os_list_directory`, `os_start_process`, `os_list_processes`)
+- `OSToolFactory` - the OS-level tool set (`os_read_file`, `os_write_file`, `os_list_directory`, `os_start_process`, `os_list_processes`), built once per process and bound to it

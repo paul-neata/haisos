@@ -51,7 +51,6 @@ public:
     // outsider gets. An agent is killed by whoever owns it (the IProcess
     // wrapping it, the LLMService that created it, or this class's own
     // destructor), never by another agent or a tool holding an IAgent handle.
-    bool Stop(unsigned timeoutMs);
     void Kill();
     // Blocks until the thread has finished. Only safe for an agent that will
     // finish on its own or has been stopped -- an interactive one never does.
@@ -101,6 +100,10 @@ private:
     SynchronizedQueueEx<std::string> m_commandQueue;
     std::thread m_thread;
     std::atomic<bool> m_finished{false};
+    // Set by TriggerStop. Read on the agent's own thread between tool calls, so
+    // a stop asked for while a round is in flight takes effect at the next
+    // point where stopping is safe rather than only at the next command.
+    std::atomic<bool> m_stopRequested{false};
     std::atomic<bool> m_killed{false};
     std::condition_variable m_finishedCv;
     std::mutex m_finishedMutex;

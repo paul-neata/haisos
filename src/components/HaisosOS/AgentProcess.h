@@ -41,8 +41,7 @@ public:
     // IOSProcess: forcing the process down, which no IProcess handle can do.
     void Kill() override;
 
-    // Internal to this component, for a bounded stop-then-wait.
-    bool Stop(unsigned timeoutMs);
+    // Internal to this component.
     bool IsFinished() const;
 
 private:

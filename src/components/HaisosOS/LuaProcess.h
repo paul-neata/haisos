@@ -53,7 +53,6 @@ public:
     void Kill() override;
 
     // Internal to this component.
-    bool Stop(unsigned timeoutMs);
     bool IsFinished() const;
     void WaitToFinish();
 

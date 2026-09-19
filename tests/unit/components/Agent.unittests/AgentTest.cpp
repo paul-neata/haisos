@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <atomic>
 #include <memory>
 #include <chrono>
 #include <thread>
@@ -10,6 +11,47 @@
 
 using namespace Haisos;
 using namespace Haisos::Mocks;
+
+namespace {
+
+// A tool factory with one tool that records whether it was ever called.
+class RecordingToolFactory : public IToolFactory {
+public:
+    static constexpr const char* kToolName = "recorded_tool";
+
+    bool WasToolCalled() const { return m_called->load(); }
+
+    std::shared_ptr<ITool> CreateTool(const std::string& name, std::shared_ptr<IAgent>) override {
+        if (name != kToolName) {
+            return nullptr;
+        }
+        return std::make_shared<RecordingTool>(m_called);
+    }
+    bool HasTool(const std::string& name) const override { return name == kToolName; }
+    std::vector<std::string> GetAvailableTools() const override { return {kToolName}; }
+    std::vector<std::tuple<std::string, std::string, nlohmann::json>> GetAvailableToolDescriptions() const override {
+        return {{kToolName, "records that it ran", nlohmann::json::object()}};
+    }
+
+private:
+    class RecordingTool : public ITool {
+    public:
+        explicit RecordingTool(std::shared_ptr<std::atomic<bool>> called) : m_called(std::move(called)) {}
+        ToolResult Call(std::shared_ptr<IAgent>, const nlohmann::json&) override {
+            *m_called = true;
+            return ToolResult{"ran", false};
+        }
+        nlohmann::json GetParametersSchema() const override { return nlohmann::json::object(); }
+
+    private:
+        std::shared_ptr<std::atomic<bool>> m_called;
+    };
+
+    // Shared so a tool outlives the factory call that made it.
+    std::shared_ptr<std::atomic<bool>> m_called = std::make_shared<std::atomic<bool>>(false);
+};
+
+} // namespace
 
 TEST(AgentTest, Construction) {
     auto mockLLM = std::make_shared<MockLLMCommunicator>();
@@ -23,7 +65,7 @@ TEST(AgentTest, Construction) {
     EXPECT_EQ(agent->Name(), "test_agent");
     EXPECT_EQ(agent->GetParent(), nullptr);
 
-    agent->Stop(0);
+    agent->TriggerStop();
     agent->WaitToFinish();
 }
 
@@ -38,7 +80,7 @@ TEST(AgentTest, PostAndWaitToFinish) {
         "test_agent", nullptr);
 
     agent->Post("Test command");
-    agent->Stop(0);
+    agent->TriggerStop();
     agent->WaitToFinish();
 
     EXPECT_EQ(mockLLM->GetCallCount(), 1);
@@ -55,7 +97,7 @@ TEST(AgentTest, CommandProcessingWritesToConsole) {
         "test_agent", nullptr);
 
     agent->Post("Test command");
-    agent->Stop(0);
+    agent->TriggerStop();
     agent->WaitToFinish();
 
     // IAgentConsole receives the raw message; per-source tagging (e.g. "[name]")
@@ -82,7 +124,7 @@ TEST(AgentTest, CommandProcessingWritesToConsoleOutput) {
         nullptr);
 
     agent->Post("Test command");
-    agent->Stop(0);
+    agent->TriggerStop();
     agent->WaitToFinish();
 
     std::string contents = agent->GetConsoleOutput();
@@ -101,7 +143,7 @@ TEST(AgentTest, MultiplePosts) {
 
     agent->Post("Command 1");
     agent->Post("Command 2");
-    agent->Stop(0);
+    agent->TriggerStop();
     agent->WaitToFinish();
 
     EXPECT_EQ(mockLLM->GetCallCount(), 2);
@@ -116,7 +158,7 @@ TEST(AgentTest, StopWithoutPost) {
         std::vector<std::string>{"You are a helpful AI assistant."},
         "test_agent", nullptr);
 
-    agent->Stop(0);
+    agent->TriggerStop();
     agent->WaitToFinish();
 
     EXPECT_EQ(mockLLM->GetCallCount(), 0);
@@ -151,9 +193,9 @@ TEST(AgentTest, ParentChildRelationship) {
     ASSERT_EQ(children.size(), 1u);
     EXPECT_EQ(children[0]->Name(), "child");
 
-    child->Stop(0);
+    child->TriggerStop();
     child->WaitToFinish();
-    parent->Stop(0);
+    parent->TriggerStop();
     parent->WaitToFinish();
 }
 
@@ -184,9 +226,9 @@ TEST(AgentTest, ChildKnowsParent) {
 
     EXPECT_EQ(child->GetParent(), parent);
 
-    child->Stop(0);
+    child->TriggerStop();
     child->WaitToFinish();
-    parent->Stop(0);
+    parent->TriggerStop();
     parent->WaitToFinish();
 }
 
@@ -221,13 +263,13 @@ TEST(AgentTest, ChildDestructionRemovesFromParent) {
         parent->AddChild(child);
 
         EXPECT_EQ(parent->GetChildren(/*onlyDirectChildren=*/true).size(), 1u);
-        child->Stop(0);
+        child->TriggerStop();
         child->WaitToFinish();
     }
 
     EXPECT_EQ(parent->GetChildren(/*onlyDirectChildren=*/true).size(), 0u);
 
-    parent->Stop(0);
+    parent->TriggerStop();
     parent->WaitToFinish();
 }
 
@@ -246,7 +288,7 @@ TEST(AgentTest, GetHistoryContainsUserMessage) {
         nullptr);
 
     agent->Post("Hello agent");
-    agent->Stop(0);
+    agent->TriggerStop();
     agent->WaitToFinish();
 
     auto history = agent->GetHistory();
@@ -291,11 +333,11 @@ TEST(AgentTest, WaitToFinishWithTimeoutReturnsFalseIfNotFinished) {
     bool finished = agent->WaitToFinish(50);
     EXPECT_FALSE(finished);
 
-    agent->Stop(0);
+    agent->TriggerStop();
     agent->WaitToFinish();
 }
 
-TEST(AgentTest, StopWithTimeoutWaitsForFinish) {
+TEST(AgentTest, TriggerStopThenWaitToFinishReturnsTrue) {
     auto mockLLM = std::make_shared<MockLLMCommunicator>();
     mockLLM->SetMessageResponse("quick");
     auto mockConsole = std::make_shared<MockAgentConsole>();
@@ -306,8 +348,64 @@ TEST(AgentTest, StopWithTimeoutWaitsForFinish) {
         "test_agent", nullptr);
 
     agent->Post("hello");
-    bool stopped = agent->Stop(5000);
+    agent->TriggerStop();
+    bool stopped = agent->WaitToFinish(5000);
     EXPECT_TRUE(stopped);
+}
+
+// A stop asked for while a command is in flight is noticed before the next tool
+// runs, not only at the next command -- which for a command that keeps calling
+// tools would be a long way off. Every call still gets an answer, so the history
+// keeps one result per tool call.
+TEST(AgentTest, StopRequestedMidRoundStopsToolsFromRunning) {
+    auto toolFactory = std::make_shared<RecordingToolFactory>();
+    auto mockLLM = std::make_shared<MockLLMCommunicator>();
+    mockLLM->SetToolCallResponse(RecordingToolFactory::kToolName);
+
+    auto agent = Agent::Create(
+        mockLLM,
+        toolFactory,
+        InMemoryAgentConsole::Create(),
+        std::vector<std::string>{"You are a helpful AI assistant."},
+        "test_agent",
+        nullptr);
+
+    // Fires on the agent's own thread, inside the LLM call of the round whose
+    // tool calls are about to be executed.
+    std::weak_ptr<Agent> weakAgent = agent;
+    mockLLM->SetOnCall([weakAgent] {
+        if (auto live = weakAgent.lock()) {
+            live->TriggerStop();
+        }
+    });
+
+    agent->Post("do some work");
+    EXPECT_TRUE(agent->WaitToFinish(5000));
+    EXPECT_FALSE(toolFactory->WasToolCalled());
+}
+
+// Without the stop, the same arrangement does run the tool -- so the test above
+// is pinning the stop, not some other reason the tool never ran.
+TEST(AgentTest, ToolsRunNormallyWhenNoStopIsRequested) {
+    auto toolFactory = std::make_shared<RecordingToolFactory>();
+    auto mockLLM = std::make_shared<MockLLMCommunicator>();
+    mockLLM->SetToolCallResponse(RecordingToolFactory::kToolName);
+
+    // Not interactive, so it finishes on its own once the command is answered --
+    // no stop is needed, and none can race ahead of the round.
+    auto agent = Agent::Create(
+        mockLLM,
+        toolFactory,
+        InMemoryAgentConsole::Create(),
+        std::vector<std::string>{"You are a helpful AI assistant."},
+        "test_agent",
+        nullptr,
+        /*startTime=*/"",
+        /*interactive=*/false);
+
+    agent->Post("do some work");
+    EXPECT_TRUE(agent->WaitToFinish(5000));
+    EXPECT_TRUE(toolFactory->WasToolCalled());
 }
 
 TEST(AgentTest, GetConsoleOutputContainsAgentMessages) {
@@ -321,7 +419,7 @@ TEST(AgentTest, GetConsoleOutputContainsAgentMessages) {
         "test_agent", nullptr);
 
     agent->Post("Test");
-    agent->Stop(0);
+    agent->TriggerStop();
     agent->WaitToFinish();
 
     std::string output = agent->GetConsoleOutput();

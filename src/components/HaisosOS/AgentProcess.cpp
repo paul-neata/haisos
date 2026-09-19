@@ -87,10 +87,6 @@ std::shared_ptr<IHaisosOS> AgentProcess::OS() const {
     return m_os.lock();
 }
 
-bool AgentProcess::Stop(unsigned timeoutMs) {
-    return m_agent->Stop(timeoutMs);
-}
-
 void AgentProcess::Kill() {
     m_agent->Kill();
 }

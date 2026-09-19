@@ -298,15 +298,6 @@ bool LuaProcess::WaitToFinish(uint64_t timeoutMs) {
     return finished;
 }
 
-bool LuaProcess::Stop(unsigned timeoutMs) {
-    // A Lua process runs its script to completion; there is no command queue
-    // to close, so "stop" just means "wait" (mirroring a short-running agent).
-    if (timeoutMs == 0) {
-        return false;
-    }
-    return WaitToFinish(timeoutMs);
-}
-
 void LuaProcess::Kill() {
     m_killed = true;
 }

@@ -48,8 +48,14 @@ finishes outright, which is what a delegated one-shot subagent wants.
 an agent with no parent); `agent_start` uses it to cap subagent recursion.
 
 **Forcing an agent down is deliberately not on `IAgent`.** `TriggerStop()` is
-all an outsider gets: it closes the command queue, so the agent takes no new
-commands and finishes once whatever it is already doing is done. `Stop()`,
+all an outsider gets, and it does two things: it closes the command queue, so no
+new command is taken, and it sets a flag the round already in flight notices.
+That flag is what makes a stop prompt -- `ExecuteToolCalls` runs no further
+tools once it is set, and the conversation round ends rather than spending the
+remaining LLM rounds refusing tool calls. Every call still gets a result, an
+error one, because the history is only well-formed with one result per tool call
+(see `TrimHistory`, which refuses to split such a block).
+
 `Kill()`, the untimed `WaitToFinish()`, `IsFinished()` and `IsKilled()` are
 public on the concrete `Agent` only, so an agent is killed by whoever owns it --
 the process wrapping it, the `LLMService` that created it, or its own

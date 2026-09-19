@@ -103,7 +103,7 @@ void Agent::Start() {
 }
 
 Agent::~Agent() {
-    Stop(0);
+    TriggerStop();
     if (!WaitToFinish(5000)) {
         LogWarning("Agent '%s' thread did not finish within 5s during destruction, waiting indefinitely", m_name.c_str());
     }
@@ -119,22 +119,18 @@ void Agent::Send(const std::string& command) {
 }
 
 void Agent::TriggerStop() {
-    // Only a request: closing the queue stops new commands being taken, and the
-    // agent finishes once whatever it is already doing is done.
+    // Only a request, and two halves of one: closing the queue stops new
+    // commands being taken, while the flag is what a round already in flight
+    // notices -- see ExecuteToolCalls. Without the flag a stop would not be
+    // seen until the current command was finished with, which for a command
+    // that keeps calling tools can be a long way off.
+    m_stopRequested = true;
     m_commandQueue.Close();
-}
-
-bool Agent::Stop(unsigned timeoutMs) {
-    TriggerStop();
-    if (timeoutMs > 0) {
-        return WaitToFinish(timeoutMs);
-    }
-    return false;
 }
 
 void Agent::Kill() {
     m_killed = true;
-    Stop(0);
+    TriggerStop();
 }
 
 std::shared_ptr<IAgent> Agent::GetParent() const {
@@ -307,6 +303,15 @@ std::vector<std::tuple<std::string, std::string, std::string, bool>> Agent::Exec
             continue;
         }
 
+        // Asked to stop: run no further tools. Every call still gets an answer,
+        // because the conversation only stays well-formed with one result per
+        // tool call (see TrimHistory, which refuses to split such a block).
+        if (m_stopRequested) {
+            LogDebug("Agent '%s' - stop requested, not running tool: %s", m_name.c_str(), toolName.c_str());
+            toolResults.emplace_back(toolName, "Error: the agent was asked to stop", toolCallId, true);
+            continue;
+        }
+
         LogDebug("Agent '%s' - Tool call received: %s", m_name.c_str(), toolName.c_str());
         auto tool = m_toolFactory->CreateTool(toolName, shared_from_this());
         if (tool) {
@@ -422,6 +427,13 @@ void Agent::RunThread() {
                             m_history.push_back(toolMsg);
                         }
                         TrimHistory(m_history);
+                    }
+                    // Nothing was run, so there is nothing for another round to
+                    // build on: going back to the LLM would only spend calls
+                    // refusing tools until the round cap ran out.
+                    if (m_stopRequested) {
+                        LogDebug("Agent '%s' - stop requested, ending the conversation round", m_name.c_str());
+                        break;
                     }
                     continue;
                 }

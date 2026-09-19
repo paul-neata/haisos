@@ -28,10 +28,11 @@ ToolResult OSListDirectoryTool::Call(std::shared_ptr<IAgent> /*callerAgent*/, co
         return NoCurrentProcessError(ToolName);
     }
 
-    std::string path = context.ResolvePath(args.value("path", "."));
-    LogDebug("OSListDirectoryTool: listing directory '%s'", path.c_str());
+    std::string path = args.value("path", ".");
+    LogDebug("OSListDirectoryTool: listing directory '%s' (resolved to '%s')",
+        path.c_str(), context.io->ResolvePath(path).c_str());
 
-    auto entries = context.os->GetRootFileSystem()->ReadDirectory(path);
+    auto entries = context.io->ReadDirectory(path);
 
     nlohmann::json result = nlohmann::json::array();
     for (const auto& entry : entries) {

@@ -1,5 +1,4 @@
 #include "LuaProcess.h"
-#include "ProcessWorkingDirectory.h"
 #include <algorithm>
 #include <chrono>
 #include <vector>
@@ -179,7 +178,6 @@ std::shared_ptr<LuaProcess> LuaProcess::Create(
     std::shared_ptr<IEnvironment> environment,
     const std::string& path,
     const std::string& workingDirectory,
-    std::shared_ptr<IFileSystem> rootFileSystem,
     std::weak_ptr<IHaisosOS> os,
     std::shared_ptr<CurrentProcessHandle> selfHandle,
     std::string scriptContent,
@@ -193,7 +191,6 @@ std::shared_ptr<LuaProcess> LuaProcess::Create(
         std::move(environment),
         path,
         workingDirectory,
-        std::move(rootFileSystem),
         std::move(os),
         std::move(scriptContent),
         std::move(args),
@@ -214,7 +211,6 @@ LuaProcess::LuaProcess(
     std::shared_ptr<IEnvironment> environment,
     const std::string& path,
     const std::string& workingDirectory,
-    std::shared_ptr<IFileSystem> rootFileSystem,
     std::weak_ptr<IHaisosOS> os,
     std::string scriptContent,
     std::vector<std::string> args,
@@ -224,9 +220,8 @@ LuaProcess::LuaProcess(
     , m_parentPid(parentPid)
     , m_environment(std::move(environment))
     , m_path(path)
-    , m_rootFileSystem(std::move(rootFileSystem))
-    , m_os(std::move(os))
-    , m_workingDirectory(NormalizeWorkingDirectory(workingDirectory))
+    , m_os(os)
+    , m_io(ProcessFileIO::Create(std::move(os), workingDirectory))
     , m_scriptContent(std::move(scriptContent))
     , m_args(std::move(args))
     , m_toolFactory(std::move(toolFactory))
@@ -269,14 +264,8 @@ std::shared_ptr<IEnvironment> LuaProcess::GetEnvironment() const {
     return m_environment ? m_environment->Clone() : nullptr;
 }
 
-std::string LuaProcess::GetCurrentDirectory() const {
-    std::lock_guard<std::mutex> lock(m_workingDirectoryMutex);
-    return m_workingDirectory;
-}
-
-int LuaProcess::ChangeDirectory(const std::string& path) {
-    std::lock_guard<std::mutex> lock(m_workingDirectoryMutex);
-    return ChangeWorkingDirectory(m_rootFileSystem.get(), m_workingDirectory, path);
+std::shared_ptr<IFileIO> LuaProcess::IO() const {
+    return m_io;
 }
 
 void LuaProcess::TriggerStop() {
@@ -326,7 +315,7 @@ std::shared_ptr<IAgent> LuaProcess::AsAgent() {
     return nullptr;
 }
 
-std::shared_ptr<IHaisosOS> LuaProcess::GetHaisosOS() const {
+std::shared_ptr<IHaisosOS> LuaProcess::OS() const {
     // The one door out of this process: everything the script reaches beyond
     // its own memory comes from here (see ICurrentProcess).
     return m_os.lock();

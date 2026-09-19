@@ -1,5 +1,4 @@
 #include "AgentProcess.h"
-#include "ProcessWorkingDirectory.h"
 
 namespace Haisos {
 
@@ -9,14 +8,12 @@ std::shared_ptr<AgentProcess> AgentProcess::Create(
     std::shared_ptr<IEnvironment> environment,
     const std::string& path,
     const std::string& workingDirectory,
-    std::shared_ptr<IFileSystem> rootFileSystem,
     std::weak_ptr<IHaisosOS> os,
     std::shared_ptr<CurrentProcessHandle> selfHandle,
     std::shared_ptr<Agent> agent)
 {
     auto process = std::shared_ptr<AgentProcess>(new AgentProcess(
-        pid, parentPid, std::move(environment), path, workingDirectory,
-        std::move(rootFileSystem), std::move(os), std::move(agent)));
+        pid, parentPid, std::move(environment), path, workingDirectory, std::move(os), std::move(agent)));
     // The process's own tools reach it through this handle. Filling it in here
     // -- before the agent is given anything to do -- is what guarantees no tool
     // can ever observe it empty.
@@ -32,17 +29,15 @@ AgentProcess::AgentProcess(
     std::shared_ptr<IEnvironment> environment,
     const std::string& path,
     const std::string& workingDirectory,
-    std::shared_ptr<IFileSystem> rootFileSystem,
     std::weak_ptr<IHaisosOS> os,
     std::shared_ptr<Agent> agent)
     : m_pid(pid)
     , m_parentPid(parentPid)
     , m_environment(std::move(environment))
     , m_path(path)
-    , m_rootFileSystem(std::move(rootFileSystem))
-    , m_os(std::move(os))
+    , m_os(os)
+    , m_io(ProcessFileIO::Create(std::move(os), workingDirectory))
     , m_agent(std::move(agent))
-    , m_workingDirectory(NormalizeWorkingDirectory(workingDirectory))
 {
 }
 
@@ -78,23 +73,17 @@ bool AgentProcess::WaitToFinish(uint64_t timeoutMs) {
     return m_agent->WaitToFinish(timeoutMs);
 }
 
-std::string AgentProcess::GetCurrentDirectory() const {
-    std::lock_guard<std::mutex> lock(m_workingDirectoryMutex);
-    return m_workingDirectory;
-}
-
-int AgentProcess::ChangeDirectory(const std::string& path) {
-    std::lock_guard<std::mutex> lock(m_workingDirectoryMutex);
-    return ChangeWorkingDirectory(m_rootFileSystem.get(), m_workingDirectory, path);
+std::shared_ptr<IFileIO> AgentProcess::IO() const {
+    return m_io;
 }
 
 std::shared_ptr<IAgent> AgentProcess::AsAgent() {
     return m_agent;
 }
 
-std::shared_ptr<IHaisosOS> AgentProcess::GetHaisosOS() const {
+std::shared_ptr<IHaisosOS> AgentProcess::OS() const {
     // The one door out of this process: everything it reaches beyond its own
-    // memory comes from here (see ICurrentProcess).
+    // memory comes from here or from IO() (see ICurrentProcess).
     return m_os.lock();
 }
 

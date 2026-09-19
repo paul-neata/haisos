@@ -269,17 +269,18 @@ Each component lives in its own folder under `src/components/` and has its own `
 ### Security: `ICurrentProcess` is the only door out of a process
 
 **Everything a running program reaches beyond its own memory -- the filesystem,
-other processes, the services -- it reaches through `ICurrentProcess`, via
-`GetHaisosOS()`.** That holds for every runtime alike: the tools an agent calls,
-the agent itself, and the globals a Lua script gets. Nothing is handed an
-`IHaisosOS` directly, and nothing keeps a private path to one.
+other processes, the services -- it reaches through `ICurrentProcess`: files via
+`IO()`, everything else via `OS()`.** That holds for every runtime alike: the
+tools an agent calls, the agent itself, and the globals a Lua script gets.
+Nothing is handed an `IHaisosOS` or an `IFileSystem` directly, and nothing keeps
+a private path to one.
 
 Two things follow, and they are the whole reason for the rule:
 
 1. **Every runtime has the same reach.** A `.lua` script can do neither more nor
    less than a `.md` agent, because both go through the same one door.
 2. **Narrowing a process is a matter of handing it a narrower OS**, with no
-   runtime needing to know. `ICurrentProcess::GetHaisosOS()` need not return the
+   runtime needing to know. `ICurrentProcess::OS()` need not return the
    OS that started the process: it may be a narrowed clone of it, confined by
    the root filesystem it was built with. When user support arrives, the first
    process of a user will be given an OS whose root is writable only under that
@@ -299,9 +300,18 @@ builds the process fills it in before the process goes live, so no tool can
 observe it empty. At call time a tool asks the handle for its process, the
 process for its OS, and gets exactly the OS that process was given.
 
-The visible payoff today is path resolution: because a tool knows its caller, a
-relative path is resolved against **that process's** working directory, and
-`os_start_process` starts a child in the same directory, the way a shell would.
+All file access goes through `ICurrentProcess::IO()`, an `IFileIO`: the
+`IFileSystem` operations bound to the root filesystem of the OS that process was
+given, plus the working directory they resolve against. That is what makes a
+bare name or a relative path mean anything at all -- an `IFileSystem`
+understands absolute paths alone, so `IFileIO` is the one place a path and the
+process's position are brought together. `os_start_process` also starts a child
+in the caller's directory, the way a shell would.
+
+`IFileIO` deliberately omits `Mount`/`Unmount`, which `IFileSystem` has:
+composing filesystems is how an OS is assembled, not something a program running
+inside one may do to the ground it stands on. A process that could mount could
+widen its own reach, which is what this whole arrangement exists to prevent.
 
 ### Creating things: private constructors and `Create()`
 

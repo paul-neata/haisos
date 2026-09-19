@@ -19,13 +19,18 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   empty working directory means the OS's root. The process keeps both.
   `IProcess::GetEnvironment()` hands out a **clone**, so reading a process's
   environment from outside can never change what the process itself sees.
-- A process owns its **working directory**: a filesystem has none (see the
-  Filesystem component), so this is the only thing a relative path is resolved
-  against, and one process moving never moves another. It is reachable only
-  from inside the process, through `ICurrentProcess`.
+- A process owns its **working directory**, on its `IFileIO` (`ProcessFileIO`):
+  a filesystem has none (see the Filesystem component), so this is the only
+  thing a relative path is resolved against, and one process moving never moves
+  another. All file access a process does goes through that `IFileIO`, reached
+  by `ICurrentProcess::IO()` -- never through `GetRootFileSystem()`, which
+  understands absolute paths alone. `ProcessFileIO` fetches the filesystem from
+  the OS on every call rather than holding it, so a process handed a narrowed
+  OS does its I/O through that OS's root and nothing else.
 - **`ICurrentProcess` is the only door out of a process.** Everything a running
   program reaches beyond its own memory it reaches through
-  `ICurrentProcess::GetHaisosOS()` -- tools, agents and Lua scripts alike. So
+  `ICurrentProcess` -- files via `IO()`, everything else via `OS()` --
+  tools, agents and Lua scripts alike. So
   every runtime has the same reach, and narrowing one process is a matter of
   handing it a narrower OS (a clone confined by a different root filesystem),
   with no runtime needing to know. The security policy that will exploit this
@@ -43,7 +48,7 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   (`TriggerStop`) and wait; you may not change its environment or its working
   directory, nor reach the agent running it -- `StartingAgentName()` gives the
   name and nothing more. From inside, `ICurrentProcess` adds
-  `ChangeDirectory`/`GetCurrentDirectory`, `AsAgent()` and `GetHaisosOS()`. Forcing a process
+  `IO()`, `AsAgent()` and `OS()`. Forcing a process
   down is on neither: `Kill()` lives on the component-internal `IOSProcess`,
   because that is the OS's business alone.
 - Dispatches `StartProcess` by file extension: `.md` starts an LLM agent (its
@@ -100,5 +105,5 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   be able to do both
 - `LuaProcess` - `IOSProcess` backed by an embedded Lua script, running on its own thread; `Kill()` aborts it via a Lua instruction-count hook
 - `IOSProcess` (`OSProcess.h`) - `ICurrentProcess` plus `Kill()`; the type the OS tracks its processes as, so only the OS can force one down
-- `ProcessWorkingDirectory.h` - the per-process working directory shared by both runtimes
+- `ProcessFileIO` - the `IFileIO` behind `ICurrentProcess::IO()`: the OS's root filesystem plus this process's working directory
 - `OSToolFactory` - the OS-level tool set (`os_read_file`, `os_write_file`, `os_list_directory`, `os_start_process`, `os_list_processes`), built once per process and bound to it

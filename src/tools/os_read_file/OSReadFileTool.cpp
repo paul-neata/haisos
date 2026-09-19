@@ -32,11 +32,12 @@ ToolResult OSReadFileTool::Call(std::shared_ptr<IAgent> /*callerAgent*/, const n
         return NoCurrentProcessError(ToolName);
     }
 
-    std::string path = context.ResolvePath(args["path"]);
-    LogDebug("OSReadFileTool: reading file '%s'", path.c_str());
+    std::string path = args["path"];
+    LogDebug("OSReadFileTool: reading file '%s' (resolved to '%s')",
+        path.c_str(), context.io->ResolvePath(path).c_str());
 
     std::string content;
-    if (!ReadWholeFile(*context.os->GetRootFileSystem(), path, content)) {
+    if (!ReadWholeFile(*context.io, path, content)) {
         LogWarning("OSReadFileTool: failed to read file '%s'", path.c_str());
         return ToolResult{"Failed to read file: " + path, true};
     }

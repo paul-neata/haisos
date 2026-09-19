@@ -7,6 +7,7 @@
 #include <thread>
 #include <vector>
 #include "OSProcess.h"
+#include "ProcessFileIO.h"
 #include "src/components/libheaders/CurrentProcessHandle.h"
 #include "interfaces/IHaisosOS.h"
 
@@ -26,7 +27,6 @@ public:
         std::shared_ptr<IEnvironment> environment,
         const std::string& path,
         const std::string& workingDirectory,
-        std::shared_ptr<IFileSystem> rootFileSystem,
         std::weak_ptr<IHaisosOS> os,
         std::shared_ptr<CurrentProcessHandle> selfHandle,
         std::string scriptContent,
@@ -45,10 +45,9 @@ public:
     bool WaitToFinish(uint64_t timeoutMs) override;
 
     // ICurrentProcess
-    std::string GetCurrentDirectory() const override;
-    int ChangeDirectory(const std::string& path) override;
+    std::shared_ptr<IFileIO> IO() const override;
     std::shared_ptr<IAgent> AsAgent() override;
-    std::shared_ptr<IHaisosOS> GetHaisosOS() const override;
+    std::shared_ptr<IHaisosOS> OS() const override;
 
     // IOSProcess: forcing the process down, which no IProcess handle can do.
     void Kill() override;
@@ -69,7 +68,6 @@ private:
         std::shared_ptr<IEnvironment> environment,
         const std::string& path,
         const std::string& workingDirectory,
-        std::shared_ptr<IFileSystem> rootFileSystem,
         std::weak_ptr<IHaisosOS> os,
         std::string scriptContent,
         std::vector<std::string> args,
@@ -90,14 +88,11 @@ private:
     uint64_t m_parentPid;
     std::shared_ptr<IEnvironment> m_environment;
     std::string m_path;
-    std::shared_ptr<IFileSystem> m_rootFileSystem;
     // Weak: the OS owns its processes, so a strong reference back would be a
     // cycle neither could escape.
     std::weak_ptr<IHaisosOS> m_os;
-    // The process's own working directory, guarded because the script's thread
-    // and whoever inspects the process run concurrently.
-    mutable std::mutex m_workingDirectoryMutex;
-    std::string m_workingDirectory;
+    // This process's file I/O, and the only route it has to a filesystem.
+    std::shared_ptr<IFileIO> m_io;
     std::string m_scriptContent;
     std::vector<std::string> m_args;
     std::shared_ptr<IToolFactory> m_toolFactory;

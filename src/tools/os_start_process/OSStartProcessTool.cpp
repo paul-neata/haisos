@@ -36,7 +36,10 @@ ToolResult OSStartProcessTool::Call(std::shared_ptr<IAgent> callerAgent, const n
         return NoCurrentProcessError(ToolName);
     }
 
-    std::string path = context.ResolvePath(args["path"]);
+    // Resolved here rather than by the OS: IHaisosOS::StartProcess takes a
+    // path against the OS root, and only this process's IFileIO knows where
+    // "here" is for it.
+    std::string path = context.io->ResolvePath(args["path"]);
 
     std::vector<std::string> programArgs;
     if (args.contains("args") && args["args"].is_array()) {
@@ -53,7 +56,7 @@ ToolResult OSStartProcessTool::Call(std::shared_ptr<IAgent> callerAgent, const n
     // what the OS was given, and its own edits stay its own. It starts in the
     // calling process's working directory, the way a shell would.
     auto process = context.os->StartProcess(
-        context.os->GetOsEnvironment()->Clone(), path, programArgs, context.process->GetCurrentDirectory());
+        context.os->GetOsEnvironment()->Clone(), path, programArgs, context.io->GetCurrentDirectory());
     if (!process) {
         LogWarning("OSStartProcessTool: failed to start process '%s'", path.c_str());
         return ToolResult{"Failed to start process: " + path, true};

@@ -14,7 +14,7 @@ namespace Haisos {
 // console, and a services layer, and can start processes (agent- or
 // script-backed) and spawn more tightly-scoped sub-OS instances.
 //
-// A running process reaches its OS only through ICurrentProcess::GetHaisosOS(),
+// A running process reaches its OS only through ICurrentProcess::OS(),
 // never through an IHaisosOS handed to it directly -- that is what lets one
 // process be given a narrower OS than another without any runtime knowing.
 class IHaisosOS {

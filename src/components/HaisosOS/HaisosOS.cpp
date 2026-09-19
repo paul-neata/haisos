@@ -191,7 +191,7 @@ std::shared_ptr<IOSProcess> HaisosOS::StartAgentProcess(
     // be strong. A narrowed per-process OS would be passed here instead.
     auto process = AgentProcess::Create(
         pid, /*parentPid=*/0, std::move(environment), programPath, workingDirectory,
-        m_rootFileSystem, weak_from_this(), processHandle, concreteAgent);
+        weak_from_this(), processHandle, concreteAgent);
 
     // Only now: the agent's first command may call a tool, and a tool must find
     // the process it acts for, which AgentProcess::Create has just filled in.
@@ -228,7 +228,7 @@ std::shared_ptr<IOSProcess> HaisosOS::StartLuaProcess(
     auto processHandle = CurrentProcessHandle::Create();
     auto process = LuaProcess::Create(
         pid, /*parentPid=*/0, std::move(environment), programPath, workingDirectory,
-        m_rootFileSystem, weak_from_this(), processHandle, std::move(content), args,
+        weak_from_this(), processHandle, std::move(content), args,
         OSToolFactory::Create(processHandle), std::move(console));
 
     {

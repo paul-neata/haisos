@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <fstream>
 #include "HaisosOS.h"
+#include "src/components/Filesystem/FilesystemUtils.h"
 #include "Factory.h"
 #include "ServicesCreator.h"
 
@@ -196,8 +197,8 @@ TEST_F(HaisosOSTest, ProcessStartsAtTheWorkingDirectoryItWasGiven) {
     auto inSubInside = std::dynamic_pointer_cast<ICurrentProcess>(inSub);
     ASSERT_NE(atRootInside, nullptr);
     ASSERT_NE(inSubInside, nullptr);
-    EXPECT_EQ(atRootInside->GetCurrentDirectory(), "/");
-    EXPECT_EQ(inSubInside->GetCurrentDirectory(), "/sub");
+    EXPECT_EQ(atRootInside->IO()->GetCurrentDirectory(), "/");
+    EXPECT_EQ(inSubInside->IO()->GetCurrentDirectory(), "/sub");
 }
 
 TEST_F(HaisosOSTest, ChangeDirectoryMovesOnlyThatProcess) {
@@ -210,13 +211,13 @@ TEST_F(HaisosOSTest, ChangeDirectoryMovesOnlyThatProcess) {
     ASSERT_NE(first, nullptr);
     ASSERT_NE(second, nullptr);
 
-    EXPECT_EQ(first->ChangeDirectory("sub"), 0);
-    EXPECT_EQ(first->GetCurrentDirectory(), "/sub");
+    EXPECT_EQ(first->IO()->ChangeDirectory("sub"), 0);
+    EXPECT_EQ(first->IO()->GetCurrentDirectory(), "/sub");
     // The other process has not moved: a filesystem holds no cwd for them to share.
-    EXPECT_EQ(second->GetCurrentDirectory(), "/");
+    EXPECT_EQ(second->IO()->GetCurrentDirectory(), "/");
 
-    EXPECT_EQ(first->ChangeDirectory(".."), 0);
-    EXPECT_EQ(first->GetCurrentDirectory(), "/");
+    EXPECT_EQ(first->IO()->ChangeDirectory(".."), 0);
+    EXPECT_EQ(first->IO()->GetCurrentDirectory(), "/");
 }
 
 TEST_F(HaisosOSTest, ChangeDirectoryRejectsWhatIsNotADirectory) {
@@ -225,9 +226,9 @@ TEST_F(HaisosOSTest, ChangeDirectoryRejectsWhatIsNotADirectory) {
         os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/""));
     ASSERT_NE(process, nullptr);
 
-    EXPECT_EQ(process->ChangeDirectory("hello.md"), -1);
-    EXPECT_EQ(process->ChangeDirectory("nowhere"), -1);
-    EXPECT_EQ(process->GetCurrentDirectory(), "/");
+    EXPECT_EQ(process->IO()->ChangeDirectory("hello.md"), -1);
+    EXPECT_EQ(process->IO()->ChangeDirectory("nowhere"), -1);
+    EXPECT_EQ(process->IO()->GetCurrentDirectory(), "/");
 }
 
 // Reading a process's environment from outside must never be a way to change
@@ -248,15 +249,15 @@ TEST_F(HaisosOSTest, GetEnvironmentHandsOutACloneNotTheProcessOwn) {
 }
 
 // A process reaches everything outside itself through its OS, and only through
-// ICurrentProcess::GetHaisosOS() -- nothing is handed an IHaisosOS directly.
+// ICurrentProcess::OS() -- nothing is handed an IHaisosOS directly.
 // That is what will let one process be given a narrower OS than another.
-TEST_F(HaisosOSTest, ProcessReachesItsOSThroughGetHaisosOS) {
+TEST_F(HaisosOSTest, ProcessReachesItsOSThroughOS) {
     auto os = BuildOS();
     auto process = std::dynamic_pointer_cast<ICurrentProcess>(
         os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/""));
     ASSERT_NE(process, nullptr);
 
-    auto reached = process->GetHaisosOS();
+    auto reached = process->OS();
     ASSERT_NE(reached, nullptr);
     EXPECT_EQ(reached->GetOSProcessID(), os->GetOSProcessID());
 }
@@ -272,11 +273,11 @@ TEST_F(HaisosOSTest, ProcessDoesNotKeepItsOSAlive) {
         process = std::dynamic_pointer_cast<ICurrentProcess>(
             os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/""));
         ASSERT_NE(process, nullptr);
-        ASSERT_NE(process->GetHaisosOS(), nullptr);
+        ASSERT_NE(process->OS(), nullptr);
     }
 
     EXPECT_TRUE(osWatch.expired());
-    EXPECT_EQ(process->GetHaisosOS(), nullptr);
+    EXPECT_EQ(process->OS(), nullptr);
 }
 
 // The os_* tools reach the OS only through the calling process
@@ -302,6 +303,59 @@ TEST_F(HaisosOSTest, ToolsResolveAgainstTheRootForAProcessStartedThere) {
 
     EXPECT_TRUE(std::filesystem::exists(kTestRoot + "/written.txt"));
     EXPECT_FALSE(std::filesystem::exists(kTestRoot + "/sub/written.txt"));
+}
+
+// IFileIO is what makes a bare name or a relative path mean anything: an
+// IFileSystem understands absolute paths alone, so this is the only place the
+// path and the process's position are brought together.
+TEST_F(HaisosOSTest, FileIOResolvesBareNamesAndRelativePathsFromWhereTheProcessIs) {
+    auto os = BuildOS();
+    auto process = std::dynamic_pointer_cast<ICurrentProcess>(
+        os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"sub"));
+    ASSERT_NE(process, nullptr);
+    auto io = process->IO();
+    ASSERT_NE(io, nullptr);
+
+    // A bare name is taken from the working directory.
+    EXPECT_EQ(io->ResolvePath("inner.md"), "/sub/inner.md");
+    // A relative path is walked from there.
+    EXPECT_EQ(io->ResolvePath("../hello.md"), "/hello.md");
+    // An absolute path is already what it says.
+    EXPECT_EQ(io->ResolvePath("/hello.md"), "/hello.md");
+    // ".." cannot climb above the root.
+    EXPECT_EQ(io->ResolvePath("../../../hello.md"), "/hello.md");
+}
+
+TEST_F(HaisosOSTest, FileIOReadsAndWritesThroughTheWorkingDirectory) {
+    auto os = BuildOS();
+    auto process = std::dynamic_pointer_cast<ICurrentProcess>(
+        os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"sub"));
+    ASSERT_NE(process, nullptr);
+    auto io = process->IO();
+
+    int fd = io->OpenFile("note.txt", kFileOpenWriteCreateTruncate, kFileCreateMode);
+    ASSERT_GE(fd, 0);
+    const std::string payload = "written from sub";
+    EXPECT_EQ(io->WriteFile(fd, payload.data(), payload.size()), static_cast<ssize_t>(payload.size()));
+    io->CloseFile(fd);
+
+    // The bare name landed in the working directory, not at the root.
+    EXPECT_TRUE(std::filesystem::exists(kTestRoot + "/sub/note.txt"));
+    EXPECT_FALSE(std::filesystem::exists(kTestRoot + "/note.txt"));
+
+    // And reads come back through the same route.
+    std::string readBack;
+    EXPECT_TRUE(ReadWholeFile(*io, "note.txt", readBack));
+    EXPECT_EQ(readBack, payload);
+
+    // A directory listing is resolved the same way.
+    bool sawNote = false;
+    for (const auto& entry : io->ReadDirectory(".")) {
+        if (entry.name == "note.txt") {
+            sawNote = true;
+        }
+    }
+    EXPECT_TRUE(sawNote);
 }
 
 TEST_F(HaisosOSTest, CreateHaisosOSWithoutAnEnvironmentReturnsNull) {

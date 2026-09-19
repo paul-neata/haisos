@@ -1,4 +1,4 @@
-add_library(HaisosOS STATIC HaisosOS.cpp AgentProcess.cpp OSToolFactory.cpp LuaProcess.cpp)
+add_library(HaisosOS STATIC HaisosOS.cpp AgentProcess.cpp OSToolFactory.cpp LuaProcess.cpp ProcessFileIO.cpp)
 target_include_directories(HaisosOS PUBLIC
     ${CMAKE_SOURCE_DIR}/interfaces
     ${CMAKE_SOURCE_DIR}/src/components/HaisosOS

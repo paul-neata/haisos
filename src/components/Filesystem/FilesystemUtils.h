@@ -45,9 +45,13 @@ inline bool RequestsWriteAccess(int flags) {
            (flags & kFileAppendBit) != 0;
 }
 
-// Reads the whole file at |path| (through |fs|, which may be a rooted/jailed
-// filesystem), up to a 10 MB cap. Returns false on any failure.
-inline bool ReadWholeFile(IFileSystem& fs, const std::string& path, std::string& outContent) {
+// Reads the whole file at |path|, up to a 10 MB cap. Returns false on any
+// failure. |fs| is anything offering the IFileSystem file operations: an
+// IFileSystem (which may be rooted/jailed, and understands absolute paths
+// only) or a process's IFileIO (which also resolves a relative path against
+// where that process currently is).
+template <typename FileAccess>
+inline bool ReadWholeFile(FileAccess& fs, const std::string& path, std::string& outContent) {
     int fd = fs.OpenFile(path, kFileOpenReadOnly);
     if (fd < 0) {
         return false;

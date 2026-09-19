@@ -43,21 +43,22 @@ ToolResult OSWriteFileTool::Call(std::shared_ptr<IAgent> /*callerAgent*/, const 
         return NoCurrentProcessError(ToolName);
     }
 
-    std::string path = context.ResolvePath(args["path"]);
+    std::string path = args["path"];
     std::string content = args["content"];
     bool append = args.value("append", false);
 
-    LogDebug("OSWriteFileTool: writing file '%s' append=%d", path.c_str(), append ? 1 : 0);
+    LogDebug("OSWriteFileTool: writing file '%s' (resolved to '%s') append=%d",
+        path.c_str(), context.io->ResolvePath(path).c_str(), append ? 1 : 0);
 
-    auto fs = context.os->GetRootFileSystem();
-    int fd = fs->OpenFile(path, append ? kFileOpenWriteCreateAppend : kFileOpenWriteCreateTruncate, kFileCreateMode);
+    auto& io = *context.io;
+    int fd = io.OpenFile(path, append ? kFileOpenWriteCreateAppend : kFileOpenWriteCreateTruncate, kFileCreateMode);
     if (fd < 0) {
         LogWarning("OSWriteFileTool: failed to open file '%s' for writing (fd=%d)", path.c_str(), fd);
         return ToolResult{"Failed to open file for writing: " + path, true};
     }
 
-    ssize_t written = fs->WriteFile(fd, content.data(), content.size());
-    fs->CloseFile(fd);
+    ssize_t written = io.WriteFile(fd, content.data(), content.size());
+    io.CloseFile(fd);
 
     if (written < 0 || static_cast<size_t>(written) != content.size()) {
         LogWarning("OSWriteFileTool: failed to write file '%s' (written=%zd, expected=%zu)", path.c_str(), written, content.size());

@@ -23,11 +23,13 @@ behaves identically no matter what you mount onto.
 - Provides directory operations: mkdir, rmdir
 - Provides custom directory listing via `ReadDirectory`
 - Holds **no current directory**. That notion belongs to a process
-  (`ICurrentProcess::ChangeDirectory`), not to a filesystem: one filesystem is
+  (`ICurrentProcess::IO()`, an `IFileIO`), not to a filesystem: one filesystem is
   reachable from every process under an OS, so a cwd living here would be a
   cwd they all shared. Every path an `IFileSystem` is handed is therefore
   resolved against its own root -- `"foo"` and `"/foo"` mean the same thing --
-  and a process resolves against its own working directory before calling in.
+  and a process's `IFileIO` resolves against its working directory before
+  calling in. A running program never holds an `IFileSystem`: it holds an
+  `IFileIO`, which is the only thing that can make sense of a bare name.
 - `FileSystem` uses platform-specific backends:
   - **Linux**: POSIX calls (`linux/PosixFilesystem.cpp`)
   - **Windows**: Windows CRT (`windows/WindowsFilesystem.cpp`)

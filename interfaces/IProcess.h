@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 #include "IEnvironment.h"
+#include "IFileIO.h"
 #include "ILLMService.h"
 
 namespace Haisos {
@@ -53,12 +54,13 @@ public:
 };
 
 // What a process looks like from the inside -- the handle a process has on
-// itself. It adds what only the process may do to itself: move its working
-// directory, reach the agent running it, and reach the OS it runs under.
+// itself. It adds what only the process may do for itself: file I/O from where
+// it currently is, reaching the agent running it, and reaching the OS it runs
+// under.
 //
 // THIS IS THE ONLY DOOR OUT OF A PROCESS. Everything a running program reaches
 // beyond its own memory -- the filesystem, other processes, the services -- it
-// reaches through here, via GetHaisosOS(). That holds for every runtime alike:
+// reaches through here, via OS() and IO(). That holds for every runtime alike:
 // the tools an agent calls, the agent itself, and the globals a Lua script
 // gets. Nothing is handed an IHaisosOS directly, and nothing keeps a private
 // path to one.
@@ -72,22 +74,19 @@ public:
 //     still to come -- see the Security section of the root CLAUDE.md).
 class ICurrentProcess : public IProcess {
 public:
-    // This process's working directory, against which it resolves relative
-    // paths before handing them to a filesystem (a filesystem has none of its
-    // own -- see IFileSystem). Always an absolute path within the OS's root.
-    virtual std::string GetCurrentDirectory() const = 0;
-
-    // Moves this process's working directory, resolving path against the
-    // current one. Returns 0 on success and -1 if the target is not a directory
-    // of this OS's root filesystem, matching chdir().
-    virtual int ChangeDirectory(const std::string& path) = 0;
+    // This process's file I/O: the OS's root filesystem plus the working
+    // directory this process resolves relative paths against. All file access
+    // a running program does goes through here -- the tools an agent calls and
+    // the globals a Lua script gets alike -- never to an IFileSystem directly,
+    // which would understand only absolute paths. Never null.
+    virtual std::shared_ptr<IFileIO> IO() const = 0;
 
     // The agent running this process, or null for a process whose runtime is
     // not an agent.
     virtual std::shared_ptr<IAgent> AsAgent() = 0;
 
     // The OS this process is part of, and everything it may reach outside
-    // itself (see the note above this class).
+    // itself beyond its own files (see the note above this class).
     //
     // Not necessarily the OS that started it: it may be a narrowed clone of
     // that one, confined by the root filesystem it was built with. When user
@@ -99,7 +98,7 @@ public:
     // Returns null once the OS is gone, which outlives no running process in
     // practice: the reference is weak, because an OS owns its processes and a
     // strong one back would be a cycle neither could escape.
-    virtual std::shared_ptr<IHaisosOS> GetHaisosOS() const = 0;
+    virtual std::shared_ptr<IHaisosOS> OS() const = 0;
 };
 
 }

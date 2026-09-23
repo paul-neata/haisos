@@ -8,7 +8,7 @@ Manages LLM conversations with parent/child agent relationships. Supports subage
 - Handles tool calls returned by the LLM and executes them
 - Supports parent/child agent hierarchies for subagent delegation
 - Runs each agent on its own thread with a command queue
-- Tracks agent lifecycle: running, finished, killed
+- Tracks agent lifecycle: running, finished
 - Provides console output aggregation from agent execution
 - Created only through `Agent::Create()` (the constructor is private and every
   `Agent` is owned by a `shared_ptr`). `Create()` also starts the conversation
@@ -26,7 +26,13 @@ Manages LLM conversations with parent/child agent relationships. Supports subage
 - Tool-call results are treated as untrusted content: they are added to the history verbatim
   (never filtered, so file contents and JSON stay intact) but wrapped in
   `--- BEGIN TOOL RESULT ---` / `--- END TOOL RESULT ---` delimiters, the same convention used
-  for user input. Oversized results are truncated before the delimiters are added.
+  for user input.
+- **Nothing is truncated or trimmed.** The history keeps every message for the
+  agent's whole life, and message content -- an LLM reply, a tool result, the
+  copy written to the log -- reaches its destination whole. What the model said
+  and what a tool returned is what is kept. The cost is that a long-running
+  agent's history grows without bound, and with it the size of every request:
+  `MAX_LLM_ROUNDS` caps one command's rounds, nothing caps the conversation.
 - Tool descriptions are fetched from the tool factory once in the constructor and cached for the
   agent's lifetime, not rebuilt per LLM round. Tools registered after an agent is constructed are
   invisible to it, so tool registries must be populated before agents are created.
@@ -36,8 +42,8 @@ Manages LLM conversations with parent/child agent relationships. Supports subage
 `IAgent` is defined in `interfaces/ILLMService.h` and provides methods for:
 - Sending commands (`Post`, `Send`)
 - Asking an agent to stop (`TriggerStop`) and waiting on it
-  (`WaitToFinish(timeoutMs)`; a timeout of 0 does not wait at all, so it
-  doubles as "has it finished?")
+  (`WaitToFinish(timeoutMs)`, the only wait there is; a timeout of 0 does not
+  wait at all, so it doubles as "has it finished?")
 - Querying status (`Name`, `IsInteractive`, `GetStartTime`, `GetHistory`, `GetConsoleOutput`)
 - Navigating hierarchy (`GetParent`, `GetChildren(onlyDirectChildren)`, `AddChild`, `GetDepth`)
 
@@ -53,13 +59,25 @@ new command is taken, and it sets a flag the round already in flight notices.
 That flag is what makes a stop prompt -- `ExecuteToolCalls` runs no further
 tools once it is set, and the conversation round ends rather than spending the
 remaining LLM rounds refusing tool calls. Every call still gets a result, an
-error one, because the history is only well-formed with one result per tool call
-(see `TrimHistory`, which refuses to split such a block).
+error one, because the history is only well-formed with one result per tool
+call.
 
-`Kill()`, the untimed `WaitToFinish()`, `IsFinished()` and `IsKilled()` are
-public on the concrete `Agent` only, so an agent is killed by whoever owns it --
-the process wrapping it, the `LLMService` that created it, or its own
-destructor -- and never by another agent or a tool holding an `IAgent` handle.
+**There is no `Kill()`.** An agent cannot be forced down, because its thread
+spends its time inside an HTTP call or a tool call that has to be allowed to
+return; a flag saying it was killed would change nothing about when it actually
+stops. `TriggerStop()` is the whole of it, for owners and outsiders alike --
+`AgentProcess::Kill()`, the OS's escalation after a cooperative stop times out,
+can do no more than ask again.
+
+`~Agent` is what closes the gap. It triggers a stop and then waits **without a
+bound**, in passes of `DESTRUCTION_WAIT_INTERVAL_MS`, logging a warning after
+each pass that finds the thread still running. The wait cannot give up: the
+thread runs on members the destructor is about to free, so abandoning it is a
+use-after-free rather than a timeout. The per-pass log is what keeps a wedged
+agent from looking like a silent hang.
+
+`IsFinished()` is public on the concrete `Agent` only, not on `IAgent`, which
+answers the same question through `WaitToFinish(0)`.
 
 `AddChild` is **protected** on `IAgent`, with `LLMService` as its only friend:
 an agent's children are decided by the one thing that creates agents, not by

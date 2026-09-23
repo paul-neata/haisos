@@ -22,7 +22,7 @@ bool TestAgentPostAndProcess() {
     auto networkService = servicesCreator->CreateNetworkService();
     auto llmService = servicesCreator->CreateLLMService(networkService, endpoint, model, apiKey);
 
-    auto physicalConsole = factory->CreatePhysicalConsole(false);
+    auto physicalConsole = factory->CreatePhysicalConsole();
     physicalConsole->Start();
     auto console = AgentConsoleAdapter::Create(physicalConsole, "root");
 

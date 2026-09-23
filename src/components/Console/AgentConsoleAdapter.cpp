@@ -12,7 +12,10 @@ AgentConsoleAdapter::~AgentConsoleAdapter() = default;
 
 void AgentConsoleAdapter::Write(const std::string& message) {
     if (m_physicalConsole) {
-        m_physicalConsole->Write(m_sourceName, message);
+        // Tagging happens here, in the one place that knows the source, rather
+        // than in the console -- a shared console has no business knowing who
+        // its writers are, and only one kind of writer wants a label at all.
+        m_physicalConsole->Write("[" + m_sourceName + "] " + message);
     }
 }
 

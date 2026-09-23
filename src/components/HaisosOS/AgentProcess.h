@@ -9,10 +9,13 @@
 namespace Haisos {
 
 // An ICurrentProcess whose runtime is an LLM agent. It holds the concrete Agent
-// rather than an IAgent: killing is deliberately not part of IAgent, and a
-// process is exactly the thing that has to be able to do it.
+// because it owns the agent's lifetime: the agent is destroyed with the process.
+// It does not override IOSProcess::Kill -- an agent cannot be forced down, so
+// the inherited default (ask again) is all there is.
 class AgentProcess : public IOSProcess {
 public:
+    // Returns nullptr if agent or environment is null: both are required for
+    // the life of the process, so every method here may assume them.
     static std::shared_ptr<AgentProcess> Create(
         uint64_t pid,
         uint64_t parentPid,
@@ -37,12 +40,6 @@ public:
     std::shared_ptr<IFileIO> IO() const override;
     std::shared_ptr<IAgent> AsAgent() override;
     std::shared_ptr<IHaisosOS> OS() const override;
-
-    // IOSProcess: forcing the process down, which no IProcess handle can do.
-    void Kill() override;
-
-    // Internal to this component.
-    bool IsFinished() const;
 
 private:
     AgentProcess(

@@ -11,7 +11,7 @@ public:
     ~Factory() override;
 
     // IFactory interface
-    std::shared_ptr<IPhysicalConsole> CreatePhysicalConsole(bool registerAsLogMessageReceiver) override;
+    std::shared_ptr<IPhysicalConsole> CreatePhysicalConsole() override;
     std::shared_ptr<IFileSystem> CreatePhysicalFileSystem(const std::string& rootPath) override;
     std::shared_ptr<IEnvironment> CreateEnvironment() override;
     std::shared_ptr<IServicesCreator> CreateServicesCreator() override;

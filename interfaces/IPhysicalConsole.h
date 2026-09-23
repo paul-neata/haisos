@@ -9,8 +9,10 @@ namespace Haisos {
 class IPhysicalConsole {
 public:
     virtual ~IPhysicalConsole() = default;
+    // The message is written as given. A console does not know who is writing
+    // to it and does not label anything: a writer that wants to be identifiable
+    // says so in the text it passes (see AgentConsoleAdapter).
     virtual void Write(const std::string& message) = 0;
-    virtual void Write(const std::string& sourceName, const std::string& message) = 0;
     virtual void Start() = 0;
     virtual void Stop() = 0;
 };

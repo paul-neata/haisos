@@ -14,7 +14,13 @@ class IOSProcess : public ICurrentProcess {
 public:
     // Forces the process down, as far as its runtime allows. Still asynchronous:
     // pair it with WaitToFinish.
-    virtual void Kill() = 0;
+    //
+    // How far that is depends on the runtime, so the default is to ask again:
+    // an agent's thread sits inside an HTTP call or a tool call that has to be
+    // allowed to return, and there is nothing stronger to do to it. A runtime
+    // that can genuinely be interrupted mid-instruction -- a Lua interpreter --
+    // overrides this.
+    virtual void Kill() { TriggerStop(); }
 };
 
 }

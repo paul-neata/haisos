@@ -15,8 +15,8 @@ std::shared_ptr<Factory> Factory::Create() {
 Factory::Factory() = default;
 Factory::~Factory() = default;
 
-std::shared_ptr<IPhysicalConsole> Factory::CreatePhysicalConsole(bool registerAsLogMessageReceiver) {
-    return Console::Create(registerAsLogMessageReceiver);
+std::shared_ptr<IPhysicalConsole> Factory::CreatePhysicalConsole() {
+    return Console::Create();
 }
 
 std::shared_ptr<IFileSystem> Factory::CreatePhysicalFileSystem(const std::string& rootPath) {

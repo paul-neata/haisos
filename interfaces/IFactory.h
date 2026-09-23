@@ -32,7 +32,7 @@ class IFactory {
 public:
     virtual ~IFactory() = default;
 
-    virtual std::shared_ptr<IPhysicalConsole> CreatePhysicalConsole(bool registerAsLogMessageReceiver) = 0;
+    virtual std::shared_ptr<IPhysicalConsole> CreatePhysicalConsole() = 0;
 
     // Returns a filesystem jailed to (rooted at) a real disk path: every path
     // passed to it is resolved and validated against rootPath before delegating.

@@ -47,16 +47,7 @@ public:
     // this component and its tests can reach anyway.
     void AddChild(std::shared_ptr<IAgent> child) override;
 
-    // Forcing an agent down, deliberately outside IAgent: TriggerStop is all an
-    // outsider gets. An agent is killed by whoever owns it (the IProcess
-    // wrapping it, the LLMService that created it, or this class's own
-    // destructor), never by another agent or a tool holding an IAgent handle.
-    void Kill();
-    // Blocks until the thread has finished. Only safe for an agent that will
-    // finish on its own or has been stopped -- an interactive one never does.
-    void WaitToFinish();
     bool IsFinished() const;
-    bool IsKilled() const;
 
 private:
     Agent(
@@ -104,7 +95,6 @@ private:
     // a stop asked for while a round is in flight takes effect at the next
     // point where stopping is safe rather than only at the next command.
     std::atomic<bool> m_stopRequested{false};
-    std::atomic<bool> m_killed{false};
     std::condition_variable m_finishedCv;
     std::mutex m_finishedMutex;
     std::mutex m_joinMutex;

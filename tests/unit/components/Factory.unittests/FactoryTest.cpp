@@ -6,11 +6,8 @@ using namespace Haisos;
 
 TEST(FactoryTest, CreatePhysicalConsole) {
     auto factory = Factory::Create();
-    auto console = factory->CreatePhysicalConsole(false);
+    auto console = factory->CreatePhysicalConsole();
     EXPECT_NE(console, nullptr);
-
-    auto consoleWithLog = factory->CreatePhysicalConsole(true);
-    EXPECT_NE(consoleWithLog, nullptr);
 }
 
 TEST(FactoryTest, CreateServicesCreator) {

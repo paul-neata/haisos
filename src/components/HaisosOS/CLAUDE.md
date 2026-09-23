@@ -99,11 +99,14 @@ console, and a services layer; starts processes and spawns sub-OS instances.
 ## Key Classes
 
 - `HaisosOS` - Main implementation of `IHaisosOS`; `HaisosOS::Create(...)` builds an instance
-- `AgentProcess` - `IOSProcess` backed by an agent. It holds the concrete `Agent`,
-  not an `IAgent`: stopping and killing are deliberately off `IAgent` (see the
-  Agent component's CLAUDE.md), and a process is exactly the thing that has to
-  be able to do both
+- `AgentProcess` - `IOSProcess` backed by an agent. It holds the concrete
+  `Agent` because it owns the agent's lifetime. It does **not** override
+  `Kill()`: an agent cannot be forced down (see the Agent component's
+  CLAUDE.md), so the inherited default -- ask again -- is all there is, and a
+  wedged agent process is waited out by `~Agent` rather than aborted.
+  `AgentProcess::Create` refuses a null agent or environment, so the rest of
+  the class assumes both
 - `LuaProcess` - `IOSProcess` backed by an embedded Lua script, running on its own thread; `Kill()` aborts it via a Lua instruction-count hook
-- `IOSProcess` (`OSProcess.h`) - `ICurrentProcess` plus `Kill()`; the type the OS tracks its processes as, so only the OS can force one down
+- `IOSProcess` (`OSProcess.h`) - `ICurrentProcess` plus `Kill()`; the type the OS tracks its processes as, so only the OS can force one down. `Kill()` is virtual with a default of `TriggerStop()`, which a runtime that can genuinely be interrupted overrides
 - `ProcessFileIO` - the `IFileIO` behind `ICurrentProcess::IO()`: the OS's root filesystem plus this process's working directory
 - `OSToolFactory` - the OS-level tool set (`os_read_file`, `os_write_file`, `os_list_directory`, `os_start_process`, `os_list_processes`), built once per process and bound to it

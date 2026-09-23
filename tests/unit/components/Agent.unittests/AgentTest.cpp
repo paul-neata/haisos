@@ -14,6 +14,10 @@ using namespace Haisos::Mocks;
 
 namespace {
 
+// The untimed WaitToFinish() is gone, so a test that means "wait until it is
+// done" waits with a timeout generous enough that only a real hang trips it.
+constexpr uint64_t kWaitTimeoutMs = 5000;
+
 // A tool factory with one tool that records whether it was ever called.
 class RecordingToolFactory : public IToolFactory {
 public:
@@ -66,7 +70,7 @@ TEST(AgentTest, Construction) {
     EXPECT_EQ(agent->GetParent(), nullptr);
 
     agent->TriggerStop();
-    agent->WaitToFinish();
+    ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
 }
 
 TEST(AgentTest, PostAndWaitToFinish) {
@@ -81,7 +85,7 @@ TEST(AgentTest, PostAndWaitToFinish) {
 
     agent->Post("Test command");
     agent->TriggerStop();
-    agent->WaitToFinish();
+    ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
 
     EXPECT_EQ(mockLLM->GetCallCount(), 1);
 }
@@ -98,7 +102,7 @@ TEST(AgentTest, CommandProcessingWritesToConsole) {
 
     agent->Post("Test command");
     agent->TriggerStop();
-    agent->WaitToFinish();
+    ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
 
     // IAgentConsole receives the raw message; per-source tagging (e.g. "[name]")
     // is the physical console's job (see AgentConsoleAdapter/Console), not the
@@ -125,7 +129,7 @@ TEST(AgentTest, CommandProcessingWritesToConsoleOutput) {
 
     agent->Post("Test command");
     agent->TriggerStop();
-    agent->WaitToFinish();
+    ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
 
     std::string contents = agent->GetConsoleOutput();
     EXPECT_NE(contents.find("Virtual response"), std::string::npos);
@@ -144,7 +148,7 @@ TEST(AgentTest, MultiplePosts) {
     agent->Post("Command 1");
     agent->Post("Command 2");
     agent->TriggerStop();
-    agent->WaitToFinish();
+    ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
 
     EXPECT_EQ(mockLLM->GetCallCount(), 2);
 }
@@ -159,7 +163,7 @@ TEST(AgentTest, StopWithoutPost) {
         "test_agent", nullptr);
 
     agent->TriggerStop();
-    agent->WaitToFinish();
+    ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
 
     EXPECT_EQ(mockLLM->GetCallCount(), 0);
 }
@@ -194,9 +198,9 @@ TEST(AgentTest, ParentChildRelationship) {
     EXPECT_EQ(children[0]->Name(), "child");
 
     child->TriggerStop();
-    child->WaitToFinish();
+    ASSERT_TRUE(child->WaitToFinish(kWaitTimeoutMs));
     parent->TriggerStop();
-    parent->WaitToFinish();
+    ASSERT_TRUE(parent->WaitToFinish(kWaitTimeoutMs));
 }
 
 TEST(AgentTest, ChildKnowsParent) {
@@ -227,9 +231,9 @@ TEST(AgentTest, ChildKnowsParent) {
     EXPECT_EQ(child->GetParent(), parent);
 
     child->TriggerStop();
-    child->WaitToFinish();
+    ASSERT_TRUE(child->WaitToFinish(kWaitTimeoutMs));
     parent->TriggerStop();
-    parent->WaitToFinish();
+    ASSERT_TRUE(parent->WaitToFinish(kWaitTimeoutMs));
 }
 
 TEST(AgentTest, ChildDestructionRemovesFromParent) {
@@ -264,13 +268,13 @@ TEST(AgentTest, ChildDestructionRemovesFromParent) {
 
         EXPECT_EQ(parent->GetChildren(/*onlyDirectChildren=*/true).size(), 1u);
         child->TriggerStop();
-        child->WaitToFinish();
+        ASSERT_TRUE(child->WaitToFinish(kWaitTimeoutMs));
     }
 
     EXPECT_EQ(parent->GetChildren(/*onlyDirectChildren=*/true).size(), 0u);
 
     parent->TriggerStop();
-    parent->WaitToFinish();
+    ASSERT_TRUE(parent->WaitToFinish(kWaitTimeoutMs));
 }
 
 TEST(AgentTest, GetHistoryContainsUserMessage) {
@@ -289,7 +293,7 @@ TEST(AgentTest, GetHistoryContainsUserMessage) {
 
     agent->Post("Hello agent");
     agent->TriggerStop();
-    agent->WaitToFinish();
+    ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
 
     auto history = agent->GetHistory();
     ASSERT_TRUE(history.is_array());
@@ -305,7 +309,7 @@ TEST(AgentTest, GetHistoryContainsUserMessage) {
     EXPECT_TRUE(foundUserMessage);
 }
 
-TEST(AgentTest, KillSetsKilledFlag) {
+TEST(AgentTest, TriggerStopFinishesAnIdleAgent) {
     auto mockLLM = std::make_shared<MockLLMCommunicator>();
     auto mockConsole = std::make_shared<MockAgentConsole>();
     auto toolFactory = ToolFactory::Create();
@@ -314,10 +318,10 @@ TEST(AgentTest, KillSetsKilledFlag) {
         std::vector<std::string>{"You are a helpful AI assistant."},
         "test_agent", nullptr);
 
-    EXPECT_FALSE(agent->IsKilled());
-    agent->Kill();
-    agent->WaitToFinish();
-    EXPECT_TRUE(agent->IsKilled());
+    EXPECT_FALSE(agent->IsFinished());
+    agent->TriggerStop();
+    EXPECT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
+    EXPECT_TRUE(agent->IsFinished());
 }
 
 TEST(AgentTest, WaitToFinishWithTimeoutReturnsFalseIfNotFinished) {
@@ -334,7 +338,7 @@ TEST(AgentTest, WaitToFinishWithTimeoutReturnsFalseIfNotFinished) {
     EXPECT_FALSE(finished);
 
     agent->TriggerStop();
-    agent->WaitToFinish();
+    ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
 }
 
 TEST(AgentTest, TriggerStopThenWaitToFinishReturnsTrue) {
@@ -420,7 +424,7 @@ TEST(AgentTest, GetConsoleOutputContainsAgentMessages) {
 
     agent->Post("Test");
     agent->TriggerStop();
-    agent->WaitToFinish();
+    ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
 
     std::string output = agent->GetConsoleOutput();
     EXPECT_NE(output.find("Hello world"), std::string::npos);

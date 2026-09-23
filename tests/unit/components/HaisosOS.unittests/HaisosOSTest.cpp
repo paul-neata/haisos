@@ -42,7 +42,7 @@ protected:
     std::shared_ptr<IHaisosOS> BuildOS() {
         std::shared_ptr<IServicesCreator> servicesCreator = m_factory->CreateServicesCreator();
         std::shared_ptr<IFileSystem> rootFileSystem = m_factory->CreatePhysicalFileSystem(kTestRoot);
-        auto physicalConsole = m_factory->CreatePhysicalConsole(false);
+        auto physicalConsole = m_factory->CreatePhysicalConsole();
         return m_factory->CreateHaisosOS(
             std::move(servicesCreator), physicalConsole, rootFileSystem, TestEnvironment());
     }
@@ -140,7 +140,7 @@ TEST_F(HaisosOSTest, CreateSubOSIsConfinedByTheRootItIsGiven) {
         m_factory->CreatePhysicalFileSystem(kTestRoot), "sub");
     auto subOS = os->CreateSubOS(
         os->GetServicesCreator()->Clone(),
-        m_factory->CreatePhysicalConsole(false),
+        m_factory->CreatePhysicalConsole(),
         subRoot,
         os->GetOsEnvironment()->Clone());
     ASSERT_NE(subOS, nullptr);
@@ -155,7 +155,7 @@ TEST_F(HaisosOSTest, CreateSubOSCarriesTheParentOSPid) {
 
     auto subOS = os->CreateSubOS(
         os->GetServicesCreator()->Clone(),
-        m_factory->CreatePhysicalConsole(false),
+        m_factory->CreatePhysicalConsole(),
         m_factory->CreatePhysicalFileSystem(kTestRoot),
         os->GetOsEnvironment()->Clone());
     ASSERT_NE(subOS, nullptr);
@@ -170,7 +170,7 @@ TEST_F(HaisosOSTest, SubOSGetsACopyOfTheEnvironmentItIsGiven) {
 
     auto subOS = os->CreateSubOS(
         os->GetServicesCreator()->Clone(),
-        m_factory->CreatePhysicalConsole(false),
+        m_factory->CreatePhysicalConsole(),
         m_factory->CreatePhysicalFileSystem(kTestRoot),
         os->GetOsEnvironment()->Clone());
     ASSERT_NE(subOS, nullptr);
@@ -361,7 +361,7 @@ TEST_F(HaisosOSTest, FileIOReadsAndWritesThroughTheWorkingDirectory) {
 TEST_F(HaisosOSTest, CreateHaisosOSWithoutAnEnvironmentReturnsNull) {
     std::shared_ptr<IServicesCreator> servicesCreator = m_factory->CreateServicesCreator();
     std::shared_ptr<IFileSystem> rootFileSystem = m_factory->CreatePhysicalFileSystem(kTestRoot);
-    auto physicalConsole = m_factory->CreatePhysicalConsole(false);
+    auto physicalConsole = m_factory->CreatePhysicalConsole();
     EXPECT_EQ(
         m_factory->CreateHaisosOS(std::move(servicesCreator), physicalConsole, rootFileSystem, nullptr),
         nullptr);

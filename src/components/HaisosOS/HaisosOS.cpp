@@ -31,10 +31,9 @@ std::string GetStem(const std::string& path) {
 // Maximum number of concurrently-running processes per OS instance. Each one
 // costs a thread (plus, for an agent, an HTTP client and unbounded LLM spend),
 // so an unbounded count is a fork bomb: a .lua script that starts itself, or an
-// agent looping on os_start_process. 64 is far above any legitimate use (a
-// handful of initial RUNs plus their children, with agent recursion already
-// capped at depth 5) while keeping thread and socket usage bounded.
-constexpr size_t MAX_CONCURRENT_PROCESSES = 64;
+// agent looping on os_start_process. The cap is a backstop against that runaway
+// rather than a budget, so it is set well clear of any legitimate use.
+constexpr size_t MAX_CONCURRENT_PROCESSES = 1024;
 
 // Shutdown budget per process: how long a cooperative Stop() is given before
 // escalating to Kill(), and how long Kill() is then given to take effect.
@@ -192,6 +191,12 @@ std::shared_ptr<IOSProcess> HaisosOS::StartAgentProcess(
     auto process = AgentProcess::Create(
         pid, /*parentPid=*/0, std::move(environment), programPath, workingDirectory,
         weak_from_this(), processHandle, concreteAgent);
+    if (!process) {
+        // AgentProcess::Create has already said why. The agent is dropped here
+        // unstarted: nothing was posted to it, and its destructor waits out the
+        // thread Create() began.
+        return nullptr;
+    }
 
     // Only now: the agent's first command may call a tool, and a tool must find
     // the process it acts for, which AgentProcess::Create has just filled in.

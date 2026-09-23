@@ -1,4 +1,5 @@
 #include "AgentProcess.h"
+#include "src/components/Logger/Logger.h"
 
 namespace Haisos {
 
@@ -12,6 +13,19 @@ std::shared_ptr<AgentProcess> AgentProcess::Create(
     std::shared_ptr<CurrentProcessHandle> selfHandle,
     std::shared_ptr<Agent> agent)
 {
+    // The two things this process cannot be without, refused here so that every
+    // method below may simply use them. An agent process with no agent has no
+    // runtime to be a process for, and one with no environment would silently
+    // run with nothing in it -- both are caller bugs, not states to tolerate.
+    if (!agent) {
+        LogError("AgentProcess: refusing to create a process for '%s': no agent was passed", path.c_str());
+        return nullptr;
+    }
+    if (!environment) {
+        LogError("AgentProcess: refusing to create a process for '%s': no environment was passed", path.c_str());
+        return nullptr;
+    }
+
     auto process = std::shared_ptr<AgentProcess>(new AgentProcess(
         pid, parentPid, std::move(environment), path, workingDirectory, std::move(os), std::move(agent)));
     // The process's own tools reach it through this handle. Filling it in here
@@ -56,13 +70,13 @@ std::string AgentProcess::Path() const {
 }
 
 std::string AgentProcess::StartingAgentName() const {
-    return m_agent ? m_agent->Name() : std::string();
+    return m_agent->Name();
 }
 
 std::shared_ptr<IEnvironment> AgentProcess::GetEnvironment() const {
     // A clone: reading a process's environment from outside must never be a way
     // to change what the process itself sees.
-    return m_environment ? m_environment->Clone() : nullptr;
+    return m_environment->Clone();
 }
 
 void AgentProcess::TriggerStop() {
@@ -85,14 +99,6 @@ std::shared_ptr<IHaisosOS> AgentProcess::OS() const {
     // The one door out of this process: everything it reaches beyond its own
     // memory comes from here or from IO() (see ICurrentProcess).
     return m_os.lock();
-}
-
-void AgentProcess::Kill() {
-    m_agent->Kill();
-}
-
-bool AgentProcess::IsFinished() const {
-    return m_agent->IsFinished();
 }
 
 }

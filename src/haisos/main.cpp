@@ -270,7 +270,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    auto physicalConsole = factory->CreatePhysicalConsole(false);
+    auto physicalConsole = factory->CreatePhysicalConsole();
     physicalConsole->Start();
 
     auto os = factory->CreateHaisosOS(servicesCreator, physicalConsole, rootFileSystem, environment);

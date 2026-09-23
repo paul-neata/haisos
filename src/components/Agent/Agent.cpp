@@ -1,5 +1,4 @@
 #include "Agent.h"
-#include <algorithm>
 #include <chrono>
 #include <iterator>
 #include <nlohmann/json.hpp>
@@ -8,47 +7,10 @@
 
 namespace Haisos {
 
-constexpr size_t MAX_HISTORY_SIZE = 100;
-constexpr size_t MAX_MESSAGE_CONTENT_SIZE = 100 * 1024;
-constexpr size_t MAX_LOGGED_TOOL_RESULT_SIZE = 1024;
-
-static void TrimHistory(std::vector<LLMMessage>& history) {
-    if (history.size() <= MAX_HISTORY_SIZE) {
-        return;
-    }
-
-    // Count system messages at the beginning
-    size_t systemCount = 0;
-    for (const auto& msg : history) {
-        if (msg.role == "system") {
-            ++systemCount;
-        } else {
-            break;
-        }
-    }
-
-    size_t excess = history.size() - MAX_HISTORY_SIZE;
-    size_t removable = history.size() - systemCount;
-    size_t toRemove = std::min(excess, removable);
-
-    // Never trim in the middle of a tool-call round. If the erase boundary
-    // falls inside a block of tool result messages, extend removal to include
-    // the entire block so no orphaned tool messages remain.
-    while (systemCount + toRemove < history.size() && history[systemCount + toRemove].role == "tool") {
-        ++toRemove;
-    }
-
-    history.erase(history.begin() + static_cast<std::ptrdiff_t>(systemCount),
-                  history.begin() + static_cast<std::ptrdiff_t>(systemCount + toRemove));
-}
-
-static void TruncateIfNeeded(std::string& content, size_t maxSize = MAX_MESSAGE_CONTENT_SIZE) {
-    constexpr size_t truncatedNoticeSize = 11; // strlen("[truncated]")
-    if (content.size() > maxSize && maxSize > truncatedNoticeSize) {
-        content.resize(maxSize - truncatedNoticeSize);
-        content += "[truncated]";
-    }
-}
+// How long each pass of the destructor's wait gives the agent's thread before
+// reporting that it is still running. Only the reporting interval -- the wait
+// itself never gives up.
+constexpr uint64_t DESTRUCTION_WAIT_INTERVAL_MS = 5000;
 
 std::shared_ptr<Agent> Agent::Create(
     std::shared_ptr<ILLMCommunicator> llmCommunicator,
@@ -104,10 +66,15 @@ void Agent::Start() {
 
 Agent::~Agent() {
     TriggerStop();
-    if (!WaitToFinish(5000)) {
-        LogWarning("Agent '%s' thread did not finish within 5s during destruction, waiting indefinitely", m_name.c_str());
+    // The wait is deliberately unbounded: the thread runs on members this
+    // destructor is about to free, so giving up on it is never an option.
+    // Every pass says whether the agent has stopped, so one that is wedged
+    // shows up in the log as it happens instead of looking like a silent hang.
+    while (!WaitToFinish(DESTRUCTION_WAIT_INTERVAL_MS)) {
+        LogWarning("Agent '%s' has not stopped after waiting %llums in its destructor, still waiting",
+            m_name.c_str(), static_cast<unsigned long long>(DESTRUCTION_WAIT_INTERVAL_MS));
     }
-    WaitToFinish();
+    LogDebug("Agent '%s' stopped, destruction continuing", m_name.c_str());
 }
 
 void Agent::Post(const std::string& command) {
@@ -128,24 +95,12 @@ void Agent::TriggerStop() {
     m_commandQueue.Close();
 }
 
-void Agent::Kill() {
-    m_killed = true;
-    TriggerStop();
-}
-
 std::shared_ptr<IAgent> Agent::GetParent() const {
     return m_parent;
 }
 
 std::string Agent::Name() const {
     return m_name;
-}
-
-void Agent::WaitToFinish() {
-    std::lock_guard<std::mutex> joinLock(m_joinMutex);
-    if (m_thread.joinable()) {
-        m_thread.join();
-    }
 }
 
 bool Agent::WaitToFinish(uint64_t timeoutMs) {
@@ -222,10 +177,6 @@ std::string Agent::GetConsoleOutput() const {
 
 bool Agent::IsFinished() const {
     return m_finished.load();
-}
-
-bool Agent::IsKilled() const {
-    return m_killed.load();
 }
 
 std::string Agent::GetStartTime() const {
@@ -305,7 +256,7 @@ std::vector<std::tuple<std::string, std::string, std::string, bool>> Agent::Exec
 
         // Asked to stop: run no further tools. Every call still gets an answer,
         // because the conversation only stays well-formed with one result per
-        // tool call (see TrimHistory, which refuses to split such a block).
+        // tool call.
         if (m_stopRequested) {
             LogDebug("Agent '%s' - stop requested, not running tool: %s", m_name.c_str(), toolName.c_str());
             toolResults.emplace_back(toolName, "Error: the agent was asked to stop", toolCallId, true);
@@ -317,9 +268,7 @@ std::vector<std::tuple<std::string, std::string, std::string, bool>> Agent::Exec
         if (tool) {
             ToolResult result = tool->Call(shared_from_this(), args);
             toolResults.emplace_back(toolName, result.content, toolCallId, result.isError);
-            std::string loggedResult = result.content;
-            TruncateIfNeeded(loggedResult, MAX_LOGGED_TOOL_RESULT_SIZE);
-            LogVerboseDebug("Agent '%s' - Tool result: %s", m_name.c_str(), loggedResult.c_str());
+            LogVerboseDebug("Agent '%s' - Tool result: %s", m_name.c_str(), result.content.c_str());
         } else {
             LogWarning("Agent '%s' - Unknown tool: %s", m_name.c_str(), toolName.c_str());
             if (m_console) {
@@ -341,7 +290,6 @@ void Agent::RunThread() {
         {
             std::lock_guard<std::mutex> lock(m_historyMutex);
             m_history.push_back(systemMsg);
-            TrimHistory(m_history);
         }
     }
 
@@ -367,7 +315,6 @@ void Agent::RunThread() {
             {
                 std::lock_guard<std::mutex> lock(m_historyMutex);
                 m_history.push_back(userMsg);
-                TrimHistory(m_history);
             }
 
             constexpr int MAX_LLM_ROUNDS = 20;
@@ -387,7 +334,6 @@ void Agent::RunThread() {
                 }
 
                 LLMResponse response = m_llmCommunicator->Call(localHistory, m_cachedToolDescriptions);
-                TruncateIfNeeded(response.message.content);
 
                 if (!response.message.content.empty()) {
                     if (m_console) {
@@ -400,7 +346,6 @@ void Agent::RunThread() {
                 {
                     std::lock_guard<std::mutex> lock(m_historyMutex);
                     m_history.push_back(response.message);
-                    TrimHistory(m_history);
                 }
 
                 if (!response.message.toolCallsJson.empty()) {
@@ -414,19 +359,13 @@ void Agent::RunThread() {
                             // Tool results are untrusted content, but they are structured data
                             // (file contents, JSON) that must reach the LLM verbatim. Instead of
                             // filtering them, delimit them the same way user input is delimited
-                            // so the model can tell data from instructions. The delimiters are
-                            // added after truncation so they are never cut off.
-                            toolMsg.content = std::get<1>(tr);
+                            // so the model can tell data from instructions.
                             toolMsg.is_error = std::get<3>(tr);
-                            if (!toolMsg.is_error) {
-                                TruncateIfNeeded(toolMsg.content);
-                            }
-                            toolMsg.content = "\n--- BEGIN TOOL RESULT ---\n" + toolMsg.content + "\n--- END TOOL RESULT ---\n";
+                            toolMsg.content = "\n--- BEGIN TOOL RESULT ---\n" + std::get<1>(tr) + "\n--- END TOOL RESULT ---\n";
                             toolMsg.name = std::get<0>(tr);
                             toolMsg.tool_call_id = std::get<2>(tr);
                             m_history.push_back(toolMsg);
                         }
-                        TrimHistory(m_history);
                     }
                     // Nothing was run, so there is nothing for another round to
                     // build on: going back to the LLM would only spend calls

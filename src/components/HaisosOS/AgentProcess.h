@@ -1,7 +1,7 @@
 #pragma once
 #include <memory>
 #include <string>
-#include "OSProcess.h"
+#include "interfaces/IProcess.h"
 #include "ProcessFileIO.h"
 #include "src/components/libheaders/CurrentProcessHandle.h"
 #include "src/components/Agent/Agent.h"
@@ -9,10 +9,10 @@
 namespace Haisos {
 
 // An ICurrentProcess whose runtime is an LLM agent. It holds the concrete Agent
-// because it owns the agent's lifetime: the agent is destroyed with the process.
-// It does not override IOSProcess::Kill -- an agent cannot be forced down, so
-// the inherited default (ask again) is all there is.
-class AgentProcess : public IOSProcess {
+// because it owns the agent's lifetime: the agent is destroyed with the process,
+// and ~Agent is what waits the agent's thread out. There is nothing stronger
+// than TriggerStop to do to an agent, so nothing here offers one.
+class AgentProcess : public ICurrentProcess {
 public:
     // Returns nullptr if agent or environment is null: both are required for
     // the life of the process, so every method here may assume them.

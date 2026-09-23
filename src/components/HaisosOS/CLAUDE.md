@@ -7,11 +7,12 @@ console, and a services layer; starts processes and spawns sub-OS instances.
 
 - Numbers the processes it starts from one program-wide pid allocator (the same
   one behind `IFactory::GetNextGloballyUniquePID()`), so a pid live in one OS can
-  never appear in another. Processes started here are top-most (parent PID 0) --
-  `StartProcess` is deliberately not told which agent called it, because a
-  process is opaque (whether it is an agent is its own business, and an agent's
-  subagents stay inside it rather than becoming processes). Process parentage
-  will be redefined along with that split.
+  never appear in another. A process started here has **this OS as its parent**:
+  its parent pid is `GetOSProcessID()`, not 0 (0 means no parent at all, and is
+  never allocated). `StartProcess` is deliberately not told which agent called
+  it, because a process is opaque (whether it is an agent is its own business,
+  and an agent's subagents stay inside it rather than becoming processes), so
+  the OS is the most specific parent there is to name.
 - Every process is started with an environment and a working directory passed
   by the caller (`StartProcess(environment, programPath, args, workingDirectory)`)
   -- the environment typically `GetOsEnvironment()->Clone()`. Neither is taken
@@ -48,9 +49,12 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   (`TriggerStop`) and wait; you may not change its environment or its working
   directory, nor reach the agent running it -- `StartingAgentName()` gives the
   name and nothing more. From inside, `ICurrentProcess` adds
-  `IO()`, `AsAgent()` and `OS()`. Forcing a process
-  down is on neither: `Kill()` lives on the component-internal `IOSProcess`,
-  because that is the OS's business alone.
+  `IO()`, `AsAgent()` and `OS()`. Neither offers a way to force a process down:
+  `TriggerStop()` is all there is, and what actually waits a stubborn thread out
+  is the process's own destructor. (An `IOSProcess` carrying a `Kill()` used to
+  sit between the two; it was removed because neither runtime could honour it
+  any harder than `TriggerStop()` already did, and will come back when there is
+  something real for it to do.)
 - Dispatches `StartProcess` by file extension: `.md` starts an LLM agent (its
   content becomes the agent's prompt); `.lua` starts an embedded Lua script
   (via the vendored `extern/lua` interpreter, see `LuaProcess`)
@@ -99,14 +103,14 @@ console, and a services layer; starts processes and spawns sub-OS instances.
 ## Key Classes
 
 - `HaisosOS` - Main implementation of `IHaisosOS`; `HaisosOS::Create(...)` builds an instance
-- `AgentProcess` - `IOSProcess` backed by an agent. It holds the concrete
-  `Agent` because it owns the agent's lifetime. It does **not** override
-  `Kill()`: an agent cannot be forced down (see the Agent component's
-  CLAUDE.md), so the inherited default -- ask again -- is all there is, and a
-  wedged agent process is waited out by `~Agent` rather than aborted.
-  `AgentProcess::Create` refuses a null agent or environment, so the rest of
-  the class assumes both
-- `LuaProcess` - `IOSProcess` backed by an embedded Lua script, running on its own thread; `Kill()` aborts it via a Lua instruction-count hook
-- `IOSProcess` (`OSProcess.h`) - `ICurrentProcess` plus `Kill()`; the type the OS tracks its processes as, so only the OS can force one down. `Kill()` is virtual with a default of `TriggerStop()`, which a runtime that can genuinely be interrupted overrides
+- `AgentProcess` - `ICurrentProcess` backed by an agent. It holds the concrete
+  `Agent` because it owns the agent's lifetime: an agent cannot be forced down
+  (see the Agent component's CLAUDE.md), so a wedged agent process is waited out
+  by `~Agent` rather than aborted. `AgentProcess::Create` refuses a null agent
+  or environment, so the rest of the class assumes both
+- `LuaProcess` - `ICurrentProcess` backed by an embedded Lua script, running on
+  its own thread. Its `Kill()` aborts the script via a Lua instruction-count
+  hook -- an interpreter really can be interrupted mid-instruction -- and
+  `TriggerStop()` simply calls it, since a script has no command queue to close
 - `ProcessFileIO` - the `IFileIO` behind `ICurrentProcess::IO()`: the OS's root filesystem plus this process's working directory
 - `OSToolFactory` - the OS-level tool set (`os_read_file`, `os_write_file`, `os_list_directory`, `os_start_process`, `os_list_processes`), built once per process and bound to it

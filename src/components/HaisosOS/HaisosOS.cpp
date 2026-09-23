@@ -35,10 +35,9 @@ std::string GetStem(const std::string& path) {
 // rather than a budget, so it is set well clear of any legitimate use.
 constexpr size_t MAX_CONCURRENT_PROCESSES = 1024;
 
-// Shutdown budget per process: how long a cooperative Stop() is given before
-// escalating to Kill(), and how long Kill() is then given to take effect.
+// Shutdown budget per process: how long a cooperative TriggerStop() is given
+// before the OS stops waiting on it and moves on to the next one.
 constexpr uint64_t PROCESS_STOP_TIMEOUT_MS = 5000;
-constexpr uint64_t PROCESS_KILL_TIMEOUT_MS = 2000;
 
 // Processes are drained in passes, because a process started concurrently with
 // shutdown can land in m_processes after the first snapshot was taken. The pass
@@ -80,17 +79,21 @@ HaisosOS::~HaisosOS() {
     }
     LogInfo("HaisosOS: shutting down, draining %zu running process(es)", initialCount);
 
-    // Never hold m_processesMutex while calling into a process: take the
-    // processes out of the list under the lock, then drain them unlocked.
-    std::vector<std::shared_ptr<IOSProcess>> processes;
     for (int pass = 0; pass < MAX_DRAIN_PASSES; ++pass) {
-        // Release the previous pass's processes outside the lock: destroying a
-        // process can join its thread, which may itself call back into the OS.
-        processes.clear();
+        // Declared inside the pass so it is destroyed at the end of one, which
+        // is both outside the lock and after the draining: releasing a process
+        // joins its thread, and that thread may call back into the OS.
+        //
+        // Never hold m_processesMutex while calling into a process: the swap
+        // takes the whole list out under the lock, and the draining below runs
+        // unlocked against this pass's private copy.
+        std::vector<std::shared_ptr<ICurrentProcess>> processes;
         {
             std::lock_guard<std::mutex> lock(m_processesMutex);
             processes.swap(m_processes);
         }
+        // Nothing left, and nothing arrived while the previous pass drained:
+        // that is the only way this loop is meant to end.
         if (processes.empty()) {
             return;
         }
@@ -98,31 +101,35 @@ HaisosOS::~HaisosOS() {
             DrainProcess(process);
         }
     }
-    LogWarning("HaisosOS: processes were still being started during shutdown after %d drain passes", MAX_DRAIN_PASSES);
+
+    size_t stillTracked = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_processesMutex);
+        stillTracked = m_processes.size();
+    }
+    LogWarning("HaisosOS: gave up draining after %d passes with %zu process(es) still tracked; "
+        "they are being destroyed without a stop having been waited for",
+        MAX_DRAIN_PASSES, stillTracked);
 }
 
-void HaisosOS::DrainProcess(const std::shared_ptr<IOSProcess>& process) {
-    // TriggerStop is only a request (for an agent it merely closes the command
-    // queue, so a command already in flight keeps running), hence the bounded
-    // wait and the escalation to Kill() below -- which is on IOSProcess rather
-    // than IProcess, because forcing a process down is the OS's business.
+void HaisosOS::DrainProcess(const std::shared_ptr<ICurrentProcess>& process) {
+    // TriggerStop is all there is. It is only a request -- for an agent it
+    // closes the command queue, so a command already in flight keeps running --
+    // so the wait is bounded and the OS moves on rather than blocking shutdown
+    // on one process. What actually waits the thread out is the process's own
+    // destructor, which runs when the last reference to it is released.
     process->TriggerStop();
-    if (process->WaitToFinish(PROCESS_STOP_TIMEOUT_MS)) {
-        return;
-    }
-    LogWarning("HaisosOS: process '%s' did not stop within %llums during destruction, killing it",
-        process->Path().c_str(), static_cast<unsigned long long>(PROCESS_STOP_TIMEOUT_MS));
-    process->Kill();
-    if (!process->WaitToFinish(PROCESS_KILL_TIMEOUT_MS)) {
-        LogError("HaisosOS: process '%s' did not finish within %llums after being killed, abandoning the wait",
-            process->Path().c_str(), static_cast<unsigned long long>(PROCESS_KILL_TIMEOUT_MS));
+    if (!process->WaitToFinish(PROCESS_STOP_TIMEOUT_MS)) {
+        LogWarning("HaisosOS: process '%s' did not stop within %llums during destruction; "
+            "its destructor will wait for it",
+            process->Path().c_str(), static_cast<unsigned long long>(PROCESS_STOP_TIMEOUT_MS));
     }
 }
 
 void HaisosOS::CleanupFinishedProcesses() {
     m_processes.erase(
         std::remove_if(m_processes.begin(), m_processes.end(),
-            [](const std::shared_ptr<IOSProcess>& process) {
+            [](const std::shared_ptr<ICurrentProcess>& process) {
                 // WaitToFinish(0) does not wait; it just reports whether the
                 // process has finished.
                 return process->WaitToFinish(0);
@@ -130,7 +137,7 @@ void HaisosOS::CleanupFinishedProcesses() {
         m_processes.end());
 }
 
-std::shared_ptr<IOSProcess> HaisosOS::StartAgentProcess(
+std::shared_ptr<ICurrentProcess> HaisosOS::StartAgentProcess(
     std::shared_ptr<IEnvironment> environment,
     const std::string& programPath,
     const std::vector<std::string>& args,
@@ -181,15 +188,15 @@ std::shared_ptr<IOSProcess> HaisosOS::StartAgentProcess(
         return nullptr;
     }
 
-    // Parent pid 0: a process started here is top-most. Parentage used to be
-    // resolved from the calling agent, but a process is opaque -- whether it is
-    // an agent is its own business -- and the process/agent relationship is
-    // being redefined, so nothing claims to know a parent for now.
+    // The parent is this OS. A process started here is top-most among
+    // processes, but it is not parentless: the OS that started it is itself
+    // identified by a pid from the same allocator, so naming it is both true
+    // and more useful than 0, which means "no parent at all".
     // weak_from_this: the process reaches back to this OS for everything
     // outside itself, and an OS owns its processes, so the reference must not
     // be strong. A narrowed per-process OS would be passed here instead.
     auto process = AgentProcess::Create(
-        pid, /*parentPid=*/0, std::move(environment), programPath, workingDirectory,
+        pid, /*parentPid=*/m_osProcessId, std::move(environment), programPath, workingDirectory,
         weak_from_this(), processHandle, concreteAgent);
     if (!process) {
         // AgentProcess::Create has already said why. The agent is dropped here
@@ -212,7 +219,7 @@ std::shared_ptr<IOSProcess> HaisosOS::StartAgentProcess(
     return process;
 }
 
-std::shared_ptr<IOSProcess> HaisosOS::StartLuaProcess(
+std::shared_ptr<ICurrentProcess> HaisosOS::StartLuaProcess(
     std::shared_ptr<IEnvironment> environment,
     const std::string& programPath,
     const std::vector<std::string>& args,
@@ -231,9 +238,13 @@ std::shared_ptr<IOSProcess> HaisosOS::StartLuaProcess(
     // As for an agent process: the tool set is built around the process, and
     // LuaProcess::Create fills the handle in before the script's thread starts.
     auto processHandle = CurrentProcessHandle::Create();
+    // The parent is this OS, as for an agent process above.
     auto process = LuaProcess::Create(
-        pid, /*parentPid=*/0, std::move(environment), programPath, workingDirectory,
+        pid, /*parentPid=*/m_osProcessId, std::move(environment), programPath, workingDirectory,
         weak_from_this(), processHandle, std::move(content), args,
+        // The OS tool set and nothing else. The LLM tool set (get_current_date_time,
+        // agent_*) belongs to agents: it is handed out by ILLMService and reaches
+        // a process only through the agent running it, never through a script.
         OSToolFactory::Create(processHandle), std::move(console));
 
     {
@@ -358,15 +369,6 @@ std::shared_ptr<HaisosOS> HaisosOS::Create(
     std::string endpoint = EnvValue(*environment, kEnvEndpoint);
     std::string modelName = EnvValue(*environment, kEnvModel);
     std::string apiKey = EnvValue(*environment, kEnvApiKey);
-
-    if (endpoint.empty() || modelName.empty()) {
-        LogWarning(
-            "HaisosOS: %s is not set in the OS environment; agents will fail to reach an LLM. "
-            "Set it in the haisosfile with `ENV %s=<value>`, or import the host's with `ENV %s`.",
-            endpoint.empty() ? kEnvEndpoint : kEnvModel,
-            endpoint.empty() ? kEnvEndpoint : kEnvModel,
-            endpoint.empty() ? kEnvEndpoint : kEnvModel);
-    }
 
     std::shared_ptr<INetworkService> networkService = servicesCreator->CreateNetworkService();
     std::shared_ptr<ILLMService> llmService = servicesCreator->CreateLLMService(networkService, endpoint, modelName, apiKey);

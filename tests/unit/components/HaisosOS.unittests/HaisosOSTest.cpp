@@ -59,8 +59,10 @@ TEST_F(HaisosOSTest, StartProcessAssignsUniqueTopLevelPids) {
     ASSERT_NE(p1, nullptr);
     ASSERT_NE(p2, nullptr);
     EXPECT_NE(p1->GetPid(), p2->GetPid());
-    EXPECT_EQ(p1->GetParentPid(), 0u);
-    EXPECT_EQ(p2->GetParentPid(), 0u);
+    // A process's parent is the OS that started it, not 0 (which means no
+    // parent at all and is never allocated).
+    EXPECT_EQ(p1->GetParentPid(), os->GetOSProcessID());
+    EXPECT_EQ(p2->GetParentPid(), os->GetOSProcessID());
     EXPECT_EQ(p1->Path(), "hello.md");
     // An agent-backed process names the agent running it; AsAgent is reachable
     // only from inside the process (ICurrentProcess).

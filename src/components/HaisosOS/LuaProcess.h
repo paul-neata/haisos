@@ -6,7 +6,7 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include "OSProcess.h"
+#include "interfaces/IProcess.h"
 #include "ProcessFileIO.h"
 #include "src/components/libheaders/CurrentProcessHandle.h"
 #include "interfaces/IHaisosOS.h"
@@ -19,7 +19,7 @@ namespace Haisos {
 // a Lua global function returning (content, is_error); output from Lua's print()
 // routes through the process's IAgentConsole. Runs on its own background
 // thread, matching Agent's lifecycle shape.
-class LuaProcess : public IOSProcess {
+class LuaProcess : public ICurrentProcess {
 public:
     static std::shared_ptr<LuaProcess> Create(
         uint64_t pid,
@@ -49,10 +49,11 @@ public:
     std::shared_ptr<IAgent> AsAgent() override;
     std::shared_ptr<IHaisosOS> OS() const override;
 
-    // IOSProcess: forcing the process down, which no IProcess handle can do.
-    void Kill() override;
-
-    // Internal to this component.
+    // Internal to this component. Kill aborts the script through the Lua
+    // instruction-count hook -- a Lua interpreter, unlike an agent, really can
+    // be interrupted mid-instruction. TriggerStop() is the same thing here:
+    // a script has no command queue to close, so stopping it is aborting it.
+    void Kill();
     bool IsFinished() const;
     void WaitToFinish();
 

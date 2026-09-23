@@ -5,7 +5,6 @@
 #include <vector>
 #include "interfaces/IFactory.h"
 #include "interfaces/IHaisosOS.h"
-#include "OSProcess.h"
 #include "OSToolFactory.h"
 
 namespace Haisos {
@@ -53,15 +52,15 @@ private:
 
     // Erases finished processes. Must be called with m_processesMutex held.
     void CleanupFinishedProcesses();
-    // Stops one process, escalating to Kill() if it does not stop in time.
+    // Asks one process to stop and waits a bounded time for it.
     // Never called with m_processesMutex held.
-    static void DrainProcess(const std::shared_ptr<IOSProcess>& process);
-    std::shared_ptr<IOSProcess> StartAgentProcess(
+    static void DrainProcess(const std::shared_ptr<ICurrentProcess>& process);
+    std::shared_ptr<ICurrentProcess> StartAgentProcess(
         std::shared_ptr<IEnvironment> environment,
         const std::string& programPath,
         const std::vector<std::string>& args,
         const std::string& workingDirectory);
-    std::shared_ptr<IOSProcess> StartLuaProcess(
+    std::shared_ptr<ICurrentProcess> StartLuaProcess(
         std::shared_ptr<IEnvironment> environment,
         const std::string& programPath,
         const std::vector<std::string>& args,
@@ -79,9 +78,9 @@ private:
     std::atomic<bool> m_shuttingDown{false};
 
     mutable std::mutex m_processesMutex;
-    // Tracked as IOSProcess, not IProcess: the OS is the one thing that may
-    // kill a process outright.
-    std::vector<std::shared_ptr<IOSProcess>> m_processes;
+    // Tracked as ICurrentProcess: that is what a process runtime is built as.
+    // Handed out through GetRunningProcesses() as IProcess, the outside view.
+    std::vector<std::shared_ptr<ICurrentProcess>> m_processes;
 };
 
 }

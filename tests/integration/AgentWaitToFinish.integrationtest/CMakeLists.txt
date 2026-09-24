@@ -2,6 +2,7 @@ add_executable(AgentWaitToFinish.integrationtest AgentWaitToFinishTest.cpp)
 target_include_directories(AgentWaitToFinish.integrationtest PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(AgentWaitToFinish.integrationtest PRIVATE
     Factory
+    ServicesCreator
     Agent
     LLMCommunicator
     HTTPClient
@@ -12,7 +13,6 @@ target_link_libraries(AgentWaitToFinish.integrationtest PRIVATE
     AgentStartTool
     AgentWaitToFinishTool
     AgentQueryTool
-    AgentStopTool
     AgentListRunningTool
     nlohmann_json::nlohmann_json
 )

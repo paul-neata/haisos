@@ -20,18 +20,26 @@ if command -v gh >/dev/null 2>&1; then
     fi
 fi
 
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+
 # 3. Git upstream tracking
+# Note: a plain `git push -u origin <branch>` makes the branch track itself
+# (its upstream is origin/<branch>, not the actual base), so that self-
+# referential case must be ignored here rather than reported as the base.
 UPSTREAM=$(git rev-parse --abbrev-ref @{upstream} 2>/dev/null || true)
 if [ -n "$UPSTREAM" ]; then
-    echo "${UPSTREAM#origin/}"
-    exit 0
+    UPSTREAM_BRANCH="${UPSTREAM#origin/}"
+    if [ "$UPSTREAM_BRANCH" != "$CURRENT_BRANCH" ]; then
+        echo "$UPSTREAM_BRANCH"
+        exit 0
+    fi
 fi
 
 # 4. Git config merge ref for current branch
-CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+# Same self-tracking caveat as step 3 applies here (`git push -u` sets this too).
 if [ -n "$CURRENT_BRANCH" ]; then
     BASE_BRANCH=$(git config "branch.$CURRENT_BRANCH.merge" 2>/dev/null | sed 's|refs/heads/||' || true)
-    if [ -n "$BASE_BRANCH" ]; then
+    if [ -n "$BASE_BRANCH" ] && [ "$BASE_BRANCH" != "$CURRENT_BRANCH" ]; then
         echo "$BASE_BRANCH"
         exit 0
     fi

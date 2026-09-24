@@ -1,4 +1,7 @@
 #include "src/components/Factory/Factory.h"
+#include "src/components/ServicesCreator/ServicesCreator.h"
+#include "src/components/Console/AgentConsoleAdapter.h"
+#include "src/components/Logger/Logger.h"
 #include "tests/integration/helpers/IntegrationTestHelpers.h"
 #include "tests/integration/helpers/IntegrationTestLogCapture.h"
 
@@ -6,35 +9,39 @@ using namespace Haisos;
 
 namespace {
 
+// Generous: a real LLM round trip, not a unit-test-scale wait.
+constexpr uint64_t kAgentTimeoutMs = 5 * 60 * 1000;
+
 bool TestAgentListRunning() {
     IntegrationTest::IntegrationTestLogCapture logCapture;
 
     auto [endpoint, model, apiKey] = IntegrationTest::GetEndpointModelAndApiKey();
 
-    Factory factory;
-    auto console = factory.CreateConsole(false);
-    console->Start();
-    auto httpClient = factory.CreateHTTPClient();
-    auto toolFactory = factory.CreateToolFactory(factory);
-    auto llmCommunicator = factory.CreateLLMCommunicator(
-        std::move(httpClient), endpoint, model, apiKey);
+    auto factory = Factory::Create();
+    auto servicesCreator = CreateServicesCreator();
+    auto networkService = servicesCreator->CreateNetworkService();
+    auto llmService = servicesCreator->CreateLLMService(networkService, endpoint, model, apiKey);
 
-    SystemCallbacks callbacks;
-    callbacks.on_send_with_name = IntegrationTest::MakeLLMJsonLoggerWithName("send");
-    callbacks.on_received_with_name = IntegrationTest::MakeLLMJsonLoggerWithName("receive");
-    factory.SetSystemCallbacks(callbacks);
+    auto physicalConsole = factory->CreatePhysicalConsole();
+    physicalConsole->Start();
+    auto console = AgentConsoleAdapter::Create(physicalConsole, "root");
 
-    auto agent = factory.CreateAgent(
-        std::move(llmCommunicator),
-        std::move(toolFactory),
-        std::move(console),
-        std::vector<std::string>{"You are a helpful AI assistant."},
+    auto agent = llmService->CreateAgent(
         "root",
-        nullptr);
+        /*parent=*/nullptr,
+        std::move(console),
+        /*additionalTools=*/nullptr,
+        std::vector<std::string>{"You are a helpful AI assistant."},
+        // Not interactive: the agent answers the prompt below and then finishes,
+        // which is what this test waits for. IAgent cannot be forced down.
+        /*isInteractive=*/false);
 
     agent->Post("Start a subagent with prompt 'What is 5+5?' and wait for it to finish, then list running agents, then stop it.");
-    agent->Stop(0);
-    agent->WaitToFinish();
+    if (!agent->WaitToFinish(kAgentTimeoutMs)) {
+        LogError("Agent did not finish within %llums", static_cast<unsigned long long>(kAgentTimeoutMs));
+        logCapture.DumpIfFailed(true);
+        return false;
+    }
 
     bool success = true;
     logCapture.DumpIfFailed(!success);

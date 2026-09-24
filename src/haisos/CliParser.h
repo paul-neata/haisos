@@ -1,23 +1,27 @@
 #pragma once
 
 #include <string>
+#include <utility>
 #include <vector>
 #include "src/components/Logger/Logger.h"
 
 namespace Haisos {
 
 struct CliOptions {
-    std::string userPrompt;
-    std::string systemPrompt;
-    std::string systemPromptFile;
-    bool useFile = false;
+    // Path to the haisosfile; empty means "use the default (./haisosfile)".
+    std::string haisosFilePath;
+    // "key=value" pairs given after a literal "--", fed to the haisosfile as
+    // ARG overrides, in the order given.
+    std::vector<std::pair<std::string, std::string>> argOverrides;
+
     bool logToConsole = false;
     std::string logFilePath;
     LogLevel logLevel = LogLevel::Warning;
     bool logJsonInTemp = false;
-    bool takeStdin = false;
     bool help = false;
     bool version = false;
+    // Write a commented starter haisosfile to ./haisosfile and exit.
+    bool init = false;
 };
 
 struct ParseResult {
@@ -25,7 +29,11 @@ struct ParseResult {
     std::string error;
 };
 
-LogLevel ParseLogLevel(const std::string& level);
+// Parses a log level name ("verbose_debug", "debug", "trace", "info",
+// "warning", "error"). Returns false and leaves outLevel untouched if the name
+// is not recognized, so callers can report the mistake instead of silently
+// running at some other verbosity.
+bool ParseLogLevel(const std::string& level, LogLevel& outLevel);
 
 ParseResult ParseArguments(int argc, char* argv[]);
 

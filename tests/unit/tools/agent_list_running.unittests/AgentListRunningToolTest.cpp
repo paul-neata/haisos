@@ -22,10 +22,10 @@ TEST(AgentListRunningToolTest, ListRunningReturnsAgent) {
     child->SetName("child1");
     callerAgent->AddChild(child);
 
-    AgentListRunningTool tool;
+    auto tool = AgentListRunningTool::Create();
 
     nlohmann::json args;
-    auto result = tool.Call(callerAgent, args);
+    auto result = tool->Call(callerAgent, args);
     std::string resultStr = result.content;
 
     EXPECT_EQ(resultStr, "child1");
@@ -38,10 +38,10 @@ TEST(AgentListRunningToolTest, ListRunningEmptyAfterStop) {
     child->SetFinished(true);
     callerAgent->AddChild(child);
 
-    AgentListRunningTool tool;
+    auto tool = AgentListRunningTool::Create();
 
     nlohmann::json args;
-    auto result = tool.Call(callerAgent, args);
+    auto result = tool->Call(callerAgent, args);
     std::string resultStr = result.content;
 
     EXPECT_EQ(resultStr, "");
@@ -57,12 +57,12 @@ TEST(AgentListRunningToolTest, ListRunningWithNameFilter) {
     child2->SetName("beta");
     callerAgent->AddChild(child2);
 
-    AgentListRunningTool tool;
+    auto tool = AgentListRunningTool::Create();
 
     nlohmann::json args;
     args["names"] = nlohmann::json::array({"alpha"});
 
-    auto result = tool.Call(callerAgent, args);
+    auto result = tool->Call(callerAgent, args);
     std::string resultStr = result.content;
 
     EXPECT_EQ(resultStr, "alpha");
@@ -83,20 +83,20 @@ TEST(AgentListRunningToolTest, ListRunningMultipleAgents) {
     child3->SetFinished(true);
     callerAgent->AddChild(child3);
 
-    AgentListRunningTool tool;
+    auto tool = AgentListRunningTool::Create();
 
     nlohmann::json args;
-    auto result = tool.Call(callerAgent, args);
+    auto result = tool->Call(callerAgent, args);
     std::string resultStr = result.content;
 
     EXPECT_EQ(resultStr, "alpha,beta");
 }
 
 TEST(AgentListRunningToolTest, ListRunningNoCallerAgent) {
-    AgentListRunningTool tool;
+    auto tool = AgentListRunningTool::Create();
 
     nlohmann::json args;
-    auto result = tool.Call(nullptr, args);
+    auto result = tool->Call(nullptr, args);
 
     EXPECT_TRUE(result.isError);
     EXPECT_EQ(result.content, "no caller agent");

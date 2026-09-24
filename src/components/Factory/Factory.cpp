@@ -1,78 +1,58 @@
 #include "Factory.h"
-#include <algorithm>
 #include "src/components/Console/Console.h"
-#include "src/components/HTTPClient/HTTPClient.h"
-#include "src/components/LLMCommunicator/LLMCommunicator.h"
-#include "src/components/ToolFactory/ToolFactory.h"
-#include "src/components/HaisosEngine/HaisosEngine.h"
-#include "src/components/Agent/Agent.h"
-#include "src/components/Filesystem/Filesystem.h"
+#include "src/components/Environment/Environment.h"
+#include "src/components/Filesystem/PhysicalFileSystem.h"
+#include "src/components/HaisosOS/HaisosOS.h"
+#include "src/components/ServicesCreator/ServicesCreator.h"
+#include "src/components/libheaders/GloballyUniquePID.h"
 
 namespace Haisos {
+
+std::shared_ptr<Factory> Factory::Create() {
+    return std::shared_ptr<Factory>(new Factory());
+}
 
 Factory::Factory() = default;
 Factory::~Factory() = default;
 
-std::unique_ptr<IConsole> Factory::CreateConsole(bool registerAsLogMessageReceiver) {
-    return std::make_unique<Console>(registerAsLogMessageReceiver);
+std::shared_ptr<IPhysicalConsole> Factory::CreatePhysicalConsole() {
+    return Console::Create();
 }
 
-std::unique_ptr<IHTTPClient> Factory::CreateHTTPClient() {
-    return ::Haisos::CreateHTTPClient();
+std::shared_ptr<IFileSystem> Factory::CreatePhysicalFileSystem(const std::string& rootPath) {
+    return PhysicalFileSystem::Create(rootPath);
 }
 
-std::unique_ptr<ILLMCommunicator> Factory::CreateLLMCommunicator(
-    std::unique_ptr<IHTTPClient> httpClient,
-    const std::string& endpoint,
-    const std::string& modelName,
-    const std::string& apiKey)
+std::shared_ptr<IEnvironment> Factory::CreateEnvironment() {
+    return ::Haisos::CreateEnvironment();
+}
+
+std::shared_ptr<IServicesCreator> Factory::CreateServicesCreator() {
+    return ::Haisos::CreateServicesCreator();
+}
+
+std::shared_ptr<IHaisosOS> Factory::CreateHaisosOS(
+    std::shared_ptr<IServicesCreator> servicesCreator,
+    std::shared_ptr<IPhysicalConsole> physicalConsole,
+    std::shared_ptr<IFileSystem> rootFileSystem,
+    std::shared_ptr<IEnvironment> environment)
 {
-    return std::make_unique<LLMCommunicator>(std::move(httpClient), endpoint, modelName, apiKey);
+    // Every OS created here is a root of its own tree, so it is given a pid of
+    // its own rather than borrowing one; only CreateSubOS passes an existing pid on.
+    return HaisosOS::Create(
+        std::move(servicesCreator),
+        std::move(physicalConsole),
+        std::move(rootFileSystem),
+        std::move(environment),
+        GetNextGloballyUniquePID());
 }
 
-std::unique_ptr<IToolFactory> Factory::CreateToolFactory(IFactory& factory) {
-    return std::make_unique<ToolFactory>(factory);
+uint64_t Factory::GetNextGloballyUniquePID() {
+    return NextGloballyUniquePID();
 }
 
-void Factory::CleanupFinishedAgents() {
-    m_agents.erase(
-        std::remove_if(m_agents.begin(), m_agents.end(),
-            [](const std::shared_ptr<IAgent>& agent) {
-                return agent->IsFinished();
-            }),
-        m_agents.end());
-}
-
-std::shared_ptr<IAgent> Factory::CreateAgent(
-    std::unique_ptr<ILLMCommunicator> llmCommunicator,
-    std::unique_ptr<IToolFactory> toolFactory,
-    std::unique_ptr<IConsole> console,
-    const std::vector<std::string>& systemPrompts,
-    const std::string& name,
-    std::shared_ptr<IAgent> parent,
-    const std::string& startTime,
-    bool longRunning)
-{
-    auto agent = std::make_shared<Agent>(std::move(llmCommunicator), std::move(toolFactory), std::move(console), systemPrompts, name, parent, startTime, m_systemCallbacks, longRunning);
-    if (parent) {
-        parent->AddChild(agent);
-    }
-    std::lock_guard<std::mutex> lock(m_agentsMutex);
-    CleanupFinishedAgents();
-    m_agents.push_back(agent);
-    return agent;
-}
-
-std::unique_ptr<IHaisosEngine> Factory::CreateHaisosEngine(IFactory& factory) {
-    return std::make_unique<HaisosEngine>(factory);
-}
-
-std::unique_ptr<IFileSystem> Factory::CreateFilesystem() {
-    return std::make_unique<FileSystem>();
-}
-
-std::unique_ptr<IFactory> CreateFactory() {
-    return std::make_unique<Factory>();
+std::shared_ptr<IFactory> CreateFactory() {
+    return Factory::Create();
 }
 
 }

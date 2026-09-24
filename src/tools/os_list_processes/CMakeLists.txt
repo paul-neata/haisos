@@ -1,0 +1,4 @@
+add_library(OSListProcessesTool STATIC OSListProcessesTool.cpp)
+target_include_directories(OSListProcessesTool PUBLIC ${CMAKE_SOURCE_DIR}/interfaces ${CMAKE_SOURCE_DIR}/src/tools/os_list_processes)
+target_link_libraries(OSListProcessesTool PUBLIC nlohmann_json::nlohmann_json)
+target_compile_features(OSListProcessesTool PUBLIC cxx_std_17)

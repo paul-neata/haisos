@@ -1,25 +1,32 @@
 #pragma once
-#include "interfaces/IFileSystem.h"
+#include "MountableFileSystem.h"
+#include "VirtualPath.h"
+#include "interfaces/IFileSystemService.h"
 
 namespace Haisos {
 
-class FileSystem : public IFileSystem {
+class FileSystem : public MountableFileSystem {
 public:
-    FileSystem() = default;
+    static std::shared_ptr<FileSystem> Create() {
+        return std::shared_ptr<FileSystem>(new FileSystem());
+    }
     ~FileSystem() override = default;
 
-    int OpenFile(const std::string& pathname, int flags) override;
-    int OpenFile(const std::string& pathname, int flags, int mode) override;
-    int CloseFile(int fd) override;
-    ssize_t ReadFile(int fd, void* buf, size_t count) override;
-    ssize_t WriteFile(int fd, const void* buf, size_t count) override;
+    int LocalOpenFile(const std::string& pathname, int flags) override;
+    int LocalOpenFile(const std::string& pathname, int flags, int mode) override;
+    int LocalCloseFile(int fd) override;
+    ssize_t LocalReadFile(int fd, void* buf, size_t count) override;
+    ssize_t LocalWriteFile(int fd, const void* buf, size_t count) override;
 
-    int CreateDirectory(const std::string& pathname, int mode) override;
-    int RemoveDirectory(const std::string& pathname) override;
-    int ChangeDirectory(const std::string& path) override;
-    char* GetCurrentDirectory(std::string& buf, size_t size) override;
+    int LocalCreateDirectory(const std::string& pathname, int mode) override;
+    int LocalRemoveDirectory(const std::string& pathname) override;
+    std::vector<DirectoryEntry> LocalReadDirectory(const std::string& path) override;
+    std::string AbsolutePathFor(const std::string& path) const override {
+        return NormalizeVirtualPath(path, "/");
+    }
 
-    std::vector<DirectoryEntry> ReadDirectory(const std::string& path) override;
+private:
+    FileSystem() = default;
 };
 
 } // namespace Haisos

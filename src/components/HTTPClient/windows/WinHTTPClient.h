@@ -1,6 +1,6 @@
 #pragma once
 #include <memory>
-#include "interfaces/IHTTPClient.h"
+#include "interfaces/INetworkService.h"
 
 #ifdef _WIN32
 
@@ -8,7 +8,9 @@ namespace Haisos {
 
 class WinHTTPClient : public IHTTPClient {
 public:
-    WinHTTPClient();
+    static std::shared_ptr<WinHTTPClient> Create() {
+        return std::shared_ptr<WinHTTPClient>(new WinHTTPClient());
+    }
     ~WinHTTPClient() override;
 
     // IHTTPClient interface
@@ -17,6 +19,8 @@ public:
     HTTPResponse Post(const std::string& url, const std::string& body, const std::vector<HTTPHeader>& headers) override;
 
 private:
+    WinHTTPClient();
+
     HTTPResponse PerformRequest(const std::string& url, const wchar_t* method, const std::string& body = "", const std::vector<HTTPHeader>& headers = {});
 
     struct WinHTTPHandle;

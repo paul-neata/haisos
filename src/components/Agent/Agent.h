@@ -7,11 +7,8 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include "interfaces/IAgent.h"
+#include "interfaces/ILLMService.h"
 #include "interfaces/ILLMCommunicator.h"
-#include "interfaces/IToolFactory.h"
-#include "interfaces/IConsole.h"
-#include "interfaces/SystemCallbacks.h"
 #include "src/components/libheaders/SynchronizedQueueEx.h"
 #include "AgentMessageBuffer.h"
 
@@ -19,51 +16,70 @@ namespace Haisos {
 
 class Agent : public IAgent, public std::enable_shared_from_this<Agent> {
 public:
-    Agent(
+    static std::shared_ptr<Agent> Create(
         std::shared_ptr<ILLMCommunicator> llmCommunicator,
         std::shared_ptr<IToolFactory> toolFactory,
-        std::shared_ptr<IConsole> console,
+        std::shared_ptr<IAgentConsole> console,
         const std::vector<std::string>& systemPrompts,
         const std::string& name,
         std::shared_ptr<IAgent> parent,
         const std::string& startTime = "",
-        const SystemCallbacks& callbacks = {},
-        bool longRunning = true);
+        bool interactive = true);
 
     ~Agent() override;
 
     // IAgent interface
     void Post(const std::string& command) override;
     void Send(const std::string& command) override;
-    bool Stop(unsigned timeoutMs) override;
-    void Kill() override;
     std::shared_ptr<IAgent> GetParent() const override;
     std::string Name() const override;
-    void WaitToFinish() override;
+    void TriggerStop() override;
     bool WaitToFinish(uint64_t timeoutMs) override;
-    std::vector<std::shared_ptr<IAgent>> GetChildren() const override;
+    std::vector<std::shared_ptr<IAgent>> GetChildren(bool onlyDirectChildren) const override;
     nlohmann::json GetHistory() const override;
     std::string GetConsoleOutput() const override;
-    bool IsFinished() const override;
-    bool IsKilled() const override;
     std::string GetStartTime() const override;
     int GetDepth() const override;
-    bool IsLongRunning() const override;
+    bool IsInteractive() const override;
+
+    // IAgent::AddChild is protected there, so that only LLMService may register
+    // a child. It stays public on the concrete Agent, which nothing outside
+    // this component and its tests can reach anyway.
     void AddChild(std::shared_ptr<IAgent> child) override;
 
+    bool IsFinished() const;
+
 private:
+    Agent(
+        std::shared_ptr<ILLMCommunicator> llmCommunicator,
+        std::shared_ptr<IToolFactory> toolFactory,
+        std::shared_ptr<IAgentConsole> console,
+        const std::vector<std::string>& systemPrompts,
+        const std::string& name,
+        std::shared_ptr<IAgent> parent,
+        const std::string& startTime,
+        bool interactive);
+
+    // Starts the conversation thread. Called by Create() once the shared_ptr
+    // owning this agent exists, so the thread can safely shared_from_this()
+    // when it hands itself to a tool.
+    void Start();
+
     void RunThread();
     std::vector<std::tuple<std::string, std::string, std::string, bool>> ExecuteToolCalls(const LLMMessage& message);
 
     std::shared_ptr<ILLMCommunicator> m_llmCommunicator;
     std::shared_ptr<IToolFactory> m_toolFactory;
-    std::shared_ptr<IConsole> m_console;
+    // Tool descriptions are fetched once in the constructor and reused for every LLM round.
+    // This assumes the tool factory's registry is immutable after the Agent is constructed;
+    // tools registered later will not be visible to this agent.
+    std::vector<std::tuple<std::string, std::string, nlohmann::json>> m_cachedToolDescriptions;
+    std::shared_ptr<IAgentConsole> m_console;
     std::vector<std::string> m_systemPrompts;
     std::string m_name;
     std::string m_startTime;
     std::shared_ptr<IAgent> m_parent;
-    SystemCallbacks m_callbacks;
-    bool m_longRunning;
+    bool m_interactive;
     mutable std::mutex m_historyMutex;
     std::vector<LLMMessage> m_history;
 
@@ -75,7 +91,10 @@ private:
     SynchronizedQueueEx<std::string> m_commandQueue;
     std::thread m_thread;
     std::atomic<bool> m_finished{false};
-    std::atomic<bool> m_killed{false};
+    // Set by TriggerStop. Read on the agent's own thread between tool calls, so
+    // a stop asked for while a round is in flight takes effect at the next
+    // point where stopping is safe rather than only at the next command.
+    std::atomic<bool> m_stopRequested{false};
     std::condition_variable m_finishedCv;
     std::mutex m_finishedMutex;
     std::mutex m_joinMutex;

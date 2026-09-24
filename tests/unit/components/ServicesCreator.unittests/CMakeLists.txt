@@ -1,0 +1,4 @@
+add_executable(ServicesCreator.unittests ServicesCreatorTest.cpp)
+target_include_directories(ServicesCreator.unittests PRIVATE ${CMAKE_SOURCE_DIR}/src/components/Factory)
+target_link_libraries(ServicesCreator.unittests PRIVATE gtest_main ServicesCreator Factory)
+target_compile_features(ServicesCreator.unittests PRIVATE cxx_std_17)

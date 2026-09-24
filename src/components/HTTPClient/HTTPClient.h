@@ -1,5 +1,5 @@
 #pragma once
-#include "interfaces/IHTTPClient.h"
+#include "interfaces/INetworkService.h"
 #include <memory>
 
 // Platform detection
@@ -17,13 +17,13 @@
 namespace Haisos {
 
 // Create the appropriate HTTP client based on platform
-inline std::unique_ptr<IHTTPClient> CreateHTTPClient() {
+inline std::shared_ptr<IHTTPClient> CreateHTTPClient() {
 #if defined(PLATFORM_WINDOWS)
-    return std::make_unique<WinHTTPClient>();
+    return WinHTTPClient::Create();
 #elif defined(PLATFORM_WASM)
-    return std::make_unique<FetchHTTPClient>();
+    return FetchHTTPClient::Create();
 #else
-    return std::make_unique<CurlHTTPClient>();
+    return CurlHTTPClient::Create();
 #endif
 }
 

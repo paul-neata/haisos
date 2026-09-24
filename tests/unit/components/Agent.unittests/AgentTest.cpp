@@ -1,79 +1,125 @@
 #include <gtest/gtest.h>
+#include <atomic>
 #include <memory>
 #include <chrono>
 #include <thread>
 #include "Agent.h"
 #include "tests/mocks/MockLLMCommunicator.h"
-#include "tests/mocks/MockConsole.h"
-#include "src/components/Factory/Factory.h"
+#include "tests/mocks/MockAgentConsole.h"
+#include "src/components/ToolFactory/ToolFactory.h"
+#include "src/components/Console/InMemoryAgentConsole.h"
 
 using namespace Haisos;
 using namespace Haisos::Mocks;
 
-TEST(AgentTest, Construction) {
-    Factory factory;
-    auto mockLLM = std::make_shared<MockLLMCommunicator>();
-    auto mockConsole = std::make_shared<MockConsole>();
-    auto toolFactory = factory.CreateToolFactory(factory);
+namespace {
 
-    auto agent = std::make_shared<Agent>(mockLLM, std::move(toolFactory), mockConsole,
+// The untimed WaitToFinish() is gone, so a test that means "wait until it is
+// done" waits with a timeout generous enough that only a real hang trips it.
+constexpr uint64_t kWaitTimeoutMs = 5000;
+
+// A tool factory with one tool that records whether it was ever called.
+class RecordingToolFactory : public IToolFactory {
+public:
+    static constexpr const char* kToolName = "recorded_tool";
+
+    bool WasToolCalled() const { return m_called->load(); }
+
+    std::shared_ptr<ITool> CreateTool(const std::string& name, std::shared_ptr<IAgent>) override {
+        if (name != kToolName) {
+            return nullptr;
+        }
+        return std::make_shared<RecordingTool>(m_called);
+    }
+    bool HasTool(const std::string& name) const override { return name == kToolName; }
+    std::vector<std::string> GetAvailableTools() const override { return {kToolName}; }
+    std::vector<std::tuple<std::string, std::string, nlohmann::json>> GetAvailableToolDescriptions() const override {
+        return {{kToolName, "records that it ran", nlohmann::json::object()}};
+    }
+
+private:
+    class RecordingTool : public ITool {
+    public:
+        explicit RecordingTool(std::shared_ptr<std::atomic<bool>> called) : m_called(std::move(called)) {}
+        ToolResult Call(std::shared_ptr<IAgent>, const nlohmann::json&) override {
+            *m_called = true;
+            return ToolResult{"ran", false};
+        }
+        nlohmann::json GetParametersSchema() const override { return nlohmann::json::object(); }
+
+    private:
+        std::shared_ptr<std::atomic<bool>> m_called;
+    };
+
+    // Shared so a tool outlives the factory call that made it.
+    std::shared_ptr<std::atomic<bool>> m_called = std::make_shared<std::atomic<bool>>(false);
+};
+
+} // namespace
+
+TEST(AgentTest, Construction) {
+    auto mockLLM = std::make_shared<MockLLMCommunicator>();
+    auto mockConsole = std::make_shared<MockAgentConsole>();
+    auto toolFactory = ToolFactory::Create();
+
+    auto agent = Agent::Create(mockLLM, std::move(toolFactory), mockConsole,
         std::vector<std::string>{"You are a helpful AI assistant."},
         "test_agent", nullptr);
 
     EXPECT_EQ(agent->Name(), "test_agent");
     EXPECT_EQ(agent->GetParent(), nullptr);
 
-    agent->Stop(0);
-    agent->WaitToFinish();
+    agent->TriggerStop();
+    ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
 }
 
 TEST(AgentTest, PostAndWaitToFinish) {
-    Factory factory;
     auto mockLLM = std::make_shared<MockLLMCommunicator>();
     mockLLM->SetMessageResponse("Hello from agent");
-    auto mockConsole = std::make_shared<MockConsole>();
-    auto toolFactory = factory.CreateToolFactory(factory);
+    auto mockConsole = std::make_shared<MockAgentConsole>();
+    auto toolFactory = ToolFactory::Create();
 
-    auto agent = std::make_shared<Agent>(mockLLM, std::move(toolFactory), mockConsole,
+    auto agent = Agent::Create(mockLLM, std::move(toolFactory), mockConsole,
         std::vector<std::string>{"You are a helpful AI assistant."},
         "test_agent", nullptr);
 
     agent->Post("Test command");
-    agent->Stop(0);
-    agent->WaitToFinish();
+    agent->TriggerStop();
+    ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
 
     EXPECT_EQ(mockLLM->GetCallCount(), 1);
 }
 
 TEST(AgentTest, CommandProcessingWritesToConsole) {
-    Factory factory;
     auto mockLLM = std::make_shared<MockLLMCommunicator>();
     mockLLM->SetMessageResponse("Agent response");
-    auto mockConsole = std::make_shared<MockConsole>();
-    auto toolFactory = factory.CreateToolFactory(factory);
+    auto mockConsole = std::make_shared<MockAgentConsole>();
+    auto toolFactory = ToolFactory::Create();
 
-    auto agent = std::make_shared<Agent>(mockLLM, std::move(toolFactory), mockConsole,
+    auto agent = Agent::Create(mockLLM, std::move(toolFactory), mockConsole,
         std::vector<std::string>{"You are a helpful AI assistant."},
         "test_agent", nullptr);
 
     agent->Post("Test command");
-    agent->Stop(0);
-    agent->WaitToFinish();
+    agent->TriggerStop();
+    ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
 
+    // IAgentConsole receives the raw message; per-source tagging (e.g. "[name]")
+    // is the physical console's job (see AgentConsoleAdapter/Console), not the
+    // agent's -- otherwise a physical-console-backed agent would get tagged twice.
     const auto& messages = mockConsole->GetMessages();
     ASSERT_FALSE(messages.empty());
-    EXPECT_NE(messages[0].find("[test_agent]"), std::string::npos);
+    EXPECT_EQ(messages[0].find("[test_agent]"), std::string::npos);
     EXPECT_NE(messages[0].find("Agent response"), std::string::npos);
 }
 
 TEST(AgentTest, CommandProcessingWritesToConsoleOutput) {
-    Factory factory;
-    auto mockLLM = std::make_unique<MockLLMCommunicator>();
+    auto mockLLM = std::make_shared<MockLLMCommunicator>();
     mockLLM->SetMessageResponse("Virtual response");
-    auto mockConsole = factory.CreateConsole(false);
-    auto toolFactory = factory.CreateToolFactory(factory);
+    auto mockConsole = InMemoryAgentConsole::Create();
+    auto toolFactory = ToolFactory::Create();
 
-    auto agent = factory.CreateAgent(
+    auto agent = Agent::Create(
         std::move(mockLLM),
         std::move(toolFactory),
         std::move(mockConsole),
@@ -82,55 +128,52 @@ TEST(AgentTest, CommandProcessingWritesToConsoleOutput) {
         nullptr);
 
     agent->Post("Test command");
-    agent->Stop(0);
-    agent->WaitToFinish();
+    agent->TriggerStop();
+    ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
 
     std::string contents = agent->GetConsoleOutput();
     EXPECT_NE(contents.find("Virtual response"), std::string::npos);
 }
 
 TEST(AgentTest, MultiplePosts) {
-    Factory factory;
     auto mockLLM = std::make_shared<MockLLMCommunicator>();
     mockLLM->SetMessageResponse("Response");
-    auto mockConsole = std::make_shared<MockConsole>();
-    auto toolFactory = factory.CreateToolFactory(factory);
+    auto mockConsole = std::make_shared<MockAgentConsole>();
+    auto toolFactory = ToolFactory::Create();
 
-    auto agent = std::make_shared<Agent>(mockLLM, std::move(toolFactory), mockConsole,
+    auto agent = Agent::Create(mockLLM, std::move(toolFactory), mockConsole,
         std::vector<std::string>{"You are a helpful AI assistant."},
         "test_agent", nullptr);
 
     agent->Post("Command 1");
     agent->Post("Command 2");
-    agent->Stop(0);
-    agent->WaitToFinish();
+    agent->TriggerStop();
+    ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
 
     EXPECT_EQ(mockLLM->GetCallCount(), 2);
 }
 
 TEST(AgentTest, StopWithoutPost) {
-    Factory factory;
     auto mockLLM = std::make_shared<MockLLMCommunicator>();
-    auto mockConsole = std::make_shared<MockConsole>();
-    auto toolFactory = factory.CreateToolFactory(factory);
+    auto mockConsole = std::make_shared<MockAgentConsole>();
+    auto toolFactory = ToolFactory::Create();
 
-    auto agent = std::make_shared<Agent>(mockLLM, std::move(toolFactory), mockConsole,
+    auto agent = Agent::Create(mockLLM, std::move(toolFactory), mockConsole,
         std::vector<std::string>{"You are a helpful AI assistant."},
         "test_agent", nullptr);
 
-    agent->Stop(0);
-    agent->WaitToFinish();
+    agent->TriggerStop();
+    ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
 
     EXPECT_EQ(mockLLM->GetCallCount(), 0);
 }
 
 TEST(AgentTest, ParentChildRelationship) {
-    Factory factory;
-    auto mockLLM = std::make_unique<MockLLMCommunicator>();
-    auto mockConsole = factory.CreateConsole(false);
-    auto toolFactory = factory.CreateToolFactory(factory);
+    auto mockLLM = std::make_shared<MockLLMCommunicator>();
+    auto mockConsole = InMemoryAgentConsole::Create();
+    auto toolFactory = ToolFactory::Create();
 
-    auto parent = factory.CreateAgent(
+    auto parent = Agent::Create(
         std::move(mockLLM),
         std::move(toolFactory),
         std::move(mockConsole),
@@ -138,34 +181,34 @@ TEST(AgentTest, ParentChildRelationship) {
         "parent",
         nullptr);
 
-    toolFactory = factory.CreateToolFactory(factory);
-    auto childLLM = std::make_unique<MockLLMCommunicator>();
-    auto childConsole = factory.CreateConsole(false);
-    auto child = factory.CreateAgent(
+    auto childLLM = std::make_shared<MockLLMCommunicator>();
+    auto childConsole = InMemoryAgentConsole::Create();
+    auto childToolFactory = ToolFactory::Create();
+    auto child = Agent::Create(
         std::move(childLLM),
-        std::move(toolFactory),
+        std::move(childToolFactory),
         std::move(childConsole),
         std::vector<std::string>{"You are a helpful AI assistant."},
         "child",
         parent);
+    parent->AddChild(child);
 
-    auto children = parent->GetChildren();
+    auto children = parent->GetChildren(/*onlyDirectChildren=*/true);
     ASSERT_EQ(children.size(), 1u);
     EXPECT_EQ(children[0]->Name(), "child");
 
-    child->Stop(0);
-    child->WaitToFinish();
-    parent->Stop(0);
-    parent->WaitToFinish();
+    child->TriggerStop();
+    ASSERT_TRUE(child->WaitToFinish(kWaitTimeoutMs));
+    parent->TriggerStop();
+    ASSERT_TRUE(parent->WaitToFinish(kWaitTimeoutMs));
 }
 
 TEST(AgentTest, ChildKnowsParent) {
-    Factory factory;
-    auto mockLLM = std::make_unique<MockLLMCommunicator>();
-    auto mockConsole = factory.CreateConsole(false);
-    auto toolFactory = factory.CreateToolFactory(factory);
+    auto mockLLM = std::make_shared<MockLLMCommunicator>();
+    auto mockConsole = InMemoryAgentConsole::Create();
+    auto toolFactory = ToolFactory::Create();
 
-    auto parent = factory.CreateAgent(
+    auto parent = Agent::Create(
         std::move(mockLLM),
         std::move(toolFactory),
         std::move(mockConsole),
@@ -173,32 +216,32 @@ TEST(AgentTest, ChildKnowsParent) {
         "parent",
         nullptr);
 
-    toolFactory = factory.CreateToolFactory(factory);
-    auto childLLM = std::make_unique<MockLLMCommunicator>();
-    auto childConsole = factory.CreateConsole(false);
-    auto child = factory.CreateAgent(
+    auto childLLM = std::make_shared<MockLLMCommunicator>();
+    auto childConsole = InMemoryAgentConsole::Create();
+    auto childToolFactory = ToolFactory::Create();
+    auto child = Agent::Create(
         std::move(childLLM),
-        std::move(toolFactory),
+        std::move(childToolFactory),
         std::move(childConsole),
         std::vector<std::string>{"You are a helpful AI assistant."},
         "child",
         parent);
+    parent->AddChild(child);
 
     EXPECT_EQ(child->GetParent(), parent);
 
-    child->Stop(0);
-    child->WaitToFinish();
-    parent->Stop(0);
-    parent->WaitToFinish();
+    child->TriggerStop();
+    ASSERT_TRUE(child->WaitToFinish(kWaitTimeoutMs));
+    parent->TriggerStop();
+    ASSERT_TRUE(parent->WaitToFinish(kWaitTimeoutMs));
 }
 
 TEST(AgentTest, ChildDestructionRemovesFromParent) {
-    Factory factory;
-    auto mockLLM = std::make_unique<MockLLMCommunicator>();
-    auto mockConsole = factory.CreateConsole(false);
-    auto toolFactory = factory.CreateToolFactory(factory);
+    auto mockLLM = std::make_shared<MockLLMCommunicator>();
+    auto mockConsole = InMemoryAgentConsole::Create();
+    auto toolFactory = ToolFactory::Create();
 
-    auto parent = factory.CreateAgent(
+    auto parent = Agent::Create(
         std::move(mockLLM),
         std::move(toolFactory),
         std::move(mockConsole),
@@ -206,38 +249,41 @@ TEST(AgentTest, ChildDestructionRemovesFromParent) {
         "parent",
         nullptr);
 
-    toolFactory = factory.CreateToolFactory(factory);
+    // Unlike the old Factory-backed flow (which kept every created agent
+    // alive internally), nothing here holds the child alive once it goes out
+    // of scope except parent's own weak_ptr -- so this test now specifically
+    // verifies that GetChildren() prunes a child that's actually gone.
     {
-        auto childLLM = std::make_unique<MockLLMCommunicator>();
-        auto childConsole = factory.CreateConsole(false);
-        auto child = factory.CreateAgent(
+        auto childLLM = std::make_shared<MockLLMCommunicator>();
+        auto childConsole = InMemoryAgentConsole::Create();
+        auto childToolFactory = ToolFactory::Create();
+        auto child = Agent::Create(
             std::move(childLLM),
-            std::move(toolFactory),
+            std::move(childToolFactory),
             std::move(childConsole),
             std::vector<std::string>{"You are a helpful AI assistant."},
             "child",
             parent);
+        parent->AddChild(child);
 
-        EXPECT_EQ(parent->GetChildren().size(), 1u);
-        child->Stop(0);
-        child->WaitToFinish();
+        EXPECT_EQ(parent->GetChildren(/*onlyDirectChildren=*/true).size(), 1u);
+        child->TriggerStop();
+        ASSERT_TRUE(child->WaitToFinish(kWaitTimeoutMs));
     }
 
-    // Factory holds a shared_ptr to all agents, so the child remains alive
-    EXPECT_EQ(parent->GetChildren().size(), 1u);
+    EXPECT_EQ(parent->GetChildren(/*onlyDirectChildren=*/true).size(), 0u);
 
-    parent->Stop(0);
-    parent->WaitToFinish();
+    parent->TriggerStop();
+    ASSERT_TRUE(parent->WaitToFinish(kWaitTimeoutMs));
 }
 
 TEST(AgentTest, GetHistoryContainsUserMessage) {
-    Factory factory;
-    auto mockLLM = std::make_unique<MockLLMCommunicator>();
+    auto mockLLM = std::make_shared<MockLLMCommunicator>();
     mockLLM->SetMessageResponse("Agent response");
-    auto mockConsole = factory.CreateConsole(false);
-    auto toolFactory = factory.CreateToolFactory(factory);
+    auto mockConsole = InMemoryAgentConsole::Create();
+    auto toolFactory = ToolFactory::Create();
 
-    auto agent = factory.CreateAgent(
+    auto agent = Agent::Create(
         std::move(mockLLM),
         std::move(toolFactory),
         std::move(mockConsole),
@@ -246,8 +292,8 @@ TEST(AgentTest, GetHistoryContainsUserMessage) {
         nullptr);
 
     agent->Post("Hello agent");
-    agent->Stop(0);
-    agent->WaitToFinish();
+    agent->TriggerStop();
+    ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
 
     auto history = agent->GetHistory();
     ASSERT_TRUE(history.is_array());
@@ -263,29 +309,27 @@ TEST(AgentTest, GetHistoryContainsUserMessage) {
     EXPECT_TRUE(foundUserMessage);
 }
 
-TEST(AgentTest, KillSetsKilledFlag) {
-    Factory factory;
+TEST(AgentTest, TriggerStopFinishesAnIdleAgent) {
     auto mockLLM = std::make_shared<MockLLMCommunicator>();
-    auto mockConsole = std::make_shared<MockConsole>();
-    auto toolFactory = factory.CreateToolFactory(factory);
+    auto mockConsole = std::make_shared<MockAgentConsole>();
+    auto toolFactory = ToolFactory::Create();
 
-    auto agent = std::make_shared<Agent>(mockLLM, std::move(toolFactory), mockConsole,
+    auto agent = Agent::Create(mockLLM, std::move(toolFactory), mockConsole,
         std::vector<std::string>{"You are a helpful AI assistant."},
         "test_agent", nullptr);
 
-    EXPECT_FALSE(agent->IsKilled());
-    agent->Kill();
-    agent->WaitToFinish();
-    EXPECT_TRUE(agent->IsKilled());
+    EXPECT_FALSE(agent->IsFinished());
+    agent->TriggerStop();
+    EXPECT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
+    EXPECT_TRUE(agent->IsFinished());
 }
 
 TEST(AgentTest, WaitToFinishWithTimeoutReturnsFalseIfNotFinished) {
-    Factory factory;
     auto mockLLM = std::make_shared<MockLLMCommunicator>();
-    auto mockConsole = std::make_shared<MockConsole>();
-    auto toolFactory = factory.CreateToolFactory(factory);
+    auto mockConsole = std::make_shared<MockAgentConsole>();
+    auto toolFactory = ToolFactory::Create();
 
-    auto agent = std::make_shared<Agent>(mockLLM, std::move(toolFactory), mockConsole,
+    auto agent = Agent::Create(mockLLM, std::move(toolFactory), mockConsole,
         std::vector<std::string>{"You are a helpful AI assistant."},
         "test_agent", nullptr);
 
@@ -293,40 +337,94 @@ TEST(AgentTest, WaitToFinishWithTimeoutReturnsFalseIfNotFinished) {
     bool finished = agent->WaitToFinish(50);
     EXPECT_FALSE(finished);
 
-    agent->Stop(0);
-    agent->WaitToFinish();
+    agent->TriggerStop();
+    ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
 }
 
-TEST(AgentTest, StopWithTimeoutWaitsForFinish) {
-    Factory factory;
+TEST(AgentTest, TriggerStopThenWaitToFinishReturnsTrue) {
     auto mockLLM = std::make_shared<MockLLMCommunicator>();
     mockLLM->SetMessageResponse("quick");
-    auto mockConsole = std::make_shared<MockConsole>();
-    auto toolFactory = factory.CreateToolFactory(factory);
+    auto mockConsole = std::make_shared<MockAgentConsole>();
+    auto toolFactory = ToolFactory::Create();
 
-    auto agent = std::make_shared<Agent>(mockLLM, std::move(toolFactory), mockConsole,
+    auto agent = Agent::Create(mockLLM, std::move(toolFactory), mockConsole,
         std::vector<std::string>{"You are a helpful AI assistant."},
         "test_agent", nullptr);
 
     agent->Post("hello");
-    bool stopped = agent->Stop(5000);
+    agent->TriggerStop();
+    bool stopped = agent->WaitToFinish(5000);
     EXPECT_TRUE(stopped);
 }
 
+// A stop asked for while a command is in flight is noticed before the next tool
+// runs, not only at the next command -- which for a command that keeps calling
+// tools would be a long way off. Every call still gets an answer, so the history
+// keeps one result per tool call.
+TEST(AgentTest, StopRequestedMidRoundStopsToolsFromRunning) {
+    auto toolFactory = std::make_shared<RecordingToolFactory>();
+    auto mockLLM = std::make_shared<MockLLMCommunicator>();
+    mockLLM->SetToolCallResponse(RecordingToolFactory::kToolName);
+
+    auto agent = Agent::Create(
+        mockLLM,
+        toolFactory,
+        InMemoryAgentConsole::Create(),
+        std::vector<std::string>{"You are a helpful AI assistant."},
+        "test_agent",
+        nullptr);
+
+    // Fires on the agent's own thread, inside the LLM call of the round whose
+    // tool calls are about to be executed.
+    std::weak_ptr<Agent> weakAgent = agent;
+    mockLLM->SetOnCall([weakAgent] {
+        if (auto live = weakAgent.lock()) {
+            live->TriggerStop();
+        }
+    });
+
+    agent->Post("do some work");
+    EXPECT_TRUE(agent->WaitToFinish(5000));
+    EXPECT_FALSE(toolFactory->WasToolCalled());
+}
+
+// Without the stop, the same arrangement does run the tool -- so the test above
+// is pinning the stop, not some other reason the tool never ran.
+TEST(AgentTest, ToolsRunNormallyWhenNoStopIsRequested) {
+    auto toolFactory = std::make_shared<RecordingToolFactory>();
+    auto mockLLM = std::make_shared<MockLLMCommunicator>();
+    mockLLM->SetToolCallResponse(RecordingToolFactory::kToolName);
+
+    // Not interactive, so it finishes on its own once the command is answered --
+    // no stop is needed, and none can race ahead of the round.
+    auto agent = Agent::Create(
+        mockLLM,
+        toolFactory,
+        InMemoryAgentConsole::Create(),
+        std::vector<std::string>{"You are a helpful AI assistant."},
+        "test_agent",
+        nullptr,
+        /*startTime=*/"",
+        /*interactive=*/false);
+
+    agent->Post("do some work");
+    EXPECT_TRUE(agent->WaitToFinish(5000));
+    EXPECT_TRUE(toolFactory->WasToolCalled());
+}
+
 TEST(AgentTest, GetConsoleOutputContainsAgentMessages) {
-    Factory factory;
     auto mockLLM = std::make_shared<MockLLMCommunicator>();
     mockLLM->SetMessageResponse("Hello world");
-    auto mockConsole = std::make_shared<MockConsole>();
-    auto toolFactory = factory.CreateToolFactory(factory);
+    auto mockConsole = std::make_shared<MockAgentConsole>();
+    auto toolFactory = ToolFactory::Create();
 
-    auto agent = std::make_shared<Agent>(mockLLM, std::move(toolFactory), mockConsole,
+    auto agent = Agent::Create(mockLLM, std::move(toolFactory), mockConsole,
         std::vector<std::string>{"You are a helpful AI assistant."},
         "test_agent", nullptr);
 
     agent->Post("Test");
-    agent->Stop(0);
-    agent->WaitToFinish();
+    agent->TriggerStop();
+    ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
 
     std::string output = agent->GetConsoleOutput();
     EXPECT_NE(output.find("Hello world"), std::string::npos);

@@ -1,0 +1,4 @@
+add_library(OSListDirectoryTool STATIC OSListDirectoryTool.cpp)
+target_include_directories(OSListDirectoryTool PUBLIC ${CMAKE_SOURCE_DIR}/interfaces ${CMAKE_SOURCE_DIR}/src/tools/os_list_directory)
+target_link_libraries(OSListDirectoryTool PUBLIC nlohmann_json::nlohmann_json)
+target_compile_features(OSListDirectoryTool PUBLIC cxx_std_17)

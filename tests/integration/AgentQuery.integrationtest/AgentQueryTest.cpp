@@ -1,4 +1,7 @@
 #include "src/components/Factory/Factory.h"
+#include "src/components/ServicesCreator/ServicesCreator.h"
+#include "src/components/Console/AgentConsoleAdapter.h"
+#include "src/components/Logger/Logger.h"
 #include "tests/integration/helpers/IntegrationTestHelpers.h"
 #include "tests/integration/helpers/IntegrationTestLogCapture.h"
 #include "src/tools/agent_query/AgentQueryTool.h"
@@ -9,51 +12,53 @@ using namespace Haisos;
 
 namespace {
 
+// Generous: a real LLM round trip, not a unit-test-scale wait.
+constexpr uint64_t kAgentTimeoutMs = 5 * 60 * 1000;
+
 bool TestAgentQuery() {
     IntegrationTest::IntegrationTestLogCapture logCapture;
 
     auto [endpoint, model, apiKey] = IntegrationTest::GetEndpointModelAndApiKey();
 
-    Factory factory;
-    auto console = factory.CreateConsole(false);
-    console->Start();
-    auto httpClient = factory.CreateHTTPClient();
-    auto toolFactory = factory.CreateToolFactory(factory);
-    auto llmCommunicator = factory.CreateLLMCommunicator(
-        std::move(httpClient), endpoint, model, apiKey);
+    auto factory = Factory::Create();
+    auto servicesCreator = CreateServicesCreator();
+    auto networkService = servicesCreator->CreateNetworkService();
+    auto llmService = servicesCreator->CreateLLMService(networkService, endpoint, model, apiKey);
 
-    SystemCallbacks callbacks;
-    callbacks.on_send_with_name = IntegrationTest::MakeLLMJsonLoggerWithName("send");
-    callbacks.on_received_with_name = IntegrationTest::MakeLLMJsonLoggerWithName("receive");
-    factory.SetSystemCallbacks(callbacks);
+    auto physicalConsole = factory->CreatePhysicalConsole();
+    physicalConsole->Start();
+    auto console = AgentConsoleAdapter::Create(physicalConsole, "root");
 
-    auto agent = factory.CreateAgent(
-        std::move(llmCommunicator),
-        std::move(toolFactory),
-        std::move(console),
-        std::vector<std::string>{"You are a helpful AI assistant."},
+    auto agent = llmService->CreateAgent(
         "root",
-        nullptr);
+        /*parent=*/nullptr,
+        std::move(console),
+        /*additionalTools=*/nullptr,
+        std::vector<std::string>{"You are a helpful AI assistant."},
+        // Not interactive: the agent answers the prompt below and then finishes,
+        // which is what this test waits for. IAgent cannot be forced down.
+        /*isInteractive=*/false);
 
     // Create a subagent directly under the main agent
     auto subagent = Tools::CreateAndStartSubagent(
-        factory,
+        *llmService,
         agent,
         "What is 4+4?",
-        std::vector<std::string>{"You are a helpful AI assistant."});
+        std::vector<std::string>{"You are a helpful AI assistant."},
+        /*interactive=*/false);
 
     std::string subagentName = subagent->Name();
 
-    // Close the queue and wait for the subagent to finish
-    subagent->Stop(0);
-    subagent->WaitToFinish();
+    // The subagent is not interactive, so it finishes on its own once it has
+    // answered; there is nothing to stop.
+    subagent->WaitToFinish(kAgentTimeoutMs);
 
     // Query its status using AgentQueryTool directly
-    Tools::AgentQueryTool queryTool;
+    auto queryTool = Tools::AgentQueryTool::Create();
     nlohmann::json args;
     args["names"] = nlohmann::json::array({subagentName});
     args["return_console"] = true;
-    ToolResult resultTr = queryTool.Call(agent, args);
+    ToolResult resultTr = queryTool->Call(agent, args);
 
     // Parse and verify the result (agent_query returns raw JSON array on success)
     nlohmann::json result = nlohmann::json::parse(resultTr.content);

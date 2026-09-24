@@ -33,6 +33,11 @@ if not exist "extern\googletest" (
     git clone --branch v1.14.0 --depth 1 https://github.com/google/googletest.git extern/googletest
 )
 
+if not exist "extern\lua" (
+    echo Cloning lua/lua
+    git clone --branch v5.4.9 --depth 1 https://github.com/lua/lua.git extern/lua
+)
+
 rem Configure only on first run; reuse existing build system on rebuilds
 if not exist "build\temp_windows%BUILD_SUFFIX%\CMakeCache.txt" (
     cmake -B build\temp_windows%BUILD_SUFFIX% -DHAISOS_DEBUG=%HAISOS_DEBUG%

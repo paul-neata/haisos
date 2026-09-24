@@ -1,5 +1,5 @@
 #pragma once
-#include "interfaces/IFileSystem.h"
+#include "interfaces/IFileSystemService.h"
 #include <vector>
 #include <tuple>
 
@@ -22,10 +22,7 @@ public:
     struct DirCall { std::string path; int mode; };
     std::vector<DirCall> m_mkdirCalls;
     std::vector<DirCall> m_rmdirCalls;
-    std::vector<DirCall> m_chdirCalls;
 
-    struct GetcwdCall { size_t size; };
-    std::vector<GetcwdCall> m_getcwdCalls;
 
     struct ReadDirCall { std::string path; };
     std::vector<ReadDirCall> m_readdirCalls;
@@ -37,8 +34,6 @@ public:
     ssize_t m_writeReturn = 0;
     int m_mkdirReturn = 0;
     int m_rmdirReturn = 0;
-    int m_chdirReturn = 0;
-    char* m_getcwdReturn = nullptr;
     std::vector<DirectoryEntry> m_readdirReturn;
 
     // IFileSystem overrides
@@ -83,18 +78,9 @@ public:
         return m_rmdirReturn;
     }
 
-    int ChangeDirectory(const std::string& path) override {
-        m_chdirCalls.push_back({path, 0});
-        return m_chdirReturn;
-    }
-
-    char* GetCurrentDirectory(std::string& buf, size_t size) override {
-        m_getcwdCalls.push_back({size});
-        if (m_getcwdReturn) {
-            buf = m_getcwdReturn;
-        }
-        return m_getcwdReturn;
-    }
+    // The mock records calls rather than routing, so mounting is a no-op here.
+    void Mount(const std::string&, std::shared_ptr<IFileSystem>) override {}
+    void Unmount(const std::string&) override {}
 
     std::vector<DirectoryEntry> ReadDirectory(const std::string& path) override {
         m_readdirCalls.push_back({path});

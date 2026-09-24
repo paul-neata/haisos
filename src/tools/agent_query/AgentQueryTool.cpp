@@ -4,7 +4,7 @@
 namespace Haisos::Tools {
 
 const std::string AgentQueryTool::ToolName = "agent_query";
-const std::string AgentQueryTool::ToolDefaultDescription = "Query the status of named subagents. On success, returns a JSON array of agent status objects. Each object includes the agent's name, starting_time, killed, finished, and oneShot status.";
+const std::string AgentQueryTool::ToolDefaultDescription = "Query the status of named subagents. On success, returns a JSON array of agent status objects. Each object includes the agent's name, starting_time, finished, and oneShot status.";
 
 nlohmann::json AgentQueryTool::GetDefaultParametersSchema() {
     return nlohmann::json{
@@ -57,12 +57,14 @@ ToolResult AgentQueryTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohm
             result["name"] = agentName;
             result["found"] = false;
         } else {
-            LogVerboseDebug("AgentQueryTool: querying agent '%s' (finished=%d, killed=%d)", agentName.c_str(), target->IsFinished() ? 1 : 0, target->IsKilled() ? 1 : 0);
+            // WaitToFinish(0) does not wait; it just reports whether the
+            // agent has finished.
+            bool finished = target->WaitToFinish(0);
+            LogVerboseDebug("AgentQueryTool: querying agent '%s' (finished=%d)", agentName.c_str(), finished ? 1 : 0);
             result["name"] = target->Name();
             result["starting_time"] = target->GetStartTime();
-            result["killed"] = target->IsKilled();
-            result["finished"] = target->IsFinished();
-            result["oneShot"] = !target->IsLongRunning();
+            result["finished"] = finished;
+            result["oneShot"] = !target->IsInteractive();
             if (returnConsole) {
                 result["console_result"] = target->GetConsoleOutput();
             }

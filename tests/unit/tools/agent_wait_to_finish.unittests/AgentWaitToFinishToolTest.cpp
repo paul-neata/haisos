@@ -20,12 +20,12 @@ TEST(AgentWaitToFinishToolTest, GetParametersSchemaIsValid) {
 
 TEST(AgentWaitToFinishToolTest, WaitToFinish_MissingNames_ReturnsError) {
     auto callerAgent = std::make_shared<MockAgent>();
-    AgentWaitToFinishTool tool;
+    auto tool = AgentWaitToFinishTool::Create();
 
     nlohmann::json args;
     // missing "names"
 
-    auto result = tool.Call(callerAgent, args);
+    auto result = tool->Call(callerAgent, args);
 
     EXPECT_TRUE(result.isError);
     EXPECT_EQ(result.content, "Missing required field: names");
@@ -37,13 +37,13 @@ TEST(AgentWaitToFinishToolTest, WaitToFinish_ImmediateCheck) {
     child->SetName("child1");
     callerAgent->AddChild(child);
 
-    AgentWaitToFinishTool tool;
+    auto tool = AgentWaitToFinishTool::Create();
 
     nlohmann::json args;
     args["names"] = nlohmann::json::array({"child1"});
     args["timeout_ms"] = 0;
 
-    auto result = tool.Call(callerAgent, args);
+    auto result = tool->Call(callerAgent, args);
 
     EXPECT_TRUE(result.content.empty());
     EXPECT_FALSE(result.isError);
@@ -56,13 +56,13 @@ TEST(AgentWaitToFinishToolTest, WaitToFinish_WithTimeout_Succeeds) {
     child->SetFinished(true);
     callerAgent->AddChild(child);
 
-    AgentWaitToFinishTool tool;
+    auto tool = AgentWaitToFinishTool::Create();
 
     nlohmann::json args;
     args["names"] = nlohmann::json::array({"child1"});
     args["timeout_ms"] = 5000;
 
-    auto result = tool.Call(callerAgent, args);
+    auto result = tool->Call(callerAgent, args);
 
     EXPECT_TRUE(result.content.empty());
     EXPECT_FALSE(result.isError);
@@ -78,45 +78,66 @@ TEST(AgentWaitToFinishToolTest, WaitToFinish_ReturnsConsoleAndMessages) {
     child->SetHistory(history);
     callerAgent->AddChild(child);
 
-    AgentWaitToFinishTool tool;
+    auto tool = AgentWaitToFinishTool::Create();
 
     nlohmann::json args;
     args["names"] = nlohmann::json::array({"child1"});
     args["return_console"] = true;
     args["return_messages"] = true;
 
-    auto result = tool.Call(callerAgent, args);
+    auto result = tool->Call(callerAgent, args);
 
     EXPECT_TRUE(result.content.empty());
     EXPECT_FALSE(result.isError);
 }
 
-TEST(AgentWaitToFinishToolTest, WaitToFinish_Forever) {
+TEST(AgentWaitToFinishToolTest, WaitToFinish_NoTimeoutOnOneShotAgent) {
     auto callerAgent = std::make_shared<MockAgent>();
     auto child = std::make_shared<MockAgent>();
     child->SetName("child1");
     child->SetFinished(true);
     callerAgent->AddChild(child);
 
-    AgentWaitToFinishTool tool;
+    auto tool = AgentWaitToFinishTool::Create();
 
     nlohmann::json args;
     args["names"] = nlohmann::json::array({"child1"});
 
-    auto result = tool.Call(callerAgent, args);
+    auto result = tool->Call(callerAgent, args);
 
     EXPECT_TRUE(result.content.empty());
     EXPECT_FALSE(result.isError);
 }
 
+// An interactive agent never finishes on its own and can no longer be told to
+// stop through IAgent, so waiting on one without a timeout is an error rather
+// than a wait that would never return.
+TEST(AgentWaitToFinishToolTest, WaitToFinish_NoTimeoutOnInteractiveAgentIsAnError) {
+    auto callerAgent = std::make_shared<MockAgent>();
+    auto child = std::make_shared<MockAgent>();
+    child->SetName("child1");
+    child->SetInteractive(true);
+    callerAgent->AddChild(child);
+
+    auto tool = AgentWaitToFinishTool::Create();
+
+    nlohmann::json args;
+    args["names"] = nlohmann::json::array({"child1"});
+
+    auto result = tool->Call(callerAgent, args);
+
+    EXPECT_TRUE(result.isError);
+    EXPECT_NE(result.content.find("timeout_ms"), std::string::npos);
+}
+
 TEST(AgentWaitToFinishToolTest, WaitToFinish_AgentNotFound) {
     auto callerAgent = std::make_shared<MockAgent>();
-    AgentWaitToFinishTool tool;
+    auto tool = AgentWaitToFinishTool::Create();
 
     nlohmann::json args;
     args["names"] = nlohmann::json::array({"nonexistent"});
 
-    auto result = tool.Call(callerAgent, args);
+    auto result = tool->Call(callerAgent, args);
 
     EXPECT_TRUE(result.isError);
     EXPECT_EQ(result.content, "nonexistent not found");

@@ -7,7 +7,10 @@ Creates tool instances by name, including context-aware tools like `agent_start`
 - Maintains a registry of available tools
 - Creates tool instances on demand, passing the calling agent when needed
 - Provides tool descriptions and JSON schemas for LLM tool registration
+- Merges two tool sets into one (e.g. an OS's tools with an agent's own tools)
+- Takes an `ILLMService&` (not `IFactory&`) so `agent_start` can create subagents via it; nullable, matching how a missing caller agent is handled
 
 ## Key Classes
 
 - `ToolFactory` - Main implementation of `IToolFactory`
+- `CompositeToolFactory` - `IToolFactory` that merges a shared, non-owned factory with an owned one, by tool name

@@ -1,0 +1,3 @@
+add_executable(Environment.unittests EnvironmentTest.cpp)
+target_link_libraries(Environment.unittests PRIVATE gtest_main gmock Environment)
+target_compile_features(Environment.unittests PRIVATE cxx_std_17)

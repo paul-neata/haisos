@@ -65,6 +65,10 @@ public:
     // RemoveDirectory is the IFileSystem counterpart of the C rmdir() function.
     virtual int RemoveDirectory(const std::string& pathname) = 0;
 
+    // RemoveFile is the IFileSystem counterpart of the C unlink() function: it
+    // removes a file, never a directory (use RemoveDirectory for those).
+    virtual int RemoveFile(const std::string& pathname) = 0;
+
     // Mount makes |toBeMounted| serve every path at or under |whereToMount| on
     // THIS filesystem, in place -- unlike IFileSystemService::CreateComposedFileSystem,
     // which leaves its operands alone and returns a new filesystem. Calls are

@@ -51,6 +51,10 @@ int SubFileSystem::LocalRemoveDirectory(const std::string& pathname) {
     return m_root->RemoveDirectory(ResolveInRoot(pathname));
 }
 
+int SubFileSystem::LocalRemoveFile(const std::string& pathname) {
+    return m_root->RemoveFile(ResolveInRoot(pathname));
+}
+
 std::vector<DirectoryEntry> SubFileSystem::LocalReadDirectory(const std::string& path) {
     return m_root->ReadDirectory(ResolveInRoot(path));
 }

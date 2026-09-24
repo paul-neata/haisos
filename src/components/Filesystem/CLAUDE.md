@@ -20,7 +20,7 @@ behaves identically no matter what you mount onto.
 ## Responsibilities
 
 - Provides file operations: open, close, read, write
-- Provides directory operations: mkdir, rmdir
+- Provides file removal (unlink, via `RemoveFile`) and directory operations: mkdir, rmdir
 - Provides custom directory listing via `ReadDirectory`
 - Holds **no current directory**. That notion belongs to a process
   (`ICurrentProcess::IO()`, an `IFileIO`), not to a filesystem: one filesystem is

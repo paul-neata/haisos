@@ -48,6 +48,7 @@ haisos/
 │   │   ├── agent_query/
 │   │   ├── agent_wait_to_finish/
 │   │   ├── agent_list_running/
+│   │   ├── self_close/
 │   │   ├── agent_tools_common/
 │   │   ├── os_tools_common/
 │   │   ├── os_read_file/
@@ -55,7 +56,7 @@ haisos/
 │   │   ├── os_list_directory/
 │   │   ├── os_start_process/
 │   │   └── os_list_processes/
-│   └── haisos/            - Entry point, CLI parser, haisosfile parser, and root-filesystem builder
+│   └── haisos/            - Entry point, CLI parser, haisosfile parser, root-filesystem builder, and file-directive executor
 ├── interfaces/             - Service-based interfaces (IFactory.h [IPhysicalConsole], IServicesCreator.h, IHaisosOS.h, IProcess.h, IEnvironment.h [LLMIdentifier], ILLMService.h [IAgent, ITool, IToolFactory, IAgentConsole], INetworkService.h [IHTTPClient], IFileSystemService.h [IFileSystem], IProcess.h [ICurrentProcess], ILLMCommunicator.h)
 ├── tests/                 - All tests
 │   ├── mocks/             - Mock classes for testing
@@ -199,8 +200,21 @@ MOUNT workspace /scratch scratch
 FS combined COMPOSED workspace /scratch scratch
 
 ROOT workspace                 # which declared filesystem (by name) becomes the OS's root
-RUN agent.md                   # start an initial process (.md agent or .lua script); may repeat
-RUN tools/setup.lua ${greeting}
+
+# File directives act on the root filesystem; paths inside the OS are absolute,
+# host paths are relative to this file (or absolute).
+CREATE /notes/a.txt 'hello'    # write a file (replacing it); content is 'quoted' or "quoted"
+APPEND /notes/a.txt text: more # append (creating if missing); text: takes the rest of the line as-is
+CREATE /notes/b.md multiline END
+# a heading -- content, not a comment
+END
+COPY ./input.txt /work/in.txt  # copy a host file into the OS
+DELETE /work/stale             # remove a file, or a directory and everything in it
+OUTCOPY /work/out.txt ./out.txt  # copy a file out to the host, once every RUN process has finished
+
+RUN /agent.md                  # start an initial process (.md agent or .lua script) at '/'; may repeat
+RUN /tools/setup.lua ${greeting}
+RUN -i /chat.md                # an interactive agent, fed each line typed on the console
 ```
 
 `ROOT`'s value is looked up by name against the declared `FS`s; if omitted, the
@@ -209,13 +223,35 @@ falls back to the original shorthand -- a plain directory path (or the
 haisosfile's own directory, if `ROOT` is also omitted) -- so simple haisosfiles
 never need `FS`.
 
+`RUN` takes an absolute program path, and the process starts in `/`. `RUN -i`
+(only in front of the path) runs a `.md` agent interactively -- see
+`StartProcessOptions::interactiveAgent` in `interfaces/IHaisosOS.h`: after its
+program, every line typed on the console is posted to it, until it closes itself
+with the `self_close` tool (noticed when the next line arrives) or input ends.
+
+`CREATE`/`APPEND` content is one of `'text'` / `"text"` (up to the next quote of
+the same kind; a comment may follow), `text:<rest of line>` (taken exactly as
+written, `#` included), or `multiline <marker>` (the following lines, up to one
+that is only `<marker>` after trimming; the newline before the marker is not
+part of the text, so an empty line before it keeps a trailing newline). Content
+is never `${}`-substituted; the path is. Missing parent directories are created.
+`COPY`/`OUTCOPY` copy files, not directories; `OUTCOPY` creates missing host
+directories. The file directives run in `src/haisos/HaisosFileOperations.cpp`.
+
+Ordering is enforced: once a file directive (`CREATE`/`APPEND`/`COPY`/`DELETE`/
+`OUTCOPY`) has appeared, no `ROOT`, `FS` or `MOUNT` may follow -- the root is
+fixed once files are written to it -- and `CREATE`/`APPEND`/`COPY`/`DELETE` must
+come before the first `RUN`, since they are applied before any process starts.
+`OUTCOPY` may appear anywhere after that, and always runs last.
+
 Mistakes are reported rather than silently absorbed: a `${name}` that resolves
 to nothing declared, a duplicate `FS` name, a `-- key=value` override naming an
-argument the file never declares, and a `RUN` left empty by substitution are all
-parse errors. `ARG name` without `=` declares an argument with no default, which
+argument the file never declares, a `RUN` left empty by substitution, a relative
+path inside the OS, and a file directive that fails when applied are all
+errors. `ARG name` without `=` declares an argument with no default, which
 must then be supplied via `-- name=value`. A `VAR`/`ARG` right-hand side may only
-reference names declared above it. Each `RUN` starts a top-most process (parent PID 0); Haisos
-exits once all of them have finished. Composed/temporary filesystems from
+reference names declared above it. Each `RUN` starts a top-most process (its
+parent is the OS); Haisos exits once all of them have finished. Composed/temporary filesystems from
 GitHub or tar archives, and site/network permissions, are not implemented yet.
 
 ## Example Usage
@@ -336,7 +372,7 @@ cycle and nothing would ever be freed.
 | **LLMCommunicator** | `src/components/LLMCommunicator/` | Handles LLM API communication, request/response formatting, and tool call parsing (HTTP is handled by HTTPClient) |
 | **ToolFactory** | `src/components/ToolFactory/` | Creates tool instances by name, including context-aware tools like `agent_start` |
 | **Environment** | `src/components/Environment/` | An OS's or a process's environment: variables, secrets (nameable but not readable), and LLM identifiers; `Clone()`d rather than shared |
-| **Console** | `src/components/Console/` | Async physical console output, plus adapters giving agents a write-only view onto it (or onto memory only) |
+| **Console** | `src/components/Console/` | Async physical console output and line input, plus adapters giving agents a view onto it (or onto memory only) |
 | **Logger** | `src/components/Logger/` | Thread-safe logging with configurable receivers |
 | **HTTPClient** | `src/components/HTTPClient/` | Platform-specific HTTP implementation (Curl/WinHTTP/Fetch) |
 | **Factory** | `src/components/Factory/` | Creates the root concepts: physical console, disk-backed filesystem, the services layer, and the OS itself |
@@ -356,13 +392,14 @@ cycle and nothing would ever be freed.
 | `agent_query` | `src/tools/agent_query/` | Queries a subagent's status and output |
 | `agent_wait_to_finish` | `src/tools/agent_wait_to_finish/` | Waits for a subagent to finish |
 | `agent_list_running` | `src/tools/agent_list_running/` | Lists all running subagents |
+| `self_close` | `src/tools/self_close/` | Closes the calling agent; how an interactive agent ends its session |
 | `os_read_file` | `src/tools/os_read_file/` | Reads a file from the OS's filesystem |
 | `os_write_file` | `src/tools/os_write_file/` | Writes a file on the OS's filesystem |
 | `os_list_directory` | `src/tools/os_list_directory/` | Lists a directory on the OS's filesystem |
 | `os_start_process` | `src/tools/os_start_process/` | Starts a new OS process (`.md`/`.lua`) as a child of the calling process |
 | `os_list_processes` | `src/tools/os_list_processes/` | Lists the OS's currently running processes |
 
-The `agent_*` tools above are agent-management tools, returned by `ILLMService`
+The `agent_*` tools and `self_close` above are agent-management tools, returned by `ILLMService`
 and available to every agent. The `os_*` tools are the OS's own tool set,
 returned by `IHaisosOS`'s `OSToolFactory` and merged with an agent's tools
 (via `CompositeToolFactory`) only for processes started by an `IHaisosOS`.

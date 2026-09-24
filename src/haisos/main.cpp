@@ -20,6 +20,7 @@
 #include "interfaces/IServicesCreator.h"
 #include "interfaces/IHaisosOS.h"
 #include "CliParser.h"
+#include "HaisosFileOperations.h"
 #include "HaisosFileParser.h"
 #include "HaisosFileSystemBuilder.h"
 
@@ -270,6 +271,15 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // CREATE/APPEND/COPY/DELETE: the root's files are set up before any
+    // process can see them.
+    std::string operationsError;
+    if (!ApplyHaisosFileOperations(*factory, *rootFileSystem, parseResult.config.setupOperations, haisosFileDir, operationsError)) {
+        LogError("Failed to set up files for '%s': %s", haisosFilePath.c_str(), operationsError.c_str());
+        std::cerr << operationsError;
+        return 1;
+    }
+
     auto physicalConsole = factory->CreatePhysicalConsole();
     physicalConsole->Start();
 
@@ -287,8 +297,10 @@ int main(int argc, char* argv[]) {
         // inherited implicitly, and one process's edits never reach another's.
         // Each RUN starts at the OS's root; a haisosfile has no way to say
         // otherwise yet.
+        StartProcessOptions options;
+        options.interactiveAgent = runEntry.interactive;
         auto process = os->StartProcess(
-            os->GetOsEnvironment()->Clone(), runEntry.programPath, runEntry.args, /*workingDirectory=*/"");
+            os->GetOsEnvironment()->Clone(), runEntry.programPath, runEntry.args, /*workingDirectory=*/"/", options);
         if (!process) {
             LogError("Failed to start process: %s", runEntry.programPath.c_str());
             std::cerr << "Error: Failed to start process: " << runEntry.programPath << "\n";
@@ -315,6 +327,14 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // OUTCOPY: what the processes produced is pulled out once they are done.
+    int exitCode = 0;
+    if (!ApplyHaisosFileOperations(*factory, *os->GetRootFileSystem(), parseResult.config.outCopyOperations, haisosFileDir, operationsError)) {
+        LogError("Failed to copy files out of the OS for '%s': %s", haisosFilePath.c_str(), operationsError.c_str());
+        std::cerr << operationsError;
+        exitCode = 1;
+    }
+
     physicalConsole->Stop();
 
     if (tempJsonLog) {
@@ -322,5 +342,5 @@ int main(int argc, char* argv[]) {
     }
 
     LogInfo("Haisos finished");
-    return 0;
+    return exitCode;
 }

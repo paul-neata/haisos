@@ -101,6 +101,11 @@ int ProcessFileIO::RemoveDirectory(const std::string& pathname) {
     return fs ? fs->RemoveDirectory(ResolvePath(pathname)) : -1;
 }
 
+int ProcessFileIO::RemoveFile(const std::string& pathname) {
+    auto fs = RootFileSystem();
+    return fs ? fs->RemoveFile(ResolvePath(pathname)) : -1;
+}
+
 std::vector<DirectoryEntry> ProcessFileIO::ReadDirectory(const std::string& path) {
     auto fs = RootFileSystem();
     return fs ? fs->ReadDirectory(ResolvePath(path)) : std::vector<DirectoryEntry>{};

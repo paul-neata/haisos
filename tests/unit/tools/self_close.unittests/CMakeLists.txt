@@ -1,0 +1,3 @@
+add_executable(SelfCloseTool.unittests SelfCloseToolTest.cpp)
+target_link_libraries(SelfCloseTool.unittests PRIVATE gtest_main gmock SelfCloseTool Logger)
+target_compile_features(SelfCloseTool.unittests PRIVATE cxx_std_17)

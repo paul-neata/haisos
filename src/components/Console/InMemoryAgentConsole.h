@@ -7,7 +7,8 @@
 namespace Haisos {
 
 // A standalone IAgentConsole that just accumulates what was written to it in
-// memory, with no physical/real console involved.
+// memory, with no physical/real console involved. It has nothing to read from,
+// so ReadLine reports end of input straight away.
 class InMemoryAgentConsole : public IAgentConsole {
 public:
     static std::shared_ptr<InMemoryAgentConsole> Create() {
@@ -15,6 +16,7 @@ public:
     }
 
     void Write(const std::string& message) override;
+    std::optional<std::string> ReadLine() override;
     std::string GetContents() const;
 
 private:

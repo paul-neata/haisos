@@ -87,6 +87,101 @@ std::vector<std::string> SplitWhitespace(const std::string& text) {
     return tokens;
 }
 
+std::string LineError(int lineNumber, const std::string& message) {
+    return "Error: line " + std::to_string(lineNumber) + ": " + message + "\n";
+}
+
+// A line read on Windows, or from a file written there, still carries its '\r';
+// it is part of the line ending, not of the line.
+std::string StripCarriageReturn(std::string line) {
+    if (!line.empty() && line.back() == '\r') {
+        line.pop_back();
+    }
+    return line;
+}
+
+// Paths inside the Haisos OS are always given from its root.
+bool IsAbsoluteOsPath(const std::string& path) {
+    return !path.empty() && path[0] == '/';
+}
+
+bool IsFileDirective(const std::string& key) {
+    return key == "CREATE" || key == "APPEND" || key == "COPY" || key == "DELETE" || key == "OUTCOPY";
+}
+
+// Reads the content of a CREATE/APPEND directive from spec -- the raw text
+// after its path, comments included, since a '#' may well be content. One of:
+//   'text' or "text"   up to the next quote of the same kind; only whitespace
+//                      or a comment may follow it
+//   text:<anything>    the rest of the line, exactly as written
+//   multiline <marker> the lines that follow, up to one that is only <marker>
+//                      (whitespace around it ignored), joined by '\n'. The
+//                      newline before the marker is not part of the text, so a
+//                      trailing newline takes an empty line before the marker.
+// Consumes the multiline block's lines from stream, advancing lineNumber.
+bool ParseFileContent(
+    const std::string& key,
+    const std::string& spec,
+    std::istream& stream,
+    int& lineNumber,
+    std::string& outContent,
+    std::string& outError)
+{
+    const int directiveLine = lineNumber;
+    if (!spec.empty() && (spec[0] == '\'' || spec[0] == '"')) {
+        const char quote = spec[0];
+        size_t close = spec.find(quote, 1);
+        if (close == std::string::npos) {
+            outError = LineError(directiveLine, key + ": unterminated " + (quote == '"' ? "double" : "single") + "-quoted text");
+            return false;
+        }
+        std::string trailing = Trim(spec.substr(close + 1));
+        if (!trailing.empty() && trailing[0] != '#') {
+            outError = LineError(directiveLine, key + ": unexpected text after the closing quote: " + trailing);
+            return false;
+        }
+        outContent = spec.substr(1, close - 1);
+        return true;
+    }
+
+    static const std::string kTextPrefix = "text:";
+    if (spec.compare(0, kTextPrefix.size(), kTextPrefix) == 0) {
+        outContent = spec.substr(kTextPrefix.size());
+        return true;
+    }
+
+    static const std::string kMultilinePrefix = "multiline";
+    if (spec.compare(0, kMultilinePrefix.size(), kMultilinePrefix) == 0 &&
+        (spec.size() == kMultilinePrefix.size() || spec[kMultilinePrefix.size()] == ' ' || spec[kMultilinePrefix.size()] == '\t')) {
+        std::string marker = Trim(spec.substr(kMultilinePrefix.size()));
+        if (marker.empty()) {
+            outError = LineError(directiveLine, key + ": multiline requires an end marker (e.g. `multiline EOF`)");
+            return false;
+        }
+        std::string content;
+        bool first = true;
+        std::string rawLine;
+        while (std::getline(stream, rawLine)) {
+            ++lineNumber;
+            std::string line = StripCarriageReturn(rawLine);
+            if (Trim(line) == marker) {
+                outContent = std::move(content);
+                return true;
+            }
+            if (!first) {
+                content += '\n';
+            }
+            content += line;
+            first = false;
+        }
+        outError = LineError(directiveLine, key + ": multiline text is never closed by a line containing only '" + marker + "'");
+        return false;
+    }
+
+    outError = LineError(directiveLine, key + " requires content after the path: 'text', \"text\", text:<rest of line>, or multiline <marker>");
+    return false;
+}
+
 } // namespace
 
 HaisosFileParseResult ParseHaisosFile(
@@ -97,6 +192,11 @@ HaisosFileParseResult ParseHaisosFile(
     std::unordered_map<std::string, std::string> values;
     std::unordered_set<std::string> declaredArgs;
     bool sawRoot = false;
+    // Where the first RUN / file directive was, for the ordering rules: the
+    // root filesystem cannot change once files have been written to it, and
+    // the files are set up before any process starts.
+    int firstRunLine = 0;
+    int firstFileDirectiveLine = 0;
 
     std::istringstream stream(content);
     std::string rawLine;
@@ -112,6 +212,22 @@ HaisosFileParseResult ParseHaisosFile(
         size_t sep = line.find_first_of(" \t");
         std::string key = (sep == std::string::npos) ? line : line.substr(0, sep);
         std::string rest = (sep == std::string::npos) ? "" : Trim(line.substr(sep + 1));
+
+        if ((key == "ROOT" || key == "FS" || key == "MOUNT") && firstFileDirectiveLine != 0) {
+            result.error = LineError(lineNumber, key + " cannot come after the file directive on line " +
+                std::to_string(firstFileDirectiveLine) + ": the root filesystem is fixed once files are written to it");
+            return result;
+        }
+        if (IsFileDirective(key)) {
+            if (key != "OUTCOPY" && firstRunLine != 0) {
+                result.error = LineError(lineNumber, key + " cannot come after the RUN on line " +
+                    std::to_string(firstRunLine) + ": files are set up before any process starts");
+                return result;
+            }
+            if (firstFileDirectiveLine == 0) {
+                firstFileDirectiveLine = lineNumber;
+            }
+        }
 
         if (key == "ARG") {
             auto eq = rest.find('=');
@@ -264,17 +380,102 @@ HaisosFileParseResult ParseHaisosFile(
             if (!SubstituteOrFail(rest, values, lineNumber, &substituted, &result.error)) {
                 return result;
             }
+            auto tokens = SplitWhitespace(substituted);
+            HaisosFileRunEntry entry;
+            // "-i" is only an option in front of the program, never after it:
+            // everything after the program is the program's own arguments.
+            if (!tokens.empty() && tokens.front() == "-i") {
+                entry.interactive = true;
+                tokens.erase(tokens.begin());
+            }
             // Substitution can leave nothing behind (e.g. "RUN ${empty}"), so
             // re-check before indexing into the token vector.
-            auto tokens = SplitWhitespace(substituted);
             if (tokens.empty()) {
                 result.error = "Error: line " + std::to_string(lineNumber) + ": RUN requires a program path\n";
                 return result;
             }
-            HaisosFileRunEntry entry;
+            if (!IsAbsoluteOsPath(tokens.front())) {
+                result.error = LineError(lineNumber, "RUN requires an absolute program path (starting with '/'), got '" + tokens.front() + "'");
+                return result;
+            }
             entry.programPath = tokens.front();
             entry.args.assign(tokens.begin() + 1, tokens.end());
+            if (firstRunLine == 0) {
+                firstRunLine = lineNumber;
+            }
             result.config.runEntries.push_back(std::move(entry));
+        } else if (key == "CREATE" || key == "APPEND") {
+            // Parsed from the raw line rather than the comment-stripped one: a
+            // '#' in the content is content.
+            std::string raw = StripCarriageReturn(rawLine);
+            size_t keyStart = raw.find_first_not_of(" \t");
+            size_t pathStart = raw.find_first_not_of(" \t", keyStart + key.size());
+            if (pathStart == std::string::npos) {
+                result.error = LineError(lineNumber, key + " requires a file path and its content");
+                return result;
+            }
+            size_t pathEnd = raw.find_first_of(" \t", pathStart);
+            std::string rawPath = raw.substr(pathStart, pathEnd == std::string::npos ? std::string::npos : pathEnd - pathStart);
+            size_t specStart = (pathEnd == std::string::npos) ? std::string::npos : raw.find_first_not_of(" \t", pathEnd);
+            std::string spec = (specStart == std::string::npos) ? "" : raw.substr(specStart);
+
+            HaisosFileOperation operation;
+            operation.type = (key == "CREATE") ? HaisosFileOperationType::Create : HaisosFileOperationType::Append;
+            operation.lineNumber = lineNumber;
+            if (!SubstituteOrFail(rawPath, values, lineNumber, &operation.path, &result.error)) {
+                return result;
+            }
+            if (!IsAbsoluteOsPath(operation.path)) {
+                result.error = LineError(lineNumber, key + " requires an absolute file path (starting with '/'), got '" + operation.path + "'");
+                return result;
+            }
+            // The content is taken literally: no ${name} substitution, since
+            // it is often code or markup where "${" means something else.
+            if (!ParseFileContent(key, spec, stream, lineNumber, operation.content, result.error)) {
+                return result;
+            }
+            result.config.setupOperations.push_back(std::move(operation));
+        } else if (key == "COPY" || key == "OUTCOPY" || key == "DELETE") {
+            std::string substituted;
+            if (!SubstituteOrFail(rest, values, lineNumber, &substituted, &result.error)) {
+                return result;
+            }
+            auto tokens = SplitWhitespace(substituted);
+            HaisosFileOperation operation;
+            operation.lineNumber = lineNumber;
+            if (key == "DELETE") {
+                if (tokens.size() != 1) {
+                    result.error = LineError(lineNumber, "DELETE requires exactly one path");
+                    return result;
+                }
+                operation.type = HaisosFileOperationType::Delete;
+                operation.path = tokens[0];
+            } else if (key == "COPY") {
+                if (tokens.size() != 2) {
+                    result.error = LineError(lineNumber, "COPY requires <host_path> <absolute_path>");
+                    return result;
+                }
+                operation.type = HaisosFileOperationType::Copy;
+                operation.hostPath = tokens[0];
+                operation.path = tokens[1];
+            } else {
+                if (tokens.size() != 2) {
+                    result.error = LineError(lineNumber, "OUTCOPY requires <absolute_path> <host_path>");
+                    return result;
+                }
+                operation.type = HaisosFileOperationType::OutCopy;
+                operation.path = tokens[0];
+                operation.hostPath = tokens[1];
+            }
+            if (!IsAbsoluteOsPath(operation.path)) {
+                result.error = LineError(lineNumber, key + " requires an absolute path inside the OS (starting with '/'), got '" + operation.path + "'");
+                return result;
+            }
+            if (operation.type == HaisosFileOperationType::OutCopy) {
+                result.config.outCopyOperations.push_back(std::move(operation));
+            } else {
+                result.config.setupOperations.push_back(std::move(operation));
+            }
         } else {
             result.error = "Error: line " + std::to_string(lineNumber) + ": unknown directive '" + key + "'\n";
             return result;
@@ -301,7 +502,7 @@ HaisosFileParseResult ParseHaisosFile(
 std::string GetHaisosFileTemplate() {
     return
         "# haisosfile - a small manifest that boots a Haisos OS.\n"
-        "# Comments start with '#' (full-line or trailing).\n"
+        "# Comments start with '#' (full-line, or trailing after whitespace).\n"
         "\n"
         "# ARG declares an argument, overridable from the command line via\n"
         "# `haisos -- name=value`. The value here is the default; written\n"
@@ -326,19 +527,17 @@ std::string GetHaisosFileTemplate() {
         "# ENV GREETING=${greeting}\n"
         "\n"
         "# FS declares a named filesystem: FS <name> <type> <args...>\n"
-        "#   FS <name> PHYSICAL <folder>       a real disk directory (relative to\n"
-        "#                                     this file, or absolute; may use . and ..)\n"
-        "#   FS <name> RO <other_fs>           a read-only wrapper over another declared FS\n"
-        "#   FS <name> MEM                     an empty, in-memory read/write FS\n"
-        "#   FS <name> SUB <other_fs> <folder> a filesystem confined to a sub-path of another FS\n"
-        "#   FS <name> COMPOSED <fs> <path> <fs2>  <fs> with <fs2> overlaid at <path>,\n"
-        "#                                     leaving both untouched (MOUNT below\n"
-        "#                                     does the same but in place)\n"
-        "FS workspace PHYSICAL .\n"
+        "# An FS may only refer to filesystems declared above it. Uncomment an\n"
+        "# example by deleting its leading '#'; the note after it stays a comment.\n"
+        "FS workspace PHYSICAL .                # this haisosfile's own directory\n"
+        "# FS data PHYSICAL ./data              # a real disk directory (relative to this file, or absolute; may use . and ..)\n"
+        "# FS scratch MEM                       # an empty, in-memory read/write filesystem\n"
+        "# FS readonly RO workspace             # a read-only wrapper over another declared FS\n"
+        "# FS tools SUB workspace tools         # confined to a sub-path (here tools/) of another declared FS\n"
+        "# FS combined COMPOSED workspace /scratch scratch   # workspace with scratch overlaid at /scratch, both left untouched\n"
         "\n"
-        "# MOUNT overlays one filesystem inside another at a path, overriding\n"
-        "# anything already there: MOUNT <main_fs> <path> <fs_to_mount>\n"
-        "# FS scratch MEM\n"
+        "# MOUNT overlays one filesystem inside another at a path, in place,\n"
+        "# overriding anything already there: MOUNT <main_fs> <path> <fs_to_mount>\n"
         "# MOUNT workspace /scratch scratch\n"
         "\n"
         "# ROOT selects which declared filesystem (by name) becomes this OS's\n"
@@ -346,9 +545,49 @@ std::string GetHaisosFileTemplate() {
         "# declared at all, ROOT may instead be a plain directory path.\n"
         "ROOT workspace\n"
         "\n"
-        "# RUN starts an initial process: a .md agent or a .lua script. May\n"
-        "# repeat; Haisos exits once every RUN process has finished.\n"
-        "RUN agent.md\n";
+        "# The directives below work on files of the root filesystem, so the root\n"
+        "# is fixed from the first of them on: no ROOT, FS or MOUNT may follow one.\n"
+        "# Paths inside the OS are absolute (they start at the root, '/'); paths on\n"
+        "# the host are relative to this file, or absolute. All but OUTCOPY run\n"
+        "# before any process starts, so they must come before the first RUN.\n"
+        "#\n"
+        "# CREATE <path> <content> writes a file, replacing it if it exists;\n"
+        "# APPEND <path> <content> appends to one, creating it if it does not.\n"
+        "# Missing parent directories are created. The content is taken\n"
+        "# literally (no ${name} substitution) and is one of:\n"
+        "#   'text' or \"text\"      up to the matching quote; a comment may follow\n"
+        "#   text:<rest of line>   everything after 'text:', exactly as written\n"
+        "#   multiline <marker>    the lines below, up to a line that is only <marker>;\n"
+        "#                         the newline before the marker is dropped, so end\n"
+        "#                         with an empty line to keep a final newline\n"
+        "# CREATE /notes/hello.txt 'Hello, world'\n"
+        "# APPEND /notes/hello.txt text: and # this is content, not a comment\n"
+        "# CREATE /notes/poem.md multiline END\n"
+        "# # A heading, kept as-is\n"
+        "# Roses are red.\n"
+        "#\n"
+        "# END\n"
+        "#\n"
+        "# COPY <host_path> <path> copies a host file into the OS.\n"
+        "# COPY ./input.txt /work/input.txt\n"
+        "#\n"
+        "# DELETE <path> removes a file, or a directory and everything in it.\n"
+        "# DELETE /work/stale\n"
+        "#\n"
+        "# OUTCOPY <path> <host_path> is COPY's inverse: once every RUN process has\n"
+        "# finished, it copies a file out of the OS onto the host.\n"
+        "# OUTCOPY /work/result.txt ./out/result.txt\n"
+        "\n"
+        "# RUN starts an initial process: a .md agent or a .lua script, given by\n"
+        "# its absolute path inside the OS, followed by its arguments. It starts in\n"
+        "# the root directory, '/'. RUN may repeat; Haisos exits once every RUN\n"
+        "# process has finished.\n"
+        "#\n"
+        "# `RUN -i <agent.md>` runs an agent interactively: after its program, each\n"
+        "# line typed on the console is sent to it, until it closes itself (with\n"
+        "# its self_close tool) or input ends.\n"
+        "# RUN -i /chat.md\n"
+        "RUN /agent.md\n";
 }
 
 } // namespace Haisos

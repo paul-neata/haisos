@@ -1,4 +1,4 @@
-add_executable(haisos main.cpp CliParser.cpp HaisosFileParser.cpp HaisosFileSystemBuilder.cpp)
+add_executable(haisos main.cpp CliParser.cpp HaisosFileParser.cpp HaisosFileSystemBuilder.cpp HaisosFileOperations.cpp)
 target_include_directories(haisos PRIVATE
     ${CMAKE_SOURCE_DIR}/interfaces
     ${CMAKE_SOURCE_DIR}/src/haisos

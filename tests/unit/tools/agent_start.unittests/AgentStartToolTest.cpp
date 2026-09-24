@@ -13,6 +13,7 @@ namespace {
 class DummyAgentConsole : public IAgentConsole {
 public:
     void Write(const std::string&) override {}
+    std::optional<std::string> ReadLine() override { return std::nullopt; }
 };
 
 class DummyToolFactory : public IToolFactory {

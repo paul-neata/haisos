@@ -56,6 +56,7 @@ public:
     virtual ssize_t WriteFile(int fd, const void* buf, size_t count) = 0;
     virtual int CreateDirectory(const std::string& pathname, int mode) = 0;
     virtual int RemoveDirectory(const std::string& pathname) = 0;
+    virtual int RemoveFile(const std::string& pathname) = 0;
     virtual std::vector<DirectoryEntry> ReadDirectory(const std::string& path) = 0;
 
     // Deliberately NOT here, though IFileSystem has them: Mount and Unmount.

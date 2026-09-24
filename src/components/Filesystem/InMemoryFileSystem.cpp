@@ -147,6 +147,20 @@ int InMemoryFileSystem::LocalRemoveDirectory(const std::string& pathname) {
     return 0;
 }
 
+int InMemoryFileSystem::LocalRemoveFile(const std::string& pathname) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::string normalized = NormalizeVirtualPath(pathname);
+    auto it = m_nodes.find(normalized);
+    if (it == m_nodes.end() || it->second.isDirectory) {
+        return -1;
+    }
+    // As with unlink(), a handle still open on the file is not closed by this;
+    // it just finds nothing left behind it, the way reads and writes on any
+    // handle whose node is gone already do.
+    m_nodes.erase(it);
+    return 0;
+}
+
 std::vector<DirectoryEntry> InMemoryFileSystem::LocalReadDirectory(const std::string& path) {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::string normalized = NormalizeVirtualPath(path);

@@ -14,7 +14,7 @@ fs.writeFileSync(path.join(tmpDir, 'agent.md'), prompt);
 // imported explicitly with ENV, or the agent falls back to the defaults and
 // this test silently exercises nothing.
 fs.writeFileSync(path.join(tmpDir, 'haisosfile'),
-    "ENV HAISOS_ENDPOINT\nENV HAISOS_MODEL\nENV HAISOS_API_KEY\nROOT .\nRUN agent.md\n");
+    "ENV HAISOS_ENDPOINT\nENV HAISOS_MODEL\nENV HAISOS_API_KEY\nROOT .\nRUN /agent.md\n");
 
 try {
     const result = execSync(`${haisosPath} haisosfile`, { encoding: 'utf8', timeout: 120000, cwd: tmpDir });

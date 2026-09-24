@@ -5,6 +5,7 @@
 #include "src/tools/agent_wait_to_finish/AgentWaitToFinishTool.h"
 #include "src/tools/agent_query/AgentQueryTool.h"
 #include "src/tools/agent_list_running/AgentListRunningTool.h"
+#include "src/tools/self_close/SelfCloseTool.h"
 
 namespace Haisos {
 
@@ -61,6 +62,18 @@ ToolFactory::ToolFactory() : m_llmService(nullptr) {
                     return Tools::AgentListRunningTool::Create();
                 }
                 LogWarning("ToolFactory: agent_list_running requested but caller agent is missing");
+                return nullptr;
+            }
+        },
+        ToolEntry{
+            Tools::SelfCloseTool::ToolName,
+            []() { return Tools::SelfCloseTool::ToolDefaultDescription; },
+            []() { return Tools::SelfCloseTool::GetDefaultParametersSchema(); },
+            [](std::shared_ptr<IAgent> callerAgent) -> std::shared_ptr<ITool> {
+                if (callerAgent) {
+                    return Tools::SelfCloseTool::Create();
+                }
+                LogWarning("ToolFactory: self_close requested but caller agent is missing");
                 return nullptr;
             }
         },

@@ -14,7 +14,7 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   and an agent's subagents stay inside it rather than becoming processes), so
   the OS is the most specific parent there is to name.
 - Every process is started with an environment and a working directory passed
-  by the caller (`StartProcess(environment, programPath, args, workingDirectory)`)
+  by the caller (`StartProcess(environment, programPath, args, workingDirectory, options)`)
   -- the environment typically `GetOsEnvironment()->Clone()`. Neither is taken
   from the OS behind the caller's back: a null environment is refused, and an
   empty working directory means the OS's root. The process keeps both.
@@ -55,6 +55,17 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   sit between the two; it was removed because neither runtime could honour it
   any harder than `TriggerStop()` already did, and will come back when there is
   something real for it to do.)
+- `StartProcessOptions` says how to run a program. Its one field for now,
+  `interactiveAgent`, applies to `.md` programs only (ignored otherwise): the
+  agent is created interactive, gets an extra system prompt telling it that
+  further messages are lines typed on the console and that `self_close` ends the
+  session, and its `AgentProcess` owns an `AgentInputLoop` reading its console.
+  The loop posts each line to the agent while `WaitToFinish(0)` says it is still
+  running; it ends when a line arrives for an agent that has closed (that line
+  is dropped), or at end of input, when it asks the agent to stop. An
+  interactive process is finished only once both the agent and the loop are.
+  `os_start_process` never asks for it: the console's input belongs to whoever
+  the haisosfile gave it to.
 - Dispatches `StartProcess` by file extension: `.md` starts an LLM agent (its
   content becomes the agent's prompt); `.lua` starts an embedded Lua script
   (via the vendored `extern/lua` interpreter, see `LuaProcess`)
@@ -107,7 +118,13 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   `Agent` because it owns the agent's lifetime: an agent cannot be forced down
   (see the Agent component's CLAUDE.md), so a wedged agent process is waited out
   by `~Agent` rather than aborted. `AgentProcess::Create` refuses a null agent
-  or environment, so the rest of the class assumes both
+  or environment, so the rest of the class assumes both. It also posts the
+  program to the agent -- only once the process exists, so a tool can find it --
+  and then starts the input loop of an interactive process
+- `AgentInputLoop` - the thread that feeds an interactive agent the lines typed
+  on its console (see `StartProcessOptions` above). Its destructor waits the
+  thread out however long it takes, since a blocked `ReadLine` cannot be
+  interrupted
 - `LuaProcess` - `ICurrentProcess` backed by an embedded Lua script, running on
   its own thread. Its `Kill()` aborts the script via a Lua instruction-count
   hook -- an interpreter really can be interrupted mid-instruction -- and

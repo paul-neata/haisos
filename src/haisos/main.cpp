@@ -19,6 +19,7 @@
 #include "interfaces/IFactory.h"
 #include "interfaces/IServicesCreator.h"
 #include "interfaces/IHaisosOS.h"
+#include "AgentTrafficLog.h"
 #include "CliParser.h"
 #include "HaisosFileOperations.h"
 #include "HaisosFileParser.h"
@@ -43,15 +44,6 @@ std::string GetCurrentTimestamp() {
     std::ostringstream oss;
     oss << std::put_time(&tm_buf, "%Y-%m-%d %H:%M:%S");
     return oss.str();
-}
-
-std::string PrettyPrintJson(const std::string& jsonStr) {
-    try {
-        auto j = nlohmann::json::parse(jsonStr, nullptr, false);
-        return j.dump(2);
-    } catch (...) {
-        return jsonStr;
-    }
 }
 
 // Reads filePath relative to the current working directory, rejecting any
@@ -167,6 +159,28 @@ int main(int argc, char* argv[]) {
     LogSetConsoleOutput(result.options.logToConsole);
 
     LogInfo("Haisos starting");
+
+    // --log-agent-to-file: every agent's LLM traffic, reported by the Logger's
+    // agent callbacks. The log owns its file and the callbacks share it, so it
+    // stays open for as long as any agent could still report.
+    if (!result.options.logAgentFilePath.empty()) {
+        auto agentFile = std::make_unique<std::ofstream>(result.options.logAgentFilePath, std::ios::out | std::ios::trunc);
+        if (!agentFile->is_open()) {
+            LogError("Failed to open --log-agent-to-file path: %s", result.options.logAgentFilePath.c_str());
+            std::cerr << "Error: failed to open agent log file: " << result.options.logAgentFilePath << "\n";
+            return 1;
+        }
+        auto agentLog = std::make_shared<AgentTrafficLog>(std::move(agentFile), result.options.logAgentFileType);
+        RegisterLogAgentSendCallback([agentLog](const std::string& agentName, const std::string& json) {
+            agentLog->OnSend(agentName, json);
+        });
+        RegisterLogAgentReceiveCallback([agentLog](const std::string& agentName, const std::string& json) {
+            agentLog->OnReceive(agentName, json);
+        });
+        LogInfo("Logging agent LLM traffic (%s) to: %s",
+            result.options.logAgentFileType == AgentTrafficLogType::Diff ? "diff" : "full",
+            result.options.logAgentFilePath.c_str());
+    }
 
     // Raw LLM JSON traffic is logged by LLMCommunicator at VerboseDebug level, tagged
     // "[JSON_REQUEST] "/"[JSON_RESPONSE] ". --log-json-in-temp taps that via a log

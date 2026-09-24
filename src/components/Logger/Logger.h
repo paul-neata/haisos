@@ -61,6 +61,31 @@ LogLevel LogGetMinimumLevel();
 // Enable or disable default stderr console output
 void LogSetConsoleOutput(bool enabled);
 
+// --- Agent traffic ---
+//
+// Every JSON body an agent sends to its LLM, and every one it gets back, is
+// reported here with the name of the agent it belongs to. This is separate from
+// the leveled log above: it carries whole JSON documents, is not filtered by
+// level, and goes only to the callback registered for its direction (see
+// `--log-agent-to-file` in the haisos CLI). With no callback registered, a call
+// costs a check and nothing more.
+//
+// The callbacks run on the calling agent's thread, and several agents can call
+// at once, so a callback must be thread-safe.
+using LogAgentCallback = std::function<void(const std::string& agentName, const std::string& json)>;
+
+// Reports a request body about to be sent to the LLM by agentName.
+void LogAgentSend(const std::string& agentName, const std::string& json);
+
+// Reports what came back from the LLM for agentName: the response body, or, if
+// the request failed with no body, a line saying why.
+void LogAgentReceive(const std::string& agentName, const std::string& json);
+
+// Sets the one callback for each direction, replacing any earlier one; pass
+// nullptr to remove it.
+void RegisterLogAgentSendCallback(LogAgentCallback callback);
+void RegisterLogAgentReceiveCallback(LogAgentCallback callback);
+
 // Convenience macros using do-while(false) pattern
 #define Log(level, ...) \
     do { \

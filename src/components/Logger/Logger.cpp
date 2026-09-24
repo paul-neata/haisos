@@ -7,6 +7,7 @@
 #include <sstream>
 #include <iomanip>
 #include <chrono>
+#include <memory>
 
 namespace Haisos {
 
@@ -20,6 +21,35 @@ namespace {
     std::atomic<bool> g_consoleOutput{true};
     std::mutex g_mutex;
     int g_nextToken = 1;
+
+    // Agent traffic callbacks. Held by shared_ptr so a call can take its own
+    // reference under the lock and run the callback outside it: a slow
+    // callback never blocks registration, and a callback being replaced
+    // finishes the call it is already making.
+    std::mutex g_agentCallbackMutex;
+    std::shared_ptr<LogAgentCallback> g_agentSendCallback;
+    std::shared_ptr<LogAgentCallback> g_agentReceiveCallback;
+    std::atomic<bool> g_anyAgentCallback{false};
+
+    void CallAgentCallback(const std::shared_ptr<LogAgentCallback>& slot, const std::string& agentName, const std::string& json) {
+        if (!g_anyAgentCallback.load()) {
+            return;
+        }
+        std::shared_ptr<LogAgentCallback> callback;
+        {
+            std::lock_guard<std::mutex> lock(g_agentCallbackMutex);
+            callback = slot;
+        }
+        if (callback) {
+            (*callback)(agentName, json);
+        }
+    }
+
+    void SetAgentCallback(std::shared_ptr<LogAgentCallback>& slot, LogAgentCallback callback) {
+        std::lock_guard<std::mutex> lock(g_agentCallbackMutex);
+        slot = callback ? std::make_shared<LogAgentCallback>(std::move(callback)) : nullptr;
+        g_anyAgentCallback = (g_agentSendCallback != nullptr) || (g_agentReceiveCallback != nullptr);
+    }
 }
 
 void LogImpl(LogLevel level, const char* file, int line, const std::string& message) {
@@ -105,6 +135,22 @@ void LogClearMessageReceivers() {
 void LogSetConsoleOutput(bool enabled) {
     std::lock_guard<std::mutex> lock(g_mutex);
     g_consoleOutput = enabled;
+}
+
+void LogAgentSend(const std::string& agentName, const std::string& json) {
+    CallAgentCallback(g_agentSendCallback, agentName, json);
+}
+
+void LogAgentReceive(const std::string& agentName, const std::string& json) {
+    CallAgentCallback(g_agentReceiveCallback, agentName, json);
+}
+
+void RegisterLogAgentSendCallback(LogAgentCallback callback) {
+    SetAgentCallback(g_agentSendCallback, std::move(callback));
+}
+
+void RegisterLogAgentReceiveCallback(LogAgentCallback callback) {
+    SetAgentCallback(g_agentReceiveCallback, std::move(callback));
 }
 
 }

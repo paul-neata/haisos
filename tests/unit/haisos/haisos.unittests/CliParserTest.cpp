@@ -142,3 +142,36 @@ TEST_F(CliParserTest, FlagsBeforeAndArgOverridesAfterDoubleDash) {
     EXPECT_TRUE(result.options.logToConsole);
     ASSERT_EQ(result.options.argOverrides.size(), 1u);
 }
+
+TEST_F(CliParserTest, LogAgentToFileDefaultsToDiff) {
+    auto result = Parse({"--log-agent-to-file", "/tmp/agents.log"});
+    EXPECT_TRUE(result.error.empty()) << result.error;
+    EXPECT_EQ(result.options.logAgentFilePath, "/tmp/agents.log");
+    EXPECT_EQ(result.options.logAgentFileType, AgentTrafficLogType::Diff);
+}
+
+TEST_F(CliParserTest, LogAgentToFileTypeFull) {
+    auto result = Parse({"--log-agent-to-file-type", "full", "--log-agent-to-file", "/tmp/agents.log"});
+    EXPECT_TRUE(result.error.empty()) << result.error;
+    EXPECT_EQ(result.options.logAgentFileType, AgentTrafficLogType::Full);
+}
+
+TEST_F(CliParserTest, LogAgentToFileRequiresAPath) {
+    EXPECT_FALSE(Parse({"--log-agent-to-file"}).error.empty());
+}
+
+TEST_F(CliParserTest, LogAgentToFileTypeRejectsUnknownValues) {
+    EXPECT_FALSE(Parse({"--log-agent-to-file", "/tmp/a.log", "--log-agent-to-file-type", "partial"}).error.empty());
+    EXPECT_FALSE(Parse({"--log-agent-to-file", "/tmp/a.log", "--log-agent-to-file-type"}).error.empty());
+}
+
+TEST_F(CliParserTest, LogAgentToFileTypeWithoutAFileIsError) {
+    auto result = Parse({"--log-agent-to-file-type", "full"});
+    EXPECT_NE(result.error.find("--log-agent-to-file"), std::string::npos) << result.error;
+}
+
+TEST_F(CliParserTest, UsageDescribesTheAgentLogOptions) {
+    auto usage = FormatUsage("haisos");
+    EXPECT_NE(usage.find("--log-agent-to-file <path>"), std::string::npos);
+    EXPECT_NE(usage.find("--log-agent-to-file-type <type>"), std::string::npos);
+}

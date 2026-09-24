@@ -56,7 +56,7 @@ haisos/
 │   │   ├── os_list_directory/
 │   │   ├── os_start_process/
 │   │   └── os_list_processes/
-│   └── haisos/            - Entry point, CLI parser, haisosfile parser, root-filesystem builder, and file-directive executor
+│   └── haisos/            - Entry point, CLI parser, haisosfile parser, root-filesystem builder, file-directive executor, and agent traffic log (--log-agent-to-file)
 ├── interfaces/             - Service-based interfaces (IFactory.h [IPhysicalConsole], IServicesCreator.h, IHaisosOS.h, IProcess.h, IEnvironment.h [LLMIdentifier], ILLMService.h [IAgent, ITool, IToolFactory, IAgentConsole], INetworkService.h [IHTTPClient], IFileSystemService.h [IFileSystem], IProcess.h [ICurrentProcess], ILLMCommunicator.h)
 ├── tests/                 - All tests
 │   ├── mocks/             - Mock classes for testing
@@ -166,6 +166,8 @@ after a literal `--` is parsed as `key=value` pairs fed to the haisosfile as
 | `--log-to-file <path>` | Enable logging to file |
 | `--log-level <level>` | Set log level (verbose_debug, debug, trace, info, warning, error) |
 | `--log-json-in-temp` | Log input/output JSON to a temporary file |
+| `--log-agent-to-file <path>` | Write every agent's LLM traffic to `<path>`: each request sent (`SEND`) and response received (`RECEIVE`), headed by the agent's name and the time |
+| `--log-agent-to-file-type <type>` | `diff` (default): each request as its difference from the same agent's previous one, responses in full; `full`: everything in full. Requires `--log-agent-to-file` |
 | `--version` | Show version information |
 | `-h, --help` | Show help message |
 

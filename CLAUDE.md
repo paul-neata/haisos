@@ -71,7 +71,7 @@ haisos/
 │       └── llm_cache_proxy_database/ - Cached recordings + proxy log for llm_cache_proxy (.gitkeep'd, populated by the `llm-cache` skill)
 ├── scripts/               - Build scripts
 ├── extern/                - External dependencies (nlohmann_json, googletest, lua)
-├── notes/                 - Markdown notes, one per file, named by kind: note-*.md (/note skill), plan-*.md (reserved for a plan skill) (.gitkeep'd)
+├── notes/                 - Markdown notes, one per file, named by kind: note-*.md (/note), explore-*.md (/explore), todo-*.md (/todo), plan-*.md (/implement) (.gitkeep'd; see "Planning skills")
 ├── .claude/               - Claude Code configuration
 │   └── skills/            - Custom Claude Code skills
 ├── build/temp_<platform>/ - CMake build files (temporary, e.g., temp_linux, temp_linux_debug)
@@ -477,6 +477,35 @@ use a builtin with what it already knows about the real command:
 | `ls` | Lists directories as GNU ls prints them to a terminal: columns, `-l` with `total`/links/owner/group/size/time, sorting, time styles, quoting |
 | `mkdir` | Creates directories (`-p -v`) |
 | `pwd` | Prints the working directory (`-L -P`) |
+
+## Planning skills
+
+Four skills in `.claude/skills/` take a piece of work from an idea to commits,
+each leaving a Markdown file in `notes/` that the next one can start from:
+
+| Skill | Writes | What it does |
+|-------|--------|--------------|
+| `/note` | `notes/note-*.md` | Records a finding, a decision or an idea |
+| `/explore` | `notes/explore-*.md` | Explores the variants and aspects of an issue against the code; records clear winners with why the rest were dropped, and lists undecided aspects most probable first |
+| `/todo` | `notes/todo-*.md` | A plan stopped half-way on purpose: seed, base branch/commit, then changes to `interfaces/`, the haisosfile, builtin commands, `src/`, and tests -- leaning on stable names (interfaces, components) rather than volatile ones, so it survives until it is implemented |
+| `/implement` | `notes/plan-*.md` + commits | Turns a seed into a very detailed plan with parallel agents, then implements it in one or a few parts, one agent and one `/commit` each |
+
+The usual flows:
+
+- `/note` -> `/todo` -> `/implement`
+- `/note` -> `/explore` -> `/todo` -> `/implement`
+- `/explore` -> `/todo` -> `/implement`
+- `/todo` -> `/implement`
+
+`/todo`, `/explore` and `/implement` take their **seed** -- the text they start
+from -- in the same four ways: `: <text>` (the text, as written), `<text>`
+(interpreted, usually from the current conversation), a `notes/` file name with
+or without `.md` (its exact text), or a file path with an extension (its exact
+text). `/todo explore-<words>` first asks the user about the exploration's open
+aspects. `/todo` and `/explore` also take `--redo <file> [:] [text]`, which
+re-checks that todo or exploration against the current code and folds the new
+text in. `/implement` needs a task branch with a clean tree (files in `notes/`
+aside), unless given `--no-commit` first, which also makes no commits.
 
 ## Automatic Development Rules
 

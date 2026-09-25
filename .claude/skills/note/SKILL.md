@@ -12,8 +12,10 @@ or, with `list`, show the notes already there.
 
 A note records something worth keeping -- a finding, a decision and its
 reason, how something works, a gotcha, or work still to be done. `notes/` is
-shared: a plan skill writes `plan-*.md` there. This skill only ever writes,
-names and lists `note-*.md` files.
+shared: `/explore` writes `explore-*.md`, `/todo` writes `todo-*.md` and
+`/implement` writes `plan-*.md` there. This skill only ever writes, names and
+lists `note-*.md` files. A note is often the seed of those skills (`/todo
+note-<words>`); see "Planning skills" in the root `CLAUDE.md`.
 
 ## Steps
 

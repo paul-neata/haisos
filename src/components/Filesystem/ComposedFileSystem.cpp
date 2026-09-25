@@ -62,4 +62,12 @@ std::vector<DirectoryEntry> ComposedFileSystem::LocalReadDirectory(const std::st
     return m_main->ReadDirectory(AbsolutePathFor(path));
 }
 
+int ComposedFileSystem::LocalStat(const std::string& path, FileStatus& out) {
+    return m_main->Stat(AbsolutePathFor(path), out);
+}
+
+std::optional<std::string> ComposedFileSystem::LocalIsBuiltinCommand(const std::string& path) {
+    return m_main->IsBuiltinCommand(AbsolutePathFor(path));
+}
+
 }

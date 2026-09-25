@@ -165,8 +165,8 @@ TEST(HaisosFileParserTest, RootByNameWhenFsDeclared) {
 }
 
 TEST(HaisosFileParserTest, TemplateParsesCleanly) {
-    // GetHaisosFileTemplate() must itself be a valid haisosfile.
-    auto result = ParseHaisosFile(GetHaisosFileTemplate(), {});
+    // GetHaisosFileTemplate({"echo", "ls"}) must itself be a valid haisosfile.
+    auto result = ParseHaisosFile(GetHaisosFileTemplate({"echo", "ls"}), {});
     EXPECT_TRUE(result.error.empty());
     ASSERT_EQ(result.config.runEntries.size(), 1u);
     EXPECT_EQ(result.config.runEntries[0].programPath, "/agent.md");
@@ -213,7 +213,7 @@ TEST(HaisosFileParserTest, EnvRejectsEmptyNameBeforeEquals) {
 
 TEST(HaisosFileParserTest, TemplateDeclaresEnvAndParsesCleanly) {
     // --init must emit a haisosfile that actually parses, including its ENV lines.
-    auto result = ParseHaisosFile(GetHaisosFileTemplate(), {});
+    auto result = ParseHaisosFile(GetHaisosFileTemplate({"echo", "ls"}), {});
 
     EXPECT_TRUE(result.error.empty()) << result.error;
     EXPECT_FALSE(result.config.envEntries.empty());
@@ -430,8 +430,8 @@ TEST(HaisosFileParserTest, OutCopyMayComeBeforeRun) {
 TEST(HaisosFileParserTest, TemplateFsExamplesParseOnceUncommented) {
     // Every commented-out "# FS ..." example in the template must turn into a
     // valid declaration -- note included -- just by deleting its leading '#'.
-    std::string declarations = "FS workspace PHYSICAL .\n";
-    std::istringstream lines(GetHaisosFileTemplate());
+    std::string declarations = "FS rootfs PHYSICAL .\n";
+    std::istringstream lines(GetHaisosFileTemplate({"echo", "ls"}));
     std::string line;
     int examples = 0;
     while (std::getline(lines, line)) {
@@ -445,4 +445,93 @@ TEST(HaisosFileParserTest, TemplateFsExamplesParseOnceUncommented) {
     auto result = ParseHaisosFile(declarations + "RUN /agent.md\n", {});
     EXPECT_TRUE(result.error.empty()) << result.error;
     EXPECT_EQ(result.config.fsSteps.size(), static_cast<size_t>(examples) + 1);
+}
+
+TEST(HaisosFileParserTest, DevFilesystemTakesNoArguments) {
+    auto result = ParseHaisosFile("FS devfs DEV\nRUN /agent.md\n", {});
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    ASSERT_EQ(result.config.fsSteps.size(), 1u);
+    EXPECT_EQ(result.config.fsSteps[0].declare.type, "DEV");
+    EXPECT_TRUE(result.config.fsSteps[0].declare.args.empty());
+
+    EXPECT_FALSE(ParseHaisosFile("FS devfs DEV /dev\nRUN /agent.md\n", {}).error.empty());
+}
+
+// --- CREATE_DIR and BUILTIN ---
+
+TEST(HaisosFileParserTest, CreateDirTakesOneAbsolutePath) {
+    auto result = ParseHaisosFile("CREATE_DIR /bin\nRUN /agent.md\n", {});
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    ASSERT_EQ(result.config.setupOperations.size(), 1u);
+    EXPECT_EQ(result.config.setupOperations[0].type, HaisosFileOperationType::CreateDir);
+    EXPECT_EQ(result.config.setupOperations[0].path, "/bin");
+
+    EXPECT_FALSE(ParseHaisosFile("CREATE_DIR bin\nRUN /agent.md\n", {}).error.empty());
+    EXPECT_FALSE(ParseHaisosFile("CREATE_DIR /a /b\nRUN /agent.md\n", {}).error.empty());
+    EXPECT_FALSE(ParseHaisosFile("CREATE_DIR\nRUN /agent.md\n", {}).error.empty());
+}
+
+TEST(HaisosFileParserTest, BuiltinBecomesOneOperationPerPath) {
+    auto result = ParseHaisosFile("ARG where=/usr/bin\nBUILTIN rootfs ls /bin/ls ${where}/ls\nRUN /agent.md\n", {});
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    ASSERT_EQ(result.config.setupOperations.size(), 2u);
+    for (const auto& operation : result.config.setupOperations) {
+        EXPECT_EQ(operation.type, HaisosFileOperationType::Builtin);
+        EXPECT_EQ(operation.fsName, "rootfs");
+        EXPECT_EQ(operation.builtinName, "ls");
+        EXPECT_EQ(operation.lineNumber, 2);
+    }
+    EXPECT_EQ(result.config.setupOperations[0].path, "/bin/ls");
+    EXPECT_EQ(result.config.setupOperations[1].path, "/usr/bin/ls");
+}
+
+TEST(HaisosFileParserTest, BuiltinNeedsAFilesystemANameAndAbsolutePaths) {
+    EXPECT_FALSE(ParseHaisosFile("BUILTIN rootfs ls\nRUN /agent.md\n", {}).error.empty());
+    EXPECT_FALSE(ParseHaisosFile("BUILTIN rootfs\nRUN /agent.md\n", {}).error.empty());
+    auto relative = ParseHaisosFile("BUILTIN rootfs ls bin/ls\nRUN /agent.md\n", {});
+    EXPECT_NE(relative.error.find("absolute"), std::string::npos) << relative.error;
+}
+
+TEST(HaisosFileParserTest, BuiltinAndCreateDirFollowTheFileDirectiveOrdering) {
+    // After FS/MOUNT/ROOT, before the first RUN.
+    EXPECT_FALSE(ParseHaisosFile("BUILTIN rootfs ls /ls\nFS rootfs MEM\nRUN /agent.md\n", {}).error.empty());
+    EXPECT_FALSE(ParseHaisosFile("CREATE_DIR /bin\nROOT x\nRUN /agent.md\n", {}).error.empty());
+    EXPECT_FALSE(ParseHaisosFile("RUN /agent.md\nBUILTIN rootfs ls /ls\n", {}).error.empty());
+    EXPECT_FALSE(ParseHaisosFile("RUN /agent.md\nCREATE_DIR /bin\n", {}).error.empty());
+}
+
+TEST(HaisosFileParserTest, TemplateNamesTheRootRootfsAndListsEveryBuiltin) {
+    const std::vector<std::string> builtins = {"cat", "echo", "ls"};
+    const std::string haisosfile = GetHaisosFileTemplate(builtins);
+    EXPECT_NE(haisosfile.find("\nFS rootfs PHYSICAL ."), std::string::npos);
+    EXPECT_NE(haisosfile.find("\nROOT rootfs\n"), std::string::npos);
+    EXPECT_NE(haisosfile.find("\n# CREATE_DIR /bin\n"), std::string::npos);
+    for (const auto& name : builtins) {
+        EXPECT_NE(haisosfile.find("\n# BUILTIN rootfs " + name + " /bin/" + name + "\n"), std::string::npos) << name;
+    }
+    // CREATE_DIR /bin comes after ROOT and before the BUILTINs that need it.
+    EXPECT_LT(haisosfile.find("\nROOT rootfs\n"), haisosfile.find("# CREATE_DIR /bin"));
+    EXPECT_LT(haisosfile.find("# CREATE_DIR /bin"), haisosfile.find("# BUILTIN rootfs cat"));
+}
+
+TEST(HaisosFileParserTest, TemplateBuiltinExamplesParseOnceUncommented) {
+    // Uncommenting CREATE_DIR /bin and every BUILTIN, in place, still gives a
+    // valid haisosfile.
+    std::istringstream lines(GetHaisosFileTemplate({"cat", "echo"}));
+    std::string haisosfile;
+    std::string line;
+    int builtins = 0;
+    while (std::getline(lines, line)) {
+        if (line == "# CREATE_DIR /bin" || line.rfind("# BUILTIN rootfs ", 0) == 0) {
+            line = line.substr(2);
+            builtins += (line.rfind("BUILTIN", 0) == 0) ? 1 : 0;
+        }
+        haisosfile += line + "\n";
+    }
+    EXPECT_EQ(builtins, 2);
+    auto result = ParseHaisosFile(haisosfile, {});
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    ASSERT_EQ(result.config.setupOperations.size(), 3u);
+    EXPECT_EQ(result.config.setupOperations[0].type, HaisosFileOperationType::CreateDir);
+    EXPECT_EQ(result.config.setupOperations[1].type, HaisosFileOperationType::Builtin);
 }

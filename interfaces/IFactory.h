@@ -11,6 +11,7 @@
 #include "IPhysicalConsole.h"
 #include "IServicesCreator.h"
 #include "IHaisosOS.h"
+#include "IBuiltinCommands.h"
 
 namespace Haisos {
 
@@ -49,8 +50,18 @@ public:
 
     virtual std::shared_ptr<IServicesCreator> CreateServicesCreator() = 0;
 
+    // The commands compiled into Haisos (echo, cat, ls, ...). Stateless apart
+    // from the processes it starts, so one is typically shared by an OS and
+    // every sub-OS it creates.
+    virtual std::shared_ptr<IBuiltinCommands> CreateBuiltinCommands() = 0;
+
+    // What places builtin commands on a filesystem (and removes them).
+    virtual std::shared_ptr<IBuiltinConfigurator> CreateBuiltinConfigurator() = 0;
+
     // Builds an IHaisosOS around an already-built root filesystem, which becomes
-    // the OS's root for its whole life. environment becomes the OS's own
+    // the OS's root for its whole life. builtinCommands is what runs the
+    // builtins placed on that root (see IHaisosOS::StartProcess); null gives an
+    // OS that runs none, where starting a builtin's path fails. environment becomes the OS's own
     // environment, and is where the LLM endpoint/model/API key are read from.
     // Typically -- but not automatically -- it is what its processes and sub-OS
     // instances go on to run with: each of those is passed an environment
@@ -63,6 +74,7 @@ public:
         std::shared_ptr<IServicesCreator> servicesCreator,
         std::shared_ptr<IPhysicalConsole> physicalConsole,
         std::shared_ptr<IFileSystem> rootFileSystem,
+        std::shared_ptr<IBuiltinCommands> builtinCommands,
         std::shared_ptr<IEnvironment> environment) = 0;
 
     // Allocates a process id that is unique across every OS in this program: a

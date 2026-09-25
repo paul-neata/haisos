@@ -15,34 +15,41 @@ struct HaisosFileRunEntry {
     bool interactive = false;
 };
 
-// A directive acting on the files of the OS's root filesystem.
+// A directive acting on the files of the OS's root filesystem -- or, for
+// BUILTIN, of any filesystem the haisosfile declares.
 enum class HaisosFileOperationType {
-    Create,  // CREATE <path> <content>: write content to path, replacing it
-    Append,  // APPEND <path> <content>: append content to path, creating it if missing
-    Copy,    // COPY <host_path> <path>: copy a host file into the root
-    Delete,  // DELETE <path>: remove a file, or a directory and all it holds
-    OutCopy, // OUTCOPY <path> <host_path>: copy a file out of the root to the host
+    Create,    // CREATE <path> <content>: write content to path, replacing it
+    Append,    // APPEND <path> <content>: append content to path, creating it if missing
+    CreateDir, // CREATE_DIR <path>: create a directory, and any missing parents
+    Copy,      // COPY <host_path> <path>: copy a host file into the root
+    Delete,    // DELETE <path>: remove a file, or a directory and all it holds
+    OutCopy,   // OUTCOPY <path> <host_path>: copy a file out of the root to the host
+    Builtin,   // BUILTIN <fs_name> <builtin_name> <path>...: place a builtin command
 };
 
-// One CREATE/APPEND/COPY/DELETE/OUTCOPY directive, already substituted.
-// path is always the one in the Haisos OS, and absolute; hostPath is the one on
-// the real disk, resolved by the caller against the haisosfile's directory
-// when relative (as for FS PHYSICAL).
+// One file directive, already substituted. path is always the one in the
+// Haisos OS, and absolute; hostPath is the one on the real disk, resolved by
+// the caller against the haisosfile's directory when relative (as for FS
+// PHYSICAL). A BUILTIN naming several paths becomes one operation per path.
 struct HaisosFileOperation {
     HaisosFileOperationType type = HaisosFileOperationType::Create;
     std::string path;
-    std::string hostPath; // COPY's source, OUTCOPY's destination
-    std::string content;  // CREATE/APPEND
-    int lineNumber = 0;   // for error messages
+    std::string hostPath;    // COPY's source, OUTCOPY's destination
+    std::string content;     // CREATE/APPEND
+    std::string fsName;      // BUILTIN: the declared FS the builtin goes on
+    std::string builtinName; // BUILTIN
+    int lineNumber = 0;      // for error messages
 };
 
 // One "FS <name> <type> <args...>" directive. type is one of "PHYSICAL",
-// "RO", "MEM", "SUB" (validated by the parser); args holds whatever follows,
+// "RO", "MEM", "DEV", "SUB", "COMPOSED" (validated by the parser); args holds whatever follows,
 // already substituted:
 //   PHYSICAL <folder>            args = {folder}
 //   RO <other_fs>                args = {other_fs}
 //   MEM                          args = {}
+//   DEV                          args = {}
 //   SUB <other_fs> <folder>      args = {other_fs, folder}
+//   COMPOSED <main> <path> <fs>  args = {main, path, fs}
 // Building the actual IFileSystem is left to the caller (the parser has no
 // access to IFactory/IFileSystemService).
 struct HaisosFileFilesystemDecl {
@@ -90,8 +97,8 @@ struct HaisosFileConfig {
     // ENV directives, in file order. Applied to the OS's initial environment,
     // which every process and sub-OS then inherits.
     std::vector<HaisosFileEnvEntry> envEntries;
-    // CREATE/APPEND/COPY/DELETE directives, in file order: applied to the root
-    // filesystem once it is built, before any RUN process starts.
+    // CREATE/APPEND/CREATE_DIR/COPY/DELETE/BUILTIN directives, in file order:
+    // applied once the filesystems are built, before any RUN process starts.
     std::vector<HaisosFileOperation> setupOperations;
     // OUTCOPY directives, in file order: applied once every RUN process has
     // finished, to pull what they produced out of the OS.
@@ -110,6 +117,9 @@ HaisosFileParseResult ParseHaisosFile(
     const std::vector<std::pair<std::string, std::string>>& argOverrides);
 
 // A small, heavily-commented starter haisosfile (see `haisos --init`).
-std::string GetHaisosFileTemplate();
+// builtinNames are the builtin commands to show (commented out) as BUILTIN
+// examples -- every one Haisos has, IBuiltinCommands::GetCommands(), so the
+// template never falls behind.
+std::string GetHaisosFileTemplate(const std::vector<std::string>& builtinNames);
 
 } // namespace Haisos

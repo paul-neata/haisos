@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include "src/haisos/HaisosFileSystemBuilder.h"
 #include "src/components/Factory/Factory.h"
 #include "src/components/ServicesCreator/ServicesCreator.h"
@@ -172,9 +173,12 @@ TEST_F(HaisosFileSystemBuilderTest, MountRetargetsNamedFilesystem) {
     EXPECT_TRUE(error.empty());
     // The disk marker is still visible outside the mount point...
     EXPECT_TRUE(FileExists(*fs, "marker.txt"));
-    // ...and the mount point is now backed by the (empty) in-mem filesystem.
+    // ...and the mount point is now backed by the (empty) in-mem filesystem:
+    // nothing but its "." and "..".
     auto entries = fs->ReadDirectory("/mnt");
-    EXPECT_TRUE(entries.empty());
+    ASSERT_EQ(entries.size(), 2u);
+    EXPECT_EQ(entries[0].name, ".");
+    EXPECT_EQ(entries[1].name, "..");
 }
 
 TEST_F(HaisosFileSystemBuilderTest, RootNotMatchingAnyDeclaredNameFallsBackToLegacyPath) {
@@ -195,4 +199,49 @@ TEST_F(HaisosFileSystemBuilderTest, RootNotMatchingAnyDeclaredNameFallsBackToLeg
 
     ASSERT_NE(fs, nullptr);
     EXPECT_TRUE(FileExists(*fs, "marker.txt"));
+}
+
+TEST_F(HaisosFileSystemBuilderTest, DevFilesystemMountedAtDevServesDevices) {
+    auto filesystemService = CreateServicesCreator()->CreateFileSystemService();
+    auto parsed = ParseHaisosFile("FS rootfs PHYSICAL .\nFS devfs DEV\nMOUNT rootfs /dev devfs\nROOT rootfs\nRUN /agent.md\n", {});
+    ASSERT_TRUE(parsed.error.empty()) << parsed.error;
+    std::string error;
+    auto fs = BuildRootFileSystem(*factory, *filesystemService, parsed.config, kTestDir, error);
+
+    ASSERT_NE(fs, nullptr) << error;
+    FileStatus status;
+    ASSERT_EQ(fs->Stat("/dev/null", status), 0);
+    EXPECT_EQ(status.type, DirectoryEntryType::CharDevice);
+    ASSERT_EQ(fs->Stat("/dev/zero", status), 0);
+    EXPECT_EQ(status.type, DirectoryEntryType::CharDevice);
+    EXPECT_TRUE(FileExists(*fs, "marker.txt"));
+    // The mount point needs no /dev on the disk, and makes none.
+    EXPECT_FALSE(std::filesystem::exists(kTestDir + "/dev"));
+}
+
+TEST_F(HaisosFileSystemBuilderTest, TheInitTemplatesDevLinesWorkOnceUncommented) {
+    // Most haisosfiles will get /dev by uncommenting these two lines of what
+    // `haisos --init` writes, in place.
+    std::istringstream lines(GetHaisosFileTemplate({"echo"}));
+    std::string haisosfile;
+    std::string line;
+    int uncommented = 0;
+    while (std::getline(lines, line)) {
+        if (line == "# FS devfs DEV" || line == "# MOUNT rootfs /dev devfs") {
+            line = line.substr(2);
+            ++uncommented;
+        }
+        haisosfile += line + "\n";
+    }
+    ASSERT_EQ(uncommented, 2);
+    auto parsed = ParseHaisosFile(haisosfile, {});
+    ASSERT_TRUE(parsed.error.empty()) << parsed.error;
+
+    auto filesystemService = CreateServicesCreator()->CreateFileSystemService();
+    std::string error;
+    auto fs = BuildRootFileSystem(*factory, *filesystemService, parsed.config, kTestDir, error);
+    ASSERT_NE(fs, nullptr) << error;
+    FileStatus status;
+    ASSERT_EQ(fs->Stat("/dev/null", status), 0);
+    EXPECT_EQ(status.type, DirectoryEntryType::CharDevice);
 }

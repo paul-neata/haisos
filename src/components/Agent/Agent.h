@@ -64,6 +64,8 @@ private:
     // owning this agent exists, so the thread can safely shared_from_this()
     // when it hands itself to a tool.
     void Start();
+    // Whether the calling thread is the agent's own.
+    bool IsOwnThread();
 
     void RunThread();
     std::vector<std::tuple<std::string, std::string, std::string, bool>> ExecuteToolCalls(const LLMMessage& message);

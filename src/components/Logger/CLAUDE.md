@@ -6,7 +6,8 @@ Thread-safe logging with configurable receivers.
 
 - Provides log macros for different severity levels
 - Supports registering multiple message receivers
-- Formats log messages with file, line, and timestamp
+- Formats log messages with timestamp, level, thread, file and line:
+  `[<timestamp>][<LEVEL>][<thread>][<file>:<line>] <message>`
 - Thread-safe log output
 - Reports agent LLM traffic (`LogAgentSend`/`LogAgentReceive`) to one callback
   per direction, apart from the leveled log
@@ -16,6 +17,15 @@ Thread-safe logging with configurable receivers.
 - `LogImpl` - Core logging function
 - `LogRegisterMessageReceiver` / `LogUnregisterMessageReceiver` - Receiver management
 - Convenience macros: `LogError`, `LogWarning`, `LogInfo`, `LogTrace`, `LogDebug`, `LogVerboseDebug`
+- `LogThreadName` / `LogCurrentThreadName` - every log line names the thread
+  that wrote it (`LogMessage::thread`, printed by the stderr output and by
+  `haisos --log-to-file`), so which thread let go of an object, destroyed it or
+  waited on another can be read off the log. A `LogThreadName` names its thread
+  while it is in scope: `main` in haisos's `main()`, `destruction` on the
+  `DestructionThread`, and each runtime thread through its `RuntimeThreadScope`
+  (`agent <name>`, `lua <path> pid=<n>`, `builtin <path> pid=<n>`,
+  `input <agent>`; see `src/components/libheaders/DestroyOffRuntimeThreads.h`).
+  A thread nobody named is `t<N>`, numbered in the order threads first log.
 - `LogAgentSend` / `LogAgentReceive` - report each JSON request an agent sends
   to its LLM, and each response (or failure) it gets back, with the agent's
   path: its ancestors' names, top-most first, then its own (so the path's

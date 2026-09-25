@@ -5,6 +5,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "ReopeningLogFile.h"
 
 namespace Haisos {
 
@@ -70,7 +71,7 @@ std::string FormatExtremeResponse(const std::string& json);
 // subagent's traffic hangs under its parent's.
 std::string IndentForAgentDepth(const std::string& text, size_t depth);
 
-// Writes agent traffic to a stream it owns, one entry per request or
+// Writes agent traffic to a stream or file it owns, one entry per request or
 // response, each headed by its direction, agent path and time, and indented by
 // the agent's depth. Thread-safe: agents report from their own threads.
 // Register OnSend/OnReceive as the Logger's agent callbacks
@@ -78,6 +79,12 @@ std::string IndentForAgentDepth(const std::string& text, size_t depth);
 class AgentTrafficLog {
 public:
     AgentTrafficLog(std::unique_ptr<std::ostream> out, AgentTrafficLogType type);
+
+    // Writes to the file at path (emptied first), and re-creates it if it is
+    // deleted while Haisos runs (see ReopeningLogFile). The re-created file
+    // starts afresh -- in the diff modes each agent's next request is written in
+    // full -- so it never refers back to entries that went with the old one.
+    AgentTrafficLog(std::shared_ptr<ReopeningLogFile> file, AgentTrafficLogType type);
 
     AgentTrafficLog(const AgentTrafficLog&) = delete;
     AgentTrafficLog& operator=(const AgentTrafficLog&) = delete;
@@ -88,9 +95,16 @@ public:
 private:
     // Writes one entry: its header line, then body, indented for the agent.
     void WriteEntry(const char* direction, const std::vector<std::string>& agentPath, const std::string& body);
+    // Called first by OnSend/OnReceive, with m_mutex held: if the file was
+    // re-created, forgets the requests the next diffs would refer to.
+    void StartAfreshIfRecreated();
+    // Writes one whole entry, with m_mutex held.
+    void Emit(const std::string& entry);
 
     std::mutex m_mutex;
+    // Exactly one of the two is set.
     std::unique_ptr<std::ostream> m_out;
+    std::shared_ptr<ReopeningLogFile> m_file;
     AgentTrafficLogType m_type;
     // Diff/XDiff modes: the last request each agent (by path) sent, to diff
     // the next one against.

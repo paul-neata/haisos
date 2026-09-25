@@ -10,6 +10,8 @@
 
 namespace Haisos {
 
+class IBuiltinCommands;
+
 // How IHaisosOS::StartProcess should run a program, beyond what to run and
 // where. Default-constructed, it asks for nothing special.
 struct StartProcessOptions {
@@ -38,9 +40,12 @@ public:
     // environment is what the new process runs with. It is not taken from the
     // OS behind the caller's back: pass GetOsEnvironment()->Clone() to hand on
     // this OS's own, or a narrowed one to give the process less.
-    // programPath is resolved against this OS's filesystem root. The runtime is
-    // selected by extension: ".md" starts an LLM agent, ".lua" starts a Lua
-    // script (future: .js, .wasm, a real-OS-process driver, ...). Which of
+    // programPath is resolved against this OS's filesystem root. If the root
+    // filesystem says it is a builtin command (IFileSystem::IsBuiltinCommand),
+    // that builtin is run, on a thread of its own, from the IBuiltinCommands
+    // this OS was created with -- whatever the path's extension. Otherwise the
+    // runtime is selected by extension: ".md" starts an LLM agent, ".lua"
+    // starts a Lua script (future: .js, .wasm, a real-OS-process driver, ...). Which of
     // those it is is not the caller's business: a process is opaque, and an
     // agent-backed one that starts subagents keeps them inside itself rather
     // than turning them into processes.
@@ -60,14 +65,16 @@ public:
 
     // Same shape as IFactory::CreateHaisosOS: a sub-OS is an OS like any other,
     // and it is confined by the root filesystem it is handed rather than by a
-    // permission flag. It is likewise given its environment explicitly --
-    // typically GetOsEnvironment()->Clone(). It carries this OS's process id
+    // permission flag. It is likewise given its builtin commands and its
+    // environment explicitly -- typically the same IBuiltinCommands this OS was
+    // created with, and GetOsEnvironment()->Clone(). It carries this OS's process id
     // rather than a fresh one: a sub-OS is a narrowing of the same OS, not a
     // new one belonging to some other process.
     virtual std::shared_ptr<IHaisosOS> CreateSubOS(
         std::shared_ptr<IServicesCreator> servicesCreator,
         std::shared_ptr<IPhysicalConsole> physicalConsole,
         std::shared_ptr<IFileSystem> rootFileSystem,
+        std::shared_ptr<IBuiltinCommands> builtinCommands,
         std::shared_ptr<IEnvironment> environment) = 0;
 
     // The OS's root filesystem, fixed at creation. An OS cannot step outside

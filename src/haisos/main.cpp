@@ -8,6 +8,7 @@
 #include <fstream>
 #include <random>
 #include <filesystem>
+#include <unordered_map>
 
 #include <nlohmann/json.hpp>
 
@@ -20,6 +21,7 @@
 #include "interfaces/IServicesCreator.h"
 #include "interfaces/IHaisosOS.h"
 #include "AgentTrafficLog.h"
+#include "ReopeningLogFile.h"
 #include "CliParser.h"
 #include "HaisosFileOperations.h"
 #include "HaisosFileParser.h"
@@ -85,6 +87,8 @@ std::string ReadFileWithinCwd(IFactory& factory, const std::string& filePath) {
 }
 
 int main(int argc, char* argv[]) {
+    // Every log line names its thread (see LogThreadName); this one is "main".
+    LogThreadName mainThreadName("main");
     auto result = ParseArguments(argc, argv);
 
     if (!result.error.empty()) {
@@ -115,7 +119,9 @@ int main(int argc, char* argv[]) {
             std::cerr << "Error: failed to create haisosfile\n";
             return 1;
         }
-        out << GetHaisosFileTemplate();
+        // Every builtin Haisos has is listed, so the template can never fall
+        // behind the builtins.
+        out << GetHaisosFileTemplate(CreateFactory()->CreateBuiltinCommands()->GetCommands());
         out.close();
         std::cout << "Created haisosfile\n";
         return 0;
@@ -131,16 +137,17 @@ int main(int argc, char* argv[]) {
     // Set minimum log level
     LogSetMinimumLevel(result.options.logLevel);
 
-    // Set up file logging if requested via CLI or environment
-    std::unique_ptr<std::ofstream> logFileStream;
+    // Set up file logging if requested via CLI or environment. The file is
+    // re-created if it is deleted while Haisos runs (see ReopeningLogFile).
+    std::shared_ptr<ReopeningLogFile> logFile;
     if (!result.options.logFilePath.empty()) {
-        logFileStream = std::make_unique<std::ofstream>(result.options.logFilePath, std::ios::out | std::ios::trunc);
+        logFile = std::make_shared<ReopeningLogFile>(result.options.logFilePath, /*truncate=*/true);
     } else if (const char* envFile = std::getenv("HAISOS_TEST_LOG_FILE")) {
-        logFileStream = std::make_unique<std::ofstream>(envFile, std::ios::out | std::ios::app);
+        logFile = std::make_shared<ReopeningLogFile>(envFile, /*truncate=*/false);
     }
 
-    if (logFileStream && logFileStream->is_open()) {
-        LogRegisterMessageReceiver([&logFileStream](const LogMessage& msg) {
+    if (logFile && logFile->IsOpen()) {
+        LogRegisterMessageReceiver([logFile](const LogMessage& msg) {
             const char* levelStr =
                 msg.level == LogLevel::VerboseDebug ? "VERBOSE_DEBUG" :
                 msg.level == LogLevel::Debug ? "DEBUG" :
@@ -148,7 +155,9 @@ int main(int argc, char* argv[]) {
                 msg.level == LogLevel::Info ? "INFO" :
                 msg.level == LogLevel::Warning ? "WARNING" :
                 msg.level == LogLevel::Error ? "ERROR" : "UNKNOWN";
-            *logFileStream << "[" << msg.timestamp << "][" << levelStr << "] " << msg.message << "\n" << std::flush;
+            // One Write per line: the Logger calls receivers from whichever
+            // thread logged, and ReopeningLogFile serializes them.
+            logFile->Write("[" + msg.timestamp + "][" + levelStr + "][" + msg.thread + "] " + msg.message + "\n");
         });
     }
 
@@ -164,8 +173,8 @@ int main(int argc, char* argv[]) {
     // agent callbacks. The log owns its file and the callbacks share it, so it
     // stays open for as long as any agent could still report.
     if (!result.options.logAgentFilePath.empty()) {
-        auto agentFile = std::make_unique<std::ofstream>(result.options.logAgentFilePath, std::ios::out | std::ios::trunc);
-        if (!agentFile->is_open()) {
+        auto agentFile = std::make_shared<ReopeningLogFile>(result.options.logAgentFilePath, /*truncate=*/true);
+        if (!agentFile->IsOpen()) {
             LogError("Failed to open --log-agent-to-file path: %s", result.options.logAgentFilePath.c_str());
             std::cerr << "Error: failed to open agent log file: " << result.options.logAgentFilePath << "\n";
             return 1;
@@ -278,17 +287,30 @@ int main(int argc, char* argv[]) {
     auto filesystemService = servicesCreator->CreateFileSystemService();
 
     std::string fsError;
-    std::shared_ptr<IFileSystem> rootFileSystem = BuildRootFileSystem(*factory, *filesystemService, parseResult.config, haisosFileDir, fsError);
+    // Kept by name as well, since a BUILTIN may be placed on any declared FS.
+    std::unordered_map<std::string, std::shared_ptr<IFileSystem>> namedFileSystems;
+    std::shared_ptr<IFileSystem> rootFileSystem = BuildRootFileSystem(
+        *factory, *filesystemService, parseResult.config, haisosFileDir, fsError, &namedFileSystems);
     if (!rootFileSystem) {
         LogError("Failed to build the root filesystem for '%s': %s", haisosFilePath.c_str(), fsError.c_str());
         std::cerr << fsError;
         return 1;
     }
 
-    // CREATE/APPEND/COPY/DELETE: the root's files are set up before any
-    // process can see them.
+    // One set of builtins for the OS; BUILTIN directives place them, and the OS
+    // runs whichever its root says a path is.
+    std::shared_ptr<IBuiltinCommands> builtinCommands = factory->CreateBuiltinCommands();
+    std::shared_ptr<IBuiltinConfigurator> builtinConfigurator = factory->CreateBuiltinConfigurator();
+    HaisosFileBuiltinTargets builtinTargets;
+    builtinTargets.namedFileSystems = &namedFileSystems;
+    builtinTargets.builtinCommands = builtinCommands.get();
+    builtinTargets.configurator = builtinConfigurator.get();
+
+    // CREATE/APPEND/CREATE_DIR/COPY/DELETE/BUILTIN: the files are set up
+    // before any process can see them.
     std::string operationsError;
-    if (!ApplyHaisosFileOperations(*factory, *rootFileSystem, parseResult.config.setupOperations, haisosFileDir, operationsError)) {
+    if (!ApplyHaisosFileOperations(*factory, *rootFileSystem, parseResult.config.setupOperations, haisosFileDir,
+            operationsError, builtinTargets)) {
         LogError("Failed to set up files for '%s': %s", haisosFilePath.c_str(), operationsError.c_str());
         std::cerr << operationsError;
         return 1;
@@ -297,7 +319,7 @@ int main(int argc, char* argv[]) {
     auto physicalConsole = factory->CreatePhysicalConsole();
     physicalConsole->Start();
 
-    auto os = factory->CreateHaisosOS(servicesCreator, physicalConsole, rootFileSystem, environment);
+    auto os = factory->CreateHaisosOS(servicesCreator, physicalConsole, rootFileSystem, builtinCommands, environment);
     if (!os) {
         LogError("Failed to create the OS for '%s'", haisosFilePath.c_str());
         std::cerr << "Error: failed to create the OS\n";

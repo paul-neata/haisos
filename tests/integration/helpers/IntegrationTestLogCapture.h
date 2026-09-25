@@ -59,7 +59,7 @@ public:
                         msg.level == LogLevel::Info ? "INFO" :
                         msg.level == LogLevel::Warning ? "WARNING" :
                         msg.level == LogLevel::Error ? "ERROR" : "UNKNOWN";
-                    *m_logFile << "[" << msg.timestamp << "][" << levelStr << "] " << msg.message << "\n" << std::flush;
+                    *m_logFile << "[" << msg.timestamp << "][" << levelStr << "][" << msg.thread << "] " << msg.message << "\n" << std::flush;
                 });
             }
         }
@@ -91,7 +91,7 @@ public:
                     msg.level == LogLevel::Info ? "INFO" :
                     msg.level == LogLevel::Warning ? "WARNING" :
                     msg.level == LogLevel::Error ? "ERROR" : "UNKNOWN";
-                std::cerr << "[" << msg.timestamp << "][" << levelStr << "] " << msg.message << "\n";
+                std::cerr << "[" << msg.timestamp << "][" << levelStr << "][" << msg.thread << "] " << msg.message << "\n";
             }
         }
         std::cerr << "===================================\n\n" << std::flush;

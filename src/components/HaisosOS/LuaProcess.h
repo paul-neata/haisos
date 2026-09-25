@@ -80,6 +80,8 @@ private:
 
     void RunThread();
     void RegisterBindings(lua_State* L);
+    // Whether the calling thread is the script's own.
+    bool IsOwnThread();
 
     static int LuaToolTrampoline(lua_State* L);
     static int LuaPrintTrampoline(lua_State* L);

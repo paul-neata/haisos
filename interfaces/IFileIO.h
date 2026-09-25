@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 #include "IFileSystemService.h"
@@ -58,6 +59,14 @@ public:
     virtual int RemoveDirectory(const std::string& pathname) = 0;
     virtual int RemoveFile(const std::string& pathname) = 0;
     virtual std::vector<DirectoryEntry> ReadDirectory(const std::string& path) = 0;
+    virtual int Stat(const std::string& path, FileStatus& out) = 0;
+
+    // The name of the builtin command at |path| (resolved like every path
+    // here), or nullopt if it is not one -- see IFileSystem::IsBuiltinCommand.
+    // Only asking is possible from a process: placing a builtin is how an OS is
+    // assembled (see IBuiltinConfigurator), for the same reason Mount is not
+    // here either.
+    virtual std::optional<std::string> IsBuiltinCommand(const std::string& path) = 0;
 
     // Deliberately NOT here, though IFileSystem has them: Mount and Unmount.
     // Composing filesystems is how an OS is built, not something a program

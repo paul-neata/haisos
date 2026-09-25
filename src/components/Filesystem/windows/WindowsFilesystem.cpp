@@ -2,6 +2,8 @@
 #include <memory>
 #include <io.h>
 #include <direct.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <windows.h>
 #undef CreateDirectory
 #undef RemoveDirectory
@@ -42,6 +44,23 @@ int FileSystem::LocalRemoveDirectory(const std::string& pathname) {
 
 int FileSystem::LocalRemoveFile(const std::string& pathname) {
     return ::_unlink(pathname.c_str());
+}
+
+int FileSystem::LocalStat(const std::string& path, FileStatus& out) {
+    struct _stat64 st;
+    if (::_stat64(path.c_str(), &st) != 0) {
+        return -1;
+    }
+    out.type = (st.st_mode & _S_IFDIR) ? DirectoryEntryType::Dir : DirectoryEntryType::File;
+    out.size = static_cast<uint64_t>(st.st_size);
+    // _stat64 has no block count; a 4 KB cluster is the NTFS default.
+    out.blocks = ((out.size + 4095) / 4096) * 8;
+    out.linkCount = static_cast<uint64_t>(st.st_nlink);
+    // Whole seconds only, and st_ctime is the creation time on Windows.
+    out.accessTime = FileDateTime{static_cast<int64_t>(st.st_atime), 0};
+    out.modificationTime = FileDateTime{static_cast<int64_t>(st.st_mtime), 0};
+    out.changeTime = FileDateTime{static_cast<int64_t>(st.st_ctime), 0};
+    return 0;
 }
 
 std::vector<DirectoryEntry> FileSystem::LocalReadDirectory(const std::string& path) {

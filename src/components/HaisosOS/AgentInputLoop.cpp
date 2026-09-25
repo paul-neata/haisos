@@ -1,5 +1,6 @@
 #include "AgentInputLoop.h"
 #include <chrono>
+#include "src/components/libheaders/DestroyOffRuntimeThreads.h"
 #include "src/components/Logger/Logger.h"
 
 namespace Haisos {
@@ -58,6 +59,9 @@ bool AgentInputLoop::WaitToFinish(uint64_t timeoutMs) {
 
 void AgentInputLoop::Run() {
     const std::string name = m_agent->Name();
+    // A runtime thread too (see DestroyOffRuntimeThreads.h), since it runs for
+    // the agent's process; this also names it in every log line.
+    RuntimeThreadScope runtimeThread("input " + name);
     LogDebug("AgentInputLoop: reading input for interactive agent '%s'", name.c_str());
 
     // WaitToFinish(0) does not wait; it just asks whether the agent has closed.

@@ -1,6 +1,10 @@
 #pragma once
+#include <chrono>
+#include <cstdint>
+#include <optional>
 #include <string>
 #include "interfaces/IFileSystemService.h"
+#include "VirtualPath.h"
 
 #ifdef _WIN32
 #include <fcntl.h>
@@ -43,6 +47,35 @@ inline bool RequestsWriteAccess(int flags) {
            (flags & kFileCreateBit) != 0 ||
            (flags & kFileTruncateBit) != 0 ||
            (flags & kFileAppendBit) != 0;
+}
+
+// Now, as a FileDateTime (the system clock, to the nanosecond where it has them).
+inline FileDateTime CurrentFileDateTime() {
+    const auto sinceEpoch = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    FileDateTime now;
+    now.seconds = static_cast<int64_t>(sinceEpoch / 1000000000);
+    now.nanoseconds = static_cast<uint32_t>(sinceEpoch % 1000000000);
+    return now;
+}
+
+// The 512-byte blocks |size| bytes take up when stored with no waste: what a
+// filesystem with no real allocation of its own (an in-memory one) reports.
+inline uint64_t BlocksForSize(uint64_t size) {
+    return (size + 511) / 512;
+}
+
+// What is at |absolutePath| -- DirectoryEntryType::File, ::Dir or
+// ::CharDevice -- or
+// nullopt if nothing is (see IFileSystem::Stat; a builtin command is a file).
+// |fs| is an IFileSystem or a process's IFileIO, as for ReadWholeFile below.
+template <typename FileAccess>
+inline std::optional<char> EntryTypeOf(FileAccess& fs, const std::string& absolutePath) {
+    FileStatus status;
+    if (fs.Stat(absolutePath, status) != 0) {
+        return std::nullopt;
+    }
+    return status.type;
 }
 
 // Reads the whole file at |path|, up to a 10 MB cap. Returns false on any

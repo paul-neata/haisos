@@ -1,6 +1,6 @@
 ---
 name: begin
-description: Start a new task branch from master. Stashes any local changes, updates master, creates the new branch, bumps the minor version in HAISOS_VERSION, and shows commits since base.
+description: Start a new task branch from master. Stashes any local changes, updates master, creates the new branch, bumps the minor version in HAISOS_VERSION, shows commits since base, and prunes merged local branches.
 args:
   - name: branch_name
     description: The new branch name to create (e.g. task/job_to_be_done)
@@ -88,3 +88,7 @@ git rev-parse --abbrev-ref HEAD
 ```
 
 Tell the user: "New branch '{{branch_name}}' created and checked out."
+
+### 7. Prune old branches
+
+Invoke the `/prune-old-branches` skill. It deletes local branches whose every commit is already on `origin/master` by exact hash, and lists every other branch with the command to delete it by hand.

@@ -2,6 +2,7 @@ add_library(Filesystem STATIC
     PhysicalFileSystem.cpp
     ReadOnlyFileSystem.cpp
     InMemoryFileSystem.cpp
+    DeviceFileSystem.cpp
     SubFileSystem.cpp
     ComposedFileSystem.cpp
     MountPoints.cpp

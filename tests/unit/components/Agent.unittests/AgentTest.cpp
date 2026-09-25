@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 #include <atomic>
+#include <condition_variable>
 #include <memory>
+#include <mutex>
 #include <chrono>
 #include <thread>
 #include "Agent.h"
@@ -53,6 +55,68 @@ private:
 
     // Shared so a tool outlives the factory call that made it.
     std::shared_ptr<std::atomic<bool>> m_called = std::make_shared<std::atomic<bool>>(false);
+};
+
+// What a SelfReleasingToolFactory, its tool and a test share.
+struct SelfReleaseState {
+    std::mutex mutex;
+    std::condition_variable cv;
+    // The test's one reference to the agent, until the tool lets go of it.
+    std::shared_ptr<IAgent> agent;
+    std::thread::id agentThread;
+    std::thread::id factoryDestroyedOn;
+    bool factoryDestroyed = false;
+};
+
+// A tool factory whose one tool lets go of SelfReleaseState::agent, so that the
+// references the agent's own thread holds for the call are the last ones. The
+// agent owns the factory, so the factory's destructor runs wherever the agent is
+// destroyed, and records where that was.
+class SelfReleasingToolFactory : public IToolFactory {
+public:
+    static constexpr const char* kToolName = "let_go_of_the_agent";
+
+    explicit SelfReleasingToolFactory(std::shared_ptr<SelfReleaseState> state) : m_state(std::move(state)) {}
+    ~SelfReleasingToolFactory() override {
+        {
+            std::lock_guard<std::mutex> lock(m_state->mutex);
+            m_state->factoryDestroyedOn = std::this_thread::get_id();
+            m_state->factoryDestroyed = true;
+        }
+        m_state->cv.notify_all();
+    }
+
+    std::shared_ptr<ITool> CreateTool(const std::string& name, std::shared_ptr<IAgent>) override {
+        return name == kToolName ? std::make_shared<ReleasingTool>(m_state) : nullptr;
+    }
+    bool HasTool(const std::string& name) const override { return name == kToolName; }
+    std::vector<std::string> GetAvailableTools() const override { return {kToolName}; }
+    std::vector<std::tuple<std::string, std::string, nlohmann::json>> GetAvailableToolDescriptions() const override {
+        return {{kToolName, "lets go of the test's reference to the agent", nlohmann::json::object()}};
+    }
+
+private:
+    class ReleasingTool : public ITool {
+    public:
+        explicit ReleasingTool(std::shared_ptr<SelfReleaseState> state) : m_state(std::move(state)) {}
+        ToolResult Call(std::shared_ptr<IAgent>, const nlohmann::json&) override {
+            std::shared_ptr<IAgent> released;
+            {
+                std::unique_lock<std::mutex> lock(m_state->mutex);
+                // The test hands its reference over once it is done with the agent.
+                m_state->cv.wait_for(lock, std::chrono::milliseconds(kWaitTimeoutMs), [this] { return m_state->agent != nullptr; });
+                m_state->agentThread = std::this_thread::get_id();
+                released = std::move(m_state->agent);
+            }
+            return ToolResult{"let go", false};
+        }
+        nlohmann::json GetParametersSchema() const override { return nlohmann::json::object(); }
+
+    private:
+        std::shared_ptr<SelfReleaseState> m_state;
+    };
+
+    std::shared_ptr<SelfReleaseState> m_state;
 };
 
 } // namespace
@@ -451,4 +515,49 @@ TEST(AgentTest, AnInteractiveAgentFinishesWhenItCallsSelfClose) {
     // The round ends with the tool call: no further LLM call is made once the
     // agent has asked to stop.
     EXPECT_EQ(mockLLM->GetCallCount(), 1);
+}
+
+// The agent side of the problem written up in HaisosOSTest.cpp, under "Objects
+// released last on their own threads".
+//
+// An agent hands shared_from_this() to every tool it calls, so for the length
+// of a call its own thread holds a reference to it. If everyone else lets go
+// meanwhile -- here the tool itself lets go of the test's reference -- that
+// reference is the last, and it goes when the call returns, on the agent's own
+// thread. Before the fix, ~Agent then ran right there: it stops the agent and
+// waits for its thread in a loop that never gives up, and since it was running
+// on that very thread, it hung forever, logging "Agent 'self_releasing' has not
+// stopped after waiting 5000ms in its destructor, still waiting" every 5 s.
+// This test failed after 10 s, the agent never destroyed.
+//
+// With the fix (DestroyOffRuntimeThreads, in Agent::Create), the release hands
+// the agent to the destruction thread, and the agent's thread carries on: it
+// sees the stop, ends its round and finishes, and only then does ~Agent, on the
+// destruction thread, get past its wait. The factory, which the agent owns,
+// records which thread that was.
+TEST(AgentTest, AnAgentReleasedLastByItsOwnToolCallIsDestroyedOffItsThread) {
+    auto state = std::make_shared<SelfReleaseState>();
+    auto mockLLM = std::make_shared<MockLLMCommunicator>();
+    mockLLM->SetToolCallResponse(SelfReleasingToolFactory::kToolName);
+
+    auto agent = Agent::Create(
+        mockLLM,
+        std::make_shared<SelfReleasingToolFactory>(state),
+        std::make_shared<MockAgentConsole>(),
+        std::vector<std::string>{"You are a helpful AI assistant."},
+        "self_releasing",
+        nullptr,
+        /*startTime=*/"",
+        /*interactive=*/false);
+    agent->Post("let go of yourself");
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->agent = std::move(agent);
+    }
+    state->cv.notify_all();
+
+    std::unique_lock<std::mutex> lock(state->mutex);
+    ASSERT_TRUE(state->cv.wait_for(lock, std::chrono::milliseconds(2 * kWaitTimeoutMs), [&] { return state->factoryDestroyed; }))
+        << "the agent was never destroyed: its destructor is waiting for its own thread";
+    EXPECT_NE(state->factoryDestroyedOn, state->agentThread);
 }

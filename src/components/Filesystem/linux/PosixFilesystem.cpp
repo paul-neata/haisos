@@ -4,10 +4,24 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <algorithm>
 #include <cstring>
 
 namespace Haisos {
+
+namespace {
+
+// A block device, socket or FIFO is none of these; it is reported as a file,
+// as it always has been.
+char TypeOf(mode_t mode) {
+    if (S_ISDIR(mode)) {
+        return DirectoryEntryType::Dir;
+    }
+    return S_ISCHR(mode) ? DirectoryEntryType::CharDevice : DirectoryEntryType::File;
+}
+
+} // namespace
 
 int FileSystem::LocalOpenFile(const std::string& pathname, int flags) {
     return ::open(pathname.c_str(), flags);
@@ -61,11 +75,13 @@ std::vector<DirectoryEntry> FileSystem::LocalReadDirectory(const std::string& pa
             de.type = DirectoryEntryType::File;
         } else if (entry->d_type == DT_DIR) {
             de.type = DirectoryEntryType::Dir;
+        } else if (entry->d_type == DT_CHR) {
+            de.type = DirectoryEntryType::CharDevice;
         } else {
             struct stat st;
             std::string fullPath = path + "/" + entry->d_name;
             if (::stat(fullPath.c_str(), &st) == 0) {
-                de.type = S_ISDIR(st.st_mode) ? DirectoryEntryType::Dir : DirectoryEntryType::File;
+                de.type = TypeOf(st.st_mode);
             } else {
                 de.type = DirectoryEntryType::File;
             }
@@ -75,6 +91,25 @@ std::vector<DirectoryEntry> FileSystem::LocalReadDirectory(const std::string& pa
 
     ::closedir(dir);
     return entries;
+}
+
+int FileSystem::LocalStat(const std::string& path, FileStatus& out) {
+    struct stat st;
+    if (::stat(path.c_str(), &st) != 0) {
+        return -1;
+    }
+    out.type = TypeOf(st.st_mode);
+    if (S_ISCHR(st.st_mode)) {
+        out.deviceMajor = static_cast<uint32_t>(major(st.st_rdev));
+        out.deviceMinor = static_cast<uint32_t>(minor(st.st_rdev));
+    }
+    out.size = static_cast<uint64_t>(st.st_size);
+    out.blocks = static_cast<uint64_t>(st.st_blocks);
+    out.linkCount = static_cast<uint64_t>(st.st_nlink);
+    out.accessTime = FileDateTime{static_cast<int64_t>(st.st_atim.tv_sec), static_cast<uint32_t>(st.st_atim.tv_nsec)};
+    out.modificationTime = FileDateTime{static_cast<int64_t>(st.st_mtim.tv_sec), static_cast<uint32_t>(st.st_mtim.tv_nsec)};
+    out.changeTime = FileDateTime{static_cast<int64_t>(st.st_ctim.tv_sec), static_cast<uint32_t>(st.st_ctim.tv_nsec)};
+    return 0;
 }
 
 std::shared_ptr<IFileSystem> CreateFilesystem() {

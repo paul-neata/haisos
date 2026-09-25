@@ -55,6 +55,15 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   sit between the two; it was removed because neither runtime could honour it
   any harder than `TriggerStop()` already did, and will come back when there is
   something real for it to do.)
+- Neither an OS nor a process is ever destroyed on a runtime thread, although
+  one can hold the last reference to both -- an `os_*` tool does, for the length
+  of a call. `HaisosOS::Create`, `AgentProcess::Create` and `LuaProcess::Create`
+  pass the `DestroyOffRuntimeThreads` deleter, and the agent's, the script's
+  and the input loop's threads run inside a `RuntimeThreadScope`, so what is let
+  go of there is destroyed on the destruction thread (see "Creating things" in
+  the root `CLAUDE.md`). `~HaisosOS` depends on it: it drains its processes --
+  asks each to stop, then waits up to 5 s for it -- and on a process's own
+  thread, that wait would be for itself.
 - `StartProcessOptions` says how to run a program. Its one field for now,
   `interactiveAgent`, applies to `.md` programs only (ignored otherwise): the
   agent is created interactive, gets an extra system prompt telling it that
@@ -66,7 +75,13 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   interactive process is finished only once both the agent and the loop are.
   `os_start_process` never asks for it: the console's input belongs to whoever
   the haisosfile gave it to.
-- Dispatches `StartProcess` by file extension: `.md` starts an LLM agent (its
+- `StartProcess` first asks the root filesystem `IsBuiltinCommand(path)`: a
+  path naming a builtin runs it -- whatever its extension -- through the
+  `IBuiltinCommands` the OS was created with (`StartBuiltinProcess` fills in a
+  `BuiltinCommandHost` and calls `RunCommand`; see the BuiltinCommands
+  component). That `IBuiltinCommands` is private to the OS, deliberately not
+  exposed. An OS created with none (null) cannot start a builtin. Otherwise
+  it dispatches by file extension: `.md` starts an LLM agent (its
   content becomes the agent's prompt); `.lua` starts an embedded Lua script
   (via the vendored `extern/lua` interpreter, see `LuaProcess`)
 - Merges the OS's own tools with an agent-backed process's LLM tools via
@@ -82,8 +97,9 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   tool globals. This is a security boundary, not an oversight -- the exact set
   of libraries and globals is defined by the library-opening helper in
   `LuaProcess.cpp`, which is the ground truth.
-- `CreateSubOS` takes the same arguments as `IFactory::CreateHaisosOS`, because a
-  sub-OS is an ordinary OS. What confines it is the root filesystem the caller
+- `CreateSubOS` takes the same arguments as `IFactory::CreateHaisosOS` --
+  including the `IBuiltinCommands`, right after the root filesystem, typically
+  the parent's own -- because a sub-OS is an ordinary OS. What confines it is the root filesystem the caller
   hands it -- typically this OS's root narrowed with
   `IFileSystemService::CreateSubFileSystem` -- rather than a permissions struct.
   Give it its own services creator via `IServicesCreator::Clone()`, so it does
@@ -91,7 +107,7 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   `IEnvironment::Clone()`. It carries the parent OS's pid rather than taking one
   of its own: a sub-OS is the same OS seen through a narrower root.
 - Built via `IFactory::CreateHaisosOS(servicesCreator, physicalConsole,
-  rootFileSystem, environment)`, which allocates the new OS's pid itself; the
+  rootFileSystem, builtinCommands, environment)`, which allocates the new OS's pid itself; the
   concrete entry point is `HaisosOS::Create(..., osProcessId)` (the constructor
   is private and every `HaisosOS` is owned by a `shared_ptr`). The network and
   LLM services are created internally from the `IServicesCreator` rather than
@@ -113,7 +129,7 @@ console, and a services layer; starts processes and spawns sub-OS instances.
 
 ## Key Classes
 
-- `HaisosOS` - Main implementation of `IHaisosOS`; `HaisosOS::Create(...)` builds an instance
+- `HaisosOS` - Main implementation of `IHaisosOS`; `HaisosOS::Create(...)` builds an instance. Tracks its processes as `IProcess`, the outside view -- all it asks of them is to stop, wait and name themselves, and all `IBuiltinCommands::RunCommand` hands back
 - `AgentProcess` - `ICurrentProcess` backed by an agent. It holds the concrete
   `Agent` because it owns the agent's lifetime: an agent cannot be forced down
   (see the Agent component's CLAUDE.md), so a wedged agent process is waited out
@@ -129,5 +145,5 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   its own thread. Its `Kill()` aborts the script via a Lua instruction-count
   hook -- an interpreter really can be interrupted mid-instruction -- and
   `TriggerStop()` simply calls it, since a script has no command queue to close
-- `ProcessFileIO` - the `IFileIO` behind `ICurrentProcess::IO()`: the OS's root filesystem plus this process's working directory
+- `ProcessFileIO` - the `IFileIO` behind `ICurrentProcess::IO()`: the OS's root filesystem plus this process's working directory. Built as a library of its own (`ProcessFileIO` in `CMakeLists.txt`), so a runtime living outside this component -- `BuiltinProcess` -- gives its processes the same I/O without linking all of `HaisosOS`
 - `OSToolFactory` - the OS-level tool set (`os_read_file`, `os_write_file`, `os_list_directory`, `os_start_process`, `os_list_processes`), built once per process and bound to it

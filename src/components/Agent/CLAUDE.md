@@ -76,6 +76,14 @@ thread runs on members the destructor is about to free, so abandoning it is a
 use-after-free rather than a timeout. The per-pass log is what keeps a wedged
 agent from looking like a silent hang.
 
+That wait is also why an `Agent` is never destroyed on its own thread, though
+its thread can hold the last reference to it -- the one it hands the tool it is
+calling. `Create()` passes the `DestroyOffRuntimeThreads` deleter and
+`RunThread()` runs inside a `RuntimeThreadScope`, so an agent let go of there is
+destroyed on the destruction thread once its thread is done; on its own thread,
+`~Agent` would wait for itself forever (see "Creating things" in the root
+`CLAUDE.md`).
+
 `IsFinished()` is public on the concrete `Agent` only, not on `IAgent`, which
 answers the same question through `WaitToFinish(0)`.
 

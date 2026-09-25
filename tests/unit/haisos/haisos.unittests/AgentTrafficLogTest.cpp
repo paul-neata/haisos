@@ -1,7 +1,10 @@
 #include <gtest/gtest.h>
+#include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <nlohmann/json.hpp>
 #include "src/haisos/AgentTrafficLog.h"
+#include "src/haisos/ReopeningLogFile.h"
 #include "src/components/Logger/Logger.h"
 
 using namespace Haisos;
@@ -282,4 +285,87 @@ TEST(AgentTrafficLogTest, XDiffModeWritesRequestsAsChangesAndResponsesShortened)
     EXPECT_EQ(Count(text, "\"model\": \"m\""), 1u) << text;
     EXPECT_EQ(Count(text, "-- m[0..1] as before --"), 1u) << text;
     EXPECT_EQ(Count(text, "\"content\": \"a\""), 2u) << text;
+}
+
+// --- A log file deleted while Haisos runs ---
+
+namespace {
+
+const std::string kReopenDir = "/tmp/haisos_reopening_log_test";
+
+std::string ReadFile(const std::string& path) {
+    std::ifstream in(path);
+    std::stringstream buffer;
+    buffer << in.rdbuf();
+    return buffer.str();
+}
+
+class ReopeningLogFileTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        std::filesystem::remove_all(kReopenDir);
+        std::filesystem::create_directories(kReopenDir);
+    }
+    void TearDown() override {
+        std::filesystem::remove_all(kReopenDir);
+    }
+    const std::string path = kReopenDir + "/log.txt";
+};
+
+} // namespace
+
+TEST_F(ReopeningLogFileTest, TruncatesOrAppendsOnTheFirstOpen) {
+    std::ofstream(path) << "old\n";
+    {
+        ReopeningLogFile appended(path, /*truncate=*/false);
+        appended.Write("more\n");
+    }
+    EXPECT_EQ(ReadFile(path), "old\nmore\n");
+    {
+        ReopeningLogFile truncated(path, /*truncate=*/true);
+        ASSERT_TRUE(truncated.IsOpen());
+        truncated.Write("fresh\n");
+    }
+    EXPECT_EQ(ReadFile(path), "fresh\n");
+}
+
+TEST_F(ReopeningLogFileTest, ADeletedFileIsRecreatedOnTheNextWrite) {
+    ReopeningLogFile log(path, /*truncate=*/true);
+    log.Write("before\n");
+    EXPECT_FALSE(log.EnsureOpen());
+    std::filesystem::remove(path);
+
+    log.Write("after\n");
+    ASSERT_TRUE(std::filesystem::exists(path));
+    EXPECT_EQ(ReadFile(path), "after\n");
+    // Once back, it is simply open again.
+    EXPECT_FALSE(log.EnsureOpen());
+}
+
+TEST_F(ReopeningLogFileTest, EnsureOpenSaysWhenItRecreatedTheFile) {
+    ReopeningLogFile log(path, /*truncate=*/true);
+    std::filesystem::remove(path);
+    EXPECT_TRUE(log.EnsureOpen());
+    EXPECT_TRUE(std::filesystem::exists(path));
+}
+
+TEST_F(ReopeningLogFileTest, AgentTrafficLogStartsAfreshInARecreatedFile) {
+    auto file = std::make_shared<ReopeningLogFile>(path, /*truncate=*/true);
+    AgentTrafficLog log(file, AgentTrafficLogType::Diff);
+    const std::string first = R"({"model":"m","messages":[{"role":"user","content":"hi"}]})";
+    const std::string second = R"({"model":"m","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"hello"}]})";
+    log.OnSend({"agent_1"}, first);
+    std::filesystem::remove(path);
+
+    log.OnSend({"agent_1"}, second);
+    ASSERT_TRUE(std::filesystem::exists(path));
+    const std::string content = ReadFile(path);
+    EXPECT_NE(content.find("was deleted while Haisos was running and has been re-created"), std::string::npos) << content;
+    // Written in full: the request it would be a diff of is not in this file.
+    EXPECT_EQ(content.find("diff against the previous send"), std::string::npos) << content;
+    EXPECT_NE(content.find("\"hello\""), std::string::npos) << content;
+
+    // After that, diffs go on as usual.
+    log.OnSend({"agent_1"}, second);
+    EXPECT_NE(ReadFile(path).find("diff against the previous send"), std::string::npos);
 }

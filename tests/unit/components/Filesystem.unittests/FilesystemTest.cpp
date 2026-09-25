@@ -179,14 +179,19 @@ TEST_F(FilesystemTest, ReadDirectoryListsEntries) {
     fs->RemoveDirectory(kTestDir); // will fail because file exists, that's fine for test
 }
 
-TEST_F(FilesystemTest, ReadDirectoryFiltersDotAndDotDot) {
+TEST_F(FilesystemTest, ReadDirectoryListsDotAndDotDotFirstOnce) {
     auto fs = FileSystem::Create();
     fs->CreateDirectory(kTestDir, S_IRWXU);
 
     auto entries = fs->ReadDirectory(kTestDir);
-    for (const auto& e : entries) {
-        EXPECT_NE(e.name, ".");
-        EXPECT_NE(e.name, "..");
+    ASSERT_GE(entries.size(), 2u);
+    EXPECT_EQ(entries[0].name, ".");
+    EXPECT_EQ(entries[0].type, DirectoryEntryType::Dir);
+    EXPECT_EQ(entries[1].name, "..");
+    EXPECT_EQ(entries[1].type, DirectoryEntryType::Dir);
+    for (size_t i = 2; i < entries.size(); ++i) {
+        EXPECT_NE(entries[i].name, ".");
+        EXPECT_NE(entries[i].name, "..");
     }
 
     fs->RemoveDirectory(kTestDir);

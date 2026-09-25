@@ -33,6 +33,8 @@ public:
     int RemoveDirectory(const std::string& pathname) override;
     int RemoveFile(const std::string& pathname) override;
     std::vector<DirectoryEntry> ReadDirectory(const std::string& path) override;
+    int Stat(const std::string& path, FileStatus& out) override;
+    std::optional<std::string> IsBuiltinCommand(const std::string& path) override;
 
 private:
     ProcessFileIO(std::weak_ptr<IHaisosOS> os, const std::string& workingDirectory);

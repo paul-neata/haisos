@@ -29,7 +29,14 @@ std::shared_ptr<InMemoryFileSystem> InMemoryFileSystem::Create() {
 }
 
 InMemoryFileSystem::InMemoryFileSystem() {
-    m_nodes["/"] = Node{true, {}};
+    m_nodes["/"] = Node::Make(true);
+}
+
+void InMemoryFileSystem::TouchDirectory(const std::string& normalizedPath) {
+    auto it = m_nodes.find(normalizedPath);
+    if (it != m_nodes.end()) {
+        it->second.Modified();
+    }
 }
 
 InMemoryFileSystem::~InMemoryFileSystem() = default;
@@ -56,9 +63,11 @@ int InMemoryFileSystem::LocalOpenFile(const std::string& pathname, int flags, in
         if (parentIt == m_nodes.end() || !parentIt->second.isDirectory) {
             return -1;
         }
-        it = m_nodes.emplace(normalized, Node{false, {}}).first;
+        it = m_nodes.emplace(normalized, Node::Make(false)).first;
+        TouchDirectory(ParentOf(normalized));
     } else if (flags & kFileTruncateBit) {
         it->second.data.clear();
+        it->second.Modified();
     }
 
     int fd = m_nextFd++;
@@ -90,6 +99,7 @@ ssize_t InMemoryFileSystem::LocalReadFile(int fd, void* buf, size_t count) {
     size_t toCopy = std::min(count, data.size() - pos);
     std::memcpy(buf, data.data() + pos, toCopy);
     pos += toCopy;
+    nodeIt->second.accessTime = CurrentFileDateTime();
     return static_cast<ssize_t>(toCopy);
 }
 
@@ -113,6 +123,7 @@ ssize_t InMemoryFileSystem::LocalWriteFile(int fd, const void* buf, size_t count
     }
     std::memcpy(data.data() + pos, buf, count);
     pos += count;
+    nodeIt->second.Modified();
     return static_cast<ssize_t>(count);
 }
 
@@ -126,7 +137,8 @@ int InMemoryFileSystem::LocalCreateDirectory(const std::string& pathname, int /*
     if (parentIt == m_nodes.end() || !parentIt->second.isDirectory) {
         return -1;
     }
-    m_nodes.emplace(normalized, Node{true, {}});
+    m_nodes.emplace(normalized, Node::Make(true));
+    TouchDirectory(ParentOf(normalized));
     return 0;
 }
 
@@ -144,6 +156,7 @@ int InMemoryFileSystem::LocalRemoveDirectory(const std::string& pathname) {
         }
     }
     m_nodes.erase(it);
+    TouchDirectory(ParentOf(normalized));
     return 0;
 }
 
@@ -158,6 +171,7 @@ int InMemoryFileSystem::LocalRemoveFile(const std::string& pathname) {
     // it just finds nothing left behind it, the way reads and writes on any
     // handle whose node is gone already do.
     m_nodes.erase(it);
+    TouchDirectory(ParentOf(normalized));
     return 0;
 }
 
@@ -181,6 +195,33 @@ std::vector<DirectoryEntry> InMemoryFileSystem::LocalReadDirectory(const std::st
     return entries;
 }
 
+int InMemoryFileSystem::LocalStat(const std::string& path, FileStatus& out) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    const std::string normalized = NormalizeVirtualPath(path);
+    auto it = m_nodes.find(normalized);
+    if (it == m_nodes.end()) {
+        return -1;
+    }
+    const Node& node = it->second;
+    out.type = node.isDirectory ? DirectoryEntryType::Dir : DirectoryEntryType::File;
+    out.size = node.isDirectory ? 0 : static_cast<uint64_t>(node.data.size());
+    out.blocks = BlocksForSize(out.size);
+    out.linkCount = 1;
+    if (node.isDirectory) {
+        // Its own "." and the entry naming it, plus each subdirectory's "..".
+        out.linkCount = 2;
+        for (const auto& entry : m_nodes) {
+            if (entry.second.isDirectory && entry.first != normalized && entry.first != "/" &&
+                ParentOf(entry.first) == normalized) {
+                ++out.linkCount;
+            }
+        }
+    }
+    out.accessTime = node.accessTime;
+    out.modificationTime = node.modificationTime;
+    out.changeTime = node.changeTime;
+    return 0;
+}
 
 std::string InMemoryFileSystem::AbsolutePathFor(const std::string& path) const {
     return NormalizeVirtualPath(path);

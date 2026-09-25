@@ -4,11 +4,18 @@
 #include <ostream>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace Haisos {
 
 // How --log-agent-to-file writes each agent's LLM traffic.
 enum class AgentTrafficLogType {
+    // Extreme diff (the default): JSON-like, like Diff, but shorter -- only
+    // what changed since the same agent's previous request, tools only by
+    // name and description, tool calls as "path = value" lines, text wrapped
+    // to 80 characters, and fields that say nothing left out (see
+    // ComputeExtremeDiff and FormatExtremeResponse).
+    XDiff,
     // Each request is written as its difference from the previous request of
     // the same agent (the first one in full); responses are written in full,
     // since each is new rather than a growing version of the last.
@@ -17,9 +24,12 @@ enum class AgentTrafficLogType {
     Full,
 };
 
-// Parses "diff" or "full". Returns false, leaving outType untouched, for
-// anything else.
+// Parses "xdiff", "diff" or "full". Returns false, leaving outType untouched,
+// for anything else.
 bool ParseAgentTrafficLogType(const std::string& name, AgentTrafficLogType& outType);
+
+// The name ParseAgentTrafficLogType accepts for type.
+const char* AgentTrafficLogTypeName(AgentTrafficLogType type);
 
 // Pretty-prints a JSON document, preserving its key order. Anything that is
 // not JSON is returned as it is.
@@ -33,10 +43,38 @@ std::string PrettyPrintJson(const std::string& json);
 // either is not a JSON object.
 std::string ComputeSmartDiff(const std::string& previousJson, const std::string& currentJson);
 
+// The extreme difference between two request bodies, written JSON-like:
+// - only fields that changed are written; an array that only grew (an
+//   agent's "messages", written as "m") shows only its new entries, after a
+//   line saying which ones are as before;
+// - "tools" is each tool's name with its description wrapped under it, and no
+//   parameter schema;
+// - a message's "tool_calls" is one line per field, named by its full path:
+//     m[1].tool_calls[0].function.name = "get_current_date_time"
+//   (a call's "arguments" given as a JSON string is expanded the same way);
+// - a string with a line break, or longer than 80 characters, is a """-fenced
+//   block of its lines, wrapped to 80 characters and indented;
+// - empty strings and a tool call's "index" are left out.
+// An empty previousJson means there is nothing to diff against: everything is
+// new. Anything that is not a JSON object is written as FormatExtremeResponse
+// would.
+std::string ComputeExtremeDiff(const std::string& previousJson, const std::string& currentJson);
+
+// A response body written the way ComputeExtremeDiff writes a request (tool
+// calls under "message.tool_calls..."), leaving out "model", "created_at" and
+// the "*_duration" timings. Anything that is not JSON is returned as it is.
+std::string FormatExtremeResponse(const std::string& json);
+
+// Indents every line of text for an agent at the given depth in its agent
+// tree: nothing at depth 0, and two tabs and a '|' per level below that, so a
+// subagent's traffic hangs under its parent's.
+std::string IndentForAgentDepth(const std::string& text, size_t depth);
+
 // Writes agent traffic to a stream it owns, one entry per request or
-// response, each headed by its direction, time and agent. Thread-safe: agents
-// report from their own threads. Register OnSend/OnReceive as the Logger's
-// agent callbacks (RegisterLogAgentSendCallback/RegisterLogAgentReceiveCallback).
+// response, each headed by its direction, agent path and time, and indented by
+// the agent's depth. Thread-safe: agents report from their own threads.
+// Register OnSend/OnReceive as the Logger's agent callbacks
+// (RegisterLogAgentSendCallback/RegisterLogAgentReceiveCallback).
 class AgentTrafficLog {
 public:
     AgentTrafficLog(std::unique_ptr<std::ostream> out, AgentTrafficLogType type);
@@ -44,16 +82,18 @@ public:
     AgentTrafficLog(const AgentTrafficLog&) = delete;
     AgentTrafficLog& operator=(const AgentTrafficLog&) = delete;
 
-    void OnSend(const std::string& agentName, const std::string& json);
-    void OnReceive(const std::string& agentName, const std::string& json);
+    void OnSend(const std::vector<std::string>& agentPath, const std::string& json);
+    void OnReceive(const std::vector<std::string>& agentPath, const std::string& json);
 
 private:
-    void WriteHeader(const char* direction, const std::string& agentName);
+    // Writes one entry: its header line, then body, indented for the agent.
+    void WriteEntry(const char* direction, const std::vector<std::string>& agentPath, const std::string& body);
 
     std::mutex m_mutex;
     std::unique_ptr<std::ostream> m_out;
     AgentTrafficLogType m_type;
-    // Diff mode: the last request each agent sent, to diff the next one against.
+    // Diff/XDiff modes: the last request each agent (by path) sent, to diff
+    // the next one against.
     std::unordered_map<std::string, std::string> m_lastSent;
 };
 

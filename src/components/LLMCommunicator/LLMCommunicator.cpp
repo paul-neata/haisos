@@ -12,10 +12,10 @@ std::shared_ptr<LLMCommunicator> LLMCommunicator::Create(
     const std::string& endpoint,
     const std::string& modelName,
     const std::string& apiKey,
-    const std::string& sourceName)
+    std::vector<std::string> agentPath)
 {
     return std::shared_ptr<LLMCommunicator>(
-        new LLMCommunicator(std::move(httpClient), endpoint, modelName, apiKey, sourceName));
+        new LLMCommunicator(std::move(httpClient), endpoint, modelName, apiKey, std::move(agentPath)));
 }
 
 LLMCommunicator::LLMCommunicator(
@@ -23,12 +23,13 @@ LLMCommunicator::LLMCommunicator(
     const std::string& endpoint,
     const std::string& modelName,
     const std::string& apiKey,
-    const std::string& sourceName)
+    std::vector<std::string> agentPath)
     : m_httpClient(std::move(httpClient))
     , m_endpoint(endpoint)
     , m_modelName(modelName)
     , m_apiKey(apiKey)
-    , m_sourceName(sourceName)
+    , m_agentPath(std::move(agentPath))
+    , m_sourceName(m_agentPath.empty() ? "" : FormatAgentPath(m_agentPath))
 {
 }
 
@@ -204,7 +205,7 @@ LLMResponse LLMCommunicator::Call(
     std::string requestJson = BuildRequestJson(m_modelName, messages, availableTools);
 
     LogVerboseDebug("[JSON_REQUEST]%s %s", sourceTag.c_str(), requestJson.c_str());
-    LogAgentSend(m_sourceName, requestJson);
+    LogAgentSend(m_agentPath, requestJson);
 
     std::vector<HTTPHeader> headers;
     headers.push_back({"Content-Type", "application/json"});
@@ -239,7 +240,7 @@ LLMResponse LLMCommunicator::Call(
         // A failed round is exactly what someone reading the agent traffic
         // needs to see, so it is reported too: the body if one came back,
         // otherwise why nothing did.
-        LogAgentReceive(m_sourceName, !httpResponse.body.empty() ? httpResponse.body
+        LogAgentReceive(m_agentPath, !httpResponse.body.empty() ? httpResponse.body
             : "(no response: HTTP request failed: status=" + std::to_string(httpResponse.statusCode) +
               (httpResponse.error.empty() ? "" : " error=" + httpResponse.error) + ")");
         LLMResponse response;
@@ -261,7 +262,7 @@ LLMResponse LLMCommunicator::Call(
     }
 
     LogVerboseDebug("[JSON_RESPONSE]%s %s", sourceTag.c_str(), httpResponse.body.c_str());
-    LogAgentReceive(m_sourceName, httpResponse.body);
+    LogAgentReceive(m_agentPath, httpResponse.body);
 
     return ParseResponseJson(httpResponse.body);
 }

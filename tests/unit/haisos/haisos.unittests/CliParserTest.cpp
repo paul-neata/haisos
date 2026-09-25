@@ -125,6 +125,13 @@ TEST_F(CliParserTest, LogToFile) {
     EXPECT_EQ(result.options.logFilePath, "/tmp/log.txt");
 }
 
+TEST_F(CliParserTest, LogToFileShortFlag) {
+    auto result = Parse({"-l", "/tmp/log.txt"});
+    EXPECT_TRUE(result.error.empty()) << result.error;
+    EXPECT_EQ(result.options.logFilePath, "/tmp/log.txt");
+    EXPECT_FALSE(Parse({"-l"}).error.empty());
+}
+
 TEST_F(CliParserTest, LogToFileMissingValue) {
     auto result = Parse({"--log-to-file"});
     EXPECT_FALSE(result.error.empty());
@@ -143,11 +150,19 @@ TEST_F(CliParserTest, FlagsBeforeAndArgOverridesAfterDoubleDash) {
     ASSERT_EQ(result.options.argOverrides.size(), 1u);
 }
 
-TEST_F(CliParserTest, LogAgentToFileDefaultsToDiff) {
+TEST_F(CliParserTest, LogAgentToFileDefaultsToXDiff) {
     auto result = Parse({"--log-agent-to-file", "/tmp/agents.log"});
     EXPECT_TRUE(result.error.empty()) << result.error;
     EXPECT_EQ(result.options.logAgentFilePath, "/tmp/agents.log");
+    EXPECT_EQ(result.options.logAgentFileType, AgentTrafficLogType::XDiff);
+}
+
+TEST_F(CliParserTest, LogAgentToFileShortFlag) {
+    auto result = Parse({"-L", "/tmp/agents.log", "--log-agent-to-file-type", "diff"});
+    EXPECT_TRUE(result.error.empty()) << result.error;
+    EXPECT_EQ(result.options.logAgentFilePath, "/tmp/agents.log");
     EXPECT_EQ(result.options.logAgentFileType, AgentTrafficLogType::Diff);
+    EXPECT_FALSE(Parse({"-L"}).error.empty());
 }
 
 TEST_F(CliParserTest, LogAgentToFileTypeFull) {
@@ -172,6 +187,8 @@ TEST_F(CliParserTest, LogAgentToFileTypeWithoutAFileIsError) {
 
 TEST_F(CliParserTest, UsageDescribesTheAgentLogOptions) {
     auto usage = FormatUsage("haisos");
-    EXPECT_NE(usage.find("--log-agent-to-file <path>"), std::string::npos);
+    EXPECT_NE(usage.find("-L, --log-agent-to-file <path>"), std::string::npos);
+    EXPECT_NE(usage.find("-l, --log-to-file <path>"), std::string::npos);
+    EXPECT_NE(usage.find("xdiff"), std::string::npos);
     EXPECT_NE(usage.find("--log-agent-to-file-type <type>"), std::string::npos);
 }

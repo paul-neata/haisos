@@ -171,14 +171,14 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         auto agentLog = std::make_shared<AgentTrafficLog>(std::move(agentFile), result.options.logAgentFileType);
-        RegisterLogAgentSendCallback([agentLog](const std::string& agentName, const std::string& json) {
-            agentLog->OnSend(agentName, json);
+        RegisterLogAgentSendCallback([agentLog](const std::vector<std::string>& agentPath, const std::string& json) {
+            agentLog->OnSend(agentPath, json);
         });
-        RegisterLogAgentReceiveCallback([agentLog](const std::string& agentName, const std::string& json) {
-            agentLog->OnReceive(agentName, json);
+        RegisterLogAgentReceiveCallback([agentLog](const std::vector<std::string>& agentPath, const std::string& json) {
+            agentLog->OnReceive(agentPath, json);
         });
         LogInfo("Logging agent LLM traffic (%s) to: %s",
-            result.options.logAgentFileType == AgentTrafficLogType::Diff ? "diff" : "full",
+            AgentTrafficLogTypeName(result.options.logAgentFileType),
             result.options.logAgentFilePath.c_str());
     }
 

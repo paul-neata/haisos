@@ -36,8 +36,11 @@ size_t Count(const std::string& text, const std::string& needle) {
 
 } // namespace
 
-TEST(AgentTrafficLogTest, ParsesItsTwoTypes) {
+TEST(AgentTrafficLogTest, ParsesItsThreeTypes) {
     AgentTrafficLogType type = AgentTrafficLogType::Full;
+    EXPECT_TRUE(ParseAgentTrafficLogType("xdiff", type));
+    EXPECT_EQ(type, AgentTrafficLogType::XDiff);
+    EXPECT_STREQ(AgentTrafficLogTypeName(type), "xdiff");
     EXPECT_TRUE(ParseAgentTrafficLogType("diff", type));
     EXPECT_EQ(type, AgentTrafficLogType::Diff);
     EXPECT_TRUE(ParseAgentTrafficLogType("full", type));
@@ -71,9 +74,9 @@ TEST(AgentTrafficLogTest, SmartDiffOfNonJsonFallsBackToTheCurrentText) {
 
 TEST(AgentTrafficLogTest, DiffModeWritesTheFirstRequestInFullThenOnlyTheDifference) {
     LogUnderTest under(AgentTrafficLogType::Diff);
-    under.log->OnSend("agent_1", kFirstRequest);
-    under.log->OnReceive("agent_1", R"({"message":{"content":"a"}})");
-    under.log->OnSend("agent_1", kSecondRequest);
+    under.log->OnSend({"agent_1"}, kFirstRequest);
+    under.log->OnReceive({"agent_1"}, R"({"message":{"content":"a"}})");
+    under.log->OnSend({"agent_1"}, kSecondRequest);
 
     const std::string text = under.Text();
     EXPECT_EQ(Count(text, ">>>>>>>> SEND    [agent_1]"), 2u);
@@ -85,8 +88,8 @@ TEST(AgentTrafficLogTest, DiffModeWritesTheFirstRequestInFullThenOnlyTheDifferen
 
 TEST(AgentTrafficLogTest, DiffModeKeepsEachAgentsHistorySeparate) {
     LogUnderTest under(AgentTrafficLogType::Diff);
-    under.log->OnSend("agent_1", kFirstRequest);
-    under.log->OnSend("agent_2", kSecondRequest);
+    under.log->OnSend({"agent_1"}, kFirstRequest);
+    under.log->OnSend({"agent_1", "agent_2"}, kSecondRequest);
 
     // agent_2's first request is not a diff against agent_1's.
     EXPECT_EQ(Count(under.Text(), "(diff against"), 0u);
@@ -94,9 +97,9 @@ TEST(AgentTrafficLogTest, DiffModeKeepsEachAgentsHistorySeparate) {
 
 TEST(AgentTrafficLogTest, FullModeWritesEveryRequestInFull) {
     LogUnderTest under(AgentTrafficLogType::Full);
-    under.log->OnSend("agent_1", kFirstRequest);
-    under.log->OnSend("agent_1", kSecondRequest);
-    under.log->OnReceive("", "(no response: HTTP request failed: status=0)");
+    under.log->OnSend({"agent_1"}, kFirstRequest);
+    under.log->OnSend({"agent_1"}, kSecondRequest);
+    under.log->OnReceive({""}, "(no response: HTTP request failed: status=0)");
 
     const std::string text = under.Text();
     EXPECT_EQ(Count(text, "(diff against"), 0u);
@@ -111,18 +114,172 @@ TEST(AgentTrafficLogTest, FullModeWritesEveryRequestInFull) {
 TEST(AgentTrafficLogTest, LoggerCallsOnlyTheRegisteredCallbacks) {
     std::vector<std::string> events;
     // Nothing registered: reporting is a no-op.
-    LogAgentSend("a", "{}");
+    LogAgentSend({"a"}, "{}");
 
-    RegisterLogAgentSendCallback([&](const std::string& name, const std::string& json) { events.push_back("send " + name + " " + json); });
-    LogAgentSend("a", "{1}");
-    LogAgentReceive("a", "{2}");
-    RegisterLogAgentReceiveCallback([&](const std::string& name, const std::string& json) { events.push_back("receive " + name + " " + json); });
-    LogAgentReceive("a", "{3}");
+    RegisterLogAgentSendCallback([&](const std::vector<std::string>& path, const std::string& json) { events.push_back("send " + FormatAgentPath(path) + " " + json); });
+    LogAgentSend({"a", "b"}, "{1}");
+    LogAgentReceive({"a"}, "{2}");
+    RegisterLogAgentReceiveCallback([&](const std::vector<std::string>& path, const std::string& json) { events.push_back("receive " + FormatAgentPath(path) + " " + json); });
+    LogAgentReceive({"a"}, "{3}");
 
     RegisterLogAgentSendCallback(nullptr);
     RegisterLogAgentReceiveCallback(nullptr);
-    LogAgentSend("a", "{4}");
-    LogAgentReceive("a", "{5}");
+    LogAgentSend({"a"}, "{4}");
+    LogAgentReceive({"a"}, "{5}");
 
-    EXPECT_EQ(events, (std::vector<std::string>{"send a {1}", "receive a {3}"}));
+    EXPECT_EQ(events, (std::vector<std::string>{"send a>b {1}", "receive a {3}"}));
+}
+
+TEST(AgentTrafficLogTest, FormatsAgentPathsWithAngleBrackets) {
+    EXPECT_EQ(FormatAgentPath({"main", "agent_1", "agent_4"}), "main>agent_1>agent_4");
+    EXPECT_EQ(FormatAgentPath({"main", ""}), "main>(unnamed)");
+    EXPECT_EQ(FormatAgentPath({}), "(unnamed)");
+}
+
+TEST(AgentTrafficLogTest, IndentsTwoTabsAndABarPerLevelOfDepth) {
+    EXPECT_EQ(IndentForAgentDepth("a\nb\n", 0), "a\nb\n");
+    EXPECT_EQ(IndentForAgentDepth("a\n\nb", 1), "\t\t| a\n\t\t|\n\t\t| b");
+    EXPECT_EQ(IndentForAgentDepth("a\n", 2), "\t\t|\t\t| a\n");
+}
+
+TEST(AgentTrafficLogTest, EveryModeHeadsEntriesWithTheAgentPathAndIndentsByDepth) {
+    for (auto type : {AgentTrafficLogType::XDiff, AgentTrafficLogType::Diff, AgentTrafficLogType::Full}) {
+        LogUnderTest under(type);
+        under.log->OnSend({"main"}, kFirstRequest);
+        under.log->OnSend({"main", "agent_1"}, kFirstRequest);
+        under.log->OnReceive({"main", "agent_1", "agent_2"}, R"({"done":true})");
+
+        const std::string text = under.Text();
+        EXPECT_EQ(text.rfind(">>>>>>>> SEND    [main] ", 0), 0u) << AgentTrafficLogTypeName(type) << "\n" << text;
+        EXPECT_NE(text.find("\n\t\t| >>>>>>>> SEND    [main>agent_1] "), std::string::npos) << AgentTrafficLogTypeName(type) << "\n" << text;
+        EXPECT_NE(text.find("\n\t\t|\t\t| <<<<<<<< RECEIVE [main>agent_1>agent_2] "), std::string::npos) << AgentTrafficLogTypeName(type) << "\n" << text;
+    }
+}
+
+TEST(AgentTrafficLogTest, ExtremeDiffOfAFirstRequestKeepsJsonButShortensToolsAndCalls) {
+    const std::string request = R"({"model":"m","stream":false,"tools":[)"
+        R"({"type":"function","function":{"name":"t1","description":"Reads\n a file.","parameters":{"type":"object"}}},)"
+        R"({"type":"function","function":{"name":"t2","parameters":{}}}],)"
+        R"("messages":[{"content":"s","role":"system"},)"
+        R"({"content":"","role":"assistant","tool_calls":[{"id":"c0","function":{"index":0,"name":"f","arguments":{"path":"/a","n":2}}}]},)"
+        R"({"content":"r","name":"f","role":"tool","tool_call_id":"c0"}]})";
+    EXPECT_EQ(ComputeExtremeDiff("", request),
+        "{\n"
+        "  \"model\": \"m\",\n"
+        "  \"stream\": false,\n"
+        "  \"tools\": [\n"
+        "    t1:\n"
+        "        Reads\n"
+        "         a file.\n"
+        "    t2\n"
+        "  ],\n"
+        "  \"m\": [\n"
+        "    {\n"
+        "      \"role\": \"system\",\n"
+        "      \"content\": \"s\"\n"
+        "    },\n"
+        "    {\n"
+        "      \"role\": \"assistant\",\n"
+        "      m[1].tool_calls[0].id = \"c0\"\n"
+        "      m[1].tool_calls[0].function.name = \"f\"\n"
+        "      m[1].tool_calls[0].function.arguments.path = \"/a\"\n"
+        "      m[1].tool_calls[0].function.arguments.n = 2\n"
+        "    },\n"
+        "    {\n"
+        "      \"role\": \"tool\",\n"
+        "      \"name\": \"f\",\n"
+        "      \"content\": \"r\",\n"
+        "      \"tool_call_id\": \"c0\"\n"
+        "    }\n"
+        "  ]\n"
+        "}");
+}
+
+TEST(AgentTrafficLogTest, ExtremeDiffShowsOnlyWhatChanged) {
+    // Same model, stream and tools; one message more.
+    EXPECT_EQ(ComputeExtremeDiff(kFirstRequest, kSecondRequest),
+        "{\n"
+        "  \"m\": [\n"
+        "    -- m[0..1] as before --\n"
+        "    {\n"
+        "      \"role\": \"assistant\",\n"
+        "      \"content\": \"a\"\n"
+        "    }\n"
+        "  ]\n"
+        "}");
+    EXPECT_EQ(ComputeExtremeDiff(kSecondRequest, kSecondRequest), "{}");
+}
+
+TEST(AgentTrafficLogTest, ExtremeDiffWritesChangedToolsAndRewrittenArraysInFull) {
+    const std::string before = R"({"model":"m","tools":[{"name":"a"}],"messages":[{"content":"x"}],"gone":1})";
+    const std::string after = R"({"model":"n","tools":[{"name":"b","description":"d"}],"messages":[{"content":"y"}]})";
+    EXPECT_EQ(ComputeExtremeDiff(before, after),
+        "{\n"
+        "  \"model\": \"n\",\n"
+        "  \"tools\": [\n"
+        "    b:\n"
+        "        d\n"
+        "  ],\n"
+        "  \"m\": [\n"
+        "    {\n"
+        "      \"content\": \"y\"\n"
+        "    }\n"
+        "  ],\n"
+        "  \"gone\": \"-- removed --\"\n"
+        "}");
+}
+
+TEST(AgentTrafficLogTest, ExtremeWrapsLongAndMultiLineTextTo80Characters) {
+    const std::string word9 = "abcdefgh ";   // 9 characters with its space
+    std::string longLine;
+    for (int i = 0; i < 10; ++i) {
+        longLine += word9;
+    }
+    longLine += "end";                        // 93 characters in all
+    const std::string request = R"({"messages":[{"content":")" + longLine + R"(\n\nnext \"line\""}]})";
+    // 9 words are exactly 80 characters, so the wrap falls at the space after
+    // the 9th; the line breaks in the text are kept.
+    EXPECT_EQ(ComputeExtremeDiff("", request),
+        "{\n"
+        "  \"m\": [\n"
+        "    {\n"
+        "      \"content\": \"\"\"\n"
+        "          abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh\n"
+        "          abcdefgh end\n"
+        "\n"
+        "          next \"line\"\n"
+        "      \"\"\"\n"
+        "    }\n"
+        "  ]\n"
+        "}");
+}
+
+TEST(AgentTrafficLogTest, ExtremeResponseDropsNoiseAndFlattensToolCalls) {
+    const std::string response = R"({"model":"m","created_at":"t","message":{"role":"assistant","content":"",)"
+        R"("tool_calls":[{"function":{"name":"f","arguments":"{\"q\":\"tab\\there \\\"x\\\"\"}"}}]},)"
+        R"("done":true,"total_duration":5,"eval_count":7})";
+    EXPECT_EQ(FormatExtremeResponse(response),
+        "{\n"
+        "  \"message\": {\n"
+        "    \"role\": \"assistant\",\n"
+        "    message.tool_calls[0].function.name = \"f\"\n"
+        "    message.tool_calls[0].function.arguments.q = \"tab\there \\\"x\\\"\"\n"
+        "  },\n"
+        "  \"done\": true,\n"
+        "  \"eval_count\": 7\n"
+        "}");
+    EXPECT_EQ(FormatExtremeResponse("not json"), "not json");
+}
+
+TEST(AgentTrafficLogTest, XDiffModeWritesRequestsAsChangesAndResponsesShortened) {
+    LogUnderTest under(AgentTrafficLogType::XDiff);
+    under.log->OnSend({"agent_1"}, kFirstRequest);
+    under.log->OnReceive({"agent_1"}, R"({"model":"m","message":{"role":"assistant","content":"a"}})");
+    under.log->OnSend({"agent_1"}, kSecondRequest);
+
+    const std::string text = under.Text();
+    EXPECT_EQ(Count(text, "(diff against the previous send of [agent_1])"), 1u);
+    EXPECT_EQ(Count(text, "\"model\": \"m\""), 1u) << text;
+    EXPECT_EQ(Count(text, "-- m[0..1] as before --"), 1u) << text;
+    EXPECT_EQ(Count(text, "\"content\": \"a\""), 2u) << text;
 }

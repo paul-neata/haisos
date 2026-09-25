@@ -71,15 +71,15 @@ namespace {
 class AgentTrafficRecorder {
 public:
     AgentTrafficRecorder() {
-        RegisterLogAgentSendCallback([this](const std::string& name, const std::string& json) { sent.emplace_back(name, json); });
-        RegisterLogAgentReceiveCallback([this](const std::string& name, const std::string& json) { received.emplace_back(name, json); });
+        RegisterLogAgentSendCallback([this](const std::vector<std::string>& path, const std::string& json) { sent.emplace_back(path, json); });
+        RegisterLogAgentReceiveCallback([this](const std::vector<std::string>& path, const std::string& json) { received.emplace_back(path, json); });
     }
     ~AgentTrafficRecorder() {
         RegisterLogAgentSendCallback(nullptr);
         RegisterLogAgentReceiveCallback(nullptr);
     }
-    std::vector<std::pair<std::string, std::string>> sent;
-    std::vector<std::pair<std::string, std::string>> received;
+    std::vector<std::pair<std::vector<std::string>, std::string>> sent;
+    std::vector<std::pair<std::vector<std::string>, std::string>> received;
 };
 
 std::vector<LLMMessage> OneUserMessage() {
@@ -91,20 +91,20 @@ std::vector<LLMMessage> OneUserMessage() {
 
 } // namespace
 
-TEST(LLMCommunicatorTest, ReportsEachRequestAndResponseUnderItsAgentName) {
+TEST(LLMCommunicatorTest, ReportsEachRequestAndResponseUnderItsAgentPath) {
     AgentTrafficRecorder recorder;
     auto mockHttp = std::make_shared<MockHTTPClient>();
     const std::string responseBody = R"({"message": {"role": "assistant", "content": "hi"}, "done": true})";
     mockHttp->SetPostResponse(responseBody);
-    auto llm = LLMCommunicator::Create(mockHttp, "http://localhost:11434/api/chat", "llama3", "", "agent_7");
+    auto llm = LLMCommunicator::Create(mockHttp, "http://localhost:11434/api/chat", "llama3", "", {"main", "agent_7"});
 
     llm->Call(OneUserMessage(), {});
 
     ASSERT_EQ(recorder.sent.size(), 1u);
-    EXPECT_EQ(recorder.sent[0].first, "agent_7");
+    EXPECT_EQ(recorder.sent[0].first, (std::vector<std::string>{"main", "agent_7"}));
     EXPECT_EQ(recorder.sent[0].second, mockHttp->GetLastBody());
     ASSERT_EQ(recorder.received.size(), 1u);
-    EXPECT_EQ(recorder.received[0].first, "agent_7");
+    EXPECT_EQ(recorder.received[0].first, (std::vector<std::string>{"main", "agent_7"}));
     EXPECT_EQ(recorder.received[0].second, responseBody);
 }
 
@@ -112,7 +112,7 @@ TEST(LLMCommunicatorTest, ReportsAFailedRequestAsReceivedToo) {
     AgentTrafficRecorder recorder;
     auto mockHttp = std::make_shared<MockHTTPClient>();
     mockHttp->SetPostResponse(HTTPResponse{0, "", "Couldn't connect to server"});
-    auto llm = LLMCommunicator::Create(mockHttp, "http://localhost:9999/api/chat", "llama3", "", "agent_7");
+    auto llm = LLMCommunicator::Create(mockHttp, "http://localhost:9999/api/chat", "llama3", "", {"main", "agent_7"});
 
     llm->Call(OneUserMessage(), {});
 

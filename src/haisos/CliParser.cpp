@@ -15,17 +15,23 @@ std::string FormatUsage(const char* programName) {
         "  -h, --help                     Show this help message\n"
         "\n"
         "      --log-to-console           Enable logging to console\n"
-        "      --log-to-file <path>       Enable logging to file\n"
+        "  -l, --log-to-file <path>       Enable logging to file\n"
         "      --log-level <level>        Set log level (verbose_debug, debug, trace, info, warning, error)\n"
         "      --log-json-in-temp         Log input/output JSON to a temporary file\n"
-        "      --log-agent-to-file <path> Write every agent's LLM traffic to <path>: each JSON\n"
+        "  -L, --log-agent-to-file <path> Write every agent's LLM traffic to <path>: each\n"
         "                                 request sent (SEND) and response received (RECEIVE),\n"
-        "                                 headed by the agent's name and the time\n"
+        "                                 headed by the agent's path (parent>child) and the\n"
+        "                                 time, and indented by how deep the agent is\n"
         "      --log-agent-to-file-type <type>\n"
-        "                                 How --log-agent-to-file writes it (default: diff):\n"
-        "                                   diff  each request as its difference from the same\n"
-        "                                         agent's previous one; responses in full\n"
-        "                                   full  every request and response in full\n"
+        "                                 How --log-agent-to-file writes it (default: xdiff):\n"
+        "                                   xdiff like diff, but shorter: tools by name and\n"
+        "                                         description only, tool calls as\n"
+        "                                         \"m[1].tool_calls[0].function.name = ...\"\n"
+        "                                         lines, text wrapped to 80 characters, and\n"
+        "                                         unchanged or uninformative fields left out\n"
+        "                                   diff  each request as its JSON difference from the\n"
+        "                                         same agent's previous one; responses in full\n"
+        "                                   full  every request and response in full JSON\n"
 
         "\nLLM configuration (read from the haisosfile's ENV directives; `ENV NAME`\n"
         "imports a host variable):\n"
@@ -67,11 +73,11 @@ ParseResult ParseArguments(int argc, char* argv[]) {
             return ParseResult{options, ""};
         } else if (arg == "--log-to-console") {
             options.logToConsole = true;
-        } else if (arg == "--log-to-file") {
+        } else if (arg == "--log-to-file" || arg == "-l") {
             if (i + 1 < argc) {
                 options.logFilePath = argv[++i];
             } else {
-                return ParseResult{options, "Error: --log-to-file requires a path argument\n"};
+                return ParseResult{options, "Error: " + arg + " requires a path argument\n"};
             }
         } else if (arg == "--log-level") {
             if (i + 1 < argc) {
@@ -84,21 +90,21 @@ ParseResult ParseArguments(int argc, char* argv[]) {
             }
         } else if (arg == "--log-json-in-temp") {
             options.logJsonInTemp = true;
-        } else if (arg == "--log-agent-to-file") {
+        } else if (arg == "--log-agent-to-file" || arg == "-L") {
             if (i + 1 < argc) {
                 options.logAgentFilePath = argv[++i];
             } else {
-                return ParseResult{options, "Error: --log-agent-to-file requires a path argument\n"};
+                return ParseResult{options, "Error: " + arg + " requires a path argument\n"};
             }
         } else if (arg == "--log-agent-to-file-type") {
             if (i + 1 < argc) {
                 std::string typeName = argv[++i];
                 if (!ParseAgentTrafficLogType(typeName, options.logAgentFileType)) {
-                    return ParseResult{options, "Error: unrecognized --log-agent-to-file-type value: " + typeName + " (expected diff or full)\n"};
+                    return ParseResult{options, "Error: unrecognized --log-agent-to-file-type value: " + typeName + " (expected xdiff, diff or full)\n"};
                 }
                 sawLogAgentFileType = true;
             } else {
-                return ParseResult{options, "Error: --log-agent-to-file-type requires a type argument (diff or full)\n"};
+                return ParseResult{options, "Error: --log-agent-to-file-type requires a type argument (xdiff, diff or full)\n"};
             }
         } else if (!arg.empty() && arg[0] != '-') {
             if (!haisosFilePath.empty()) {
@@ -121,7 +127,7 @@ ParseResult ParseArguments(int argc, char* argv[]) {
 
     // A type with nowhere to write it would do nothing, silently.
     if (sawLogAgentFileType && options.logAgentFilePath.empty()) {
-        return ParseResult{options, "Error: --log-agent-to-file-type requires --log-agent-to-file <path>\n"};
+        return ParseResult{options, "Error: --log-agent-to-file-type requires --log-agent-to-file (-L) <path>\n"};
     }
 
     options.haisosFilePath = haisosFilePath;

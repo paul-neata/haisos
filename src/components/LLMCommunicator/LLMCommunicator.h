@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <memory>
+#include <vector>
 #include "interfaces/ILLMCommunicator.h"
 #include "interfaces/INetworkService.h"
 #include "src/components/Logger/Logger.h"
@@ -9,17 +10,18 @@ namespace Haisos {
 
 class LLMCommunicator : public ILLMCommunicator {
 public:
-    // sourceName, when non-empty, tags this communicator's [JSON_REQUEST]/
-    // [JSON_RESPONSE] trace log lines with it (e.g. an agent's name), so
-    // concurrent agents' traffic can still be told apart in the logs. It is
-    // also the agent name every request and response is reported under via
-    // LogAgentSend/LogAgentReceive (see Logger.h).
+    // agentPath, when non-empty, is the path of the agent this communicator
+    // talks for (its ancestors' names, then its own; see Logger.h). It tags
+    // this communicator's [JSON_REQUEST]/[JSON_RESPONSE] trace log lines (as
+    // "a>b>c"), so concurrent agents' traffic can still be told apart in the
+    // logs, and it is what every request and response is reported under via
+    // LogAgentSend/LogAgentReceive.
     static std::shared_ptr<LLMCommunicator> Create(
         std::shared_ptr<IHTTPClient> httpClient,
         const std::string& endpoint,
         const std::string& modelName,
         const std::string& apiKey,
-        const std::string& sourceName = "");
+        std::vector<std::string> agentPath = {});
 
     ~LLMCommunicator() override;
 
@@ -40,7 +42,7 @@ private:
         const std::string& endpoint,
         const std::string& modelName,
         const std::string& apiKey,
-        const std::string& sourceName);
+        std::vector<std::string> agentPath);
 
     LLMResponse ParseResponseJson(const std::string& jsonResponse);
 
@@ -48,6 +50,8 @@ private:
     std::string m_endpoint;
     std::string m_modelName;
     std::string m_apiKey;
+    std::vector<std::string> m_agentPath;
+    // m_agentPath as text, for the trace log lines; empty if the path is.
     std::string m_sourceName;
 };
 

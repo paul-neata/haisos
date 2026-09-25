@@ -56,7 +56,7 @@ haisos/
 │   │   ├── os_list_directory/
 │   │   ├── os_start_process/
 │   │   └── os_list_processes/
-│   └── haisos/            - Entry point, CLI parser, haisosfile parser, root-filesystem builder, file-directive executor, and agent traffic log (--log-agent-to-file)
+│   └── haisos/            - Entry point, CLI parser, haisosfile parser, root-filesystem builder, file-directive executor, and agent traffic log (--log-agent-to-file / -L)
 ├── interfaces/             - Service-based interfaces (IFactory.h [IPhysicalConsole], IServicesCreator.h, IHaisosOS.h, IProcess.h, IEnvironment.h [LLMIdentifier], ILLMService.h [IAgent, ITool, IToolFactory, IAgentConsole], INetworkService.h [IHTTPClient], IFileSystemService.h [IFileSystem], IProcess.h [ICurrentProcess], ILLMCommunicator.h)
 ├── tests/                 - All tests
 │   ├── mocks/             - Mock classes for testing
@@ -165,11 +165,11 @@ after a literal `--` is parsed as `key=value` pairs fed to the haisosfile as
 | `--version` | Show version information |
 | `-h, --help` | Show help message |
 | `--log-to-console` | Enable logging to console |
-| `--log-to-file <path>` | Enable logging to file |
+| `-l`, `--log-to-file <path>` | Enable logging to file |
 | `--log-level <level>` | Set log level (verbose_debug, debug, trace, info, warning, error) |
 | `--log-json-in-temp` | Log input/output JSON to a temporary file |
-| `--log-agent-to-file <path>` | Write every agent's LLM traffic to `<path>`: each request sent (`SEND`) and response received (`RECEIVE`), headed by the agent's name and the time |
-| `--log-agent-to-file-type <type>` | `diff` (default): each request as its difference from the same agent's previous one, responses in full; `full`: everything in full. Requires `--log-agent-to-file` |
+| `-L`, `--log-agent-to-file <path>` | Write every agent's LLM traffic to `<path>`: each request sent (`SEND`) and response received (`RECEIVE`), headed by the agent's path (its ancestors' names then its own, joined by `>`, e.g. `main_2>aaaaer6o`) and the time. Each entry is indented by the agent's depth in its agent tree: two tabs and a `\|` per level, none for a top-level agent |
+| `--log-agent-to-file-type <type>` | `xdiff` (default): like `diff`, JSON-like, but shorter -- unchanged fields are left out, `messages` is written `m` and shows only its new entries, `tools` lists only each tool's name with its description, a tool call is written as `m[1].tool_calls[0].function.name = "..."` lines, text is wrapped to 80 characters (line breaks kept) in `"""` blocks, and empty strings plus response timings (`model`, `created_at`, `*_duration`) are dropped; `diff`: each request as its JSON difference from the same agent's previous one, responses in full; `full`: everything in full JSON. Requires `--log-agent-to-file` |
 
 ## The `haisosfile` DSL
 

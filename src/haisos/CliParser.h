@@ -21,7 +21,7 @@ struct CliOptions {
     bool logJsonInTemp = false;
     // Where to write every agent's LLM traffic; empty means don't.
     std::string logAgentFilePath;
-    AgentTrafficLogType logAgentFileType = AgentTrafficLogType::Diff;
+    AgentTrafficLogType logAgentFileType = AgentTrafficLogType::XDiff;
     bool help = false;
     bool version = false;
     // Write a commented starter haisosfile to ./haisosfile and exit.

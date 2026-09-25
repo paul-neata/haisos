@@ -340,12 +340,14 @@ HaisosFileParseResult ParseHaisosFile(
                 expectedArgs = 1;
             } else if (decl.type == "MEM") {
                 expectedArgs = 0;
+            } else if (decl.type == "DEV") {
+                expectedArgs = 0;
             } else if (decl.type == "SUB") {
                 expectedArgs = 2;
             } else if (decl.type == "COMPOSED") {
                 expectedArgs = 3;
             } else {
-                result.error = "Error: line " + std::to_string(lineNumber) + ": unknown FS type '" + decl.type + "' (expected PHYSICAL, RO, MEM, SUB, or COMPOSED)\n";
+                result.error = "Error: line " + std::to_string(lineNumber) + ": unknown FS type '" + decl.type + "' (expected PHYSICAL, RO, MEM, DEV, SUB, or COMPOSED)\n";
                 return result;
             }
             if (decl.args.size() != expectedArgs) {
@@ -563,6 +565,7 @@ std::string GetHaisosFileTemplate(const std::vector<std::string>& builtinNames) 
         "FS rootfs PHYSICAL .                   # this haisosfile's own directory\n"
         "# FS data PHYSICAL ./data              # a real disk directory (relative to this file, or absolute; may use . and ..)\n"
         "# FS scratch MEM                       # an empty, in-memory read/write filesystem\n"
+        "# FS devices DEV                       # device files, as Linux's /dev: null and zero (see below)\n"
         "# FS readonly RO rootfs                # a read-only wrapper over another declared FS\n"
         "# FS tools SUB rootfs tools            # confined to a sub-path (here tools/) of another declared FS\n"
         "# FS combined COMPOSED rootfs /scratch scratch   # rootfs with scratch overlaid at /scratch, both left untouched\n"
@@ -570,6 +573,13 @@ std::string GetHaisosFileTemplate(const std::vector<std::string>& builtinNames) 
         "# MOUNT overlays one filesystem inside another at a path, in place,\n"
         "# overriding anything already there: MOUNT <main_fs> <path> <fs_to_mount>\n"
         "# MOUNT rootfs /scratch scratch\n"
+        "\n"
+        "# /dev, as on Linux: uncomment both lines to give every process\n"
+        "# /dev/null (writes vanish, reads end at once) and /dev/zero (writes\n"
+        "# vanish, reads give endless zero bytes). Nothing can be created or\n"
+        "# deleted in it. Shell commands redirect to /dev/null all the time.\n"
+        "# FS devfs DEV\n"
+        "# MOUNT rootfs /dev devfs\n"
         "\n"
         "# ROOT selects which declared filesystem (by name) becomes this OS's\n"
         "# root. If omitted, the last FS declared above is used; if no FS is\n"

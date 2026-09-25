@@ -65,7 +65,8 @@ inline uint64_t BlocksForSize(uint64_t size) {
     return (size + 511) / 512;
 }
 
-// What is at |absolutePath| -- DirectoryEntryType::File or ::Dir -- or
+// What is at |absolutePath| -- DirectoryEntryType::File, ::Dir or
+// ::CharDevice -- or
 // nullopt if nothing is (see IFileSystem::Stat; a builtin command is a file).
 // |fs| is an IFileSystem or a process's IFileIO, as for ReadWholeFile below.
 template <typename FileAccess>

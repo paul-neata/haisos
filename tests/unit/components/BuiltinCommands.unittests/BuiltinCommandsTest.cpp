@@ -547,7 +547,7 @@ TEST_F(BuiltinCommandsTest, LsSortOrders) {
     int status = 0;
     auto lines = Run("ls", {"--sort=version", "-1", "/docs/sub"}, &status);
     EXPECT_EQ(status, 0);
-    EXPECT_EQ(lines, (Lines{"Parameter --sort=version is not treated by HaisosOS ls v. 1.1.0", "b.md"}));
+    EXPECT_EQ(lines, (Lines{"Parameter --sort=version is not treated by HaisosOS ls v. 1.2.0", "b.md"}));
 }
 
 TEST_F(BuiltinCommandsTest, LsLayouts) {
@@ -601,6 +601,45 @@ TEST_F(BuiltinCommandsTest, LsRecursive) {
         "/docs/sub:",
         "total 1",
         "-rwxrwxrwx 1 haisos haisos 6 <time> b.md"}));
+}
+
+TEST_F(BuiltinCommandsTest, LsShowsDotAndDotDotFirstOnlyWithAll) {
+    EXPECT_EQ(Run("ls", {"-a", "/docs"}), (Lines{".  ..  a.md  sub"}));
+    EXPECT_EQ(Run("ls", {"-f", "/docs/sub"}), (Lines{".  ..  b.md"}));
+    EXPECT_EQ(Run("ls", {"-A", "/docs"}), (Lines{"a.md  sub"}));
+    // "." is the directory itself and ".." its parent, as their link counts show.
+    EXPECT_EQ(WithoutTimes(Run("ls", {"-la", "/docs"})), (Lines{
+        "total 1",
+        "drwxrwxrwx 3 haisos haisos 0 <time> .",
+        "drwxrwxrwx 4 haisos haisos 0 <time> ..",
+        "-rwxrwxrwx 1 haisos haisos 5 <time> a.md",
+        "drwxrwxrwx 2 haisos haisos 0 <time> sub"}));
+}
+
+TEST_F(BuiltinCommandsTest, LsShowsDevicesAsTheRealOneDoes) {
+    root->Mount("/dev", factory->CreateServicesCreator()->CreateFileSystemService()->CreateDeviceFileSystem());
+    EXPECT_EQ(Run("ls", {"/dev"}), (Lines{"null  zero"}));
+    EXPECT_EQ(Run("ls", {"-p", "/dev"}), (Lines{"null  zero"}));
+    // A device's size column holds its major and minor numbers.
+    EXPECT_EQ(WithoutTimes(Run("ls", {"-l", "/dev"})), (Lines{
+        "total 0",
+        "crwxrwxrwx 1 haisos haisos 1, 3 <time> null",
+        "crwxrwxrwx 1 haisos haisos 1, 5 <time> zero"}));
+    // Aligned with the sizes of files listed alongside.
+    EXPECT_EQ(WithoutTimes(Run("ls", {"-l", "/docs/a.md", "/dev/null"})), (Lines{
+        "crwxrwxrwx 1 haisos haisos 1, 3 <time> /dev/null",
+        "-rwxrwxrwx 1 haisos haisos    5 <time> /docs/a.md"}));
+    WriteFile("/docs/big.bin", std::string(123456, 'x'));
+    EXPECT_EQ(WithoutTimes(Run("ls", {"-l", "/docs/big.bin", "/dev/zero"})), (Lines{
+        "crwxrwxrwx 1 haisos haisos   1, 5 <time> /dev/zero",
+        "-rwxrwxrwx 1 haisos haisos 123456 <time> /docs/big.bin"}));
+}
+
+TEST_F(BuiltinCommandsTest, CatOfDevNullPrintsNothing) {
+    root->Mount("/dev", factory->CreateServicesCreator()->CreateFileSystemService()->CreateDeviceFileSystem());
+    int status = -1;
+    EXPECT_EQ(Run("cat", {"/dev/null"}, &status), (Lines{}));
+    EXPECT_EQ(status, 0);
 }
 
 TEST_F(BuiltinCommandsTest, LsReportsWhatItCannotAccess) {

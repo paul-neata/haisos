@@ -42,12 +42,14 @@ struct HaisosFileOperation {
 };
 
 // One "FS <name> <type> <args...>" directive. type is one of "PHYSICAL",
-// "RO", "MEM", "SUB" (validated by the parser); args holds whatever follows,
+// "RO", "MEM", "DEV", "SUB", "COMPOSED" (validated by the parser); args holds whatever follows,
 // already substituted:
 //   PHYSICAL <folder>            args = {folder}
 //   RO <other_fs>                args = {other_fs}
 //   MEM                          args = {}
+//   DEV                          args = {}
 //   SUB <other_fs> <folder>      args = {other_fs, folder}
+//   COMPOSED <main> <path> <fs>  args = {main, path, fs}
 // Building the actual IFileSystem is left to the caller (the parser has no
 // access to IFactory/IFileSystemService).
 struct HaisosFileFilesystemDecl {

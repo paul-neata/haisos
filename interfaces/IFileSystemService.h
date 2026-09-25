@@ -14,7 +14,11 @@ namespace Haisos {
 
 enum DirectoryEntryType : char {
     File = 'f',
-    Dir = 'd'
+    Dir = 'd',
+    // A character device, such as /dev/null: a file whose reads and writes are
+    // served by a driver rather than stored anywhere (see
+    // IFileSystemService::CreateDeviceFileSystem).
+    CharDevice = 'c'
 };
 
 struct DirectoryEntry {
@@ -46,7 +50,7 @@ struct FileDateTime {
 // that means something on every filesystem here. There are no permissions or
 // owners yet, so they are not pretended to.
 struct FileStatus {
-    char type = DirectoryEntryType::File; // DirectoryEntryType::File or ::Dir
+    char type = DirectoryEntryType::File; // DirectoryEntryType::File, ::Dir or ::CharDevice
     // In bytes. For a directory, whatever the filesystem reports (a real disk
     // typically says 4096; an in-memory directory is 0).
     uint64_t size = 0;
@@ -62,6 +66,10 @@ struct FileStatus {
     FileDateTime accessTime;
     FileDateTime modificationTime;
     FileDateTime changeTime;
+    // As st_rdev: for a device, its major and minor numbers (Linux's, e.g.
+    // 1 and 3 for null); 0 for anything else.
+    uint32_t deviceMajor = 0;
+    uint32_t deviceMinor = 0;
 };
 
 // IFileSystem is a thin abstraction over C/POSIX filesystem operations.
@@ -128,7 +136,9 @@ public:
     // keep working until they are closed.
     virtual void Unmount(const std::string& mountedPath) = 0;
 
-    // ReadDirectory returns the non-"." / ".." entries in |path|.
+    // ReadDirectory returns the entries in the directory |path|: "." and ".."
+    // first, as readdir() gives them, then everything else. A path that is no
+    // directory lists nothing at all. (The ".." of the root is the root.)
     // There is no direct single C counterpart; it wraps opendir/readdir/closedir
     // on POSIX and FindFirstFile/FindNextFile on Windows.
     // Note: on POSIX, when d_type is unknown, stat() is used rather than lstat(),
@@ -162,7 +172,9 @@ public:
     // the front door onto them, adding the checks a placement needs.
 
     // Places builtinName at |path| in this filesystem's own list. Returns 0, or
-    // -1 if |path| is the root or already holds a builtin of this filesystem.
+    // -1 if |path| is the root or already holds a builtin of this filesystem,
+    // or if this filesystem holds nothing but what it was made with (a
+    // device filesystem).
     virtual int AddBuiltinCommand(const std::string& path, const std::string& builtinName) = 0;
 
     // Removes the builtin this filesystem itself placed at |path|. Returns 0,
@@ -189,6 +201,14 @@ public:
 
     // Creates an empty, in-memory read/write filesystem (no backing real disk).
     virtual std::shared_ptr<IFileSystem> CreateEmptyInMemFileSystem() = 0;
+
+    // Creates a device filesystem, as Linux's /dev: a root directory holding
+    // character devices, and nothing can be created in it or removed from it.
+    // The devices, which behave as their Linux namesakes:
+    //   null  writes are discarded; reads return end-of-file at once
+    //   zero  writes are discarded; reads return as many 0 bytes as asked for
+    // Meant to be mounted at /dev.
+    virtual std::shared_ptr<IFileSystem> CreateDeviceFileSystem() = 0;
 
     // Creates a filesystem confined to a sub-path of an existing filesystem, working
     // purely through the IFileSystem abstraction (no real disk access, unlike

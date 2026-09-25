@@ -171,26 +171,42 @@ int MountableFileSystem::RemoveFile(const std::string& pathname) {
 
 std::vector<DirectoryEntry> MountableFileSystem::ReadDirectory(const std::string& path) {
     const std::string absolute = AbsolutePathFor(path);
+    std::vector<DirectoryEntry> entries;
     auto route = m_mounts.Resolve(absolute);
     if (route.filesystem) {
-        std::vector<DirectoryEntry> entries = route.filesystem->ReadDirectory(route.innerPath);
-        AddOwnBuiltinEntries(absolute, entries);
-        return entries;
-    }
-
-    std::vector<DirectoryEntry> entries = LocalReadDirectory(path);
-    // A mount point does not have to exist underneath, so synthesize the next
-    // segment towards each one; otherwise a mount would be unreachable by
-    // listing down from the root.
-    for (const auto& segment : m_mounts.ChildSegments(absolute)) {
-        const bool alreadyListed = std::any_of(entries.begin(), entries.end(),
-            [&segment](const DirectoryEntry& entry) { return entry.name == segment; });
-        if (!alreadyListed) {
-            entries.push_back(DirectoryEntry{segment, DirectoryEntryType::Dir});
+        entries = route.filesystem->ReadDirectory(route.innerPath);
+    } else {
+        entries = LocalReadDirectory(path);
+        // A mount point does not have to exist underneath, so synthesize the next
+        // segment towards each one; otherwise a mount would be unreachable by
+        // listing down from the root.
+        for (const auto& segment : m_mounts.ChildSegments(absolute)) {
+            const bool alreadyListed = std::any_of(entries.begin(), entries.end(),
+                [&segment](const DirectoryEntry& entry) { return entry.name == segment; });
+            if (!alreadyListed) {
+                entries.push_back(DirectoryEntry{segment, DirectoryEntryType::Dir});
+            }
         }
     }
     AddOwnBuiltinEntries(absolute, entries);
+    PutDotEntriesFirst(path, entries);
     return entries;
+}
+
+void MountableFileSystem::PutDotEntriesFirst(const std::string& path, std::vector<DirectoryEntry>& entries) {
+    // A filesystem this one is a view of, or has mounted, has put them in
+    // already; they are put back first, once.
+    const auto dots = std::remove_if(entries.begin(), entries.end(),
+        [](const DirectoryEntry& entry) { return entry.name == "." || entry.name == ".."; });
+    const bool hadDots = dots != entries.end();
+    entries.erase(dots, entries.end());
+    // Only a directory lists anything, so an empty listing is the one case
+    // that may be of no directory at all.
+    FileStatus status;
+    if (!hadDots && entries.empty() && (Stat(path, status) != 0 || status.type != DirectoryEntryType::Dir)) {
+        return;
+    }
+    entries.insert(entries.begin(), {DirectoryEntry{".", DirectoryEntryType::Dir}, DirectoryEntry{"..", DirectoryEntryType::Dir}});
 }
 
 int MountableFileSystem::Stat(const std::string& path, FileStatus& out) {
@@ -232,7 +248,7 @@ int MountableFileSystem::Stat(const std::string& path, FileStatus& out) {
 
 int MountableFileSystem::AddBuiltinCommand(const std::string& path, const std::string& builtinName) {
     const std::string absolute = AbsolutePathFor(path);
-    if (absolute == "/" || builtinName.empty()) {
+    if (absolute == "/" || builtinName.empty() || !LocalCanHoldBuiltinCommands()) {
         return -1;
     }
     std::lock_guard<std::mutex> lock(m_builtinsMutex);

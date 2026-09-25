@@ -104,7 +104,9 @@ bool CopyFileBetween(IFileSystem& from, const std::string& fromPath, IFileSystem
         return false;
     }
     if (*sourceType != DirectoryEntryType::File) {
-        outReason = "the source is a directory; only files can be copied";
+        outReason = *sourceType == DirectoryEntryType::Dir
+            ? "the source is a directory; only files can be copied"
+            : "the source is a device; only files can be copied";
         return false;
     }
     if (EntryTypeOf(to, toPath) == std::optional<char>(DirectoryEntryType::Dir)) {
@@ -152,6 +154,9 @@ bool CopyFileBetween(IFileSystem& from, const std::string& fromPath, IFileSystem
 bool RemoveTree(IFileSystem& fs, const std::string& normalizedPath, char type, std::string& outReason) {
     if (type == DirectoryEntryType::Dir) {
         for (const auto& entry : fs.ReadDirectory(normalizedPath)) {
+            if (entry.name == "." || entry.name == "..") {
+                continue;
+            }
             if (!RemoveTree(fs, normalizedPath + "/" + entry.name, entry.type, outReason)) {
                 return false;
             }

@@ -260,6 +260,27 @@ TEST_F(HaisosFileOperationsTest, BuiltinWithoutTargetsFails) {
     EXPECT_NE(error.find("not available"), std::string::npos) << error;
 }
 
+TEST_F(HaisosFileOperationsTest, DevNullSwallowsWritesAndDevCannotBeChanged) {
+    root->Mount("/dev", CreateServicesCreator()->CreateFileSystemService()->CreateDeviceFileSystem());
+    std::string error;
+    ASSERT_TRUE(Apply("CREATE /dev/null 'gone'\nAPPEND /dev/null 'gone too'\n", error)) << error;
+    EXPECT_EQ(Read("/dev/null"), "");
+
+    EXPECT_FALSE(Apply("CREATE /dev/new.txt 'x'\n", error));
+    EXPECT_FALSE(Apply("CREATE_DIR /dev/sub\n", error));
+    EXPECT_FALSE(Apply("DELETE /dev/null\n", error));
+    EXPECT_FALSE(Apply("DELETE /dev\n", error));
+    EXPECT_FALSE(Apply("OUTCOPY /dev/zero ./zero\n", error));
+    EXPECT_NE(error.find("device"), std::string::npos) << error;
+    EXPECT_EQ(EntryTypeOf(*root, "/dev/null"), std::optional<char>(DirectoryEntryType::CharDevice));
+}
+
+TEST_F(HaisosFileOperationsTest, DeleteOfADirectoryTreeSkipsDotEntries) {
+    std::string error;
+    ASSERT_TRUE(Apply("CREATE /tree/a/b.txt 'b'\nCREATE /tree/c.txt 'c'\nDELETE /tree\n", error)) << error;
+    EXPECT_FALSE(EntryTypeOf(*root, "/tree").has_value());
+}
+
 TEST_F(HaisosFileOperationsTest, TheInitTemplatesBuiltinsAllApplyOnceUncommented) {
     // What `haisos --init` writes lists every builtin Haisos has; uncommenting
     // CREATE_DIR /bin and every BUILTIN must place them all.

@@ -36,9 +36,16 @@ ToolResult OSListDirectoryTool::Call(std::shared_ptr<IAgent> /*callerAgent*/, co
 
     nlohmann::json result = nlohmann::json::array();
     for (const auto& entry : entries) {
+        // Every directory has them; listing them tells the caller nothing.
+        if (entry.name == "." || entry.name == "..") {
+            continue;
+        }
+        const char* type = entry.type == DirectoryEntryType::Dir ? "dir"
+            : entry.type == DirectoryEntryType::CharDevice ? "char_device"
+            : "file";
         result.push_back({
             {"name", entry.name},
-            {"type", entry.type == DirectoryEntryType::Dir ? "dir" : "file"}
+            {"type", type}
         });
     }
     // A filename is an arbitrary byte string, so it need not be valid UTF-8;

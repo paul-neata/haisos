@@ -50,6 +50,8 @@ std::shared_ptr<IFileSystem> BuildRootFileSystem(
                 fs = factory.CreatePhysicalFileSystem((haisosFileDir / decl.args[0]).string());
             } else if (decl.type == "MEM") {
                 fs = filesystemService.CreateEmptyInMemFileSystem();
+            } else if (decl.type == "DEV") {
+                fs = filesystemService.CreateDeviceFileSystem();
             } else if (decl.type == "RO") {
                 auto it = namedFs.find(decl.args[0]);
                 if (it == namedFs.end()) {

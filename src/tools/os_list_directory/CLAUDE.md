@@ -11,4 +11,6 @@ OS's mounted directory).
 
 ## Output format
 
-On success, returns a JSON array of `{"name": ..., "type": "file"|"dir"}` objects.
+On success, returns a JSON array of `{"name": ..., "type": "file"|"dir"|"char_device"}`
+objects (`char_device`: a device such as `/dev/null`). The `.` and `..` entries
+`ReadDirectory` starts every listing with are left out.

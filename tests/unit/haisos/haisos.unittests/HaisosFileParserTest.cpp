@@ -447,6 +447,16 @@ TEST(HaisosFileParserTest, TemplateFsExamplesParseOnceUncommented) {
     EXPECT_EQ(result.config.fsSteps.size(), static_cast<size_t>(examples) + 1);
 }
 
+TEST(HaisosFileParserTest, DevFilesystemTakesNoArguments) {
+    auto result = ParseHaisosFile("FS devfs DEV\nRUN /agent.md\n", {});
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    ASSERT_EQ(result.config.fsSteps.size(), 1u);
+    EXPECT_EQ(result.config.fsSteps[0].declare.type, "DEV");
+    EXPECT_TRUE(result.config.fsSteps[0].declare.args.empty());
+
+    EXPECT_FALSE(ParseHaisosFile("FS devfs DEV /dev\nRUN /agent.md\n", {}).error.empty());
+}
+
 // --- CREATE_DIR and BUILTIN ---
 
 TEST(HaisosFileParserTest, CreateDirTakesOneAbsolutePath) {

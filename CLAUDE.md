@@ -192,12 +192,14 @@ ENV GREETING=${greeting}      # set one outright
 # FS declares a named filesystem: FS <name> <type> <args...>
 FS rootfs PHYSICAL .                 # a real disk directory (relative to this file, or absolute)
 FS scratch MEM                       # an empty, in-memory read/write filesystem
+FS devfs DEV                         # device files, as Linux's /dev: null and zero
 FS readonly RO rootfs                # a read-only view of another declared filesystem
 FS inner SUB rootfs tools            # confined to a sub-path of another filesystem
 
 # MOUNT overlays one filesystem inside another at a path, in place, overriding
 # anything already there: MOUNT <main_fs> <path> <fs_to_mount>
 MOUNT rootfs /scratch scratch
+MOUNT rootfs /dev devfs              # /dev/null and /dev/zero for every process
 
 # FS ... COMPOSED does the same without touching either operand, declaring the
 # result under a new name: FS <name> COMPOSED <main_fs> <path> <fs_to_mount>
@@ -223,6 +225,12 @@ RUN /bin/ls -l /               # a builtin, placed by BUILTIN above
 RUN /tools/setup.lua ${greeting}
 RUN -i /chat.md                # an interactive agent, fed each line typed on the console
 ```
+
+`FS <name> DEV` is a device filesystem, meant to be mounted at `/dev`: it holds
+the character devices `null` (writes discarded, reads return end-of-file at
+once) and `zero` (writes discarded, reads return endless 0 bytes), as on Linux,
+and nothing can be created in it or deleted from it -- not even a `BUILTIN`.
+`haisos --init` writes the two lines that mount it, commented out.
 
 `ROOT`'s value is looked up by name against the declared `FS`s; if omitted, the
 last `FS` declared is used. If a haisosfile declares no `FS` at all, `ROOT`

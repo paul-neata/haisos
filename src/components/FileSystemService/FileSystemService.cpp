@@ -1,6 +1,7 @@
 #include "FileSystemService.h"
 #include "src/components/Filesystem/ReadOnlyFileSystem.h"
 #include "src/components/Filesystem/InMemoryFileSystem.h"
+#include "src/components/Filesystem/DeviceFileSystem.h"
 #include "src/components/Filesystem/SubFileSystem.h"
 #include "src/components/Filesystem/ComposedFileSystem.h"
 
@@ -12,6 +13,10 @@ std::shared_ptr<IFileSystem> FileSystemService::CreateReadOnlyFileSystem(std::sh
 
 std::shared_ptr<IFileSystem> FileSystemService::CreateEmptyInMemFileSystem() {
     return InMemoryFileSystem::Create();
+}
+
+std::shared_ptr<IFileSystem> FileSystemService::CreateDeviceFileSystem() {
+    return DeviceFileSystem::Create();
 }
 
 std::shared_ptr<IFileSystem> FileSystemService::CreateSubFileSystem(std::shared_ptr<IFileSystem> root, const std::string& path) {

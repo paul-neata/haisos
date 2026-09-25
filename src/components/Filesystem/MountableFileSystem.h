@@ -61,6 +61,10 @@ protected:
     // own, which is the default.
     virtual std::optional<std::string> LocalIsBuiltinCommand(const std::string& /*path*/) { return std::nullopt; }
 
+    // Whether AddBuiltinCommand may place a builtin here at all. A filesystem
+    // holding nothing but what it was made with (a device filesystem) says no.
+    virtual bool LocalCanHoldBuiltinCommands() const { return true; }
+
 private:
     // An open builtin command file: its text, and how far it has been read.
     struct BuiltinFileHandle {
@@ -80,6 +84,10 @@ private:
     // Adds this filesystem's own builtins that live directly in |absolute| to
     // a listing of it.
     void AddOwnBuiltinEntries(const std::string& absolute, std::vector<DirectoryEntry>& entries) const;
+    // Makes "." and ".." the first two entries of a listing of |path| -- once,
+    // whether or not whatever served it put them in already -- if |path| is a
+    // directory.
+    void PutDotEntriesFirst(const std::string& path, std::vector<DirectoryEntry>& entries);
 
     MountPoints m_mounts;
 

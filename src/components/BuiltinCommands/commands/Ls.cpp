@@ -255,7 +255,7 @@ bool ParseWidth(const std::string& text, size_t& width) {
 class LsCommand : public IBuiltinCommand {
 public:
     std::string Name() const override { return "ls"; }
-    std::string Version() const override { return "1.1.0"; }
+    std::string Version() const override { return "1.2.0"; }
 
     const std::vector<BuiltinOption>& Options() const override {
         using A = BuiltinArgument;
@@ -541,23 +541,19 @@ private:
 
         IFileIO& io = context.IO();
         std::vector<LsEntry> entries;
-        if (settings.all) {
-            for (const auto& [name, path] : {std::pair<std::string, std::string>{".", absolutePath},
-                                              std::pair<std::string, std::string>{"..", VirtualParentOf(absolutePath)}}) {
-                LsEntry entry{name, path, FileStatus{DirectoryEntryType::Dir}};
-                io.Stat(path, entry.status);
-                entries.push_back(std::move(entry));
-            }
-        }
+        // The listing starts with "." and "..", which only -a shows.
         for (const auto& listed : io.ReadDirectory(absolutePath)) {
+            const bool dots = listed.name == "." || listed.name == "..";
             const bool hidden = !listed.name.empty() && listed.name[0] == '.';
-            if (hidden && !settings.all && !settings.almostAll) {
+            if ((dots && !settings.all) || (hidden && !settings.all && !settings.almostAll)) {
                 continue;
             }
             if (settings.ignoreBackups && !listed.name.empty() && listed.name.back() == '~') {
                 continue;
             }
-            const std::string childPath = (absolutePath == "/") ? "/" + listed.name : absolutePath + "/" + listed.name;
+            const std::string childPath = listed.name == "." ? absolutePath
+                : listed.name == ".." ? VirtualParentOf(absolutePath)
+                : (absolutePath == "/") ? "/" + listed.name : absolutePath + "/" + listed.name;
             LsEntry entry{listed.name, childPath, FileStatus{}};
             if (io.Stat(childPath, entry.status) != 0) {
                 // Gone since it was listed: shown as it was listed.
@@ -668,6 +664,8 @@ private:
 
     // -l: "<type>rwxrwxrwx <links> <owner> <group> <size> <time> <name>",
     // the numbers right-aligned and the names left-aligned in their columns.
+    // A device shows "<major>, <minor>" in the size column instead, each number
+    // right-aligned in a column of its own, as GNU ls lines them up.
     template <typename SizePrefix>
     static void ListLong(BuiltinContext& context, const std::vector<LsEntry>& entries, const std::vector<ShownName>& names,
                          const LsSettings& settings, const SizePrefix& sizePrefix) {
@@ -676,15 +674,27 @@ private:
         std::vector<std::string> sizes;
         size_t linkWidth = 0;
         size_t sizeWidth = 0;
+        size_t majorWidth = 0;
+        size_t minorWidth = 0;
         for (const auto& entry : entries) {
             links.push_back(std::to_string(entry.status.linkCount));
-            sizes.push_back(settings.human ? HumanSize(entry.status.size) : std::to_string(entry.status.size));
             linkWidth = std::max(linkWidth, links.back().size());
-            sizeWidth = std::max(sizeWidth, sizes.back().size());
+            if (entry.status.type == DirectoryEntryType::CharDevice) {
+                sizes.emplace_back();
+                majorWidth = std::max(majorWidth, std::to_string(entry.status.deviceMajor).size());
+                minorWidth = std::max(minorWidth, std::to_string(entry.status.deviceMinor).size());
+                sizeWidth = std::max(sizeWidth, majorWidth + 2 + minorWidth);
+            } else {
+                sizes.push_back(settings.human ? HumanSize(entry.status.size) : std::to_string(entry.status.size));
+                sizeWidth = std::max(sizeWidth, sizes.back().size());
+            }
         }
         for (size_t i = 0; i < entries.size(); ++i) {
+            const FileStatus& status = entries[i].status;
             std::string line = sizePrefix(i);
-            line += entries[i].status.type == DirectoryEntryType::Dir ? 'd' : '-';
+            line += status.type == DirectoryEntryType::Dir ? 'd'
+                : status.type == DirectoryEntryType::CharDevice ? 'c'
+                : '-';
             line += "rwxrwxrwx ";
             line += std::string(linkWidth - links[i].size(), ' ') + links[i] + " ";
             if (settings.showOwner) {
@@ -693,7 +703,15 @@ private:
             if (settings.showGroup) {
                 line += std::string(kGroup) + " ";
             }
-            line += std::string(sizeWidth - sizes[i].size(), ' ') + sizes[i] + " ";
+            if (status.type == DirectoryEntryType::CharDevice) {
+                const std::string major = std::to_string(status.deviceMajor);
+                const std::string minor = std::to_string(status.deviceMinor);
+                line += std::string(sizeWidth - (majorWidth + 2 + minorWidth), ' ');
+                line += std::string(majorWidth - major.size(), ' ') + major + ", ";
+                line += std::string(minorWidth - minor.size(), ' ') + minor + " ";
+            } else {
+                line += std::string(sizeWidth - sizes[i].size(), ' ') + sizes[i] + " ";
+            }
             line += FormatTimeColumn(settings.timeStyle, TimeOf(entries[i], settings), now) + " ";
             line += names[i].text;
             context.Out(line + "\n");

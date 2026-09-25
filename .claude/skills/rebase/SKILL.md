@@ -41,7 +41,21 @@ While the rebase is in progress (verify with `git rev-parse --git-path rebase-me
    git diff --name-only --diff-filter=U
    ```
 
-2. For each conflicted file:
+2. If `HAISOS_VERSION` is among the conflicted files, resolve it to the **next minor version after the base's**, rather than picking either side: take the version on `origin/$BASE_BRANCH`, increment `MINOR` and reset `PATCH` to 0 (e.g. base `0.3.0` becomes `0.4.0`). The branch's version was bumped from an older master, so neither side is right: the branch must land one minor version above what is on the base now.
+   ```bash
+   BASE_VERSION=$(git show "origin/$BASE_BRANCH:HAISOS_VERSION" | tr -d '[:space:]')
+   if [[ ! "$BASE_VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+       echo "HAISOS_VERSION on origin/$BASE_BRANCH is not MAJOR.MINOR.PATCH: '$BASE_VERSION'"
+       exit 1
+   fi
+   NEW_VERSION="${BASH_REMATCH[1]}.$((BASH_REMATCH[2] + 1)).0"
+   echo "$NEW_VERSION" > HAISOS_VERSION
+   git add HAISOS_VERSION
+   echo "HAISOS_VERSION conflict resolved: base $BASE_VERSION -> $NEW_VERSION"
+   ```
+   If the base's version does not match `MAJOR.MINOR.PATCH`, stop and tell the user rather than guessing. The result depends only on the base, so a later commit of the same rebase that conflicts on `HAISOS_VERSION` again resolves to the same version. If `HAISOS_VERSION` was the only conflicted file, go straight to step 4.4.
+
+3. For each other conflicted file:
    - Read the file contents.
    - Resolve the conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`). Preserve the intended code by choosing the correct side or merging both as appropriate.
    - Write the resolved file.
@@ -50,14 +64,14 @@ While the rebase is in progress (verify with `git rev-parse --git-path rebase-me
      git add "<file>"
      ```
 
-3. Continue the rebase:
+4. Continue the rebase:
    ```bash
    git rebase --continue
    ```
 
-4. If new conflicts appear, repeat from step 4.1.
+5. If new conflicts appear, repeat from step 4.1.
 
-5. If `git rebase --continue` fails because no changes were made (e.g. all conflicts were resolved to match the incoming version), you may need to skip the empty commit:
+6. If `git rebase --continue` fails because no changes were made (e.g. all conflicts were resolved to match the incoming version), you may need to skip the empty commit:
    ```bash
    git rebase --skip
    ```

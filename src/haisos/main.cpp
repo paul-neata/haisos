@@ -87,6 +87,8 @@ std::string ReadFileWithinCwd(IFactory& factory, const std::string& filePath) {
 }
 
 int main(int argc, char* argv[]) {
+    // Every log line names its thread (see LogThreadName); this one is "main".
+    LogThreadName mainThreadName("main");
     auto result = ParseArguments(argc, argv);
 
     if (!result.error.empty()) {
@@ -155,7 +157,7 @@ int main(int argc, char* argv[]) {
                 msg.level == LogLevel::Error ? "ERROR" : "UNKNOWN";
             // One Write per line: the Logger calls receivers from whichever
             // thread logged, and ReopeningLogFile serializes them.
-            logFile->Write("[" + msg.timestamp + "][" + levelStr + "] " + msg.message + "\n");
+            logFile->Write("[" + msg.timestamp + "][" + levelStr + "][" + msg.thread + "] " + msg.message + "\n");
         });
     }
 

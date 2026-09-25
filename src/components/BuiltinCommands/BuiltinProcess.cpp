@@ -1,6 +1,7 @@
 #include "BuiltinProcess.h"
 #include <chrono>
 #include "ProcessFileIO.h"
+#include "src/components/libheaders/DestroyOffRuntimeThreads.h"
 #include "src/components/Logger/Logger.h"
 
 namespace Haisos {
@@ -12,8 +13,13 @@ std::shared_ptr<BuiltinProcess> BuiltinProcess::Create(
     std::vector<std::string> args,
     const std::string& workingDirectory)
 {
-    auto process = std::shared_ptr<BuiltinProcess>(new BuiltinProcess(
-        host, std::move(environment), std::move(command), std::move(args), workingDirectory));
+    // The command's own thread can hold the last reference to it -- through
+    // an OS it lets go of last (see ProcessFileIO) -- and the destructor joins
+    // that thread.
+    auto process = std::shared_ptr<BuiltinProcess>(
+        new BuiltinProcess(host, std::move(environment), std::move(command), std::move(args), workingDirectory),
+        DestroyOffRuntimeThreads<BuiltinProcess>(
+            "BuiltinProcess '" + host.programPath + "' pid=" + std::to_string(host.pid)));
     process->Start();
     return process;
 }
@@ -39,18 +45,41 @@ BuiltinProcess::BuiltinProcess(
 }
 
 BuiltinProcess::~BuiltinProcess() {
+    LogDebug("BuiltinProcess '%s' pid=%llu: destroying", m_path.c_str(), static_cast<unsigned long long>(m_pid));
     TriggerStop();
     std::lock_guard<std::mutex> joinLock(m_joinMutex);
     if (m_thread.joinable()) {
+        // Cannot happen while Create()'s deleter is in place. If it ever does,
+        // join() below throws std::system_error, and a throwing destructor is
+        // std::terminate: this line is what explains the crash.
+        if (m_thread.get_id() == std::this_thread::get_id()) {
+            LogError("BuiltinProcess '%s' pid=%llu: destroyed on its own thread, which it cannot join",
+                m_path.c_str(), static_cast<unsigned long long>(m_pid));
+        }
         m_thread.join();
     }
 }
 
 void BuiltinProcess::Start() {
+    // Under the join lock, as every use of m_thread is: IsOwnThread() may be
+    // asked from the command's thread itself.
+    std::lock_guard<std::mutex> joinLock(m_joinMutex);
     m_thread = std::thread(&BuiltinProcess::RunThread, this);
 }
 
+bool BuiltinProcess::IsOwnThread() {
+    std::lock_guard<std::mutex> joinLock(m_joinMutex);
+    return m_thread.get_id() == std::this_thread::get_id();
+}
+
 void BuiltinProcess::RunThread() {
+    // A runtime thread (see DestroyOffRuntimeThreads.h): each of the command's
+    // file operations holds its OS for a moment (see ProcessFileIO), so this
+    // thread can be the one to let go of the OS last -- whose destruction then
+    // lets go of this very process. Whatever this thread lets go of last is
+    // destroyed on the destruction thread, not here. It also names this thread
+    // in every log line.
+    RuntimeThreadScope runtimeThread("builtin " + m_path + " pid=" + std::to_string(m_pid));
     const std::string name = m_command->Name();
     int status = 1;
     try {
@@ -100,6 +129,13 @@ void BuiltinProcess::TriggerStop() {
 }
 
 bool BuiltinProcess::WaitToFinish(uint64_t timeoutMs) {
+    // A wait for the command, made on the command's own thread, can only time
+    // out: that thread is the one that would have to finish. Reported loudly,
+    // as it is a sign of the problem DestroyOffRuntimeThreads.h describes.
+    if (timeoutMs > 0 && IsOwnThread()) {
+        LogError("BuiltinProcess '%s' pid=%llu: waiting %llums for itself on its own thread, which cannot finish while it waits",
+            m_path.c_str(), static_cast<unsigned long long>(m_pid), static_cast<unsigned long long>(timeoutMs));
+    }
     std::unique_lock<std::mutex> lock(m_finishedMutex);
     const bool finished = m_finishedCv.wait_for(lock, std::chrono::milliseconds(timeoutMs), [this] { return m_finished.load(); });
     lock.unlock();

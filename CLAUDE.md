@@ -389,6 +389,24 @@ The exception is a back-reference to the owner: `ToolFactory` holds an
 -- the referent owns the holder, so a `shared_ptr` back would close an ownership
 cycle and nothing would ever be freed.
 
+**Nothing that waits for a runtime thread is destroyed on one.** A runtime
+thread -- an agent's conversation, a Lua script, a builtin command, an
+interactive agent's input loop -- can hold the last reference to the very
+object that owns it: an `os_*` tool holds its process and its OS for the length
+of a call, and an agent hands `shared_from_this()` to every tool it calls.
+Destroyed there, `~Agent` would wait for itself forever, `~LuaProcess` and
+`~BuiltinProcess` would join their own thread (`std::terminate`), and
+`~HaisosOS` would wait out its 5 s stop timeout on the process it is running
+on. So `HaisosOS`, the process classes and `Agent` pass the
+`DestroyOffRuntimeThreads` deleter to the `shared_ptr` their `Create()` builds,
+and every runtime thread's function starts with a `RuntimeThreadScope` (both in
+`src/components/libheaders/DestroyOffRuntimeThreads.h`): released on a runtime
+thread, such an object is destroyed on the one `DestructionThread` instead. A
+new class that owns a thread, or waits for one in its destructor, does the
+same. The whole story, and what to look for in the log (whose lines name their
+thread), is written up in `tests/unit/components/HaisosOS.unittests/HaisosOSTest.cpp`
+under "Objects released last on their own threads".
+
 | Component | Path | Description |
 |-----------|------|-------------|
 | **Agent** | `src/components/Agent/` | Manages LLM conversations with parent/child agent relationships; supports subagents via agent tools |

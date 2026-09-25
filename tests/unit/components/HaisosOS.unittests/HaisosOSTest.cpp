@@ -1,8 +1,13 @@
 #include <gtest/gtest.h>
+#include <chrono>
+#include <condition_variable>
+#include <cstdio>
+#include <cstdlib>
 #include <deque>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
+#include <thread>
 #include "HaisosOS.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
 #include "Factory.h"
@@ -17,6 +22,8 @@ const std::string kUnreachableEndpoint = "http://localhost:9999/api/chat";
 // Generous: every LLM call fails fast against the unreachable endpoint, so this
 // only bounds a hang.
 constexpr uint64_t kProcessWaitMs = 30000;
+// The file read_held.lua reads, which a GatedFileSystem root holds the open of.
+const std::string kHeldPath = "/held.txt";
 
 // A physical console with scripted input: ReadLine hands out the given lines,
 // then reports end of input.
@@ -49,6 +56,75 @@ private:
     int m_readLineCalls = 0;
 };
 
+// A root filesystem that holds every open of one path until Release(), and
+// passes everything else straight through to the filesystem it wraps. Holding a
+// script's os_read_file there freezes the script inside the tool call (see
+// "Objects released last on their own threads" below).
+class GatedFileSystem : public IFileSystem {
+public:
+    GatedFileSystem(std::shared_ptr<IFileSystem> inner, std::string gatedPath)
+        : m_inner(std::move(inner)), m_gatedPath(std::move(gatedPath)) {}
+
+    // Whether an open of the gated path has reached the gate within timeoutMs.
+    bool WaitUntilHeld(uint64_t timeoutMs) {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        return m_cv.wait_for(lock, std::chrono::milliseconds(timeoutMs), [this] { return m_held; });
+    }
+
+    void Release() {
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_released = true;
+        }
+        m_cv.notify_all();
+    }
+
+    int OpenFile(const std::string& pathname, int flags) override {
+        HoldIfGated(pathname);
+        return m_inner->OpenFile(pathname, flags);
+    }
+    int OpenFile(const std::string& pathname, int flags, int mode) override {
+        HoldIfGated(pathname);
+        return m_inner->OpenFile(pathname, flags, mode);
+    }
+    int CloseFile(int fd) override { return m_inner->CloseFile(fd); }
+    ssize_t ReadFile(int fd, void* buf, size_t count) override { return m_inner->ReadFile(fd, buf, count); }
+    ssize_t WriteFile(int fd, const void* buf, size_t count) override { return m_inner->WriteFile(fd, buf, count); }
+    int CreateDirectory(const std::string& pathname, int mode) override { return m_inner->CreateDirectory(pathname, mode); }
+    int RemoveDirectory(const std::string& pathname) override { return m_inner->RemoveDirectory(pathname); }
+    int RemoveFile(const std::string& pathname) override { return m_inner->RemoveFile(pathname); }
+    void Mount(const std::string& whereToMount, std::shared_ptr<IFileSystem> toBeMounted) override {
+        m_inner->Mount(whereToMount, std::move(toBeMounted));
+    }
+    void Unmount(const std::string& mountedPath) override { m_inner->Unmount(mountedPath); }
+    std::vector<DirectoryEntry> ReadDirectory(const std::string& path) override { return m_inner->ReadDirectory(path); }
+    int Stat(const std::string& path, FileStatus& out) override { return m_inner->Stat(path, out); }
+    int AddBuiltinCommand(const std::string& path, const std::string& builtinName) override {
+        return m_inner->AddBuiltinCommand(path, builtinName);
+    }
+    int RemoveBuiltinCommand(const std::string& path) override { return m_inner->RemoveBuiltinCommand(path); }
+    std::optional<std::string> IsBuiltinCommand(const std::string& path) override { return m_inner->IsBuiltinCommand(path); }
+
+private:
+    void HoldIfGated(const std::string& pathname) {
+        if (pathname != m_gatedPath) {
+            return;
+        }
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_held = true;
+        m_cv.notify_all();
+        // Bounded, so a test that fails before releasing the gate cannot hang.
+        m_cv.wait_for(lock, std::chrono::milliseconds(kProcessWaitMs), [this] { return m_released; });
+    }
+
+    std::shared_ptr<IFileSystem> m_inner;
+    const std::string m_gatedPath;
+    std::mutex m_mutex;
+    std::condition_variable m_cv;
+    bool m_held = false;
+    bool m_released = false;
+};
+
 bool HistoryMentions(const nlohmann::json& history, const std::string& text) {
     for (const auto& message : history) {
         if (message.value("role", "") == "user" && message.value("content", "").find(text) != std::string::npos) {
@@ -71,6 +147,8 @@ protected:
         // directory the tool resolved against.
         std::ofstream(kTestRoot + "/write_relative.lua")
             << "os_write_file({path = 'written.txt', content = 'hi'})";
+        std::ofstream(kTestRoot + kHeldPath) << "held";
+        std::ofstream(kTestRoot + "/read_held.lua") << "os_read_file({path = '" << kHeldPath << "'})";
     }
 
     void TearDown() override {
@@ -84,9 +162,12 @@ protected:
         return environment;
     }
 
-    std::shared_ptr<IHaisosOS> BuildOS(std::shared_ptr<IPhysicalConsole> physicalConsole = nullptr) {
+    std::shared_ptr<IHaisosOS> BuildOS(std::shared_ptr<IPhysicalConsole> physicalConsole = nullptr,
+                                       std::shared_ptr<IFileSystem> rootFileSystem = nullptr) {
         std::shared_ptr<IServicesCreator> servicesCreator = m_factory->CreateServicesCreator();
-        std::shared_ptr<IFileSystem> rootFileSystem = m_factory->CreatePhysicalFileSystem(kTestRoot);
+        if (!rootFileSystem) {
+            rootFileSystem = m_factory->CreatePhysicalFileSystem(kTestRoot);
+        }
         if (!physicalConsole) {
             physicalConsole = m_factory->CreatePhysicalConsole();
         }
@@ -493,3 +574,144 @@ TEST_F(HaisosOSTest, AnOSWithoutBuiltinCommandsCannotStartABuiltin) {
     ASSERT_NE(os, nullptr);
     EXPECT_EQ(os->StartProcess(TestEnvironment(), "/echo", {"hi"}, "", StartProcessOptions{}), nullptr);
 }
+
+// --- Objects released last on their own threads ---
+//
+// THE PROBLEM
+//
+// A process's thread can hold the last reference to its own OS, and to its own
+// process object. An os_* tool fetches both from the calling process for the
+// length of its call (OSToolContext holds `process`, `io` and `os`, all
+// strong); an agent hands shared_from_this() to every tool it calls; a
+// builtin's ProcessFileIO holds the OS for a moment on every file operation.
+// When everyone else lets go in the meantime, those references are the last,
+// and they go when the call returns -- on the process's own thread. That is
+// what haisos's main() does as it returns: it waits for the RUN processes only,
+// so a child started with os_start_process may still be inside a tool call.
+// Before the fix, the destructors then ran on that thread:
+//
+//   1. ~HaisosOS. It asks each process to stop and waits up to 5 s for it, one
+//      after the other -- including the process whose thread it is running on,
+//      which cannot finish while it waits. 5 s were lost for nothing, and the
+//      log said only "did not stop within 5000ms during destruction".
+//   2. ~LuaProcess, when the tool call let go of `process` -- the last
+//      reference once the OS had dropped its own. It waited another 5 s for
+//      itself, then joined its own thread. join() throws std::system_error
+//      (EDEADLK), which leaving a destructor is std::terminate: the program
+//      died of SIGABRT, printing "terminate called without an active
+//      exception" (GCC's landing pad for the noexcept destructor calls
+//      std::terminate directly, so the exception never shows). ~BuiltinProcess
+//      joins at once, so a builtin died the same way, only sooner.
+//   3. ~Agent, when the reference an agent hands its own tool call was the
+//      last. It waits for its thread in a loop that never gives up, so it hung
+//      forever, logging "has not stopped after waiting 5000ms in its
+//      destructor, still waiting" every 5 s (see
+//      AgentTest.AnAgentReleasedLastByItsOwnToolCallIsDestroyedOffItsThread).
+//
+// The log could not show any of it: its lines did not say which thread wrote
+// them.
+//
+// THE FIX
+//
+// Nothing whose destructor waits for a runtime thread is destroyed on one (see
+// src/components/libheaders/DestroyOffRuntimeThreads.h). HaisosOS, the process
+// classes and Agent are created with the DestroyOffRuntimeThreads deleter, and
+// every runtime thread runs inside a RuntimeThreadScope. Released on a runtime
+// thread, such an object is handed to the one DestructionThread, while the
+// runtime thread carries on: the object stays whole until its destructor --
+// running elsewhere now -- has waited that thread out.
+//
+// WHAT TO LOOK FOR IN THE LOG
+//
+//   * Every line names its thread: "main", "agent <name>", "lua <path>
+//     pid=<n>", "builtin <path> pid=<n>", "input <agent>", "destruction", or
+//     "t<n>" for a thread nobody named.
+//   * "<what>: its last reference was released on a runtime thread, so it is
+//     destroyed on the destruction thread" (INFO) marks a hand-off; the
+//     destruction thread's "destroying <what>" and "destroyed <what> in <n>ms"
+//     (DEBUG) time it.
+//   * Each destructor logs "<what>: destroying" (DEBUG), on the thread it runs
+//     on.
+//   * An ERROR "waiting <n>ms for itself on its own thread", "destroyed on its
+//     own thread" or "being destroyed on runtime thread" means something slipped
+//     past the rule: the problem is back.
+//
+// HOW THESE TESTS REPRODUCE IT
+//
+// read_held.lua reads /held.txt with os_read_file, and the root is a
+// GatedFileSystem, which holds that open until the test releases it: the
+// script is then inside the tool call, holding its OS and its process. The
+// test lets go of its own references, checks that only the call keeps the OS
+// alive, and releases the gate. Before the fix, the first test failed after
+// 5 s, and the second one's child process died of SIGABRT after 10 s.
+
+// Symptom 1: the OS's last reference goes with the tool call, on the script's
+// thread. The script has nothing left to do once the read returns, so it must
+// finish at once -- not after ~HaisosOS, run on its thread, has spent 5 s
+// waiting for it to stop.
+TEST_F(HaisosOSTest, AnOSReleasedLastByAToolCallDoesNotWaitForTheCallingProcess) {
+    auto gate = std::make_shared<GatedFileSystem>(m_factory->CreatePhysicalFileSystem(kTestRoot), kHeldPath);
+    std::weak_ptr<IHaisosOS> osWatch;
+    std::shared_ptr<IProcess> process;
+    {
+        auto os = BuildOS(nullptr, gate);
+        osWatch = os;
+        process = os->StartProcess(TestEnvironment(), "read_held.lua", {}, /*workingDirectory=*/"", StartProcessOptions{});
+        ASSERT_NE(process, nullptr);
+        ASSERT_TRUE(gate->WaitUntilHeld(kProcessWaitMs));
+    }
+    // Only the held tool call keeps the OS alive now.
+    EXPECT_FALSE(osWatch.expired());
+
+    gate->Release();
+    // The script has nothing left to do once the read returns.
+    EXPECT_TRUE(process->WaitToFinish(2000))
+        << "the script's thread was held up by ~HaisosOS waiting for the script to stop";
+    // Not an ASSERT: should the problem come back, the process must still
+    // finish before this test lets go of it, or the tool call's reference to
+    // it would be the last, and the whole test program would go down with
+    // symptom 2.
+    EXPECT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    EXPECT_TRUE(osWatch.expired());
+}
+
+#if defined(GTEST_HAS_DEATH_TEST) && !defined(__EMSCRIPTEN__)
+// Symptom 2: let go of the process too, and the tool call's reference to it is
+// the last. The process must be destroyed off the script's thread, once that
+// thread is done with it -- not on it, where it would join itself and end in
+// std::terminate. Run in a child process, so that should the problem come
+// back, only the child goes down.
+TEST_F(HaisosOSTest, AProcessReleasedLastByItsOwnToolCallDoesNotAbortTheProgram) {
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    auto letGoDuringAToolCall = [this]() {
+        auto console = std::make_shared<ScriptedPhysicalConsole>(std::vector<std::string>{});
+        // Both the OS and the process hold the console, so it is let go of
+        // only once both have been torn down.
+        std::weak_ptr<IPhysicalConsole> consoleWatch = console;
+        auto gate = std::make_shared<GatedFileSystem>(m_factory->CreatePhysicalFileSystem(kTestRoot), kHeldPath);
+        {
+            auto os = BuildOS(console, gate);
+            auto process = os->StartProcess(TestEnvironment(), "read_held.lua", {}, /*workingDirectory=*/"", StartProcessOptions{});
+            if (!process || !gate->WaitUntilHeld(kProcessWaitMs)) {
+                std::fprintf(stderr, "read_held.lua never reached the gate\n");
+                std::_Exit(2);
+            }
+        }
+        console.reset();
+        gate->Release();
+
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kProcessWaitMs);
+        while (!consoleWatch.expired() && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        if (!consoleWatch.expired()) {
+            std::fprintf(stderr, "the OS and the process were not torn down within %llums\n",
+                static_cast<unsigned long long>(kProcessWaitMs));
+            std::_Exit(1);
+        }
+        // _Exit, not exit: nothing here should depend on static destruction.
+        std::_Exit(0);
+    };
+    EXPECT_EXIT(letGoDuringAToolCall(), ::testing::ExitedWithCode(0), "");
+}
+#endif

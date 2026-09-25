@@ -30,7 +30,10 @@ through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
 - `BuiltinProcess` - the `ICurrentProcess` a builtin runs as, shaped like
   `LuaProcess`: a thread started by `Create()` once the object is whole,
   `TriggerStop()` sets a flag commands check between steps, the destructor
-  joins. Its `IO()` is a `ProcessFileIO` (the separate `ProcessFileIO` library
+  joins. So it is never destroyed on its own thread (see "Creating things" in
+  the root `CLAUDE.md`): `Create()` passes the `DestroyOffRuntimeThreads`
+  deleter, and the command runs inside a `RuntimeThreadScope`. Its `IO()` is a
+  `ProcessFileIO` (the separate `ProcessFileIO` library
   in `src/components/HaisosOS/`), so a builtin reaches files exactly as every
   other runtime does -- `ICurrentProcess` is still the only door out.
   `ExitStatus()` is for tests: `IProcess` has no exit status yet.

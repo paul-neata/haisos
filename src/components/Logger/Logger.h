@@ -22,6 +22,8 @@ struct LogMessage {
     LogLevel level;
     std::string message;
     std::string timestamp;
+    // The name of the thread that logged it (see LogThreadName).
+    std::string thread;
 };
 
 // Log message receiver callback type
@@ -60,6 +62,31 @@ LogLevel LogGetMinimumLevel();
 
 // Enable or disable default stderr console output
 void LogSetConsoleOutput(bool enabled);
+
+// --- Thread names ---
+//
+// Every log line names the thread that wrote it, so which thread did what --
+// who let go of an object, whose destructor ran where, who waited for whom --
+// can be read straight off the log. A thread is named by the LogThreadName in
+// scope on it; one without is "t<N>", N numbering such threads in the order
+// they first log.
+
+// Names the calling thread for as long as it lives, then gives it back the name
+// it had before.
+class LogThreadName {
+public:
+    explicit LogThreadName(std::string name);
+    ~LogThreadName();
+
+    LogThreadName(const LogThreadName&) = delete;
+    LogThreadName& operator=(const LogThreadName&) = delete;
+
+private:
+    std::string m_previous;
+};
+
+// The calling thread's name, as log lines give it.
+std::string LogCurrentThreadName();
 
 // --- Agent traffic ---
 //

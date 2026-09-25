@@ -56,6 +56,8 @@ private:
 
     void Start();
     void RunThread();
+    // Whether the calling thread is the command's own.
+    bool IsOwnThread();
 
     uint64_t m_pid;
     uint64_t m_parentPid;

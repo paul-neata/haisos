@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <chrono>
 #include <vector>
+#include "src/components/libheaders/DestroyOffRuntimeThreads.h"
 #include "src/components/Logger/Logger.h"
 
 extern "C" {
@@ -185,17 +186,21 @@ std::shared_ptr<LuaProcess> LuaProcess::Create(
     std::shared_ptr<IToolFactory> toolFactory,
     std::shared_ptr<IAgentConsole> console)
 {
-    auto process = std::shared_ptr<LuaProcess>(new LuaProcess(
-        pid,
-        parentPid,
-        std::move(environment),
-        path,
-        workingDirectory,
-        std::move(os),
-        std::move(scriptContent),
-        std::move(args),
-        std::move(toolFactory),
-        std::move(console)));
+    // The script's own thread can hold the last reference to it -- inside an
+    // os_* tool call -- and the destructor waits for that thread.
+    auto process = std::shared_ptr<LuaProcess>(
+        new LuaProcess(
+            pid,
+            parentPid,
+            std::move(environment),
+            path,
+            workingDirectory,
+            std::move(os),
+            std::move(scriptContent),
+            std::move(args),
+            std::move(toolFactory),
+            std::move(console)),
+        DestroyOffRuntimeThreads<LuaProcess>("LuaProcess '" + path + "' pid=" + std::to_string(pid)));
     // The script's tools reach the process through this handle. It is filled in
     // before Start(), so the script's thread can never observe it empty.
     if (selfHandle) {
@@ -230,10 +235,14 @@ LuaProcess::LuaProcess(
 }
 
 void LuaProcess::Start() {
+    // Under the join lock, as every use of m_thread is: IsOwnThread() may be
+    // asked from the script's thread itself.
+    std::lock_guard<std::mutex> joinLock(m_joinMutex);
     m_thread = std::thread(&LuaProcess::RunThread, this);
 }
 
 LuaProcess::~LuaProcess() {
+    LogDebug("LuaProcess '%s' pid=%llu: destroying", m_path.c_str(), static_cast<unsigned long long>(m_pid));
     Kill();
     if (!WaitToFinish(5000)) {
         LogWarning("LuaProcess '%s' thread did not finish within 5s during destruction, waiting indefinitely", m_path.c_str());
@@ -286,6 +295,14 @@ void LuaProcess::WaitToFinish() {
 }
 
 bool LuaProcess::WaitToFinish(uint64_t timeoutMs) {
+    // A wait for the script, made on the script's own thread, can only time
+    // out: that thread is the one that would have to finish. It is how
+    // ~HaisosOS once lost 5 s on the very process it was running on, so it is
+    // reported loudly (the wait itself goes ahead, as asked).
+    if (timeoutMs > 0 && IsOwnThread()) {
+        LogError("LuaProcess '%s' pid=%llu: waiting %llums for itself on its own thread, which cannot finish while it waits",
+            m_path.c_str(), static_cast<unsigned long long>(m_pid), static_cast<unsigned long long>(timeoutMs));
+    }
     std::unique_lock<std::mutex> lock(m_finishedMutex);
     bool finished = m_finishedCv.wait_for(lock, std::chrono::milliseconds(timeoutMs), [this] { return m_finished.load(); });
     lock.unlock();
@@ -300,6 +317,11 @@ bool LuaProcess::WaitToFinish(uint64_t timeoutMs) {
 
 void LuaProcess::Kill() {
     m_killed = true;
+}
+
+bool LuaProcess::IsOwnThread() {
+    std::lock_guard<std::mutex> joinLock(m_joinMutex);
+    return m_thread.get_id() == std::this_thread::get_id();
 }
 
 std::shared_ptr<IAgent> LuaProcess::AsAgent() {
@@ -418,6 +440,11 @@ void LuaProcess::RegisterBindings(lua_State* L) {
 }
 
 void LuaProcess::RunThread() {
+    // A runtime thread (see DestroyOffRuntimeThreads.h): a tool call made from
+    // here can hold the last reference to this process and to its OS, and
+    // whatever it lets go of last is then destroyed on the destruction thread,
+    // not here. It also names this thread in every log line.
+    RuntimeThreadScope runtimeThread("lua " + m_path + " pid=" + std::to_string(m_pid));
     LogDebug("LuaProcess '%s' RunThread starting (%zu bytes of script)", m_path.c_str(), m_scriptContent.size());
     // Anything thrown here would otherwise take down the whole program and, worse,
     // leave m_finished false so every WaitToFinish() hangs. The finished-marking

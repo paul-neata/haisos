@@ -1,5 +1,6 @@
 #include "HaisosOS.h"
 #include <algorithm>
+#include <chrono>
 #include <sstream>
 #include "AgentProcess.h"
 #include "LuaProcess.h"
@@ -7,6 +8,7 @@
 #include "interfaces/IBuiltinCommands.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
 #include "src/components/Filesystem/VirtualPath.h"
+#include "src/components/libheaders/DestroyOffRuntimeThreads.h"
 #include "src/components/libheaders/GloballyUniquePID.h"
 #include "src/components/Logger/Logger.h"
 
@@ -85,12 +87,21 @@ HaisosOS::~HaisosOS() {
     // Stop() is killed rather than waited on forever.
     m_shuttingDown = true;
 
+    // Create() hands an OS let go of on a runtime thread to the destruction
+    // thread, so this should never be one: on it, the drain below would wait
+    // out the stop timeout of the very process whose thread it is running on.
+    if (RuntimeThreadScope::IsCurrentThreadRuntime()) {
+        LogError("HaisosOS pid=%llu: being destroyed on runtime thread '%s', which may be one of its own processes'",
+            static_cast<unsigned long long>(m_osProcessId), LogCurrentThreadName().c_str());
+    }
+
     size_t initialCount = 0;
     {
         std::lock_guard<std::mutex> lock(m_processesMutex);
         initialCount = m_processes.size();
     }
-    LogInfo("HaisosOS: shutting down, draining %zu running process(es)", initialCount);
+    LogInfo("HaisosOS pid=%llu: shutting down, draining %zu running process(es)",
+        static_cast<unsigned long long>(m_osProcessId), initialCount);
 
     for (int pass = 0; pass < MAX_DRAIN_PASSES; ++pass) {
         // Declared inside the pass so it is destroyed at the end of one, which
@@ -131,12 +142,19 @@ void HaisosOS::DrainProcess(const std::shared_ptr<IProcess>& process) {
     // so the wait is bounded and the OS moves on rather than blocking shutdown
     // on one process. What actually waits the thread out is the process's own
     // destructor, which runs when the last reference to it is released.
+    const auto start = std::chrono::steady_clock::now();
     process->TriggerStop();
     if (!process->WaitToFinish(PROCESS_STOP_TIMEOUT_MS)) {
-        LogWarning("HaisosOS: process '%s' did not stop within %llums during destruction; "
+        LogWarning("HaisosOS: process pid=%llu '%s' did not stop within %llums during destruction; "
             "its destructor will wait for it",
-            process->Path().c_str(), static_cast<unsigned long long>(PROCESS_STOP_TIMEOUT_MS));
+            static_cast<unsigned long long>(process->GetPid()), process->Path().c_str(),
+            static_cast<unsigned long long>(PROCESS_STOP_TIMEOUT_MS));
+        return;
     }
+    const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start).count();
+    LogDebug("HaisosOS: process pid=%llu '%s' stopped in %lldms",
+        static_cast<unsigned long long>(process->GetPid()), process->Path().c_str(), static_cast<long long>(elapsedMs));
 }
 
 void HaisosOS::CleanupFinishedProcesses() {
@@ -447,15 +465,19 @@ std::shared_ptr<HaisosOS> HaisosOS::Create(
     std::shared_ptr<INetworkService> networkService = servicesCreator->CreateNetworkService();
     std::shared_ptr<ILLMService> llmService = servicesCreator->CreateLLMService(networkService, endpoint, modelName, apiKey);
 
-    return std::shared_ptr<HaisosOS>(new HaisosOS(
-        std::move(servicesCreator),
-        std::move(networkService),
-        std::move(llmService),
-        std::move(rootFileSystem),
-        std::move(builtinCommands),
-        std::move(physicalConsole),
-        std::move(environment),
-        osProcessId));
+    // A process's own thread can hold the last reference to its OS -- inside
+    // an os_* tool call -- and the destructor waits for the processes.
+    return std::shared_ptr<HaisosOS>(
+        new HaisosOS(
+            std::move(servicesCreator),
+            std::move(networkService),
+            std::move(llmService),
+            std::move(rootFileSystem),
+            std::move(builtinCommands),
+            std::move(physicalConsole),
+            std::move(environment),
+            osProcessId),
+        DestroyOffRuntimeThreads<HaisosOS>("HaisosOS pid=" + std::to_string(osProcessId)));
 }
 
 }

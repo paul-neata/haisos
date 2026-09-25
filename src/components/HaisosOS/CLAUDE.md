@@ -55,6 +55,15 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   sit between the two; it was removed because neither runtime could honour it
   any harder than `TriggerStop()` already did, and will come back when there is
   something real for it to do.)
+- Neither an OS nor a process is ever destroyed on a runtime thread, although
+  one can hold the last reference to both -- an `os_*` tool does, for the length
+  of a call. `HaisosOS::Create`, `AgentProcess::Create` and `LuaProcess::Create`
+  pass the `DestroyOffRuntimeThreads` deleter, and the agent's, the script's
+  and the input loop's threads run inside a `RuntimeThreadScope`, so what is let
+  go of there is destroyed on the destruction thread (see "Creating things" in
+  the root `CLAUDE.md`). `~HaisosOS` depends on it: it drains its processes --
+  asks each to stop, then waits up to 5 s for it -- and on a process's own
+  thread, that wait would be for itself.
 - `StartProcessOptions` says how to run a program. Its one field for now,
   `interactiveAgent`, applies to `.md` programs only (ignored otherwise): the
   agent is created interactive, gets an extra system prompt telling it that

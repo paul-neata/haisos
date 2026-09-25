@@ -3,6 +3,7 @@
 #include <iterator>
 #include <nlohmann/json.hpp>
 #include "src/components/Logger/Logger.h"
+#include "src/components/libheaders/DestroyOffRuntimeThreads.h"
 #include "src/components/libheaders/SanitizeUserInput.h"
 
 namespace Haisos {
@@ -22,15 +23,19 @@ std::shared_ptr<Agent> Agent::Create(
     const std::string& startTime,
     bool interactive)
 {
-    auto agent = std::shared_ptr<Agent>(new Agent(
-        std::move(llmCommunicator),
-        std::move(toolFactory),
-        std::move(console),
-        systemPrompts,
-        name,
-        std::move(parent),
-        startTime,
-        interactive));
+    // The agent's own thread can hold the last reference to it -- the one it
+    // hands each tool it calls -- and the destructor waits for that thread.
+    auto agent = std::shared_ptr<Agent>(
+        new Agent(
+            std::move(llmCommunicator),
+            std::move(toolFactory),
+            std::move(console),
+            systemPrompts,
+            name,
+            std::move(parent),
+            startTime,
+            interactive),
+        DestroyOffRuntimeThreads<Agent>("Agent '" + name + "'"));
     // Only now that the owning shared_ptr exists may the thread run: it hands
     // shared_from_this() to every tool it calls.
     agent->Start();
@@ -61,10 +66,19 @@ Agent::Agent(
 }
 
 void Agent::Start() {
+    // Under the join lock, as every use of m_thread is: IsOwnThread() may be
+    // asked from the agent's thread itself.
+    std::lock_guard<std::mutex> joinLock(m_joinMutex);
     m_thread = std::thread(&Agent::RunThread, this);
 }
 
+bool Agent::IsOwnThread() {
+    std::lock_guard<std::mutex> joinLock(m_joinMutex);
+    return m_thread.get_id() == std::this_thread::get_id();
+}
+
 Agent::~Agent() {
+    LogDebug("Agent '%s': destroying", m_name.c_str());
     TriggerStop();
     // The wait is deliberately unbounded: the thread runs on members this
     // destructor is about to free, so giving up on it is never an option.
@@ -104,6 +118,13 @@ std::string Agent::Name() const {
 }
 
 bool Agent::WaitToFinish(uint64_t timeoutMs) {
+    // A wait for the agent, made on the agent's own thread, can only time out:
+    // that thread is the one that would have to finish. ~Agent run there once
+    // did exactly this, forever; reported loudly in case anything does again.
+    if (timeoutMs > 0 && IsOwnThread()) {
+        LogError("Agent '%s': waiting %llums for itself on its own thread, which cannot finish while it waits",
+            m_name.c_str(), static_cast<unsigned long long>(timeoutMs));
+    }
     std::unique_lock<std::mutex> lock(m_finishedMutex);
     bool finished = m_finishedCv.wait_for(lock, std::chrono::milliseconds(timeoutMs), [this] { return m_finished.load(); });
     lock.unlock();
@@ -283,6 +304,12 @@ std::vector<std::tuple<std::string, std::string, std::string, bool>> Agent::Exec
 }
 
 void Agent::RunThread() {
+    // A runtime thread (see DestroyOffRuntimeThreads.h): the reference to this
+    // agent that it hands each tool it calls can be the last one, and so can a
+    // tool's references to the agent's process and OS. Whatever it lets go of
+    // last is then destroyed on the destruction thread, not here. It also names
+    // this thread in every log line.
+    RuntimeThreadScope runtimeThread("agent " + m_name);
     for (const auto& prompt : m_systemPrompts) {
         LLMMessage systemMsg;
         systemMsg.role = "system";

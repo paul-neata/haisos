@@ -22,6 +22,12 @@ namespace {
     std::mutex g_mutex;
     int g_nextToken = 1;
 
+    // The calling thread's name while a LogThreadName is in scope on it.
+    thread_local std::string t_threadName;
+    // Unnamed threads are numbered from 1, in the order they first log.
+    std::atomic<int> g_nextUnnamedThread{1};
+    thread_local int t_unnamedThreadNumber = 0;
+
     // Agent traffic callbacks. Held by shared_ptr so a call can take its own
     // reference under the lock and run the callback outside it: a slow
     // callback never blocks registration, and a callback being replaced
@@ -75,6 +81,7 @@ void LogImpl(LogLevel level, const char* file, int line, const std::string& mess
     msg.level = level;
     msg.message = message;
     msg.timestamp = oss.str();
+    msg.thread = LogCurrentThreadName();
 
     // Print to stderr
     const char* levelStr =
@@ -99,8 +106,26 @@ void LogImpl(LogLevel level, const char* file, int line, const std::string& mess
         return;
     }
 
-    fprintf(stderr, "[%s][%s][%s:%d] %s\n",
-            msg.timestamp.c_str(), levelStr, file, line, msg.message.c_str());
+    fprintf(stderr, "[%s][%s][%s][%s:%d] %s\n",
+            msg.timestamp.c_str(), levelStr, msg.thread.c_str(), file, line, msg.message.c_str());
+}
+
+LogThreadName::LogThreadName(std::string name) : m_previous(std::move(t_threadName)) {
+    t_threadName = std::move(name);
+}
+
+LogThreadName::~LogThreadName() {
+    t_threadName = std::move(m_previous);
+}
+
+std::string LogCurrentThreadName() {
+    if (!t_threadName.empty()) {
+        return t_threadName;
+    }
+    if (t_unnamedThreadNumber == 0) {
+        t_unnamedThreadNumber = g_nextUnnamedThread.fetch_add(1);
+    }
+    return "t" + std::to_string(t_unnamedThreadNumber);
 }
 
 int LogRegisterMessageReceiver(LogMessageReceiver receiver) {

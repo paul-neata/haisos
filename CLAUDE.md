@@ -162,14 +162,14 @@ after a literal `--` is parsed as `key=value` pairs fed to the haisosfile as
 | `<haisosfile>` | Path to the haisosfile to run (positional; defaults to `./haisosfile`) |
 | `-- key=value ...` | `ARG` overrides passed to the haisosfile |
 | `--init` | Write a commented starter haisosfile to `./haisosfile` and exit (refuses to overwrite an existing one) |
+| `--version` | Show version information |
+| `-h, --help` | Show help message |
 | `--log-to-console` | Enable logging to console |
 | `--log-to-file <path>` | Enable logging to file |
 | `--log-level <level>` | Set log level (verbose_debug, debug, trace, info, warning, error) |
 | `--log-json-in-temp` | Log input/output JSON to a temporary file |
 | `--log-agent-to-file <path>` | Write every agent's LLM traffic to `<path>`: each request sent (`SEND`) and response received (`RECEIVE`), headed by the agent's name and the time |
 | `--log-agent-to-file-type <type>` | `diff` (default): each request as its difference from the same agent's previous one, responses in full; `full`: everything in full. Requires `--log-agent-to-file` |
-| `--version` | Show version information |
-| `-h, --help` | Show help message |
 
 ## The `haisosfile` DSL
 

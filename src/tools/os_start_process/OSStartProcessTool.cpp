@@ -5,7 +5,7 @@
 namespace Haisos::Tools {
 
 const std::string OSStartProcessTool::ToolName = "os_start_process";
-const std::string OSStartProcessTool::ToolDefaultDescription = "Start a new OS process (a .md agent or a .lua script). A relative path is resolved against the calling process's working directory, and the new process starts in that same directory. Returns immediately with the new process's pid; does not wait for it to finish.";
+const std::string OSStartProcessTool::ToolDefaultDescription = "Start a new OS process (a .md agent, a .lua script, or a builtin command such as /bin/ls). A relative path is resolved against the calling process's working directory, and the new process starts in that same directory. Returns immediately with the new process's pid; does not wait for it to finish.";
 
 OSStartProcessTool::OSStartProcessTool(std::shared_ptr<CurrentProcessHandle> process) : m_process(std::move(process)) {}
 
@@ -15,7 +15,7 @@ nlohmann::json OSStartProcessTool::GetDefaultParametersSchema() {
         {"properties", {
             {"path", {
                 {"type", "string"},
-                {"description", "Path to the .md or .lua program to run. A relative path is resolved against the process's working directory."}
+                {"description", "Path to the .md or .lua program, or the builtin command, to run. A relative path is resolved against the process's working directory."}
             }},
             {"args", {
                 {"type", "array"},

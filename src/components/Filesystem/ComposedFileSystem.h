@@ -33,6 +33,8 @@ protected:
     int LocalRemoveDirectory(const std::string& pathname) override;
     int LocalRemoveFile(const std::string& pathname) override;
     std::vector<DirectoryEntry> LocalReadDirectory(const std::string& path) override;
+    int LocalStat(const std::string& path, FileStatus& out) override;
+    std::optional<std::string> LocalIsBuiltinCommand(const std::string& path) override;
 
 private:
     ComposedFileSystem(std::shared_ptr<IFileSystem> main, const std::string& whereToMount, std::shared_ptr<IFileSystem> mounted);

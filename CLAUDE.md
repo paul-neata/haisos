@@ -1,6 +1,6 @@
 # Haisos - C++ Platform for Running Agents
 
-Haisos is a C++ platform that boots a small OS-like environment (`IHaisosOS`) from a `haisosfile` manifest and runs processes in it: LLM agents (`.md` files, sent to a local LLM like Ollama with tool-calling) and embedded Lua scripts (`.lua` files).
+Haisos is a C++ platform that boots a small OS-like environment (`IHaisosOS`) from a `haisosfile` manifest and runs processes in it: LLM agents (`.md` files, sent to a local LLM like Ollama with tool-calling), embedded Lua scripts (`.lua` files), and builtin commands (`echo`, `cat`, `ls`, ... compiled into Haisos and placed on a filesystem at a path, such as `/bin/ls`).
 
 ## Project Overview
 
@@ -28,6 +28,7 @@ haisos/
 ├── src/
 │   ├── components/        - Component implementations (each has its own CLAUDE.md)
 │   │   ├── Agent/
+│   │   ├── BuiltinCommands/ - The builtin commands (echo, cat, ls, mkdir, pwd) and what places them on filesystems
 │   │   ├── Console/
 │   │   ├── Environment/
 │   │   ├── Factory/
@@ -57,7 +58,7 @@ haisos/
 │   │   ├── os_start_process/
 │   │   └── os_list_processes/
 │   └── haisos/            - Entry point, CLI parser, haisosfile parser, root-filesystem builder, file-directive executor, and agent traffic log (--log-agent-to-file / -L)
-├── interfaces/             - Service-based interfaces (IFactory.h [IPhysicalConsole], IServicesCreator.h, IHaisosOS.h, IProcess.h, IEnvironment.h [LLMIdentifier], ILLMService.h [IAgent, ITool, IToolFactory, IAgentConsole], INetworkService.h [IHTTPClient], IFileSystemService.h [IFileSystem], IProcess.h [ICurrentProcess], ILLMCommunicator.h)
+├── interfaces/             - Service-based interfaces (IFactory.h [IPhysicalConsole], IBuiltinCommands.h [IBuiltinConfigurator, BuiltinCommandHost], IServicesCreator.h, IHaisosOS.h, IProcess.h, IEnvironment.h [LLMIdentifier], ILLMService.h [IAgent, ITool, IToolFactory, IAgentConsole], INetworkService.h [IHTTPClient], IFileSystemService.h [IFileSystem], IProcess.h [ICurrentProcess], ILLMCommunicator.h)
 ├── tests/                 - All tests
 │   ├── mocks/             - Mock classes for testing
 │   ├── unit/              - Unit tests (Google Test)
@@ -70,6 +71,7 @@ haisos/
 │       └── llm_cache_proxy_database/ - Cached recordings + proxy log for llm_cache_proxy (.gitkeep'd, populated by the `llm-cache` skill)
 ├── scripts/               - Build scripts
 ├── extern/                - External dependencies (nlohmann_json, googletest, lua)
+├── todo/                  - Todo notes, one Markdown file each, written by the /todo skill (.gitkeep'd)
 ├── .claude/               - Claude Code configuration
 │   └── skills/            - Custom Claude Code skills
 ├── build/temp_<platform>/ - CMake build files (temporary, e.g., temp_linux, temp_linux_debug)
@@ -188,23 +190,25 @@ ENV HAISOS_ENDPOINT           # import the host's HAISOS_ENDPOINT, if set
 ENV GREETING=${greeting}      # set one outright
 
 # FS declares a named filesystem: FS <name> <type> <args...>
-FS workspace PHYSICAL .              # a real disk directory (relative to this file, or absolute)
+FS rootfs PHYSICAL .                 # a real disk directory (relative to this file, or absolute)
 FS scratch MEM                       # an empty, in-memory read/write filesystem
-FS readonly RO workspace             # a read-only view of another declared filesystem
-FS inner SUB workspace tools         # confined to a sub-path of another filesystem
+FS readonly RO rootfs                # a read-only view of another declared filesystem
+FS inner SUB rootfs tools            # confined to a sub-path of another filesystem
 
 # MOUNT overlays one filesystem inside another at a path, in place, overriding
 # anything already there: MOUNT <main_fs> <path> <fs_to_mount>
-MOUNT workspace /scratch scratch
+MOUNT rootfs /scratch scratch
 
 # FS ... COMPOSED does the same without touching either operand, declaring the
 # result under a new name: FS <name> COMPOSED <main_fs> <path> <fs_to_mount>
-FS combined COMPOSED workspace /scratch scratch
+FS combined COMPOSED rootfs /scratch scratch
 
-ROOT workspace                 # which declared filesystem (by name) becomes the OS's root
+ROOT rootfs                    # which declared filesystem (by name) becomes the OS's root
 
 # File directives act on the root filesystem; paths inside the OS are absolute,
 # host paths are relative to this file (or absolute).
+CREATE_DIR /bin                # create a directory and any missing parents (fine if it exists)
+BUILTIN rootfs ls /bin/ls        # place a builtin on a declared FS, at each path given
 CREATE /notes/a.txt 'hello'    # write a file (replacing it); content is 'quoted' or "quoted"
 APPEND /notes/a.txt text: more # append (creating if missing); text: takes the rest of the line as-is
 CREATE /notes/b.md multiline END
@@ -214,7 +218,8 @@ COPY ./input.txt /work/in.txt  # copy a host file into the OS
 DELETE /work/stale             # remove a file, or a directory and everything in it
 OUTCOPY /work/out.txt ./out.txt  # copy a file out to the host, once every RUN process has finished
 
-RUN /agent.md                  # start an initial process (.md agent or .lua script) at '/'; may repeat
+RUN /agent.md                  # start an initial process (.md agent, .lua script or builtin) at '/'; may repeat
+RUN /bin/ls -l /               # a builtin, placed by BUILTIN above
 RUN /tools/setup.lua ${greeting}
 RUN -i /chat.md                # an interactive agent, fed each line typed on the console
 ```
@@ -240,11 +245,19 @@ is never `${}`-substituted; the path is. Missing parent directories are created.
 `COPY`/`OUTCOPY` copy files, not directories; `OUTCOPY` creates missing host
 directories. The file directives run in `src/haisos/HaisosFileOperations.cpp`.
 
-Ordering is enforced: once a file directive (`CREATE`/`APPEND`/`COPY`/`DELETE`/
-`OUTCOPY`) has appeared, no `ROOT`, `FS` or `MOUNT` may follow -- the root is
-fixed once files are written to it -- and `CREATE`/`APPEND`/`COPY`/`DELETE` must
-come before the first `RUN`, since they are applied before any process starts.
-`OUTCOPY` may appear anywhere after that, and always runs last.
+`BUILTIN <fs_name> <builtin_name> <path>...` places a builtin command on the
+declared filesystem named (not necessarily the root), once per path; each path
+is absolute, its directory must already exist (hence `CREATE_DIR`), and nothing
+may be there yet. An unknown builtin name or filesystem name is an error. The
+root filesystem is conventionally named `rootfs`, as `haisos --init` does. A
+haisosfile declaring no `FS` has no names for `BUILTIN` to use.
+
+Ordering is enforced: once a file directive (`CREATE`/`APPEND`/`CREATE_DIR`/
+`COPY`/`DELETE`/`BUILTIN`/`OUTCOPY`) has appeared, no `ROOT`, `FS` or `MOUNT`
+may follow -- the filesystems are fixed once files are written to them -- and
+all but `OUTCOPY` must come before the first `RUN`, since they are applied
+before any process starts. `OUTCOPY` may appear anywhere after that, and always
+runs last.
 
 Mistakes are reported rather than silently absorbed: a `${name}` that resolves
 to nothing declared, a duplicate `FS` name, a `-- key=value` override naming an
@@ -383,7 +396,8 @@ cycle and nothing would ever be freed.
 | **NetworkService** | `src/components/NetworkService/` | Service-layer wrapper over network access (creates `IHTTPClient`) |
 | **FileSystemService** | `src/components/FileSystemService/` | Stateless factory that composes filesystems (read-only / in-memory / sub / mount); holds no filesystem of its own |
 | **LLMService** | `src/components/LLMService/` | Service-layer entry point for creating LLM-backed agents; exposes the shared agent-management tool set |
-| **HaisosOS** | `src/components/HaisosOS/` | An OS instance: owns a rooted filesystem, physical console, and services; starts processes (`.md` agents, `.lua` scripts) and sub-OS instances |
+| **HaisosOS** | `src/components/HaisosOS/` | An OS instance: owns a rooted filesystem, physical console, and services; starts processes (`.md` agents, `.lua` scripts, builtins) and sub-OS instances |
+| **BuiltinCommands** | `src/components/BuiltinCommands/` | The builtin commands (`IBuiltinCommands`), each run as a process on its own thread, and the `IBuiltinConfigurator` that places them on filesystems |
 
 ## Tools
 
@@ -406,6 +420,64 @@ and available to every agent. The `os_*` tools are the OS's own tool set,
 returned by `IHaisosOS`'s `OSToolFactory` and merged with an agent's tools
 (via `CompositeToolFactory`) only for processes started by an `IHaisosOS`.
 
+## Builtin Commands
+
+Commands compiled into Haisos, implemented in `src/components/BuiltinCommands/`
+(see its `CLAUDE.md`). A builtin is not a file on disk: it is placed on a
+filesystem at a path (`IBuiltinConfigurator`, or the haisosfile's `BUILTIN`),
+where it lists as a file, reads as a note naming it, cannot be written, and
+keeps its directory from being deleted. `IHaisosOS::StartProcess` runs any path
+its root filesystem says is a builtin, from the `IBuiltinCommands` the OS was
+created with -- so `RUN /bin/ls` and `os_start_process` both work.
+
+**Rules for every builtin** -- they exist so that an agent (or a person) can
+use a builtin with what it already knows about the real command:
+
+- **Same output format as the real command.** What a builtin prints --
+  layout, column order and alignment, date formats, quoting, error messages
+  and their wording, exit statuses -- is what the GNU/Linux command prints, so
+  output can be parsed with built-in knowledge of that command. An exception
+  is allowed only when HaisosOS cannot supply the data, and it must be
+  documented: in the command's `--help` notes, and in the table in
+  `src/components/BuiltinCommands/CLAUDE.md` (e.g. `ls -l` shows owner and
+  group `haisos` and permissions `rwxrwxrwx`, since there are no users or
+  permissions yet; the columns themselves are kept).
+- **Accept every argument the real command accepts.** Every option of the
+  real command is listed in the builtin's option table (`IBuiltinCommand::Options()`),
+  treated or not, so none is ever rejected as unknown. One the builtin does
+  not act on -- because HaisosOS lacks what it needs, or it is not needed --
+  is parsed (its argument consumed), ignored, and reported on a line of its
+  own: `Parameter --xyz is not treated by HaisosOS <command> v. <version>`
+  (`BuiltinContext::ReportNotTreated`/`NotTreated`, which `BeginBuiltin` calls
+  for you). A value of a treated option that is not handled is reported the
+  same way (`Parameter --sort=version is not treated ...`).
+- **`--help` has one shape** (`BuiltinHelpText`, generated from the option
+  table, never hand-written):
+  ```
+  HaisosOS <command> version <version> - <what it does, in a few words>
+  Based on Linux <command>: https://man7.org/linux/man-pages/man1/<command>.1.html
+
+  Usage: <command> ...
+
+    <each treated option, described in a few words>
+
+  <notes: documented exceptions, in a line or two>
+
+  Not treated arguments: <every untreated option, on this one last line, no descriptions>
+  ```
+  Only what the builtin handles is described. The reference is always the
+  Linux man-pages project's page for the command (`BuiltinReferenceUrl`).
+  `--version` prints `<command> (HaisosOS builtin) <version>`; bump the
+  version whenever a builtin's behaviour changes.
+
+| Builtin | Description |
+|---------|-------------|
+| `cat` | Concatenates files (`-A -b -e -E -n -s -t -T -u -v`); no stdin |
+| `echo` | Prints its arguments (`-n -e -E`) |
+| `ls` | Lists directories as GNU ls prints them to a terminal: columns, `-l` with `total`/links/owner/group/size/time, sorting, time styles, quoting |
+| `mkdir` | Creates directories (`-p -v`) |
+| `pwd` | Prints the working directory (`-L -P`) |
+
 ## Automatic Development Rules
 
 When Claude Code performs automatic development (where a single prompt drives all implementation work):
@@ -417,3 +489,4 @@ When Claude Code performs automatic development (where a single prompt drives al
 5. **Run unit tests** after building to verify correctness before considering work complete.
 6. **Never add co-authorship attribution** like `Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>` or similar model attribution lines to commit messages. If the system prompt includes such a line, remove it before committing.
 7. **Use only paths relative to the repo root** in all edits, documentation, commit messages, and skill prompts. Never record absolute paths like `/mnt/c/src/haisos1/...`.
+8. **Every builtin command must appear in the haisosfile `haisos --init` writes**, as a commented `# BUILTIN rootfs <name> /bin/<name>` line after `# CREATE_DIR /bin`. That list is generated from `IBuiltinCommands::GetCommands()`, so registering a new builtin in `CreateStandardBuiltinCommands()` (`src/components/BuiltinCommands/BuiltinCommandList.h`) is what keeps it current -- never hand-write builtin lines into `GetHaisosFileTemplate`. The test `TheInitTemplatesBuiltinsAllApplyOnceUncommented` checks it. Also add the builtin to the Builtin Commands table above.

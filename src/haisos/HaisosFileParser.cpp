@@ -105,8 +105,11 @@ bool IsAbsoluteOsPath(const std::string& path) {
     return !path.empty() && path[0] == '/';
 }
 
+// BUILTIN counts as one: it places a file on a filesystem, so it is bound by
+// the same ordering -- after every FS/MOUNT/ROOT, before the first RUN.
 bool IsFileDirective(const std::string& key) {
-    return key == "CREATE" || key == "APPEND" || key == "COPY" || key == "DELETE" || key == "OUTCOPY";
+    return key == "CREATE" || key == "APPEND" || key == "CREATE_DIR" || key == "COPY" || key == "DELETE" ||
+        key == "OUTCOPY" || key == "BUILTIN";
 }
 
 // Reads the content of a CREATE/APPEND directive from spec -- the raw text
@@ -435,7 +438,30 @@ HaisosFileParseResult ParseHaisosFile(
                 return result;
             }
             result.config.setupOperations.push_back(std::move(operation));
-        } else if (key == "COPY" || key == "OUTCOPY" || key == "DELETE") {
+        } else if (key == "BUILTIN") {
+            std::string substituted;
+            if (!SubstituteOrFail(rest, values, lineNumber, &substituted, &result.error)) {
+                return result;
+            }
+            auto tokens = SplitWhitespace(substituted);
+            if (tokens.size() < 3) {
+                result.error = LineError(lineNumber, "BUILTIN requires <fs_name> <builtin_name> <absolute_path>...");
+                return result;
+            }
+            for (size_t i = 2; i < tokens.size(); ++i) {
+                if (!IsAbsoluteOsPath(tokens[i])) {
+                    result.error = LineError(lineNumber, "BUILTIN requires absolute paths (starting with '/'), got '" + tokens[i] + "'");
+                    return result;
+                }
+                HaisosFileOperation operation;
+                operation.type = HaisosFileOperationType::Builtin;
+                operation.lineNumber = lineNumber;
+                operation.fsName = tokens[0];
+                operation.builtinName = tokens[1];
+                operation.path = tokens[i];
+                result.config.setupOperations.push_back(std::move(operation));
+            }
+        } else if (key == "COPY" || key == "OUTCOPY" || key == "DELETE" || key == "CREATE_DIR") {
             std::string substituted;
             if (!SubstituteOrFail(rest, values, lineNumber, &substituted, &result.error)) {
                 return result;
@@ -443,12 +469,12 @@ HaisosFileParseResult ParseHaisosFile(
             auto tokens = SplitWhitespace(substituted);
             HaisosFileOperation operation;
             operation.lineNumber = lineNumber;
-            if (key == "DELETE") {
+            if (key == "DELETE" || key == "CREATE_DIR") {
                 if (tokens.size() != 1) {
-                    result.error = LineError(lineNumber, "DELETE requires exactly one path");
+                    result.error = LineError(lineNumber, key + " requires exactly one path");
                     return result;
                 }
-                operation.type = HaisosFileOperationType::Delete;
+                operation.type = (key == "DELETE") ? HaisosFileOperationType::Delete : HaisosFileOperationType::CreateDir;
                 operation.path = tokens[0];
             } else if (key == "COPY") {
                 if (tokens.size() != 2) {
@@ -499,7 +525,12 @@ HaisosFileParseResult ParseHaisosFile(
     return result;
 }
 
-std::string GetHaisosFileTemplate() {
+std::string GetHaisosFileTemplate(const std::vector<std::string>& builtinNames) {
+    std::string builtinExamples;
+    for (const auto& name : builtinNames) {
+        builtinExamples += "# BUILTIN rootfs " + name + " /bin/" + name + "\n";
+    }
+
     return
         "# haisosfile - a small manifest that boots a Haisos OS.\n"
         "# Comments start with '#' (full-line, or trailing after whitespace).\n"
@@ -529,27 +560,39 @@ std::string GetHaisosFileTemplate() {
         "# FS declares a named filesystem: FS <name> <type> <args...>\n"
         "# An FS may only refer to filesystems declared above it. Uncomment an\n"
         "# example by deleting its leading '#'; the note after it stays a comment.\n"
-        "FS workspace PHYSICAL .                # this haisosfile's own directory\n"
+        "FS rootfs PHYSICAL .                   # this haisosfile's own directory\n"
         "# FS data PHYSICAL ./data              # a real disk directory (relative to this file, or absolute; may use . and ..)\n"
         "# FS scratch MEM                       # an empty, in-memory read/write filesystem\n"
-        "# FS readonly RO workspace             # a read-only wrapper over another declared FS\n"
-        "# FS tools SUB workspace tools         # confined to a sub-path (here tools/) of another declared FS\n"
-        "# FS combined COMPOSED workspace /scratch scratch   # workspace with scratch overlaid at /scratch, both left untouched\n"
+        "# FS readonly RO rootfs                # a read-only wrapper over another declared FS\n"
+        "# FS tools SUB rootfs tools            # confined to a sub-path (here tools/) of another declared FS\n"
+        "# FS combined COMPOSED rootfs /scratch scratch   # rootfs with scratch overlaid at /scratch, both left untouched\n"
         "\n"
         "# MOUNT overlays one filesystem inside another at a path, in place,\n"
         "# overriding anything already there: MOUNT <main_fs> <path> <fs_to_mount>\n"
-        "# MOUNT workspace /scratch scratch\n"
+        "# MOUNT rootfs /scratch scratch\n"
         "\n"
         "# ROOT selects which declared filesystem (by name) becomes this OS's\n"
         "# root. If omitted, the last FS declared above is used; if no FS is\n"
         "# declared at all, ROOT may instead be a plain directory path.\n"
-        "ROOT workspace\n"
+        "ROOT rootfs\n"
         "\n"
-        "# The directives below work on files of the root filesystem, so the root\n"
-        "# is fixed from the first of them on: no ROOT, FS or MOUNT may follow one.\n"
-        "# Paths inside the OS are absolute (they start at the root, '/'); paths on\n"
-        "# the host are relative to this file, or absolute. All but OUTCOPY run\n"
-        "# before any process starts, so they must come before the first RUN.\n"
+        "# The directives below work on files of the root filesystem (BUILTIN on\n"
+        "# those of any declared FS), so the filesystems are fixed from the first\n"
+        "# of them on: no ROOT, FS or MOUNT may follow one. Paths inside the OS are\n"
+        "# absolute (they start at the root, '/'); paths on the host are relative\n"
+        "# to this file, or absolute. All but OUTCOPY run before any process\n"
+        "# starts, so they must come before the first RUN.\n"
+        "#\n"
+        "# CREATE_DIR <path> creates a directory, and any missing parents; it is\n"
+        "# fine if it already exists.\n"
+        "# CREATE_DIR /bin\n"
+        "#\n"
+        "# BUILTIN <fs_name> <builtin_name> <path>... places a builtin command -- one\n"
+        "# compiled into Haisos -- on a declared FS at each path given; RUN (or\n"
+        "# os_start_process) on that path then runs it. Its directory must already\n"
+        "# exist. The file reads as a note naming the builtin, cannot be written,\n"
+        "# and its directory cannot be deleted while it is there. Every builtin:\n"
+        + builtinExamples +
         "#\n"
         "# CREATE <path> <content> writes a file, replacing it if it exists;\n"
         "# APPEND <path> <content> appends to one, creating it if it does not.\n"
@@ -578,10 +621,10 @@ std::string GetHaisosFileTemplate() {
         "# finished, it copies a file out of the OS onto the host.\n"
         "# OUTCOPY /work/result.txt ./out/result.txt\n"
         "\n"
-        "# RUN starts an initial process: a .md agent or a .lua script, given by\n"
-        "# its absolute path inside the OS, followed by its arguments. It starts in\n"
-        "# the root directory, '/'. RUN may repeat; Haisos exits once every RUN\n"
-        "# process has finished.\n"
+        "# RUN starts an initial process: a .md agent, a .lua script or a builtin\n"
+        "# (e.g. `RUN /bin/ls -l /`), given by its absolute path inside the OS,\n"
+        "# followed by its arguments. It starts in the root directory, '/'. RUN\n"
+        "# may repeat; Haisos exits once every RUN process has finished.\n"
         "#\n"
         "# `RUN -i <agent.md>` runs an agent interactively: after its program, each\n"
         "# line typed on the console is sent to it, until it closes itself (with\n"

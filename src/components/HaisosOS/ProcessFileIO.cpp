@@ -45,19 +45,8 @@ int ProcessFileIO::ChangeDirectory(const std::string& path) {
         if (!fs) {
             return -1;
         }
-        // A directory listing of the parent is what tells a directory from a
-        // file: a file lists as nothing, and so does a path that is not there.
-        auto lastSlash = target.find_last_of('/');
-        auto parent = target.substr(0, lastSlash);
-        auto name = target.substr(lastSlash + 1);
-        bool isDirectory = false;
-        for (const auto& entry : fs->ReadDirectory(parent.empty() ? "/" : parent)) {
-            if (entry.name == name && entry.type == DirectoryEntryType::Dir) {
-                isDirectory = true;
-                break;
-            }
-        }
-        if (!isDirectory) {
+        FileStatus status;
+        if (fs->Stat(target, status) != 0 || status.type != DirectoryEntryType::Dir) {
             return -1;
         }
     }
@@ -109,6 +98,16 @@ int ProcessFileIO::RemoveFile(const std::string& pathname) {
 std::vector<DirectoryEntry> ProcessFileIO::ReadDirectory(const std::string& path) {
     auto fs = RootFileSystem();
     return fs ? fs->ReadDirectory(ResolvePath(path)) : std::vector<DirectoryEntry>{};
+}
+
+int ProcessFileIO::Stat(const std::string& path, FileStatus& out) {
+    auto fs = RootFileSystem();
+    return fs ? fs->Stat(ResolvePath(path), out) : -1;
+}
+
+std::optional<std::string> ProcessFileIO::IsBuiltinCommand(const std::string& path) {
+    auto fs = RootFileSystem();
+    return fs ? fs->IsBuiltinCommand(ResolvePath(path)) : std::nullopt;
 }
 
 }

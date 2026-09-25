@@ -1,5 +1,6 @@
 #include "MountPoints.h"
 #include <algorithm>
+#include "FilesystemUtils.h"
 #include "VirtualPath.h"
 
 namespace Haisos {
@@ -30,10 +31,11 @@ void MountPoints::Mount(const std::string& path, std::shared_ptr<IFileSystem> fi
             // Mounting over an existing mount point replaces it, the way a
             // second mount on the same directory shadows the first.
             entry.filesystem = std::move(filesystem);
+            entry.mountedAt = CurrentFileDateTime();
             return;
         }
     }
-    m_mounts.push_back(Entry{normalized, std::move(filesystem)});
+    m_mounts.push_back(Entry{normalized, std::move(filesystem), CurrentFileDateTime()});
     // Longest first, so Resolve() finds the innermost mount for nested mounts.
     std::sort(m_mounts.begin(), m_mounts.end(),
         [](const Entry& a, const Entry& b) { return a.path.size() > b.path.size(); });
@@ -68,12 +70,17 @@ MountPoints::Route MountPoints::Resolve(const std::string& path) const {
     return Route{};
 }
 
+int MountPoints::AllocateSyntheticFd() {
+    static std::atomic<int> nextFd{kSyntheticFdBase};
+    return nextFd.fetch_add(1);
+}
+
 int MountPoints::RegisterFd(IFileSystem* filesystem, int innerFd) {
     if (innerFd < 0) {
         return innerFd;
     }
+    const int fd = AllocateSyntheticFd();
     std::lock_guard<std::mutex> lock(m_mutex);
-    const int fd = m_nextFd++;
     m_openFds[fd] = Handle{filesystem, innerFd};
     return fd;
 }
@@ -111,6 +118,17 @@ std::vector<std::string> MountPoints::ChildSegments(const std::string& directory
         }
     }
     return segments;
+}
+
+std::optional<FileDateTime> MountPoints::LatestMountTimeBelow(const std::string& directory) const {
+    std::optional<FileDateTime> latest;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    for (const auto& entry : m_mounts) {
+        if (entry.path != directory && IsAtOrUnder(entry.path, directory) && (!latest || entry.mountedAt > *latest)) {
+            latest = entry.mountedAt;
+        }
+    }
+    return latest;
 }
 
 }

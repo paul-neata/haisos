@@ -28,6 +28,7 @@ public:
     int LocalRemoveDirectory(const std::string& pathname) override;
     int LocalRemoveFile(const std::string& pathname) override;
     std::vector<DirectoryEntry> LocalReadDirectory(const std::string& path) override;
+    int LocalStat(const std::string& path, FileStatus& out) override;
 
     std::string AbsolutePathFor(const std::string& path) const override;
 

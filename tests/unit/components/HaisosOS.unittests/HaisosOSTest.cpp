@@ -91,7 +91,7 @@ protected:
             physicalConsole = m_factory->CreatePhysicalConsole();
         }
         return m_factory->CreateHaisosOS(
-            std::move(servicesCreator), physicalConsole, rootFileSystem, TestEnvironment());
+            std::move(servicesCreator), physicalConsole, rootFileSystem, m_factory->CreateBuiltinCommands(), TestEnvironment());
     }
 
     std::shared_ptr<IFactory> m_factory = CreateFactory();
@@ -191,6 +191,7 @@ TEST_F(HaisosOSTest, CreateSubOSIsConfinedByTheRootItIsGiven) {
         os->GetServicesCreator()->Clone(),
         m_factory->CreatePhysicalConsole(),
         subRoot,
+        nullptr,
         os->GetOsEnvironment()->Clone());
     ASSERT_NE(subOS, nullptr);
 
@@ -206,6 +207,7 @@ TEST_F(HaisosOSTest, CreateSubOSCarriesTheParentOSPid) {
         os->GetServicesCreator()->Clone(),
         m_factory->CreatePhysicalConsole(),
         m_factory->CreatePhysicalFileSystem(kTestRoot),
+        nullptr,
         os->GetOsEnvironment()->Clone());
     ASSERT_NE(subOS, nullptr);
     // A sub-OS is the same OS seen through a narrower root, so it keeps the
@@ -221,6 +223,7 @@ TEST_F(HaisosOSTest, SubOSGetsACopyOfTheEnvironmentItIsGiven) {
         os->GetServicesCreator()->Clone(),
         m_factory->CreatePhysicalConsole(),
         m_factory->CreatePhysicalFileSystem(kTestRoot),
+        nullptr,
         os->GetOsEnvironment()->Clone());
     ASSERT_NE(subOS, nullptr);
     EXPECT_EQ(subOS->GetOsEnvironment()->GetVariable(kEnvModel).value_or(""), "llama3");
@@ -412,7 +415,7 @@ TEST_F(HaisosOSTest, CreateHaisosOSWithoutAnEnvironmentReturnsNull) {
     std::shared_ptr<IFileSystem> rootFileSystem = m_factory->CreatePhysicalFileSystem(kTestRoot);
     auto physicalConsole = m_factory->CreatePhysicalConsole();
     EXPECT_EQ(
-        m_factory->CreateHaisosOS(std::move(servicesCreator), physicalConsole, rootFileSystem, nullptr),
+        m_factory->CreateHaisosOS(std::move(servicesCreator), physicalConsole, rootFileSystem, nullptr, nullptr),
         nullptr);
 }
 
@@ -462,4 +465,31 @@ TEST_F(HaisosOSTest, InteractiveAgentOnlyAppliesToAgentPrograms) {
     ASSERT_NE(process, nullptr);
     EXPECT_TRUE(process->WaitToFinish(kProcessWaitMs));
     EXPECT_EQ(console->ReadLineCalls(), 0);
+}
+
+// --- Builtin commands ---
+
+TEST_F(HaisosOSTest, StartProcessRunsABuiltinTheRootFilesystemNames) {
+    auto os = BuildOS();
+    auto root = os->GetRootFileSystem();
+    ASSERT_TRUE(m_factory->CreateBuiltinConfigurator()->AddBuiltinCommand(root, "/sub/mk", "mkdir"));
+
+    // Relative program paths are resolved against the root, as for any program.
+    auto process = os->StartProcess(TestEnvironment(), "sub/mk", {"/made"}, /*workingDirectory=*/"", StartProcessOptions{});
+    ASSERT_NE(process, nullptr);
+    EXPECT_EQ(process->Path(), "sub/mk");
+    EXPECT_EQ(process->GetParentPid(), os->GetOSProcessID());
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    EXPECT_TRUE(std::filesystem::is_directory(kTestRoot + "/made"));
+    // The builtin exists only on the filesystem, never on disk.
+    EXPECT_FALSE(std::filesystem::exists(kTestRoot + "/sub/mk"));
+}
+
+TEST_F(HaisosOSTest, AnOSWithoutBuiltinCommandsCannotStartABuiltin) {
+    auto root = m_factory->CreatePhysicalFileSystem(kTestRoot);
+    ASSERT_TRUE(m_factory->CreateBuiltinConfigurator()->AddBuiltinCommand(root, "/echo", "echo"));
+    auto os = m_factory->CreateHaisosOS(
+        m_factory->CreateServicesCreator(), m_factory->CreatePhysicalConsole(), root, /*builtinCommands=*/nullptr, TestEnvironment());
+    ASSERT_NE(os, nullptr);
+    EXPECT_EQ(os->StartProcess(TestEnvironment(), "/echo", {"hi"}, "", StartProcessOptions{}), nullptr);
 }

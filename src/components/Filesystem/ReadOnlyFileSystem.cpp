@@ -53,6 +53,13 @@ std::vector<DirectoryEntry> ReadOnlyFileSystem::LocalReadDirectory(const std::st
     return m_inner->ReadDirectory(NormalizeVirtualPath(path));
 }
 
+int ReadOnlyFileSystem::LocalStat(const std::string& path, FileStatus& out) {
+    return m_inner->Stat(NormalizeVirtualPath(path), out);
+}
+
+std::optional<std::string> ReadOnlyFileSystem::LocalIsBuiltinCommand(const std::string& path) {
+    return m_inner->IsBuiltinCommand(NormalizeVirtualPath(path));
+}
 
 std::string ReadOnlyFileSystem::AbsolutePathFor(const std::string& path) const {
     return NormalizeVirtualPath(path);

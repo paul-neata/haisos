@@ -1,4 +1,5 @@
 #include "HaisosFileOperations.h"
+#include <algorithm>
 #include <optional>
 #include <sstream>
 #include <system_error>
@@ -22,6 +23,8 @@ const char* DirectiveName(HaisosFileOperationType type) {
     switch (type) {
         case HaisosFileOperationType::Create: return "CREATE";
         case HaisosFileOperationType::Append: return "APPEND";
+        case HaisosFileOperationType::CreateDir: return "CREATE_DIR";
+        case HaisosFileOperationType::Builtin: return "BUILTIN";
         case HaisosFileOperationType::Copy: return "COPY";
         case HaisosFileOperationType::Delete: return "DELETE";
         case HaisosFileOperationType::OutCopy: return "OUTCOPY";
@@ -29,34 +32,10 @@ const char* DirectiveName(HaisosFileOperationType type) {
     return "?";
 }
 
-std::string ParentOf(const std::string& normalizedPath) {
-    auto pos = normalizedPath.find_last_of('/');
-    return (pos == std::string::npos || pos == 0) ? "/" : normalizedPath.substr(0, pos);
-}
-
-std::string LastSegment(const std::string& normalizedPath) {
-    auto pos = normalizedPath.find_last_of('/');
-    return (pos == std::string::npos) ? normalizedPath : normalizedPath.substr(pos + 1);
-}
-
-// What is at normalizedPath -- a file or a directory -- or nullopt if nothing
-// is. IFileSystem has no stat(), so this looks the name up in its parent's
-// listing, which every filesystem (and every mount point) answers the same way.
-std::optional<char> EntryTypeOf(IFileSystem& fs, const std::string& normalizedPath) {
-    if (normalizedPath == "/") {
-        return DirectoryEntryType::Dir;
-    }
-    const std::string name = LastSegment(normalizedPath);
-    for (const auto& entry : fs.ReadDirectory(ParentOf(normalizedPath))) {
-        if (entry.name == name) {
-            return entry.type;
-        }
-    }
-    return std::nullopt;
-}
-
-bool EnsureParentDirectories(IFileSystem& fs, const std::string& normalizedPath, std::string& outReason) {
-    std::istringstream segments(ParentOf(normalizedPath));
+// Creates normalizedDirectory and every missing directory above it; any that
+// already exist are left as they are.
+bool EnsureDirectories(IFileSystem& fs, const std::string& normalizedDirectory, std::string& outReason) {
+    std::istringstream segments(normalizedDirectory);
     std::string segment;
     std::string current;
     while (std::getline(segments, segment, '/')) {
@@ -76,6 +55,10 @@ bool EnsureParentDirectories(IFileSystem& fs, const std::string& normalizedPath,
         }
     }
     return true;
+}
+
+bool EnsureParentDirectories(IFileSystem& fs, const std::string& normalizedPath, std::string& outReason) {
+    return EnsureDirectories(fs, VirtualParentOf(normalizedPath), outReason);
 }
 
 bool WriteAll(IFileSystem& fs, int fd, const char* data, size_t size) {
@@ -206,15 +189,48 @@ bool ResolveHostFile(const std::filesystem::path& haisosFileDir, const std::stri
     return true;
 }
 
+std::string JoinNames(const std::vector<std::string>& names) {
+    std::string joined;
+    for (const auto& name : names) {
+        joined += (joined.empty() ? "" : ", ") + name;
+    }
+    return joined;
+}
+
+bool PlaceBuiltin(const HaisosFileOperation& operation, const HaisosFileBuiltinTargets& builtins, std::string& outReason) {
+    if (!builtins.namedFileSystems || !builtins.builtinCommands || !builtins.configurator) {
+        outReason = "builtin commands are not available here";
+        return false;
+    }
+    auto fs = builtins.namedFileSystems->find(operation.fsName);
+    if (fs == builtins.namedFileSystems->end()) {
+        outReason = "unknown filesystem '" + operation.fsName + "' (BUILTIN names a filesystem declared with FS)";
+        return false;
+    }
+    const auto commands = builtins.builtinCommands->GetCommands();
+    if (std::find(commands.begin(), commands.end(), operation.builtinName) == commands.end()) {
+        outReason = "unknown builtin '" + operation.builtinName + "' (the builtins are: " + JoinNames(commands) + ")";
+        return false;
+    }
+    return builtins.configurator->AddBuiltinCommand(fs->second, operation.path, operation.builtinName, &outReason);
+}
+
 bool ApplyOne(
     IFactory& factory,
     IFileSystem& root,
     const HaisosFileOperation& operation,
     const std::filesystem::path& haisosFileDir,
+    const HaisosFileBuiltinTargets& builtins,
     std::string& outReason)
 {
     const std::string path = NormalizeVirtualPath(operation.path);
     switch (operation.type) {
+        case HaisosFileOperationType::CreateDir:
+            return EnsureDirectories(root, path, outReason);
+
+        case HaisosFileOperationType::Builtin:
+            return PlaceBuiltin(operation, builtins, outReason);
+
         case HaisosFileOperationType::Create:
         case HaisosFileOperationType::Append:
             if (path == "/") {
@@ -274,14 +290,15 @@ bool ApplyHaisosFileOperations(
     IFileSystem& rootFileSystem,
     const std::vector<HaisosFileOperation>& operations,
     const std::filesystem::path& haisosFileDir,
-    std::string& outError)
+    std::string& outError,
+    const HaisosFileBuiltinTargets& builtins)
 {
     for (const auto& operation : operations) {
         const char* name = DirectiveName(operation.type);
         LogDebug("HaisosFileOperations: line %d: %s %s %s", operation.lineNumber, name,
             operation.path.c_str(), operation.hostPath.c_str());
         std::string reason;
-        if (!ApplyOne(factory, rootFileSystem, operation, haisosFileDir, reason)) {
+        if (!ApplyOne(factory, rootFileSystem, operation, haisosFileDir, builtins, reason)) {
             outError = "Error: line " + std::to_string(operation.lineNumber) + ": " + name + " " + operation.path +
                 (operation.hostPath.empty() ? "" : " (host: " + operation.hostPath + ")") + " failed: " + reason + "\n";
             return false;

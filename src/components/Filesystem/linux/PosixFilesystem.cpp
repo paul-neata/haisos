@@ -77,6 +77,21 @@ std::vector<DirectoryEntry> FileSystem::LocalReadDirectory(const std::string& pa
     return entries;
 }
 
+int FileSystem::LocalStat(const std::string& path, FileStatus& out) {
+    struct stat st;
+    if (::stat(path.c_str(), &st) != 0) {
+        return -1;
+    }
+    out.type = S_ISDIR(st.st_mode) ? DirectoryEntryType::Dir : DirectoryEntryType::File;
+    out.size = static_cast<uint64_t>(st.st_size);
+    out.blocks = static_cast<uint64_t>(st.st_blocks);
+    out.linkCount = static_cast<uint64_t>(st.st_nlink);
+    out.accessTime = FileDateTime{static_cast<int64_t>(st.st_atim.tv_sec), static_cast<uint32_t>(st.st_atim.tv_nsec)};
+    out.modificationTime = FileDateTime{static_cast<int64_t>(st.st_mtim.tv_sec), static_cast<uint32_t>(st.st_mtim.tv_nsec)};
+    out.changeTime = FileDateTime{static_cast<int64_t>(st.st_ctim.tv_sec), static_cast<uint32_t>(st.st_ctim.tv_nsec)};
+    return 0;
+}
+
 std::shared_ptr<IFileSystem> CreateFilesystem() {
     return FileSystem::Create();
 }

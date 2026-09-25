@@ -22,6 +22,20 @@ behaves identically no matter what you mount onto.
 - Provides file operations: open, close, read, write
 - Provides file removal (unlink, via `RemoveFile`) and directory operations: mkdir, rmdir
 - Provides custom directory listing via `ReadDirectory`
+- Provides `Stat` (the counterpart of `stat()`): a path's `FileStatus` --
+  type, size, allocated 512-byte blocks, link count, and access, modification
+  and change times, each a `FileDateTime` (seconds since the epoch plus
+  nanoseconds, as `struct timespec`; always UTC). A disk file reports what
+  `stat()` says (`_stat64()` on Windows: whole seconds, blocks estimated from
+  4 KB clusters, and the creation time as the change time). An in-memory node
+  keeps its own times -- access on every read, modification and change on
+  every write, truncation, and (for a directory) every entry added or removed
+  -- its blocks as its size needs them (`BlocksForSize`), and real link counts
+  (a directory: 2 plus its subdirectories). A builtin is a file the size of its
+  note, taking no blocks, timed from when it was placed. A mount point, and
+  every directory on the way down to one, is a directory even with nothing
+  underneath, timed from when the mount was made. There are no permissions or
+  owners to report yet. `EntryTypeOf` is built on it.
 - Holds **no current directory**. That notion belongs to a process
   (`ICurrentProcess::IO()`, an `IFileIO`), not to a filesystem: one filesystem is
   reachable from every process under an OS, so a cwd living here would be a
@@ -30,6 +44,22 @@ behaves identically no matter what you mount onto.
   and a process's `IFileIO` resolves against its working directory before
   calling in. A running program never holds an `IFileSystem`: it holds an
   `IFileIO`, which is the only thing that can make sense of a bare name.
+- Keeps a **builtin command list** per filesystem (`AddBuiltinCommand`,
+  `RemoveBuiltinCommand`, `IsBuiltinCommand`; see `IBuiltinCommands`). It lives
+  in `MountableFileSystem`, so every filesystem has one and behaves alike. A
+  builtin of a filesystem's own list is consulted **before** its mounts: it
+  lists as a file in its directory, reads as `BuiltinCommandFileContent(name)`
+  (`BuiltinCommandFile.h`), and cannot be opened for writing, created over, or
+  removed with `RemoveFile`; `RemoveDirectory` refuses its directory and every
+  one above it, checked before routing so a directory served by a mount is
+  pinned too. Nothing is written anywhere -- on a `PhysicalFileSystem` the
+  builtin exists only in the list. `IsBuiltinCommand` then asks whatever serves
+  the path underneath: a mount, or (`LocalIsBuiltinCommand`) the filesystem a
+  view wraps -- `ReadOnlyFileSystem`'s inner one, `SubFileSystem`'s root,
+  `ComposedFileSystem`'s main. Every other operation already reaches the
+  underlying filesystem through its public methods, so its builtins stay
+  protected through any view of it. Placing a builtin is how an OS is
+  assembled: `IFileIO` can only ask, never place.
 - `FileSystem` uses platform-specific backends:
   - **Linux**: POSIX calls (`linux/PosixFilesystem.cpp`)
   - **Windows**: Windows CRT (`windows/WindowsFilesystem.cpp`)
@@ -44,6 +74,7 @@ behaves identically no matter what you mount onto.
 - `SubFileSystem` - confines access to a sub-path of another `IFileSystem`, resolved purely lexically (no real disk access, unlike `PhysicalFileSystem`); cannot actually escape its base path by construction
 - `ComposedFileSystem` - overlays one `IFileSystem` inside another at a path, without touching either; it is a filesystem that delegates to `main` with the overlay registered as a mount point
 - `MountableFileSystem` - the base every filesystem here derives from; implements `Mount`/`Unmount` and the routing they need, so a subclass only implements the `Local*` operations for the paths it owns itself
-- `MountPoints` - the mount table behind that: longest-prefix path matching, plus the file-descriptor translation a mount requires (the two filesystems hand out descriptors from independent namespaces that both start at 3, so a mounted file's descriptor is re-issued from a range far above any real one and can never be confused with the host's)
+- `MountPoints` - the mount table behind that: longest-prefix path matching, plus the file-descriptor translation a mount requires (the two filesystems hand out descriptors from independent namespaces that both start at 3, so a mounted file's descriptor is re-issued from a range far above any real one and can never be confused with the host's). The synthetic range is allocated from one program-wide counter (`AllocateSyntheticFd`), not one per table: filesystems stack, and an inner one's synthetic fd passes up through the outer one untranslated, so per-table counters would collide. Builtin command files take their fds from the same counter.
+- `FilesystemUtils.h` / `VirtualPath.h` - header-only helpers shared beyond this component: `ReadWholeFile`, `EntryTypeOf` (what is at a path -- `Stat`'s type, or nothing), the open-flag constants, and lexical path handling (`NormalizeVirtualPath`, `VirtualParentOf`, `VirtualLastSegment`)
 
 These four are created via `IFileSystemService` (`src/components/FileSystemService/`), not directly.

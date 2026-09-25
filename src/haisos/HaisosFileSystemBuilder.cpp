@@ -24,7 +24,8 @@ std::shared_ptr<IFileSystem> BuildRootFileSystem(
     IFileSystemService& filesystemService,
     const HaisosFileConfig& config,
     const std::filesystem::path& haisosFileDir,
-    std::string& outError)
+    std::string& outError,
+    std::unordered_map<std::string, std::shared_ptr<IFileSystem>>* outNamedFileSystems)
 {
     if (config.fsSteps.empty()) {
         std::string rootPath = config.rootPath.empty()
@@ -99,6 +100,10 @@ std::shared_ptr<IFileSystem> BuildRootFileSystem(
             }
             namedFs[mount.mainFs] = filesystemService.CreateComposedFileSystem(mainIt->second, mount.path, mountedIt->second);
         }
+    }
+
+    if (outNamedFileSystems) {
+        *outNamedFileSystems = namedFs;
     }
 
     std::string rootName = config.rootPath.empty() ? lastDeclaredName : config.rootPath;

@@ -1,8 +1,10 @@
 #pragma once
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 #include <cstddef>
+#include <cstdint>
 
 #ifdef _WIN32
 using ssize_t = std::ptrdiff_t;
@@ -18,6 +20,48 @@ enum DirectoryEntryType : char {
 struct DirectoryEntry {
     std::string name;
     char type;
+};
+
+// A point in time, as POSIX's struct timespec: whole seconds since the Unix
+// epoch (1970-01-01 00:00:00 UTC) plus the nanoseconds into that second. It is
+// always UTC; turning it into a local date is the reader's business. Compares
+// chronologically.
+struct FileDateTime {
+    int64_t seconds = 0;
+    uint32_t nanoseconds = 0; // 0 to 999999999
+
+    bool operator==(const FileDateTime& other) const {
+        return seconds == other.seconds && nanoseconds == other.nanoseconds;
+    }
+    bool operator!=(const FileDateTime& other) const { return !(*this == other); }
+    bool operator<(const FileDateTime& other) const {
+        return seconds != other.seconds ? seconds < other.seconds : nanoseconds < other.nanoseconds;
+    }
+    bool operator>(const FileDateTime& other) const { return other < *this; }
+    bool operator<=(const FileDateTime& other) const { return !(other < *this); }
+    bool operator>=(const FileDateTime& other) const { return !(*this < other); }
+};
+
+// What IFileSystem::Stat reports about a path: the part of POSIX's struct stat
+// that means something on every filesystem here. There are no permissions or
+// owners yet, so they are not pretended to.
+struct FileStatus {
+    char type = DirectoryEntryType::File; // DirectoryEntryType::File or ::Dir
+    // In bytes. For a directory, whatever the filesystem reports (a real disk
+    // typically says 4096; an in-memory directory is 0).
+    uint64_t size = 0;
+    // Storage allocated, in 512-byte blocks, as st_blocks (what `ls -s` and
+    // the `total` line of `ls -l` count).
+    uint64_t blocks = 0;
+    // Hard links, as st_nlink: 1 for a file, and for a directory 2 plus one
+    // per subdirectory (its own "." and each child's "..").
+    uint64_t linkCount = 1;
+    // As st_atim, st_mtim and st_ctim: last read, last change of content, and
+    // last change of content or status. All zero when the filesystem cannot
+    // say. (On Windows, changeTime is the creation time, as _stat64 reports.)
+    FileDateTime accessTime;
+    FileDateTime modificationTime;
+    FileDateTime changeTime;
 };
 
 // IFileSystem is a thin abstraction over C/POSIX filesystem operations.
@@ -91,6 +135,46 @@ public:
     // so symbolic links are followed and the target's type is reported (not the
     // symlink type itself).
     virtual std::vector<DirectoryEntry> ReadDirectory(const std::string& path) = 0;
+
+    // Stat is the IFileSystem counterpart of the C stat() function: fills
+    // |out| with what is at |path| and returns 0, or returns -1 (leaving |out|
+    // untouched) if nothing is there. Symbolic links on a real disk are
+    // followed. A mount point, and every directory on the way down to one,
+    // is a directory even where the filesystem underneath has none, timed from
+    // when the mount was made; a builtin command is a file the size of its
+    // note, taking no storage (0 blocks), timed from when it was placed.
+    virtual int Stat(const std::string& path, FileStatus& out) = 0;
+
+    // --- Builtin commands (see IBuiltinCommands) ---
+    //
+    // A builtin command is a program compiled into Haisos itself, placed on a
+    // filesystem at a path so that starting that path runs it. Every
+    // filesystem keeps its own list of the builtins placed on it. On that
+    // filesystem, a builtin's path:
+    //   * lists as a file in its directory;
+    //   * reads as a short text naming the builtin, but can never be opened
+    //     for writing, created over, or removed with RemoveFile;
+    //   * pins its directory -- and every directory above it -- in place:
+    //     RemoveDirectory refuses any of them while the builtin is there.
+    //
+    // Placing one is how an OS is assembled, not something a running program
+    // may do, so like Mount these are not on IFileIO. IBuiltinConfigurator is
+    // the front door onto them, adding the checks a placement needs.
+
+    // Places builtinName at |path| in this filesystem's own list. Returns 0, or
+    // -1 if |path| is the root or already holds a builtin of this filesystem.
+    virtual int AddBuiltinCommand(const std::string& path, const std::string& builtinName) = 0;
+
+    // Removes the builtin this filesystem itself placed at |path|. Returns 0,
+    // or -1 if its own list has none there (a builtin seen through another
+    // filesystem is that one's to remove).
+    virtual int RemoveBuiltinCommand(const std::string& path) = 0;
+
+    // The name of the builtin at |path|, or nullopt if there is none. This
+    // filesystem's own list is consulted first; failing that, whichever
+    // filesystem serves |path| underneath -- a mount, or the one this
+    // filesystem is a view of (read-only, sub-path, composed) -- is asked.
+    virtual std::optional<std::string> IsBuiltinCommand(const std::string& path) = 0;
 };
 
 // A factory for composing filesystems. Every method returns a new,

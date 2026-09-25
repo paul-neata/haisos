@@ -8,6 +8,7 @@
 #include <fstream>
 #include <random>
 #include <filesystem>
+#include <unordered_map>
 
 #include <nlohmann/json.hpp>
 
@@ -115,7 +116,9 @@ int main(int argc, char* argv[]) {
             std::cerr << "Error: failed to create haisosfile\n";
             return 1;
         }
-        out << GetHaisosFileTemplate();
+        // Every builtin Haisos has is listed, so the template can never fall
+        // behind the builtins.
+        out << GetHaisosFileTemplate(CreateFactory()->CreateBuiltinCommands()->GetCommands());
         out.close();
         std::cout << "Created haisosfile\n";
         return 0;
@@ -278,17 +281,30 @@ int main(int argc, char* argv[]) {
     auto filesystemService = servicesCreator->CreateFileSystemService();
 
     std::string fsError;
-    std::shared_ptr<IFileSystem> rootFileSystem = BuildRootFileSystem(*factory, *filesystemService, parseResult.config, haisosFileDir, fsError);
+    // Kept by name as well, since a BUILTIN may be placed on any declared FS.
+    std::unordered_map<std::string, std::shared_ptr<IFileSystem>> namedFileSystems;
+    std::shared_ptr<IFileSystem> rootFileSystem = BuildRootFileSystem(
+        *factory, *filesystemService, parseResult.config, haisosFileDir, fsError, &namedFileSystems);
     if (!rootFileSystem) {
         LogError("Failed to build the root filesystem for '%s': %s", haisosFilePath.c_str(), fsError.c_str());
         std::cerr << fsError;
         return 1;
     }
 
-    // CREATE/APPEND/COPY/DELETE: the root's files are set up before any
-    // process can see them.
+    // One set of builtins for the OS; BUILTIN directives place them, and the OS
+    // runs whichever its root says a path is.
+    std::shared_ptr<IBuiltinCommands> builtinCommands = factory->CreateBuiltinCommands();
+    std::shared_ptr<IBuiltinConfigurator> builtinConfigurator = factory->CreateBuiltinConfigurator();
+    HaisosFileBuiltinTargets builtinTargets;
+    builtinTargets.namedFileSystems = &namedFileSystems;
+    builtinTargets.builtinCommands = builtinCommands.get();
+    builtinTargets.configurator = builtinConfigurator.get();
+
+    // CREATE/APPEND/CREATE_DIR/COPY/DELETE/BUILTIN: the files are set up
+    // before any process can see them.
     std::string operationsError;
-    if (!ApplyHaisosFileOperations(*factory, *rootFileSystem, parseResult.config.setupOperations, haisosFileDir, operationsError)) {
+    if (!ApplyHaisosFileOperations(*factory, *rootFileSystem, parseResult.config.setupOperations, haisosFileDir,
+            operationsError, builtinTargets)) {
         LogError("Failed to set up files for '%s': %s", haisosFilePath.c_str(), operationsError.c_str());
         std::cerr << operationsError;
         return 1;
@@ -297,7 +313,7 @@ int main(int argc, char* argv[]) {
     auto physicalConsole = factory->CreatePhysicalConsole();
     physicalConsole->Start();
 
-    auto os = factory->CreateHaisosOS(servicesCreator, physicalConsole, rootFileSystem, environment);
+    auto os = factory->CreateHaisosOS(servicesCreator, physicalConsole, rootFileSystem, builtinCommands, environment);
     if (!os) {
         LogError("Failed to create the OS for '%s'", haisosFilePath.c_str());
         std::cerr << "Error: failed to create the OS\n";

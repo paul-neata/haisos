@@ -1,5 +1,8 @@
 #pragma once
 #include "interfaces/IFileSystemService.h"
+#include <cstring>
+#include <map>
+#include <optional>
 #include <vector>
 #include <tuple>
 
@@ -93,6 +96,30 @@ public:
         m_readdirCalls.push_back({path});
         return m_readdirReturn;
     }
+
+    int Stat(const std::string& path, FileStatus& out) override {
+        m_statCalls.push_back({path});
+        if (m_statReturn == 0) {
+            out = m_statResult;
+        }
+        return m_statReturn;
+    }
+    std::vector<ReadDirCall> m_statCalls;
+    int m_statReturn = -1;
+    FileStatus m_statResult;
+
+    // Builtins are recorded like any other state here, not enforced.
+    int AddBuiltinCommand(const std::string& path, const std::string& builtinName) override {
+        return m_builtins.emplace(path, builtinName).second ? 0 : -1;
+    }
+    int RemoveBuiltinCommand(const std::string& path) override {
+        return m_builtins.erase(path) > 0 ? 0 : -1;
+    }
+    std::optional<std::string> IsBuiltinCommand(const std::string& path) override {
+        auto it = m_builtins.find(path);
+        return it == m_builtins.end() ? std::nullopt : std::optional<std::string>(it->second);
+    }
+    std::map<std::string, std::string> m_builtins;
 
     int GetLastCloseFd() const { return m_lastCloseFd; }
     const std::vector<char>& GetWriteBuffer() const { return m_writeBuffer; }

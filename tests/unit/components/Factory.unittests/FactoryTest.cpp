@@ -37,3 +37,13 @@ TEST(FactoryTest, GetNextGloballyUniquePIDNeverRepeats) {
     EXPECT_NE(second, third);
     EXPECT_NE(first, third);
 }
+
+TEST(FactoryTest, CreateBuiltinCommandsKnowsEveryBuiltin) {
+    auto factory = Factory::Create();
+    auto builtins = factory->CreateBuiltinCommands();
+    ASSERT_NE(builtins, nullptr);
+    for (const char* name : {"cat", "echo", "ls", "mkdir", "pwd"}) {
+        EXPECT_FALSE(builtins->GetBuiltinVersion(name).empty()) << name;
+    }
+    EXPECT_NE(factory->CreateBuiltinConfigurator(), nullptr);
+}

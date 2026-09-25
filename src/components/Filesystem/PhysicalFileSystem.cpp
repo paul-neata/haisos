@@ -108,6 +108,14 @@ std::vector<DirectoryEntry> PhysicalFileSystem::LocalReadDirectory(const std::st
     return m_inner->LocalReadDirectory(resolved);
 }
 
+int PhysicalFileSystem::LocalStat(const std::string& path, FileStatus& out) {
+    std::string resolved;
+    if (!ResolveWithinRoot(path, resolved)) {
+        return -1;
+    }
+    return m_inner->LocalStat(resolved, out);
+}
+
 std::string PhysicalFileSystem::AbsolutePathFor(const std::string& path) const {
     return NormalizeVirtualPath(path, "/");
 }

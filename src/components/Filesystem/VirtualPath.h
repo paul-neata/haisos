@@ -55,4 +55,16 @@ inline std::optional<std::string> RelativeToBase(const std::string& normalizedBa
     return std::nullopt;
 }
 
+// The directory holding |normalizedPath| ("/" for the root and its children).
+inline std::string VirtualParentOf(const std::string& normalizedPath) {
+    auto pos = normalizedPath.find_last_of('/');
+    return (pos == std::string::npos || pos == 0) ? "/" : normalizedPath.substr(0, pos);
+}
+
+// The last segment of |normalizedPath| (empty for the root).
+inline std::string VirtualLastSegment(const std::string& normalizedPath) {
+    auto pos = normalizedPath.find_last_of('/');
+    return (pos == std::string::npos) ? normalizedPath : normalizedPath.substr(pos + 1);
+}
+
 } // namespace Haisos

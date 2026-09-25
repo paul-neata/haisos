@@ -59,6 +59,13 @@ std::vector<DirectoryEntry> SubFileSystem::LocalReadDirectory(const std::string&
     return m_root->ReadDirectory(ResolveInRoot(path));
 }
 
+int SubFileSystem::LocalStat(const std::string& path, FileStatus& out) {
+    return m_root->Stat(ResolveInRoot(path), out);
+}
+
+std::optional<std::string> SubFileSystem::LocalIsBuiltinCommand(const std::string& path) {
+    return m_root->IsBuiltinCommand(ResolveInRoot(path));
+}
 
 std::string SubFileSystem::AbsolutePathFor(const std::string& path) const {
     return NormalizeVirtualPath(path);

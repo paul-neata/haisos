@@ -4,7 +4,9 @@
 #include "AgentProcess.h"
 #include "LuaProcess.h"
 #include "src/components/Console/AgentConsoleAdapter.h"
+#include "interfaces/IBuiltinCommands.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
+#include "src/components/Filesystem/VirtualPath.h"
 #include "src/components/libheaders/GloballyUniquePID.h"
 #include "src/components/Logger/Logger.h"
 
@@ -60,6 +62,7 @@ HaisosOS::HaisosOS(
     std::shared_ptr<INetworkService> networkService,
     std::shared_ptr<ILLMService> llmService,
     std::shared_ptr<IFileSystem> rootFileSystem,
+    std::shared_ptr<IBuiltinCommands> builtinCommands,
     std::shared_ptr<IPhysicalConsole> physicalConsole,
     std::shared_ptr<IEnvironment> environment,
     uint64_t osProcessId)
@@ -67,6 +70,7 @@ HaisosOS::HaisosOS(
     , m_networkService(std::move(networkService))
     , m_llmService(std::move(llmService))
     , m_rootFileSystem(std::move(rootFileSystem))
+    , m_builtinCommands(std::move(builtinCommands))
     , m_physicalConsole(std::move(physicalConsole))
     , m_environment(std::move(environment))
     , m_osProcessId(osProcessId)
@@ -96,7 +100,7 @@ HaisosOS::~HaisosOS() {
         // Never hold m_processesMutex while calling into a process: the swap
         // takes the whole list out under the lock, and the draining below runs
         // unlocked against this pass's private copy.
-        std::vector<std::shared_ptr<ICurrentProcess>> processes;
+        std::vector<std::shared_ptr<IProcess>> processes;
         {
             std::lock_guard<std::mutex> lock(m_processesMutex);
             processes.swap(m_processes);
@@ -121,7 +125,7 @@ HaisosOS::~HaisosOS() {
         MAX_DRAIN_PASSES, stillTracked);
 }
 
-void HaisosOS::DrainProcess(const std::shared_ptr<ICurrentProcess>& process) {
+void HaisosOS::DrainProcess(const std::shared_ptr<IProcess>& process) {
     // TriggerStop is all there is. It is only a request -- for an agent it
     // closes the command queue, so a command already in flight keeps running --
     // so the wait is bounded and the OS moves on rather than blocking shutdown
@@ -138,7 +142,7 @@ void HaisosOS::DrainProcess(const std::shared_ptr<ICurrentProcess>& process) {
 void HaisosOS::CleanupFinishedProcesses() {
     m_processes.erase(
         std::remove_if(m_processes.begin(), m_processes.end(),
-            [](const std::shared_ptr<ICurrentProcess>& process) {
+            [](const std::shared_ptr<IProcess>& process) {
                 // WaitToFinish(0) does not wait; it just reports whether the
                 // process has finished.
                 return process->WaitToFinish(0);
@@ -236,6 +240,46 @@ std::shared_ptr<ICurrentProcess> HaisosOS::StartAgentProcess(
     return process;
 }
 
+std::shared_ptr<IProcess> HaisosOS::StartBuiltinProcess(
+    std::shared_ptr<IEnvironment> environment,
+    const std::string& programPath,
+    const std::string& builtinName,
+    const std::vector<std::string>& args,
+    const std::string& workingDirectory,
+    const StartProcessOptions& options)
+{
+    if (!m_builtinCommands) {
+        LogWarning("HaisosOS: '%s' is the builtin '%s', but this OS was created without builtin commands",
+            programPath.c_str(), builtinName.c_str());
+        return nullptr;
+    }
+
+    BuiltinCommandHost host;
+    host.pid = NextGloballyUniquePID();
+    // The parent is this OS, as for an agent or Lua process, and the process
+    // reaches back to it weakly, for the same reason.
+    host.parentPid = m_osProcessId;
+    host.os = weak_from_this();
+    host.programPath = programPath;
+    const std::string name = builtinName + "_" + std::to_string(host.pid);
+    host.console = AgentConsoleAdapter::Create(m_physicalConsole, name);
+
+    auto process = m_builtinCommands->RunCommand(host, std::move(environment), builtinName, args, workingDirectory, options);
+    if (!process) {
+        LogWarning("HaisosOS: builtin '%s' (at '%s') could not be started", builtinName.c_str(), programPath.c_str());
+        return nullptr;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(m_processesMutex);
+        CleanupFinishedProcesses();
+        m_processes.push_back(process);
+    }
+    LogInfo("HaisosOS: started builtin process pid=%llu name='%s' program='%s'",
+        static_cast<unsigned long long>(host.pid), name.c_str(), programPath.c_str());
+    return process;
+}
+
 std::shared_ptr<ICurrentProcess> HaisosOS::StartLuaProcess(
     std::shared_ptr<IEnvironment> environment,
     const std::string& programPath,
@@ -306,6 +350,12 @@ std::shared_ptr<IProcess> HaisosOS::StartProcess(
         }
     }
 
+    // A builtin is known by its path, not its extension: the root filesystem
+    // says which paths are builtins, and a builtin need not look like a program.
+    if (auto builtinName = m_rootFileSystem->IsBuiltinCommand(NormalizeVirtualPath(programPath))) {
+        return StartBuiltinProcess(std::move(environment), programPath, *builtinName, args, workingDirectory, options);
+    }
+
     std::string extension = GetExtension(programPath);
 
     if (extension == ".md") {
@@ -331,6 +381,7 @@ std::shared_ptr<IHaisosOS> HaisosOS::CreateSubOS(
     std::shared_ptr<IServicesCreator> servicesCreator,
     std::shared_ptr<IPhysicalConsole> physicalConsole,
     std::shared_ptr<IFileSystem> rootFileSystem,
+    std::shared_ptr<IBuiltinCommands> builtinCommands,
     std::shared_ptr<IEnvironment> environment)
 {
     // A sub-OS is an ordinary OS; what confines it is the root filesystem the
@@ -342,6 +393,7 @@ std::shared_ptr<IHaisosOS> HaisosOS::CreateSubOS(
         std::move(servicesCreator),
         std::move(physicalConsole),
         std::move(rootFileSystem),
+        std::move(builtinCommands),
         std::move(environment),
         m_osProcessId);
 }
@@ -374,6 +426,7 @@ std::shared_ptr<HaisosOS> HaisosOS::Create(
     std::shared_ptr<IServicesCreator> servicesCreator,
     std::shared_ptr<IPhysicalConsole> physicalConsole,
     std::shared_ptr<IFileSystem> rootFileSystem,
+    std::shared_ptr<IBuiltinCommands> builtinCommands,
     std::shared_ptr<IEnvironment> environment,
     uint64_t osProcessId)
 {
@@ -399,6 +452,7 @@ std::shared_ptr<HaisosOS> HaisosOS::Create(
         std::move(networkService),
         std::move(llmService),
         std::move(rootFileSystem),
+        std::move(builtinCommands),
         std::move(physicalConsole),
         std::move(environment),
         osProcessId));

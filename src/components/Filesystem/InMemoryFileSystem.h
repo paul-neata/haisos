@@ -3,6 +3,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "FilesystemUtils.h"
 #include "MountableFileSystem.h"
 #include "interfaces/IFileSystemService.h"
 
@@ -27,6 +28,7 @@ public:
     int LocalRemoveDirectory(const std::string& pathname) override;
     int LocalRemoveFile(const std::string& pathname) override;
     std::vector<DirectoryEntry> LocalReadDirectory(const std::string& path) override;
+    int LocalStat(const std::string& path, FileStatus& out) override;
 
     std::string AbsolutePathFor(const std::string& path) const override;
 
@@ -36,7 +38,25 @@ private:
     struct Node {
         bool isDirectory = false;
         std::vector<char> data;
+        // As st_atim, st_mtim and st_ctim. A directory's content is its list
+        // of entries.
+        FileDateTime accessTime;
+        FileDateTime modificationTime;
+        FileDateTime changeTime;
+
+        static Node Make(bool isDirectory) {
+            Node node;
+            node.isDirectory = isDirectory;
+            node.accessTime = node.modificationTime = node.changeTime = CurrentFileDateTime();
+            return node;
+        }
+        // Its content changed just now.
+        void Modified() { modificationTime = changeTime = CurrentFileDateTime(); }
     };
+
+    // Marks a directory's entry list as changed now. Must be called with
+    // m_mutex held.
+    void TouchDirectory(const std::string& normalizedPath);
     struct OpenHandle {
         std::string path;
         size_t position = 0;

@@ -1,5 +1,9 @@
 #pragma once
+#include <map>
+#include <mutex>
+#include <optional>
 #include <string>
+#include <unordered_map>
 #include "MountPoints.h"
 #include "interfaces/IFileSystemService.h"
 
@@ -26,6 +30,11 @@ public:
     int RemoveDirectory(const std::string& pathname) final;
     int RemoveFile(const std::string& pathname) final;
     std::vector<DirectoryEntry> ReadDirectory(const std::string& path) final;
+    int Stat(const std::string& path, FileStatus& out) final;
+
+    int AddBuiltinCommand(const std::string& path, const std::string& builtinName) final;
+    int RemoveBuiltinCommand(const std::string& path) final;
+    std::optional<std::string> IsBuiltinCommand(const std::string& path) final;
 
 protected:
     // How this filesystem addresses |path| absolutely (resolved against its own
@@ -43,9 +52,49 @@ protected:
     virtual int LocalRemoveDirectory(const std::string& pathname) = 0;
     virtual int LocalRemoveFile(const std::string& pathname) = 0;
     virtual std::vector<DirectoryEntry> LocalReadDirectory(const std::string& path) = 0;
+    virtual int LocalStat(const std::string& path, FileStatus& out) = 0;
+
+    // Asked by IsBuiltinCommand for a path that is neither in this
+    // filesystem's own builtin list nor under a mount point. A filesystem that
+    // is a view of another one (read-only, sub-path, composed) passes the
+    // question on to it; one with nothing underneath has no builtins but its
+    // own, which is the default.
+    virtual std::optional<std::string> LocalIsBuiltinCommand(const std::string& /*path*/) { return std::nullopt; }
 
 private:
+    // An open builtin command file: its text, and how far it has been read.
+    struct BuiltinFileHandle {
+        std::string content;
+        size_t position = 0;
+    };
+
+    // If one of this filesystem's own builtins is at |absolute|, opens it --
+    // read-only, so asking to write fails with outFd = -1 -- and returns true;
+    // otherwise returns false and the path is someone else's to open.
+    bool OpenOwnBuiltin(const std::string& absolute, int flags, int& outFd);
+    // The builtin this filesystem itself placed at |absolute|, if any.
+    std::optional<std::string> OwnBuiltinAt(const std::string& absolute) const;
+    // Whether any of this filesystem's own builtins is at or below |absolute|,
+    // which is what pins a directory in place.
+    bool HasOwnBuiltinAtOrUnder(const std::string& absolute) const;
+    // Adds this filesystem's own builtins that live directly in |absolute| to
+    // a listing of it.
+    void AddOwnBuiltinEntries(const std::string& absolute, std::vector<DirectoryEntry>& entries) const;
+
     MountPoints m_mounts;
+
+    mutable std::mutex m_builtinsMutex;
+    struct Builtin {
+        std::string name;
+        // When it was placed, which is what Stat reports as its times.
+        FileDateTime placedTime;
+    };
+    // Absolute path -> builtin, for the builtins placed on this filesystem
+    // itself (not those seen through a mount or an underlying one).
+    std::map<std::string, Builtin> m_builtins;
+    // Keyed by synthetic fds (MountPoints::AllocateSyntheticFd), which no real
+    // or mounted descriptor can share.
+    std::unordered_map<int, BuiltinFileHandle> m_builtinFiles;
 };
 
 }

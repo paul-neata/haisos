@@ -1,5 +1,7 @@
 #pragma once
+#include <atomic>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -36,6 +38,14 @@ public:
     static constexpr int kSyntheticFdBase = 1 << 20;
     static bool IsSynthetic(int fd) { return fd >= kSyntheticFdBase; }
 
+    // A fresh synthetic fd. The counter is the program's, not this table's:
+    // filesystems stack (a read-only view over one with mounts of its own, say),
+    // and a synthetic fd handed out by an inner one travels up through the outer
+    // one untranslated, so two tables issuing the same number would make the
+    // outer one claim a descriptor that was never its own. Also used for the
+    // descriptors of builtin command files (see MountableFileSystem).
+    static int AllocateSyntheticFd();
+
     void Mount(const std::string& path, std::shared_ptr<IFileSystem> filesystem);
     // Removes the mount at exactly this path. Unmounting a path that is not a
     // mount point does nothing.
@@ -57,10 +67,16 @@ public:
     // no real directory there.
     std::vector<std::string> ChildSegments(const std::string& directory) const;
 
+    // When the most recent mount strictly below |directory| was made, or
+    // nullopt if there is none -- the time of a directory that exists only as
+    // the way down to a mount.
+    std::optional<FileDateTime> LatestMountTimeBelow(const std::string& directory) const;
+
 private:
     struct Entry {
         std::string path;
         std::shared_ptr<IFileSystem> filesystem;
+        FileDateTime mountedAt;
     };
 
     struct Handle {
@@ -71,7 +87,6 @@ private:
     mutable std::mutex m_mutex;
     std::vector<Entry> m_mounts;
     std::unordered_map<int, Handle> m_openFds;
-    int m_nextFd = kSyntheticFdBase;
 };
 
 }

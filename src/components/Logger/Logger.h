@@ -64,22 +64,28 @@ void LogSetConsoleOutput(bool enabled);
 // --- Agent traffic ---
 //
 // Every JSON body an agent sends to its LLM, and every one it gets back, is
-// reported here with the name of the agent it belongs to. This is separate from
-// the leveled log above: it carries whole JSON documents, is not filtered by
-// level, and goes only to the callback registered for its direction (see
-// `--log-agent-to-file` in the haisos CLI). With no callback registered, a call
-// costs a check and nothing more.
+// reported here with the path of the agent it belongs to: the names of its
+// ancestors, top-most first, then its own name -- so agentPath.size() - 1 is
+// the agent's depth in the agent tree. This is separate from the leveled log
+// above: it carries whole JSON documents, is not filtered by level, and goes
+// only to the callback registered for its direction (see `--log-agent-to-file`
+// in the haisos CLI). With no callback registered, a call costs a check and
+// nothing more.
 //
 // The callbacks run on the calling agent's thread, and several agents can call
 // at once, so a callback must be thread-safe.
-using LogAgentCallback = std::function<void(const std::string& agentName, const std::string& json)>;
+using LogAgentCallback = std::function<void(const std::vector<std::string>& agentPath, const std::string& json)>;
 
-// Reports a request body about to be sent to the LLM by agentName.
-void LogAgentSend(const std::string& agentName, const std::string& json);
+// An agent path as text: its names joined by '>' ("main>agent_1>agent_4"). An
+// empty name, or an empty path, reads as "(unnamed)".
+std::string FormatAgentPath(const std::vector<std::string>& agentPath);
 
-// Reports what came back from the LLM for agentName: the response body, or, if
-// the request failed with no body, a line saying why.
-void LogAgentReceive(const std::string& agentName, const std::string& json);
+// Reports a request body about to be sent to the LLM by the agent at agentPath.
+void LogAgentSend(const std::vector<std::string>& agentPath, const std::string& json);
+
+// Reports what came back from the LLM for the agent at agentPath: the response
+// body, or, if the request failed with no body, a line saying why.
+void LogAgentReceive(const std::vector<std::string>& agentPath, const std::string& json);
 
 // Sets the one callback for each direction, replacing any earlier one; pass
 // nullptr to remove it.

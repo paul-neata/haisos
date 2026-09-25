@@ -18,8 +18,11 @@ Thread-safe logging with configurable receivers.
 - Convenience macros: `LogError`, `LogWarning`, `LogInfo`, `LogTrace`, `LogDebug`, `LogVerboseDebug`
 - `LogAgentSend` / `LogAgentReceive` - report each JSON request an agent sends
   to its LLM, and each response (or failure) it gets back, with the agent's
-  name. `LLMCommunicator::Call` is the one caller; the name is the
-  communicator's `sourceName`, which `LLMService` sets to the agent's name.
+  path: its ancestors' names, top-most first, then its own (so the path's
+  length minus one is the agent's depth). `LLMCommunicator::Call` is the one
+  caller; the path is the communicator's `agentPath`, which `LLMService`
+  builds from the agent's parent chain when it creates the agent.
+- `FormatAgentPath` - an agent path as text, names joined by `>`.
 - `RegisterLogAgentSendCallback` / `RegisterLogAgentReceiveCallback` - set (or,
   with `nullptr`, clear) the one callback per direction. With none set, a report
   costs an atomic check. Callbacks run on the reporting agent's thread,

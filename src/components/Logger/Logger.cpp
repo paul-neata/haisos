@@ -31,7 +31,7 @@ namespace {
     std::shared_ptr<LogAgentCallback> g_agentReceiveCallback;
     std::atomic<bool> g_anyAgentCallback{false};
 
-    void CallAgentCallback(const std::shared_ptr<LogAgentCallback>& slot, const std::string& agentName, const std::string& json) {
+    void CallAgentCallback(const std::shared_ptr<LogAgentCallback>& slot, const std::vector<std::string>& agentPath, const std::string& json) {
         if (!g_anyAgentCallback.load()) {
             return;
         }
@@ -41,7 +41,7 @@ namespace {
             callback = slot;
         }
         if (callback) {
-            (*callback)(agentName, json);
+            (*callback)(agentPath, json);
         }
     }
 
@@ -137,12 +137,23 @@ void LogSetConsoleOutput(bool enabled) {
     g_consoleOutput = enabled;
 }
 
-void LogAgentSend(const std::string& agentName, const std::string& json) {
-    CallAgentCallback(g_agentSendCallback, agentName, json);
+std::string FormatAgentPath(const std::vector<std::string>& agentPath) {
+    std::string result;
+    for (const auto& name : agentPath) {
+        if (!result.empty()) {
+            result += '>';
+        }
+        result += name.empty() ? "(unnamed)" : name;
+    }
+    return result.empty() ? "(unnamed)" : result;
 }
 
-void LogAgentReceive(const std::string& agentName, const std::string& json) {
-    CallAgentCallback(g_agentReceiveCallback, agentName, json);
+void LogAgentSend(const std::vector<std::string>& agentPath, const std::string& json) {
+    CallAgentCallback(g_agentSendCallback, agentPath, json);
+}
+
+void LogAgentReceive(const std::vector<std::string>& agentPath, const std::string& json) {
+    CallAgentCallback(g_agentReceiveCallback, agentPath, json);
 }
 
 void RegisterLogAgentSendCallback(LogAgentCallback callback) {

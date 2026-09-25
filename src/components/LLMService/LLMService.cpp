@@ -66,8 +66,15 @@ std::shared_ptr<IAgent> LLMService::CreateAgent(
         return nullptr;
     }
 
+    // The agent's path from the top of its agent tree, which its LLM traffic is
+    // reported under: every ancestor's name, top-most first, then its own.
+    std::vector<std::string> agentPath{name};
+    for (auto ancestor = parent; ancestor; ancestor = ancestor->GetParent()) {
+        agentPath.insert(agentPath.begin(), ancestor->Name());
+    }
+
     auto httpClient = m_networkService->CreateHTTPClient();
-    auto llmCommunicator = LLMCommunicator::Create(std::move(httpClient), m_endpoint, m_modelName, m_apiKey, name);
+    auto llmCommunicator = LLMCommunicator::Create(std::move(httpClient), m_endpoint, m_modelName, m_apiKey, std::move(agentPath));
     std::shared_ptr<IToolFactory> toolFactory = ToolFactory::Create(*this);
     if (additionalTools) {
         toolFactory = CompositeToolFactory::Create(std::move(additionalTools), std::move(toolFactory));

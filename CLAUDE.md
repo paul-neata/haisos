@@ -71,7 +71,7 @@ haisos/
 │       └── llm_cache_proxy_database/ - Cached recordings + proxy log for llm_cache_proxy (.gitkeep'd, populated by the `llm-cache` skill)
 ├── scripts/               - Build scripts
 ├── extern/                - External dependencies (nlohmann_json, googletest, lua)
-├── todo/                  - Todo notes, one Markdown file each, written by the /todo skill (.gitkeep'd)
+├── notes/                 - Markdown notes, one per file, named by kind: note-*.md (/note skill), plan-*.md (reserved for a plan skill) (.gitkeep'd)
 ├── .claude/               - Claude Code configuration
 │   └── skills/            - Custom Claude Code skills
 ├── build/temp_<platform>/ - CMake build files (temporary, e.g., temp_linux, temp_linux_debug)

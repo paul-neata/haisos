@@ -72,6 +72,14 @@ int MountableFileSystem::RemoveDirectory(const std::string& pathname) {
     return LocalRemoveDirectory(pathname);
 }
 
+int MountableFileSystem::RemoveFile(const std::string& pathname) {
+    auto route = m_mounts.Resolve(AbsolutePathFor(pathname));
+    if (route.filesystem) {
+        return route.filesystem->RemoveFile(route.innerPath);
+    }
+    return LocalRemoveFile(pathname);
+}
+
 std::vector<DirectoryEntry> MountableFileSystem::ReadDirectory(const std::string& path) {
     const std::string absolute = AbsolutePathFor(path);
     auto route = m_mounts.Resolve(absolute);

@@ -22,6 +22,7 @@ public:
     struct DirCall { std::string path; int mode; };
     std::vector<DirCall> m_mkdirCalls;
     std::vector<DirCall> m_rmdirCalls;
+    std::vector<DirCall> m_unlinkCalls;
 
 
     struct ReadDirCall { std::string path; };
@@ -34,6 +35,7 @@ public:
     ssize_t m_writeReturn = 0;
     int m_mkdirReturn = 0;
     int m_rmdirReturn = 0;
+    int m_unlinkReturn = 0;
     std::vector<DirectoryEntry> m_readdirReturn;
 
     // IFileSystem overrides
@@ -76,6 +78,11 @@ public:
     int RemoveDirectory(const std::string& pathname) override {
         m_rmdirCalls.push_back({pathname, 0});
         return m_rmdirReturn;
+    }
+
+    int RemoveFile(const std::string& pathname) override {
+        m_unlinkCalls.push_back({pathname, 0});
+        return m_unlinkReturn;
     }
 
     // The mock records calls rather than routing, so mounting is a no-op here.

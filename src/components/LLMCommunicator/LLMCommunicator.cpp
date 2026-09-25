@@ -204,6 +204,7 @@ LLMResponse LLMCommunicator::Call(
     std::string requestJson = BuildRequestJson(m_modelName, messages, availableTools);
 
     LogVerboseDebug("[JSON_REQUEST]%s %s", sourceTag.c_str(), requestJson.c_str());
+    LogAgentSend(m_sourceName, requestJson);
 
     std::vector<HTTPHeader> headers;
     headers.push_back({"Content-Type", "application/json"});
@@ -235,6 +236,12 @@ LLMResponse LLMCommunicator::Call(
             }
         }
         LogError("HTTP request failed: status=%d error=%s body=%s", httpResponse.statusCode, httpResponse.error.c_str(), bodyError.c_str());
+        // A failed round is exactly what someone reading the agent traffic
+        // needs to see, so it is reported too: the body if one came back,
+        // otherwise why nothing did.
+        LogAgentReceive(m_sourceName, !httpResponse.body.empty() ? httpResponse.body
+            : "(no response: HTTP request failed: status=" + std::to_string(httpResponse.statusCode) +
+              (httpResponse.error.empty() ? "" : " error=" + httpResponse.error) + ")");
         LLMResponse response;
         response.done = true;
         response.done_reason = "http_error";
@@ -254,6 +261,7 @@ LLMResponse LLMCommunicator::Call(
     }
 
     LogVerboseDebug("[JSON_RESPONSE]%s %s", sourceTag.c_str(), httpResponse.body.c_str());
+    LogAgentReceive(m_sourceName, httpResponse.body);
 
     return ParseResponseJson(httpResponse.body);
 }

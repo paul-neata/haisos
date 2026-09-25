@@ -6,8 +6,8 @@
 
 namespace Haisos {
 
-// Bridges a single agent's IAgentConsole writes onto a shared IPhysicalConsole,
-// tagging each write with the agent's name.
+// Bridges a single agent's IAgentConsole onto a shared IPhysicalConsole: writes
+// are tagged with the agent's name, and lines are read from the physical console.
 class AgentConsoleAdapter : public IAgentConsole {
 public:
     static std::shared_ptr<AgentConsoleAdapter> Create(std::shared_ptr<IPhysicalConsole> physicalConsole, const std::string& sourceName) {
@@ -16,6 +16,7 @@ public:
     ~AgentConsoleAdapter() override;
 
     void Write(const std::string& message) override;
+    std::optional<std::string> ReadLine() override;
 
 private:
     AgentConsoleAdapter(std::shared_ptr<IPhysicalConsole> physicalConsole, const std::string& sourceName);

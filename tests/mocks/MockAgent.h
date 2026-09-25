@@ -1,7 +1,9 @@
 #pragma once
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -9,15 +11,20 @@
 
 namespace Haisos::Mocks {
 
+// What an input loop or another thread drives -- commands, stopping and
+// finishing -- is safe to use across threads; the rest is set up by the test
+// before anything runs.
 class MockAgent : public IAgent {
 public:
     MockAgent() = default;
 
     void Post(const std::string& command) override {
+        std::lock_guard<std::mutex> lock(m_commandsMutex);
         m_commands.push_back(command);
     }
 
     void Send(const std::string& command) override {
+        std::lock_guard<std::mutex> lock(m_commandsMutex);
         m_commands.push_back(command);
     }
 
@@ -88,7 +95,10 @@ public:
         m_children.push_back(child);
     }
 
-    const std::vector<std::string>& GetCommands() const { return m_commands; }
+    std::vector<std::string> GetCommands() const {
+        std::lock_guard<std::mutex> lock(m_commandsMutex);
+        return m_commands;
+    }
     bool WasStopTriggered() const { return m_stopTriggered; }
     bool WasWaitedWithTimeout() const { return m_waitedWithTimeout; }
     uint64_t GetWaitTimeoutValue() const { return m_waitTimeoutValue; }
@@ -101,11 +111,12 @@ public:
     void SetInteractive(bool interactive) { m_interactive = interactive; }
 
 private:
+    mutable std::mutex m_commandsMutex;
     std::vector<std::string> m_commands;
-    bool m_stopTriggered = false;
-    bool m_waitedWithTimeout = false;
-    uint64_t m_waitTimeoutValue = 0;
-    bool m_finished = false;
+    std::atomic<bool> m_stopTriggered{false};
+    std::atomic<bool> m_waitedWithTimeout{false};
+    std::atomic<uint64_t> m_waitTimeoutValue{0};
+    std::atomic<bool> m_finished{false};
     std::string m_name = "MockAgent";
     std::string m_startTime;
     std::string m_consoleOutput;

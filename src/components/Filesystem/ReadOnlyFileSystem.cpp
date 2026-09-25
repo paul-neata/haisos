@@ -45,6 +45,10 @@ int ReadOnlyFileSystem::LocalRemoveDirectory(const std::string& /*pathname*/) {
     return -1;
 }
 
+int ReadOnlyFileSystem::LocalRemoveFile(const std::string& /*pathname*/) {
+    return -1;
+}
+
 std::vector<DirectoryEntry> ReadOnlyFileSystem::LocalReadDirectory(const std::string& path) {
     return m_inner->ReadDirectory(NormalizeVirtualPath(path));
 }

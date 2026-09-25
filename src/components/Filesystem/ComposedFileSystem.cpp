@@ -54,6 +54,10 @@ int ComposedFileSystem::LocalRemoveDirectory(const std::string& pathname) {
     return m_main->RemoveDirectory(AbsolutePathFor(pathname));
 }
 
+int ComposedFileSystem::LocalRemoveFile(const std::string& pathname) {
+    return m_main->RemoveFile(AbsolutePathFor(pathname));
+}
+
 std::vector<DirectoryEntry> ComposedFileSystem::LocalReadDirectory(const std::string& path) {
     return m_main->ReadDirectory(AbsolutePathFor(path));
 }

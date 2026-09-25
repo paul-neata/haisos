@@ -5,6 +5,7 @@
 #include <vector>
 #include "Console.h"
 #include "AgentConsoleAdapter.h"
+#include "InMemoryAgentConsole.h"
 #include "src/components/Logger/Logger.h"
 
 using namespace Haisos;
@@ -19,6 +20,15 @@ public:
         std::lock_guard<std::mutex> lock(m_mutex);
         m_calls.push_back(message);
     }
+    std::optional<std::string> ReadLine() override {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_input.empty()) {
+            return std::nullopt;
+        }
+        std::string line = m_input.front();
+        m_input.erase(m_input.begin());
+        return line;
+    }
     void Start() override {}
     void Stop() override {}
 
@@ -27,9 +37,15 @@ public:
         return m_calls;
     }
 
+    void SetInput(std::vector<std::string> lines) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_input = std::move(lines);
+    }
+
 private:
     mutable std::mutex m_mutex;
     std::vector<std::string> m_calls;
+    std::vector<std::string> m_input;
 };
 
 }
@@ -88,4 +104,18 @@ TEST(ConsoleTest, IsNotALogReceiver) {
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
     console->Stop();
+}
+
+TEST(AgentConsoleAdapterTest, ReadsLinesFromThePhysicalConsoleUntagged) {
+    auto physical = std::make_shared<RecordingPhysicalConsole>();
+    physical->SetInput({"typed", ""});
+    auto adapter = AgentConsoleAdapter::Create(physical, "my_process");
+
+    EXPECT_EQ(adapter->ReadLine(), std::optional<std::string>("typed"));
+    EXPECT_EQ(adapter->ReadLine(), std::optional<std::string>(""));
+    EXPECT_EQ(adapter->ReadLine(), std::nullopt);
+}
+
+TEST(InMemoryAgentConsoleTest, HasNothingToRead) {
+    EXPECT_EQ(InMemoryAgentConsole::Create()->ReadLine(), std::nullopt);
 }

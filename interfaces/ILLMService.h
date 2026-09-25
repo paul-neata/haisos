@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 #include <nlohmann/json.hpp>
@@ -91,13 +92,20 @@ public:
     virtual std::vector<std::tuple<std::string, std::string, nlohmann::json>> GetAvailableToolDescriptions() const = 0;
 };
 
-// A single agent's write-only console. Deliberately minimal: an agent only ever
-// needs to append its own output. Whether that ends up on the real console, in
-// memory, or nowhere is decided by whoever creates it (see IFactory).
+// A single agent's console. Deliberately minimal: an agent appends its own
+// output, and an interactive one is fed the lines its user types. Whether that
+// is the real console, memory, or nothing is decided by whoever creates it
+// (see IFactory).
 class IAgentConsole {
 public:
     virtual ~IAgentConsole() = default;
     virtual void Write(const std::string& message) = 0;
+
+    // Blocks until the next line of input arrives and returns it, without its
+    // line ending; nullopt once no more input will ever arrive (see
+    // IPhysicalConsole::ReadLine). A console with nowhere to read from returns
+    // nullopt straight away.
+    virtual std::optional<std::string> ReadLine() = 0;
 };
 
 class ILLMService {

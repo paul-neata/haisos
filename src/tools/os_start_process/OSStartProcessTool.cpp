@@ -54,9 +54,12 @@ ToolResult OSStartProcessTool::Call(std::shared_ptr<IAgent> callerAgent, const n
 
     // The new process runs with a copy of the OS's environment: it inherits
     // what the OS was given, and its own edits stay its own. It starts in the
-    // calling process's working directory, the way a shell would.
+    // calling process's working directory, the way a shell would. It is never
+    // interactive: the console's input belongs to whoever the haisosfile gave
+    // it to, not to a process an agent happened to start.
     auto process = context.os->StartProcess(
-        context.os->GetOsEnvironment()->Clone(), path, programArgs, context.io->GetCurrentDirectory());
+        context.os->GetOsEnvironment()->Clone(), path, programArgs, context.io->GetCurrentDirectory(),
+        StartProcessOptions{});
     if (!process) {
         LogWarning("OSStartProcessTool: failed to start process '%s'", path.c_str());
         return ToolResult{"Failed to start process: " + path, true};

@@ -6,9 +6,34 @@
 
 namespace Haisos {
 
+// One "RUN [-i] <absolute_program_path> <args...>" directive. The program
+// starts at "/", the OS's root. interactive is set by "-i": see
+// StartProcessOptions::interactiveAgent.
 struct HaisosFileRunEntry {
     std::string programPath;
     std::vector<std::string> args;
+    bool interactive = false;
+};
+
+// A directive acting on the files of the OS's root filesystem.
+enum class HaisosFileOperationType {
+    Create,  // CREATE <path> <content>: write content to path, replacing it
+    Append,  // APPEND <path> <content>: append content to path, creating it if missing
+    Copy,    // COPY <host_path> <path>: copy a host file into the root
+    Delete,  // DELETE <path>: remove a file, or a directory and all it holds
+    OutCopy, // OUTCOPY <path> <host_path>: copy a file out of the root to the host
+};
+
+// One CREATE/APPEND/COPY/DELETE/OUTCOPY directive, already substituted.
+// path is always the one in the Haisos OS, and absolute; hostPath is the one on
+// the real disk, resolved by the caller against the haisosfile's directory
+// when relative (as for FS PHYSICAL).
+struct HaisosFileOperation {
+    HaisosFileOperationType type = HaisosFileOperationType::Create;
+    std::string path;
+    std::string hostPath; // COPY's source, OUTCOPY's destination
+    std::string content;  // CREATE/APPEND
+    int lineNumber = 0;   // for error messages
 };
 
 // One "FS <name> <type> <args...>" directive. type is one of "PHYSICAL",
@@ -65,6 +90,12 @@ struct HaisosFileConfig {
     // ENV directives, in file order. Applied to the OS's initial environment,
     // which every process and sub-OS then inherits.
     std::vector<HaisosFileEnvEntry> envEntries;
+    // CREATE/APPEND/COPY/DELETE directives, in file order: applied to the root
+    // filesystem once it is built, before any RUN process starts.
+    std::vector<HaisosFileOperation> setupOperations;
+    // OUTCOPY directives, in file order: applied once every RUN process has
+    // finished, to pull what they produced out of the OS.
+    std::vector<HaisosFileOperation> outCopyOperations;
 };
 
 struct HaisosFileParseResult {

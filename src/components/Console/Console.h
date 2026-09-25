@@ -1,6 +1,8 @@
 #pragma once
-#include <string>
 #include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
 #include <thread>
 #include "interfaces/IFactory.h"
 #include "src/components/libheaders/SynchronizedQueue.h"
@@ -23,6 +25,9 @@ public:
     Console& operator=(const Console&) = delete;
 
     void Write(const std::string& message) override;
+    // Reads a line from stdin. Serialized, so two readers never split one line
+    // between them; which of them gets the next line is first come, first served.
+    std::optional<std::string> ReadLine() override;
 
     void Start() override;
     void Stop() override;
@@ -34,6 +39,7 @@ private:
 
     SynchronizedQueue<std::string> m_queue;
     std::thread m_backgroundThread;
+    std::mutex m_readMutex;
 };
 
 }

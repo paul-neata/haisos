@@ -28,7 +28,8 @@ public:
         std::shared_ptr<IEnvironment> environment,
         const std::string& programPath,
         const std::vector<std::string>& args,
-        const std::string& workingDirectory) override;
+        const std::string& workingDirectory,
+        const StartProcessOptions& options) override;
     std::vector<std::shared_ptr<IProcess>> GetRunningProcesses() const override;
     std::shared_ptr<IHaisosOS> CreateSubOS(
         std::shared_ptr<IServicesCreator> servicesCreator,
@@ -59,7 +60,8 @@ private:
         std::shared_ptr<IEnvironment> environment,
         const std::string& programPath,
         const std::vector<std::string>& args,
-        const std::string& workingDirectory);
+        const std::string& workingDirectory,
+        bool interactive);
     std::shared_ptr<ICurrentProcess> StartLuaProcess(
         std::shared_ptr<IEnvironment> environment,
         const std::string& programPath,

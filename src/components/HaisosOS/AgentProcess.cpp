@@ -1,4 +1,5 @@
 #include "AgentProcess.h"
+#include <chrono>
 #include "src/components/Logger/Logger.h"
 
 namespace Haisos {
@@ -11,7 +12,9 @@ std::shared_ptr<AgentProcess> AgentProcess::Create(
     const std::string& workingDirectory,
     std::weak_ptr<IHaisosOS> os,
     std::shared_ptr<CurrentProcessHandle> selfHandle,
-    std::shared_ptr<Agent> agent)
+    std::shared_ptr<Agent> agent,
+    const std::string& program,
+    std::shared_ptr<IAgentConsole> interactiveInput)
 {
     // The two things this process cannot be without, refused here so that every
     // method below may simply use them. An agent process with no agent has no
@@ -27,12 +30,21 @@ std::shared_ptr<AgentProcess> AgentProcess::Create(
     }
 
     auto process = std::shared_ptr<AgentProcess>(new AgentProcess(
-        pid, parentPid, std::move(environment), path, workingDirectory, std::move(os), std::move(agent)));
+        pid, parentPid, std::move(environment), path, workingDirectory, std::move(os), std::move(agent),
+        std::move(interactiveInput)));
     // The process's own tools reach it through this handle. Filling it in here
     // -- before the agent is given anything to do -- is what guarantees no tool
     // can ever observe it empty.
     if (selfHandle) {
         selfHandle->Set(process);
+    }
+
+    // Only now: the agent's first command may call a tool, and a tool must
+    // find the process it acts for, which the handle now provides.
+    process->m_agent->Post(program);
+    // And only after the program: a line typed early must not overtake it.
+    if (process->m_inputLoop) {
+        process->m_inputLoop->Start();
     }
     return process;
 }
@@ -44,7 +56,8 @@ AgentProcess::AgentProcess(
     const std::string& path,
     const std::string& workingDirectory,
     std::weak_ptr<IHaisosOS> os,
-    std::shared_ptr<Agent> agent)
+    std::shared_ptr<Agent> agent,
+    std::shared_ptr<IAgentConsole> interactiveInput)
     : m_pid(pid)
     , m_parentPid(parentPid)
     , m_environment(std::move(environment))
@@ -52,10 +65,15 @@ AgentProcess::AgentProcess(
     , m_os(os)
     , m_io(ProcessFileIO::Create(std::move(os), workingDirectory))
     , m_agent(std::move(agent))
+    , m_inputLoop(interactiveInput ? AgentInputLoop::Create(m_agent, std::move(interactiveInput)) : nullptr)
 {
 }
 
-AgentProcess::~AgentProcess() = default;
+AgentProcess::~AgentProcess() {
+    // Nothing will feed the agent once the process is gone, so it is asked to
+    // stop before the input loop's destructor waits for it to be closed.
+    m_agent->TriggerStop();
+}
 
 uint64_t AgentProcess::GetPid() const {
     return m_pid;
@@ -84,7 +102,18 @@ void AgentProcess::TriggerStop() {
 }
 
 bool AgentProcess::WaitToFinish(uint64_t timeoutMs) {
-    return m_agent->WaitToFinish(timeoutMs);
+    const auto start = std::chrono::steady_clock::now();
+    if (!m_agent->WaitToFinish(timeoutMs)) {
+        return false;
+    }
+    if (!m_inputLoop) {
+        return true;
+    }
+    // One budget for both: whatever the agent's wait used up is not given to
+    // the input loop again.
+    const auto elapsedMs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start).count());
+    return m_inputLoop->WaitToFinish(elapsedMs >= timeoutMs ? 0 : timeoutMs - elapsedMs);
 }
 
 std::shared_ptr<IFileIO> AgentProcess::IO() const {

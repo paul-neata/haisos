@@ -19,7 +19,9 @@
 #include "interfaces/IFactory.h"
 #include "interfaces/IServicesCreator.h"
 #include "interfaces/IHaisosOS.h"
+#include "AgentTrafficLog.h"
 #include "CliParser.h"
+#include "HaisosFileOperations.h"
 #include "HaisosFileParser.h"
 #include "HaisosFileSystemBuilder.h"
 
@@ -42,15 +44,6 @@ std::string GetCurrentTimestamp() {
     std::ostringstream oss;
     oss << std::put_time(&tm_buf, "%Y-%m-%d %H:%M:%S");
     return oss.str();
-}
-
-std::string PrettyPrintJson(const std::string& jsonStr) {
-    try {
-        auto j = nlohmann::json::parse(jsonStr, nullptr, false);
-        return j.dump(2);
-    } catch (...) {
-        return jsonStr;
-    }
 }
 
 // Reads filePath relative to the current working directory, rejecting any
@@ -167,6 +160,28 @@ int main(int argc, char* argv[]) {
 
     LogInfo("Haisos starting");
 
+    // --log-agent-to-file: every agent's LLM traffic, reported by the Logger's
+    // agent callbacks. The log owns its file and the callbacks share it, so it
+    // stays open for as long as any agent could still report.
+    if (!result.options.logAgentFilePath.empty()) {
+        auto agentFile = std::make_unique<std::ofstream>(result.options.logAgentFilePath, std::ios::out | std::ios::trunc);
+        if (!agentFile->is_open()) {
+            LogError("Failed to open --log-agent-to-file path: %s", result.options.logAgentFilePath.c_str());
+            std::cerr << "Error: failed to open agent log file: " << result.options.logAgentFilePath << "\n";
+            return 1;
+        }
+        auto agentLog = std::make_shared<AgentTrafficLog>(std::move(agentFile), result.options.logAgentFileType);
+        RegisterLogAgentSendCallback([agentLog](const std::string& agentName, const std::string& json) {
+            agentLog->OnSend(agentName, json);
+        });
+        RegisterLogAgentReceiveCallback([agentLog](const std::string& agentName, const std::string& json) {
+            agentLog->OnReceive(agentName, json);
+        });
+        LogInfo("Logging agent LLM traffic (%s) to: %s",
+            result.options.logAgentFileType == AgentTrafficLogType::Diff ? "diff" : "full",
+            result.options.logAgentFilePath.c_str());
+    }
+
     // Raw LLM JSON traffic is logged by LLMCommunicator at VerboseDebug level, tagged
     // "[JSON_REQUEST] "/"[JSON_RESPONSE] ". --log-json-in-temp taps that via a log
     // receiver instead of a bespoke callback mechanism.
@@ -270,6 +285,15 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // CREATE/APPEND/COPY/DELETE: the root's files are set up before any
+    // process can see them.
+    std::string operationsError;
+    if (!ApplyHaisosFileOperations(*factory, *rootFileSystem, parseResult.config.setupOperations, haisosFileDir, operationsError)) {
+        LogError("Failed to set up files for '%s': %s", haisosFilePath.c_str(), operationsError.c_str());
+        std::cerr << operationsError;
+        return 1;
+    }
+
     auto physicalConsole = factory->CreatePhysicalConsole();
     physicalConsole->Start();
 
@@ -287,8 +311,10 @@ int main(int argc, char* argv[]) {
         // inherited implicitly, and one process's edits never reach another's.
         // Each RUN starts at the OS's root; a haisosfile has no way to say
         // otherwise yet.
+        StartProcessOptions options;
+        options.interactiveAgent = runEntry.interactive;
         auto process = os->StartProcess(
-            os->GetOsEnvironment()->Clone(), runEntry.programPath, runEntry.args, /*workingDirectory=*/"");
+            os->GetOsEnvironment()->Clone(), runEntry.programPath, runEntry.args, /*workingDirectory=*/"/", options);
         if (!process) {
             LogError("Failed to start process: %s", runEntry.programPath.c_str());
             std::cerr << "Error: Failed to start process: " << runEntry.programPath << "\n";
@@ -315,6 +341,14 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // OUTCOPY: what the processes produced is pulled out once they are done.
+    int exitCode = 0;
+    if (!ApplyHaisosFileOperations(*factory, *os->GetRootFileSystem(), parseResult.config.outCopyOperations, haisosFileDir, operationsError)) {
+        LogError("Failed to copy files out of the OS for '%s': %s", haisosFilePath.c_str(), operationsError.c_str());
+        std::cerr << operationsError;
+        exitCode = 1;
+    }
+
     physicalConsole->Stop();
 
     if (tempJsonLog) {
@@ -322,5 +356,5 @@ int main(int argc, char* argv[]) {
     }
 
     LogInfo("Haisos finished");
-    return 0;
+    return exitCode;
 }

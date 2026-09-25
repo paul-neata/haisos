@@ -39,6 +39,15 @@ constexpr size_t MAX_CONCURRENT_PROCESSES = 1024;
 // before the OS stops waiting on it and moves on to the next one.
 constexpr uint64_t PROCESS_STOP_TIMEOUT_MS = 5000;
 
+// Appended to an interactive agent's system prompts. Without it the agent has no
+// way to know that its conversation goes on after its program, nor how it ends.
+constexpr const char* kInteractiveAgentSystemPrompt =
+    "You are running interactively: once you have dealt with your program, every "
+    "further user message is a line the user typed on the console, and you keep "
+    "answering them one at a time. When the user wants to end the session, or your "
+    "work is complete and nothing more is expected, call the self_close tool to "
+    "close yourself.";
+
 // Processes are drained in passes, because a process started concurrently with
 // shutdown can land in m_processes after the first snapshot was taken. The pass
 // count is capped so the destructor can never spin forever.
@@ -141,7 +150,8 @@ std::shared_ptr<ICurrentProcess> HaisosOS::StartAgentProcess(
     std::shared_ptr<IEnvironment> environment,
     const std::string& programPath,
     const std::vector<std::string>& args,
-    const std::string& workingDirectory)
+    const std::string& workingDirectory,
+    bool interactive)
 {
     std::string content;
     if (!ReadWholeFile(*m_rootFileSystem, programPath, content)) {
@@ -173,15 +183,21 @@ std::shared_ptr<ICurrentProcess> HaisosOS::StartAgentProcess(
     // the Security section of the root CLAUDE.md). The handle exists before the
     // process does, because the agent needs its tools first.
     auto processHandle = CurrentProcessHandle::Create();
-    // A process's agent is not interactive: it answers what its program asked
-    // and then finishes, which is what makes the process finish too.
+    // A non-interactive agent answers what its program asked and then
+    // finishes, which is what makes the process finish too. An interactive one
+    // then goes on to answer whatever is typed on its console, until it closes
+    // itself -- and has to be told that is how it ends.
+    std::vector<std::string> systemPrompts = {"You are a helpful AI assistant."};
+    if (interactive) {
+        systemPrompts.push_back(kInteractiveAgentSystemPrompt);
+    }
     auto agent = m_llmService->CreateAgent(
         name,
         /*parent=*/nullptr,
-        std::move(console),
+        console,
         OSToolFactory::Create(processHandle),
-        {"You are a helpful AI assistant."},
-        /*isInteractive=*/false);
+        systemPrompts,
+        interactive);
     auto concreteAgent = std::dynamic_pointer_cast<Agent>(agent);
     if (!concreteAgent) {
         LogError("HaisosOS: the LLM service returned an agent this OS cannot own: %s", programPath.c_str());
@@ -195,9 +211,14 @@ std::shared_ptr<ICurrentProcess> HaisosOS::StartAgentProcess(
     // weak_from_this: the process reaches back to this OS for everything
     // outside itself, and an OS owns its processes, so the reference must not
     // be strong. A narrowed per-process OS would be passed here instead.
+    // AgentProcess::Create posts the program only once the process exists:
+    // the agent's first command may call a tool, and a tool must find the
+    // process it acts for. An interactive process is then fed from the same
+    // console the agent writes to.
     auto process = AgentProcess::Create(
         pid, /*parentPid=*/m_osProcessId, std::move(environment), programPath, workingDirectory,
-        weak_from_this(), processHandle, concreteAgent);
+        weak_from_this(), processHandle, concreteAgent, content,
+        interactive ? std::move(console) : nullptr);
     if (!process) {
         // AgentProcess::Create has already said why. The agent is dropped here
         // unstarted: nothing was posted to it, and its destructor waits out the
@@ -205,17 +226,13 @@ std::shared_ptr<ICurrentProcess> HaisosOS::StartAgentProcess(
         return nullptr;
     }
 
-    // Only now: the agent's first command may call a tool, and a tool must find
-    // the process it acts for, which AgentProcess::Create has just filled in.
-    concreteAgent->Post(content);
-
     {
         std::lock_guard<std::mutex> lock(m_processesMutex);
         CleanupFinishedProcesses();
         m_processes.push_back(process);
     }
-    LogInfo("HaisosOS: started agent process pid=%llu name='%s' program='%s'",
-        static_cast<unsigned long long>(pid), name.c_str(), programPath.c_str());
+    LogInfo("HaisosOS: started %sagent process pid=%llu name='%s' program='%s'",
+        interactive ? "interactive " : "", static_cast<unsigned long long>(pid), name.c_str(), programPath.c_str());
     return process;
 }
 
@@ -261,7 +278,8 @@ std::shared_ptr<IProcess> HaisosOS::StartProcess(
     std::shared_ptr<IEnvironment> environment,
     const std::string& programPath,
     const std::vector<std::string>& args,
-    const std::string& workingDirectory)
+    const std::string& workingDirectory,
+    const StartProcessOptions& options)
 {
     // The environment is never taken from the OS behind the caller's back: a
     // process runs with what it was handed, so a missing one is a bug in the
@@ -291,7 +309,10 @@ std::shared_ptr<IProcess> HaisosOS::StartProcess(
     std::string extension = GetExtension(programPath);
 
     if (extension == ".md") {
-        return StartAgentProcess(std::move(environment), programPath, args, workingDirectory);
+        return StartAgentProcess(std::move(environment), programPath, args, workingDirectory, options.interactiveAgent);
+    }
+    if (options.interactiveAgent) {
+        LogDebug("HaisosOS: interactiveAgent only applies to .md programs; ignoring it for '%s'", programPath.c_str());
     }
     if (extension == ".lua") {
         return StartLuaProcess(std::move(environment), programPath, args, workingDirectory);

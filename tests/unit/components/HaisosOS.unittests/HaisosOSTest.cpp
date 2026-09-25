@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
+#include <deque>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include "HaisosOS.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
 #include "Factory.h"
@@ -12,6 +14,49 @@ namespace {
 
 const std::string kTestRoot = "/tmp/haisos_os_test_root";
 const std::string kUnreachableEndpoint = "http://localhost:9999/api/chat";
+// Generous: every LLM call fails fast against the unreachable endpoint, so this
+// only bounds a hang.
+constexpr uint64_t kProcessWaitMs = 30000;
+
+// A physical console with scripted input: ReadLine hands out the given lines,
+// then reports end of input.
+class ScriptedPhysicalConsole : public IPhysicalConsole {
+public:
+    explicit ScriptedPhysicalConsole(std::vector<std::string> lines) : m_lines(lines.begin(), lines.end()) {}
+
+    void Write(const std::string&) override {}
+    std::optional<std::string> ReadLine() override {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        ++m_readLineCalls;
+        if (m_lines.empty()) {
+            return std::nullopt;
+        }
+        std::string line = m_lines.front();
+        m_lines.pop_front();
+        return line;
+    }
+    void Start() override {}
+    void Stop() override {}
+
+    int ReadLineCalls() const {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_readLineCalls;
+    }
+
+private:
+    mutable std::mutex m_mutex;
+    std::deque<std::string> m_lines;
+    int m_readLineCalls = 0;
+};
+
+bool HistoryMentions(const nlohmann::json& history, const std::string& text) {
+    for (const auto& message : history) {
+        if (message.value("role", "") == "user" && message.value("content", "").find(text) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
 
 class HaisosOSTest : public ::testing::Test {
 protected:
@@ -39,10 +84,12 @@ protected:
         return environment;
     }
 
-    std::shared_ptr<IHaisosOS> BuildOS() {
+    std::shared_ptr<IHaisosOS> BuildOS(std::shared_ptr<IPhysicalConsole> physicalConsole = nullptr) {
         std::shared_ptr<IServicesCreator> servicesCreator = m_factory->CreateServicesCreator();
         std::shared_ptr<IFileSystem> rootFileSystem = m_factory->CreatePhysicalFileSystem(kTestRoot);
-        auto physicalConsole = m_factory->CreatePhysicalConsole();
+        if (!physicalConsole) {
+            physicalConsole = m_factory->CreatePhysicalConsole();
+        }
         return m_factory->CreateHaisosOS(
             std::move(servicesCreator), physicalConsole, rootFileSystem, TestEnvironment());
     }
@@ -53,8 +100,8 @@ protected:
 TEST_F(HaisosOSTest, StartProcessAssignsUniqueTopLevelPids) {
     auto os = BuildOS();
 
-    auto p1 = os->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/"");
-    auto p2 = os->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/"");
+    auto p1 = os->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/"", StartProcessOptions{});
+    auto p2 = os->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/"", StartProcessOptions{});
 
     ASSERT_NE(p1, nullptr);
     ASSERT_NE(p2, nullptr);
@@ -83,7 +130,7 @@ TEST_F(HaisosOSTest, StartProcessKeepsTheEnvironmentItWasGiven) {
     auto environment = TestEnvironment();
     environment->SetVariable("GREETING", "hello");
 
-    auto process = os->StartProcess(environment, "hello.md", {}, /*workingDirectory=*/"");
+    auto process = os->StartProcess(environment, "hello.md", {}, /*workingDirectory=*/"", StartProcessOptions{});
     ASSERT_NE(process, nullptr);
     ASSERT_NE(process->GetEnvironment(), nullptr);
     EXPECT_EQ(process->GetEnvironment()->GetVariable("GREETING").value_or(""), "hello");
@@ -93,17 +140,17 @@ TEST_F(HaisosOSTest, StartProcessKeepsTheEnvironmentItWasGiven) {
 
 TEST_F(HaisosOSTest, StartProcessWithoutAnEnvironmentReturnsNull) {
     auto os = BuildOS();
-    EXPECT_EQ(os->StartProcess(nullptr, "hello.md", {}, /*workingDirectory=*/""), nullptr);
+    EXPECT_EQ(os->StartProcess(nullptr, "hello.md", {}, /*workingDirectory=*/"", StartProcessOptions{}), nullptr);
 }
 
 TEST_F(HaisosOSTest, StartProcessWithUnsupportedExtensionReturnsNull) {
     auto os = BuildOS();
-    EXPECT_EQ(os->StartProcess(TestEnvironment(), "not_a_program.txt", {}, /*workingDirectory=*/""), nullptr);
+    EXPECT_EQ(os->StartProcess(TestEnvironment(), "not_a_program.txt", {}, /*workingDirectory=*/"", StartProcessOptions{}), nullptr);
 }
 
 TEST_F(HaisosOSTest, StartProcessRunsLuaScriptToCompletion) {
     auto os = BuildOS();
-    auto process = os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"");
+    auto process = os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"", StartProcessOptions{});
     ASSERT_NE(process, nullptr);
     // Not an agent, so no agent name.
     EXPECT_TRUE(process->StartingAgentName().empty());
@@ -114,12 +161,12 @@ TEST_F(HaisosOSTest, StartProcessRunsLuaScriptToCompletion) {
 
 TEST_F(HaisosOSTest, StartProcessLuaMissingFileReturnsNull) {
     auto os = BuildOS();
-    EXPECT_EQ(os->StartProcess(TestEnvironment(), "missing.lua", {}, /*workingDirectory=*/""), nullptr);
+    EXPECT_EQ(os->StartProcess(TestEnvironment(), "missing.lua", {}, /*workingDirectory=*/"", StartProcessOptions{}), nullptr);
 }
 
 TEST_F(HaisosOSTest, GetRunningProcessesIncludesStartedProcess) {
     auto os = BuildOS();
-    auto process = os->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/"");
+    auto process = os->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/"", StartProcessOptions{});
     ASSERT_NE(process, nullptr);
 
     auto running = os->GetRunningProcesses();
@@ -147,9 +194,9 @@ TEST_F(HaisosOSTest, CreateSubOSIsConfinedByTheRootItIsGiven) {
         os->GetOsEnvironment()->Clone());
     ASSERT_NE(subOS, nullptr);
 
-    EXPECT_NE(subOS->StartProcess(TestEnvironment(), "inner.md", {}, /*workingDirectory=*/""), nullptr);
+    EXPECT_NE(subOS->StartProcess(TestEnvironment(), "inner.md", {}, /*workingDirectory=*/"", StartProcessOptions{}), nullptr);
     // hello.md lives in the parent root, not the sub-root.
-    EXPECT_EQ(subOS->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/""), nullptr);
+    EXPECT_EQ(subOS->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/"", StartProcessOptions{}), nullptr);
 }
 
 TEST_F(HaisosOSTest, CreateSubOSCarriesTheParentOSPid) {
@@ -189,8 +236,8 @@ TEST_F(HaisosOSTest, SubOSGetsACopyOfTheEnvironmentItIsGiven) {
 TEST_F(HaisosOSTest, ProcessStartsAtTheWorkingDirectoryItWasGiven) {
     auto os = BuildOS();
 
-    auto atRoot = os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"");
-    auto inSub = os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"sub");
+    auto atRoot = os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"", StartProcessOptions{});
+    auto inSub = os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"sub", StartProcessOptions{});
     ASSERT_NE(atRoot, nullptr);
     ASSERT_NE(inSub, nullptr);
 
@@ -207,9 +254,9 @@ TEST_F(HaisosOSTest, ChangeDirectoryMovesOnlyThatProcess) {
     auto os = BuildOS();
 
     auto first = std::dynamic_pointer_cast<ICurrentProcess>(
-        os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/""));
+        os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"", StartProcessOptions{}));
     auto second = std::dynamic_pointer_cast<ICurrentProcess>(
-        os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/""));
+        os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"", StartProcessOptions{}));
     ASSERT_NE(first, nullptr);
     ASSERT_NE(second, nullptr);
 
@@ -225,7 +272,7 @@ TEST_F(HaisosOSTest, ChangeDirectoryMovesOnlyThatProcess) {
 TEST_F(HaisosOSTest, ChangeDirectoryRejectsWhatIsNotADirectory) {
     auto os = BuildOS();
     auto process = std::dynamic_pointer_cast<ICurrentProcess>(
-        os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/""));
+        os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"", StartProcessOptions{}));
     ASSERT_NE(process, nullptr);
 
     EXPECT_EQ(process->IO()->ChangeDirectory("hello.md"), -1);
@@ -239,7 +286,7 @@ TEST_F(HaisosOSTest, GetEnvironmentHandsOutACloneNotTheProcessOwn) {
     auto os = BuildOS();
     auto environment = TestEnvironment();
     environment->SetVariable("GREETING", "hello");
-    auto process = os->StartProcess(environment, "hello.md", {}, /*workingDirectory=*/"");
+    auto process = os->StartProcess(environment, "hello.md", {}, /*workingDirectory=*/"", StartProcessOptions{});
     ASSERT_NE(process, nullptr);
 
     auto handedOut = process->GetEnvironment();
@@ -256,7 +303,7 @@ TEST_F(HaisosOSTest, GetEnvironmentHandsOutACloneNotTheProcessOwn) {
 TEST_F(HaisosOSTest, ProcessReachesItsOSThroughOS) {
     auto os = BuildOS();
     auto process = std::dynamic_pointer_cast<ICurrentProcess>(
-        os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/""));
+        os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"", StartProcessOptions{}));
     ASSERT_NE(process, nullptr);
 
     auto reached = process->OS();
@@ -273,7 +320,7 @@ TEST_F(HaisosOSTest, ProcessDoesNotKeepItsOSAlive) {
         auto os = BuildOS();
         osWatch = os;
         process = std::dynamic_pointer_cast<ICurrentProcess>(
-            os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/""));
+            os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"", StartProcessOptions{}));
         ASSERT_NE(process, nullptr);
         ASSERT_NE(process->OS(), nullptr);
     }
@@ -288,7 +335,7 @@ TEST_F(HaisosOSTest, ProcessDoesNotKeepItsOSAlive) {
 TEST_F(HaisosOSTest, ToolsResolveRelativePathsAgainstTheCallingProcessDirectory) {
     auto os = BuildOS();
 
-    auto process = os->StartProcess(TestEnvironment(), "write_relative.lua", {}, /*workingDirectory=*/"sub");
+    auto process = os->StartProcess(TestEnvironment(), "write_relative.lua", {}, /*workingDirectory=*/"sub", StartProcessOptions{});
     ASSERT_NE(process, nullptr);
     ASSERT_TRUE(process->WaitToFinish(5000));
 
@@ -299,7 +346,7 @@ TEST_F(HaisosOSTest, ToolsResolveRelativePathsAgainstTheCallingProcessDirectory)
 TEST_F(HaisosOSTest, ToolsResolveAgainstTheRootForAProcessStartedThere) {
     auto os = BuildOS();
 
-    auto process = os->StartProcess(TestEnvironment(), "write_relative.lua", {}, /*workingDirectory=*/"");
+    auto process = os->StartProcess(TestEnvironment(), "write_relative.lua", {}, /*workingDirectory=*/"", StartProcessOptions{});
     ASSERT_NE(process, nullptr);
     ASSERT_TRUE(process->WaitToFinish(5000));
 
@@ -313,7 +360,7 @@ TEST_F(HaisosOSTest, ToolsResolveAgainstTheRootForAProcessStartedThere) {
 TEST_F(HaisosOSTest, FileIOResolvesBareNamesAndRelativePathsFromWhereTheProcessIs) {
     auto os = BuildOS();
     auto process = std::dynamic_pointer_cast<ICurrentProcess>(
-        os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"sub"));
+        os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"sub", StartProcessOptions{}));
     ASSERT_NE(process, nullptr);
     auto io = process->IO();
     ASSERT_NE(io, nullptr);
@@ -331,7 +378,7 @@ TEST_F(HaisosOSTest, FileIOResolvesBareNamesAndRelativePathsFromWhereTheProcessI
 TEST_F(HaisosOSTest, FileIOReadsAndWritesThroughTheWorkingDirectory) {
     auto os = BuildOS();
     auto process = std::dynamic_pointer_cast<ICurrentProcess>(
-        os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"sub"));
+        os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"sub", StartProcessOptions{}));
     ASSERT_NE(process, nullptr);
     auto io = process->IO();
 
@@ -370,3 +417,49 @@ TEST_F(HaisosOSTest, CreateHaisosOSWithoutAnEnvironmentReturnsNull) {
 }
 
 } // namespace
+
+TEST_F(HaisosOSTest, AnAgentProcessIsNotInteractiveByDefault) {
+    auto console = std::make_shared<ScriptedPhysicalConsole>(std::vector<std::string>{"never read"});
+    auto os = BuildOS(console);
+
+    auto process = os->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/"", StartProcessOptions{});
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    EXPECT_EQ(console->ReadLineCalls(), 0);
+    auto agent = std::dynamic_pointer_cast<ICurrentProcess>(process)->AsAgent();
+    EXPECT_FALSE(agent->IsInteractive());
+}
+
+TEST_F(HaisosOSTest, AnInteractiveAgentIsFedConsoleLinesUntilInputEnds) {
+    auto console = std::make_shared<ScriptedPhysicalConsole>(std::vector<std::string>{"typed by the user"});
+    auto os = BuildOS(console);
+    StartProcessOptions options;
+    options.interactiveAgent = true;
+
+    auto process = os->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/"", options);
+    ASSERT_NE(process, nullptr);
+    // End of input stops the agent, so the process finishes without a
+    // self_close.
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    // The line, then end of input.
+    EXPECT_EQ(console->ReadLineCalls(), 2);
+
+    auto agent = std::dynamic_pointer_cast<ICurrentProcess>(process)->AsAgent();
+    ASSERT_NE(agent, nullptr);
+    EXPECT_TRUE(agent->IsInteractive());
+    auto history = agent->GetHistory();
+    EXPECT_TRUE(HistoryMentions(history, "Say hello."));
+    EXPECT_TRUE(HistoryMentions(history, "typed by the user"));
+}
+
+TEST_F(HaisosOSTest, InteractiveAgentOnlyAppliesToAgentPrograms) {
+    auto console = std::make_shared<ScriptedPhysicalConsole>(std::vector<std::string>{"never read"});
+    auto os = BuildOS(console);
+    StartProcessOptions options;
+    options.interactiveAgent = true;
+
+    auto process = os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"", options);
+    ASSERT_NE(process, nullptr);
+    EXPECT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    EXPECT_EQ(console->ReadLineCalls(), 0);
+}

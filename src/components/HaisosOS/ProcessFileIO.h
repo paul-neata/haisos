@@ -31,6 +31,7 @@ public:
     ssize_t WriteFile(int fd, const void* buf, size_t count) override;
     int CreateDirectory(const std::string& pathname, int mode) override;
     int RemoveDirectory(const std::string& pathname) override;
+    int RemoveFile(const std::string& pathname) override;
     std::vector<DirectoryEntry> ReadDirectory(const std::string& path) override;
 
 private:

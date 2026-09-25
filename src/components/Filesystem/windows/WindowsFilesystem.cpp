@@ -40,6 +40,10 @@ int FileSystem::LocalRemoveDirectory(const std::string& pathname) {
     return ::_rmdir(pathname.c_str());
 }
 
+int FileSystem::LocalRemoveFile(const std::string& pathname) {
+    return ::_unlink(pathname.c_str());
+}
+
 std::vector<DirectoryEntry> FileSystem::LocalReadDirectory(const std::string& path) {
     std::vector<DirectoryEntry> entries;
 

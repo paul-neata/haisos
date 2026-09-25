@@ -10,6 +10,20 @@
 
 namespace Haisos {
 
+// How IHaisosOS::StartProcess should run a program, beyond what to run and
+// where. Default-constructed, it asks for nothing special.
+struct StartProcessOptions {
+    // Only meaningful for an agent (.md) process, and ignored for any other
+    // runtime. When set, the agent is interactive (see IAgent::IsInteractive):
+    // once it has run its program it waits for more, and every line read from
+    // its console is posted to it as the next user message. The process
+    // finishes once the agent has closed (e.g. with the self_close tool) and
+    // the line-reading loop has noticed -- which it does when the next line
+    // arrives, since a line being read cannot be abandoned -- or once the
+    // console reaches end of input, which stops the agent.
+    bool interactiveAgent = false;
+};
+
 // An instance of an operating system: owns a rooted filesystem, a physical
 // console, and a services layer, and can start processes (agent- or
 // script-backed) and spawn more tightly-scoped sub-OS instances.
@@ -34,11 +48,13 @@ public:
     // passed rather than inherited: a filesystem has no current directory of
     // its own, so this is the only thing a relative path is resolved against
     // (see ICurrentProcess::ChangeDirectory). Empty means the OS's root.
+    // options says how to run it (see StartProcessOptions).
     virtual std::shared_ptr<IProcess> StartProcess(
         std::shared_ptr<IEnvironment> environment,
         const std::string& programPath,
         const std::vector<std::string>& args,
-        const std::string& workingDirectory) = 0;
+        const std::string& workingDirectory,
+        const StartProcessOptions& options) = 0;
 
     virtual std::vector<std::shared_ptr<IProcess>> GetRunningProcesses() const = 0;
 

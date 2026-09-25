@@ -139,3 +139,24 @@ TEST(MountTest, MountingOverAnExistingMountPointReplacesIt) {
 
     EXPECT_EQ(ReadAll(*host, "/data/note.txt"), "second");
 }
+
+TEST(MountTest, RemoveFileIsRoutedToTheMountedFilesystem) {
+    auto mounted = MakeInMemoryWith("/note.txt", "from the mount");
+    auto host = MakeInMemoryWith("/note.txt", "from the host");
+    host->Mount("/data", mounted);
+
+    EXPECT_EQ(host->RemoveFile("/data/note.txt"), 0);
+    EXPECT_EQ(ReadAll(*mounted, "/note.txt"), "<unreadable>");
+    // The host's own file of the same name is untouched.
+    EXPECT_EQ(ReadAll(*host, "/note.txt"), "from the host");
+}
+
+TEST(MountTest, InMemoryRemoveFileRefusesDirectoriesAndMissingFiles) {
+    auto fs = MakeInMemoryWith("/note.txt", "x");
+    ASSERT_EQ(fs->CreateDirectory("/dir", 0), 0);
+
+    EXPECT_LT(fs->RemoveFile("/dir"), 0);
+    EXPECT_LT(fs->RemoveFile("/missing.txt"), 0);
+    EXPECT_EQ(fs->RemoveFile("/note.txt"), 0);
+    EXPECT_EQ(ReadAll(*fs, "/note.txt"), "<unreadable>");
+}

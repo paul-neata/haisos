@@ -31,6 +31,7 @@ protected:
     ssize_t LocalWriteFile(int fd, const void* buf, size_t count) override;
     int LocalCreateDirectory(const std::string& pathname, int mode) override;
     int LocalRemoveDirectory(const std::string& pathname) override;
+    int LocalRemoveFile(const std::string& pathname) override;
     std::vector<DirectoryEntry> LocalReadDirectory(const std::string& path) override;
 
 private:

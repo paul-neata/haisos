@@ -102,4 +102,17 @@ TEST_F(PhysicalFileSystemTest, ReadDirectoryListsCreatedFile) {
     EXPECT_TRUE(found);
 }
 
+TEST_F(PhysicalFileSystemTest, RemoveFileRemovesAFileButNotADirectory) {
+    auto fs = PhysicalFileSystem::Create(kRootDir);
+
+    int fd = fs->OpenFile("inside.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    ASSERT_GE(fd, 0);
+    fs->CloseFile(fd);
+
+    EXPECT_EQ(fs->RemoveFile("inside.txt"), 0);
+    EXPECT_LT(fs->OpenFile("inside.txt", O_RDONLY), 0);
+    EXPECT_LT(fs->RemoveFile("inside.txt"), 0);
+    EXPECT_LT(fs->RemoveFile("../outside.txt"), 0);
+}
+
 } // namespace

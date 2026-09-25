@@ -8,6 +8,10 @@ void InMemoryAgentConsole::Write(const std::string& message) {
     m_contents.push_back('\n');
 }
 
+std::optional<std::string> InMemoryAgentConsole::ReadLine() {
+    return std::nullopt;
+}
+
 std::string InMemoryAgentConsole::GetContents() const {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_contents;

@@ -1,6 +1,6 @@
 ---
 name: begin
-description: Start a new task branch from master. Stashes any local changes, updates master, creates the new branch, and shows commits since base.
+description: Start a new task branch from master. Stashes any local changes, updates master, creates the new branch, bumps the minor version in HAISOS_VERSION, and shows commits since base.
 args:
   - name: branch_name
     description: The new branch name to create (e.g. task/job_to_be_done)
@@ -42,7 +42,28 @@ Use the `branch_name` argument provided by the user:
 git checkout -b "{{branch_name}}"
 ```
 
-### 4. Print commit log since base
+### 4. Bump the minor version
+
+The version lives in `HAISOS_VERSION` at the repo root, as `MAJOR.MINOR.PATCH`. Every new task branch starts a new minor version: increment `MINOR` and reset `PATCH` to 0 (e.g. `0.1.2` becomes `0.2.0`).
+
+```bash
+OLD_VERSION=$(tr -d '[:space:]' < HAISOS_VERSION)
+if [[ ! "$OLD_VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+    echo "HAISOS_VERSION is not MAJOR.MINOR.PATCH: '$OLD_VERSION'"
+    exit 1
+fi
+NEW_VERSION="${BASH_REMATCH[1]}.$((BASH_REMATCH[2] + 1)).0"
+echo "$NEW_VERSION" > HAISOS_VERSION
+echo "Version: $OLD_VERSION -> $NEW_VERSION"
+```
+
+If `HAISOS_VERSION` does not match `MAJOR.MINOR.PATCH`, stop and tell the user rather than guessing.
+
+Leave the change uncommitted: it is committed along with the branch's work (e.g. by `/commit` or `/end`).
+
+Tell the user: "Version bumped from <old> to <new>."
+
+### 5. Print commit log since base
 
 Detect the base branch:
 
@@ -58,7 +79,7 @@ git log --format="%h | %ad | %cd | %s" "$BASE_BRANCH"..
 
 If there are no commits yet, print "(no commits yet)".
 
-### 5. Confirm the new branch
+### 6. Confirm the new branch
 
 Print the current branch name to confirm:
 

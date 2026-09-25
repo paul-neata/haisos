@@ -92,6 +92,14 @@ int PhysicalFileSystem::LocalRemoveDirectory(const std::string& pathname) {
     return m_inner->LocalRemoveDirectory(resolved);
 }
 
+int PhysicalFileSystem::LocalRemoveFile(const std::string& pathname) {
+    std::string resolved;
+    if (!ResolveWithinRoot(pathname, resolved)) {
+        return -1;
+    }
+    return m_inner->LocalRemoveFile(resolved);
+}
+
 std::vector<DirectoryEntry> PhysicalFileSystem::LocalReadDirectory(const std::string& path) {
     std::string resolved;
     if (!ResolveWithinRoot(path, resolved)) {

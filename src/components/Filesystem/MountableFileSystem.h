@@ -24,6 +24,7 @@ public:
     ssize_t WriteFile(int fd, const void* buf, size_t count) final;
     int CreateDirectory(const std::string& pathname, int mode) final;
     int RemoveDirectory(const std::string& pathname) final;
+    int RemoveFile(const std::string& pathname) final;
     std::vector<DirectoryEntry> ReadDirectory(const std::string& path) final;
 
 protected:
@@ -40,6 +41,7 @@ protected:
     virtual ssize_t LocalWriteFile(int fd, const void* buf, size_t count) = 0;
     virtual int LocalCreateDirectory(const std::string& pathname, int mode) = 0;
     virtual int LocalRemoveDirectory(const std::string& pathname) = 0;
+    virtual int LocalRemoveFile(const std::string& pathname) = 0;
     virtual std::vector<DirectoryEntry> LocalReadDirectory(const std::string& path) = 0;
 
 private:

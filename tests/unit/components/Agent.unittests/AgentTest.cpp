@@ -429,3 +429,26 @@ TEST(AgentTest, GetConsoleOutputContainsAgentMessages) {
     std::string output = agent->GetConsoleOutput();
     EXPECT_NE(output.find("Hello world"), std::string::npos);
 }
+
+// An interactive agent never finishes by answering; self_close is how it ends
+// itself, through the real tool factory's tool.
+TEST(AgentTest, AnInteractiveAgentFinishesWhenItCallsSelfClose) {
+    auto mockLLM = std::make_shared<MockLLMCommunicator>();
+    mockLLM->SetToolCallResponse("self_close");
+
+    auto agent = Agent::Create(
+        mockLLM,
+        ToolFactory::Create(),
+        InMemoryAgentConsole::Create(),
+        std::vector<std::string>{"You are a helpful AI assistant."},
+        "test_agent",
+        nullptr,
+        /*startTime=*/"",
+        /*interactive=*/true);
+
+    agent->Post("we are done, close yourself");
+    EXPECT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
+    // The round ends with the tool call: no further LLM call is made once the
+    // agent has asked to stop.
+    EXPECT_EQ(mockLLM->GetCallCount(), 1);
+}

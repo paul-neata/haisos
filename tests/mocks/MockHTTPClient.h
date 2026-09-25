@@ -10,6 +10,7 @@ public:
 
     void SetGetResponse(const std::string& response) { m_getResponse = HTTPResponse{200, response, ""}; }
     void SetPostResponse(const std::string& response) { m_postResponse = HTTPResponse{200, response, ""}; }
+    void SetPostResponse(const HTTPResponse& response) { m_postResponse = response; }
 
     HTTPResponse Get(const std::string& url) override {
         m_lastUrl = url;

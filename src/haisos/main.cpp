@@ -21,6 +21,7 @@
 #include "interfaces/IServicesCreator.h"
 #include "interfaces/IHaisosOS.h"
 #include "AgentTrafficLog.h"
+#include "ReopeningLogFile.h"
 #include "CliParser.h"
 #include "HaisosFileOperations.h"
 #include "HaisosFileParser.h"
@@ -134,16 +135,17 @@ int main(int argc, char* argv[]) {
     // Set minimum log level
     LogSetMinimumLevel(result.options.logLevel);
 
-    // Set up file logging if requested via CLI or environment
-    std::unique_ptr<std::ofstream> logFileStream;
+    // Set up file logging if requested via CLI or environment. The file is
+    // re-created if it is deleted while Haisos runs (see ReopeningLogFile).
+    std::shared_ptr<ReopeningLogFile> logFile;
     if (!result.options.logFilePath.empty()) {
-        logFileStream = std::make_unique<std::ofstream>(result.options.logFilePath, std::ios::out | std::ios::trunc);
+        logFile = std::make_shared<ReopeningLogFile>(result.options.logFilePath, /*truncate=*/true);
     } else if (const char* envFile = std::getenv("HAISOS_TEST_LOG_FILE")) {
-        logFileStream = std::make_unique<std::ofstream>(envFile, std::ios::out | std::ios::app);
+        logFile = std::make_shared<ReopeningLogFile>(envFile, /*truncate=*/false);
     }
 
-    if (logFileStream && logFileStream->is_open()) {
-        LogRegisterMessageReceiver([&logFileStream](const LogMessage& msg) {
+    if (logFile && logFile->IsOpen()) {
+        LogRegisterMessageReceiver([logFile](const LogMessage& msg) {
             const char* levelStr =
                 msg.level == LogLevel::VerboseDebug ? "VERBOSE_DEBUG" :
                 msg.level == LogLevel::Debug ? "DEBUG" :
@@ -151,7 +153,9 @@ int main(int argc, char* argv[]) {
                 msg.level == LogLevel::Info ? "INFO" :
                 msg.level == LogLevel::Warning ? "WARNING" :
                 msg.level == LogLevel::Error ? "ERROR" : "UNKNOWN";
-            *logFileStream << "[" << msg.timestamp << "][" << levelStr << "] " << msg.message << "\n" << std::flush;
+            // One Write per line: the Logger calls receivers from whichever
+            // thread logged, and ReopeningLogFile serializes them.
+            logFile->Write("[" + msg.timestamp + "][" + levelStr + "] " + msg.message + "\n");
         });
     }
 
@@ -167,8 +171,8 @@ int main(int argc, char* argv[]) {
     // agent callbacks. The log owns its file and the callbacks share it, so it
     // stays open for as long as any agent could still report.
     if (!result.options.logAgentFilePath.empty()) {
-        auto agentFile = std::make_unique<std::ofstream>(result.options.logAgentFilePath, std::ios::out | std::ios::trunc);
-        if (!agentFile->is_open()) {
+        auto agentFile = std::make_shared<ReopeningLogFile>(result.options.logAgentFilePath, /*truncate=*/true);
+        if (!agentFile->IsOpen()) {
             LogError("Failed to open --log-agent-to-file path: %s", result.options.logAgentFilePath.c_str());
             std::cerr << "Error: failed to open agent log file: " << result.options.logAgentFilePath << "\n";
             return 1;

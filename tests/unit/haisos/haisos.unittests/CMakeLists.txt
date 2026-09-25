@@ -9,6 +9,7 @@ add_executable(CliParser.unittests
     ${CMAKE_SOURCE_DIR}/src/haisos/HaisosFileSystemBuilder.cpp
     ${CMAKE_SOURCE_DIR}/src/haisos/HaisosFileOperations.cpp
     ${CMAKE_SOURCE_DIR}/src/haisos/AgentTrafficLog.cpp
+    ${CMAKE_SOURCE_DIR}/src/haisos/ReopeningLogFile.cpp
 )
 target_include_directories(CliParser.unittests PRIVATE ${CMAKE_SOURCE_DIR}/interfaces ${CMAKE_SOURCE_DIR}/src/components/Logger)
 target_link_libraries(CliParser.unittests PRIVATE gtest_main gmock Factory ServicesCreator)

@@ -511,15 +511,38 @@ AgentTrafficLog::AgentTrafficLog(std::unique_ptr<std::ostream> out, AgentTraffic
 {
 }
 
+AgentTrafficLog::AgentTrafficLog(std::shared_ptr<ReopeningLogFile> file, AgentTrafficLogType type)
+    : m_file(std::move(file))
+    , m_type(type)
+{
+}
+
+void AgentTrafficLog::StartAfreshIfRecreated() {
+    if (m_file && m_file->EnsureOpen()) {
+        m_lastSent.clear();
+        m_file->Write("(" + m_file->Path() + " was deleted while Haisos was running and has been re-created; "
+            "each agent's next request is written in full)\n\n");
+    }
+}
+
+void AgentTrafficLog::Emit(const std::string& entry) {
+    if (m_file) {
+        m_file->Write(entry);
+    } else if (m_out) {
+        *m_out << entry;
+        m_out->flush();
+    }
+}
+
 void AgentTrafficLog::WriteEntry(const char* direction, const std::vector<std::string>& agentPath, const std::string& body) {
     std::string entry = std::string(direction) + " [" + FormatAgentPath(agentPath) + "] " + CurrentTimestamp() + "\n"
         + body + "\n\n";
-    *m_out << IndentForAgentDepth(entry, agentPath.empty() ? 0 : agentPath.size() - 1);
-    m_out->flush();
+    Emit(IndentForAgentDepth(entry, agentPath.empty() ? 0 : agentPath.size() - 1));
 }
 
 void AgentTrafficLog::OnSend(const std::vector<std::string>& agentPath, const std::string& json) {
     std::lock_guard<std::mutex> lock(m_mutex);
+    StartAfreshIfRecreated();
     if (m_type == AgentTrafficLogType::Full) {
         WriteEntry(">>>>>>>> SEND   ", agentPath, PrettyPrintJson(json));
         return;
@@ -541,6 +564,7 @@ void AgentTrafficLog::OnSend(const std::vector<std::string>& agentPath, const st
 
 void AgentTrafficLog::OnReceive(const std::vector<std::string>& agentPath, const std::string& json) {
     std::lock_guard<std::mutex> lock(m_mutex);
+    StartAfreshIfRecreated();
     WriteEntry("<<<<<<<< RECEIVE", agentPath,
         m_type == AgentTrafficLogType::XDiff ? FormatExtremeResponse(json) : PrettyPrintJson(json));
 }

@@ -4,6 +4,7 @@
 #include <climits>
 #include <string>
 #include <utility>
+#include "src/components/libheaders/WideText.h"
 
 #pragma comment(lib, "winhttp.lib")
 
@@ -12,33 +13,6 @@ namespace Haisos {
 #ifdef _WIN32
 
 namespace {
-
-// Converts UTF-8 |text| to the UTF-16 WinHTTP takes. The lengths are explicit
-// on both sides, so |out| holds exactly the characters of |text| and no
-// terminating NUL -- one converted with a length of -1 keeps its NUL, which
-// then sits inside the URL or the header it is pasted into. Returns false if
-// |text| is not valid UTF-8 or too long to convert; an empty |text| converts
-// to an empty |out| (MultiByteToWideChar itself refuses a length of 0).
-bool Utf8ToWide(const std::string& text, std::wstring& out) {
-    out.clear();
-    if (text.empty()) {
-        return true;
-    }
-    if (text.size() > static_cast<size_t>(INT_MAX)) {
-        return false;
-    }
-    const int length = static_cast<int>(text.size());
-    const int wideLength = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), length, nullptr, 0);
-    if (wideLength <= 0) {
-        return false;
-    }
-    std::wstring wide(static_cast<size_t>(wideLength), L'\0');
-    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), length, &wide[0], wideLength) != wideLength) {
-        return false;
-    }
-    out = std::move(wide);
-    return true;
-}
 
 // A component WinHttpCrackUrl found: it points into the URL it was given,
 // |length| characters long and not NUL-terminated. One the URL does not have

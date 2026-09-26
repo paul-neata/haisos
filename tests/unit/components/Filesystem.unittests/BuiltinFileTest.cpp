@@ -162,7 +162,7 @@ TEST(BuiltinFileTest, AFilesystemsOwnBuiltinComesBeforeAnythingUnderneath) {
 }
 
 TEST(BuiltinFileTest, APhysicalDirectoryHoldingOnlyABuiltinIsStillPinned) {
-    const std::string root = "/tmp/haisos_builtin_file_test";
+    const std::string root = (std::filesystem::temp_directory_path() / "haisos_builtin_file_test").u8string();
     std::filesystem::remove_all(root);
     std::filesystem::create_directories(root + "/bin");
     auto fs = PhysicalFileSystem::Create(root);

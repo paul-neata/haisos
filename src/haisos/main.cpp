@@ -17,6 +17,7 @@
 #include "src/components/HaisosOS/HaisosOS.h"
 #include "src/components/Logger/Logger.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
+#include "src/components/Filesystem/PhysicalPath.h"
 #include "interfaces/IFactory.h"
 #include "interfaces/IServicesCreator.h"
 #include "interfaces/IHaisosOS.h"
@@ -48,34 +49,55 @@ std::string GetCurrentTimestamp() {
     return oss.str();
 }
 
-// Reads filePath relative to the current working directory, rejecting any
-// path that escapes it and capping the read at 10 MB. Delegates the path
-// resolution/escape-check and the read itself to PhysicalFileSystem (rooted
-// at cwd) instead of re-validating paths by hand, so there is a single place
-// ("does this path escape the root?") maintaining that logic.
 // ReadWholeFile stops at 10MB and cannot report that it truncated, so a file
 // that reaches the cap is rejected rather than parsed in part.
 constexpr size_t kMaxHaisosFileSize = 10 * 1024 * 1024;
 
-std::string ReadFileWithinCwd(IFactory& factory, const std::string& filePath) {
-    // An absolute path is an explicit operator choice, so jail at the file's own
-    // directory; a relative path is jailed to the cwd, where it still cannot
-    // traverse out. Either way the jail root matches the directory that ROOT and
-    // `FS ... PHYSICAL` are later resolved against, so content and root can't
-    // come from different places.
-    std::filesystem::path requested(filePath);
-    std::string rootPath = ".";
-    std::string nameInRoot = filePath;
-    if (requested.is_absolute()) {
-        rootPath = requested.parent_path().string();
-        nameInRoot = requested.filename().string();
-    }
+// The haisosfile named on the command line, as the directory holding it -- a
+// host path, which FS ... PHYSICAL directories and COPY/OUTCOPY host paths are
+// then resolved against -- and its name there.
+struct HaisosFileLocation {
+    std::filesystem::path directory;
+    std::string name;
+};
 
-    auto rootFileSystem = factory.CreatePhysicalFileSystem(rootPath);
+// Locates |filePath|, written as FS ... PHYSICAL directories are (on Windows
+// /c/x/haisosfile, c:\x\haisosfile or c:/x/haisosfile alike) and taken from
+// the current directory when relative. It arrives as the host gave it, which
+// on Windows is the ANSI code page, not UTF-8.
+bool LocateHaisosFile(const std::string& filePath, HaisosFileLocation& out, std::string& outError) {
+    std::string utf8Path;
+    try {
+        utf8Path = std::filesystem::path(filePath).u8string();
+    } catch (const std::exception& e) {
+        outError = std::string("cannot read the path: ") + e.what();
+        return false;
+    }
+    std::error_code ec;
+    const std::filesystem::path currentDirectory = std::filesystem::current_path(ec);
+    const auto resolved = ResolvePhysicalPath(utf8Path, ec ? std::string() : currentDirectory.u8string(), &outError);
+    if (!resolved) {
+        return false;
+    }
+    const std::filesystem::path absolute = std::filesystem::u8path(*resolved).lexically_normal();
+    if (!absolute.has_filename()) {
+        outError = "it does not name a file";
+        return false;
+    }
+    out.directory = absolute.parent_path();
+    out.name = absolute.filename().u8string();
+    return true;
+}
+
+// Reads the haisosfile through a physical filesystem jailed at its own
+// directory, capping the read at 10 MB. The same directory is where ROOT and
+// `FS ... PHYSICAL` are later resolved from, so content and root can't come
+// from different places.
+std::string ReadHaisosFile(IFactory& factory, const HaisosFileLocation& location, const std::string& filePath) {
+    auto directory = factory.CreatePhysicalFileSystem(location.directory.u8string());
     std::string content;
-    if (!ReadWholeFile(*rootFileSystem, nameInRoot, content)) {
-        LogError("Failed to open or read haisosfile (missing, unreadable, or outside %s): %s",
-            rootPath.c_str(), filePath.c_str());
+    if (!ReadWholeFile(*directory, "/" + location.name, content)) {
+        LogError("Failed to open or read haisosfile (missing or unreadable): %s", filePath.c_str());
         return "";
     }
     if (content.size() >= kMaxHaisosFileSize) {
@@ -239,7 +261,14 @@ int main(int argc, char* argv[]) {
 
     // Read the haisosfile (default: "haisosfile" in the current directory)
     std::string haisosFilePath = result.options.haisosFilePath.empty() ? "haisosfile" : result.options.haisosFilePath;
-    std::string haisosFileContent = ReadFileWithinCwd(*factory, haisosFilePath);
+    HaisosFileLocation haisosFileLocation;
+    std::string locationError;
+    if (!LocateHaisosFile(haisosFilePath, haisosFileLocation, locationError)) {
+        LogError("Invalid haisosfile path '%s': %s", haisosFilePath.c_str(), locationError.c_str());
+        std::cerr << "Error: invalid haisosfile path " << haisosFilePath << ": " << locationError << "\n";
+        return 1;
+    }
+    std::string haisosFileContent = ReadHaisosFile(*factory, haisosFileLocation, haisosFilePath);
     if (haisosFileContent.empty()) {
         LogError("Failed to read haisosfile or it is empty: %s", haisosFilePath.c_str());
         std::cerr << "Error: Failed to read haisosfile or it is empty: " << haisosFilePath << "\n";
@@ -255,7 +284,7 @@ int main(int argc, char* argv[]) {
 
     // ROOT (and every FS PHYSICAL directive) is resolved relative to the
     // haisosfile's own directory.
-    std::filesystem::path haisosFileDir = std::filesystem::absolute(haisosFilePath).parent_path();
+    const std::filesystem::path haisosFileDir = haisosFileLocation.directory;
 
     // The OS's environment comes only from the haisosfile's ENV directives: the
     // host's variables are not inherited wholesale, so `ENV NAME` is the single,

@@ -1,4 +1,6 @@
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -12,7 +14,7 @@ using namespace Haisos;
 
 namespace {
 
-const std::string kHostDir = "/tmp/haisos_fileops_test_host";
+const std::string kHostDir = (std::filesystem::temp_directory_path() / "haisos_fileops_test_host").u8string();
 
 class HaisosFileOperationsTest : public ::testing::Test {
 protected:
@@ -151,9 +153,52 @@ TEST_F(HaisosFileOperationsTest, CopyBringsAHostFileIn) {
 
 TEST_F(HaisosFileOperationsTest, CopyAcceptsAnAbsoluteHostPath) {
     std::string error;
-    ASSERT_TRUE(Apply("COPY " + kHostDir + "/in/source.txt /copied.txt\n", error)) << error;
+    // Quoted, as a path holding spaces must be.
+    ASSERT_TRUE(Apply("COPY \"" + kHostDir + "/in/source.txt\" /copied.txt\n", error)) << error;
     EXPECT_EQ(Read("/copied.txt"), "from the host");
 }
+
+// A relative host path is taken from the haisosfile's directory, and may climb
+// out of it: it names a host file, which the haisosfile's author could name
+// absolutely anyway.
+TEST_F(HaisosFileOperationsTest, ARelativeHostPathMayLeaveTheHaisosFilesDirectory) {
+    const std::string self = std::filesystem::u8path(kHostDir).filename().u8string();
+    std::string error;
+    ASSERT_TRUE(Apply("COPY ../" + self + "/in/source.txt /copied.txt\nOUTCOPY /copied.txt in/../out/back.txt\n", error)) << error;
+    EXPECT_EQ(Read("/copied.txt"), "from the host");
+    EXPECT_EQ(ReadHost(kHostDir + "/out/back.txt"), "from the host");
+}
+
+#ifdef _WIN32
+// On Windows a host path may be written as a path of the full physical
+// filesystem (/c/Users/...), or with its drive letter, with either separator
+// or a mix of both -- the same rules as FS ... PHYSICAL.
+TEST_F(HaisosFileOperationsTest, AHostPathMayBeWrittenInEveryWindowsForm) {
+    const std::filesystem::path host = std::filesystem::u8path(kHostDir);
+    const std::string drive = host.root_name().u8string();
+    ASSERT_EQ(drive.size(), 2u) << "the temporary directory is on no drive: " << kHostDir;
+    const std::string full = "/" + std::string(1, static_cast<char>(std::tolower(static_cast<unsigned char>(drive[0])))) +
+        "/" + host.relative_path().generic_u8string();
+    const std::string forward = host.generic_u8string();
+    std::string backward = forward;
+    std::replace(backward.begin(), backward.end(), '/', '\\');
+
+    std::string error;
+    ASSERT_TRUE(Apply("COPY \"" + full + "/in/source.txt\" /full.txt\n", error)) << error;
+    ASSERT_TRUE(Apply("COPY \"" + backward + "\\in\\source.txt\" /backward.txt\n", error)) << error;
+    ASSERT_TRUE(Apply("COPY \"" + forward + "/in\\source.txt\" /mixed.txt\n", error)) << error;
+    EXPECT_EQ(Read("/full.txt"), "from the host");
+    EXPECT_EQ(Read("/backward.txt"), "from the host");
+    EXPECT_EQ(Read("/mixed.txt"), "from the host");
+
+    ASSERT_TRUE(Apply("OUTCOPY /full.txt \"" + full + "/out/full.txt\"\n", error)) << error;
+    EXPECT_EQ(ReadHost(kHostDir + "/out/full.txt"), "from the host");
+
+    // /tmp is no drive: the full filesystem holds nothing else at its top.
+    EXPECT_FALSE(Apply("COPY /tmp/source.txt /x.txt\n", error));
+    EXPECT_NE(error.find("no drive letter"), std::string::npos) << error;
+}
+#endif
 
 TEST_F(HaisosFileOperationsTest, CopyOfAMissingOrDirectoryHostPathFails) {
     std::string error;

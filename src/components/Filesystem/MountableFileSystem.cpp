@@ -194,7 +194,7 @@ std::vector<DirectoryEntry> MountableFileSystem::ReadDirectory(const std::string
 }
 
 void MountableFileSystem::PutDotEntriesFirst(const std::string& path, std::vector<DirectoryEntry>& entries) {
-    // A filesystem this one is a view of, or has mounted, has put them in
+    // A filesystem this one wraps, or has mounted, has put them in
     // already; they are put back first, once.
     const auto dots = std::remove_if(entries.begin(), entries.end(),
         [](const DirectoryEntry& entry) { return entry.name == "." || entry.name == ".."; });

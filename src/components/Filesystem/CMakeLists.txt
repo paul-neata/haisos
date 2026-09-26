@@ -1,5 +1,6 @@
 add_library(Filesystem STATIC
     PhysicalFileSystem.cpp
+    PhysicalPath.cpp
     ReadOnlyFileSystem.cpp
     InMemoryFileSystem.cpp
     DeviceFileSystem.cpp
@@ -10,7 +11,7 @@ add_library(Filesystem STATIC
 )
 
 if(WIN32)
-    target_sources(Filesystem PRIVATE windows/WindowsFilesystem.cpp)
+    target_sources(Filesystem PRIVATE windows/WindowsFilesystem.cpp windows/WindowsFullPhysicalFileSystem.cpp)
 elseif(EMSCRIPTEN)
     target_sources(Filesystem PRIVATE linux/PosixFilesystem.cpp)
 else()

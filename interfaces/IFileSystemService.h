@@ -75,7 +75,8 @@ struct FileStatus {
     // describes what the link leads to, as stat() does, so a link to a
     // directory has the type Dir; this is how a caller walking a tree (the
     // haisosfile's DELETE) tells it apart, to remove the link instead of
-    // descending into it. Only PhysicalFileSystem has links to report; every
+    // descending into it. On Windows a junction is a link too, as is a
+    // symbolic link WSL made. Only PhysicalFileSystem has links to report; every
     // other filesystem leaves it false, and one composing others (read-only,
     // sub-path, composed, mounted) passes on what the one serving the path
     // says.
@@ -89,6 +90,16 @@ struct FileStatus {
 // IFileSystem is therefore resolved against the filesystem's own root, so
 // "foo" and "/foo" mean the same thing. A process that wants "relative to
 // where I am" resolves the path against its own working directory first.
+//
+// Paths:
+//   A path is a sequence of names separated by '/' -- and on Windows by '\'
+//   too, which the host takes as a separator there; elsewhere '\' is part of
+//   a name, as it is to the host. Every path an IFileSystem hands back is
+//   separated by '/' alone. Names are UTF-8. A filesystem on a real disk
+//   refuses a name the host would not take as exactly that name: one holding
+//   a NUL, and on Windows one it would read as something else -- a drive
+//   ("c:"), a device ("con"), or "bin." for "bin" (see
+//   src/components/Filesystem/PhysicalPath.h).
 //
 // Mode values:
 //   The |mode| parameter is a platform-specific permission bitmask passed to the
@@ -204,12 +215,13 @@ public:
     // The name of the builtin at |path|, or nullopt if there is none. This
     // filesystem's own list is consulted first; failing that, whichever
     // filesystem serves |path| underneath -- a mount, or the one this
-    // filesystem is a view of (read-only, sub-path, composed) -- is asked.
+    // filesystem wraps (read-only, sub-path, composed) -- is asked.
     virtual std::optional<std::string> IsBuiltinCommand(const std::string& path) = 0;
 };
 
-// A factory for composing filesystems. Every method returns a new,
-// independent view; none of them mutate the filesystems passed in.
+// A factory for composing filesystems. Every method returns a new filesystem,
+// which routes each call to the ones it composes; none of them mutate the
+// filesystems passed in.
 class IFileSystemService {
 public:
     virtual ~IFileSystemService() = default;

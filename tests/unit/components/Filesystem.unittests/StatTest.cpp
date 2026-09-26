@@ -20,7 +20,7 @@ constexpr int kDirMode = _S_IREAD | _S_IWRITE;
 constexpr int kDirMode = S_IRWXU;
 #endif
 
-const std::string kPhysicalRoot = "/tmp/haisos_stat_test";
+const std::string kPhysicalRoot = (std::filesystem::temp_directory_path() / "haisos_stat_test").u8string();
 
 void Write(IFileSystem& fs, const std::string& path, const std::string& content) {
     const int fd = fs.OpenFile(path, kFileOpenWriteCreateTruncate, kFileCreateMode);

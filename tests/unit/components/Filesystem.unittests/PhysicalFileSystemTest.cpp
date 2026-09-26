@@ -1,11 +1,15 @@
 #include <gtest/gtest.h>
 #include "PhysicalFileSystem.h"
 #include "Filesystem.h"
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <system_error>
+#include <vector>
 
 #ifdef _WIN32
 #include <io.h>
@@ -308,5 +312,206 @@ TEST_F(PhysicalFileSystemLinkTest, TheRootItselfCanBeNeitherRemovedNorCreated) {
     EXPECT_EQ(fs->RemoveFile("/"), -1);
     EXPECT_EQ(fs->CreateDirectory("/", S_IRWXU), -1);
     EXPECT_TRUE(std::filesystem::is_directory(Root()));
+}
+#endif
+
+// --- Names, and the forms a root may be written in ---
+
+namespace {
+
+// A root of its own under the system's temporary directory, removed after
+// each test.
+class PhysicalFileSystemNameTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        const auto* test = ::testing::UnitTest::GetInstance()->current_test_info();
+        m_root = std::filesystem::temp_directory_path() / (std::string("haisos_pfs_names_") + test->name());
+        std::filesystem::remove_all(m_root);
+        std::filesystem::create_directories(m_root / "sub");
+        std::ofstream(m_root / "sub" / "f.txt") << "in sub";
+    }
+
+    void TearDown() override {
+        std::error_code ec;
+        std::filesystem::remove_all(m_root, ec);
+    }
+
+    std::string Root() const { return m_root.u8string(); }
+
+    static bool Opens(IFileSystem& fs, const std::string& path) {
+        const int fd = fs.OpenFile(path, O_RDONLY);
+        if (fd < 0) {
+            return false;
+        }
+        fs.CloseFile(fd);
+        return true;
+    }
+
+    static bool Creates(IFileSystem& fs, const std::string& path) {
+        const int fd = fs.OpenFile(path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+        if (fd < 0) {
+            return false;
+        }
+        fs.CloseFile(fd);
+        return true;
+    }
+
+    std::filesystem::path m_root;
+};
+
+} // namespace
+
+// A NUL would end the name early on the host: "a\0b" would be "a".
+TEST_F(PhysicalFileSystemNameTest, ANameHoldingANulIsRefused) {
+    auto fs = PhysicalFileSystem::Create(Root());
+    EXPECT_FALSE(Creates(*fs, std::string("/a\0b", 4)));
+    EXPECT_FALSE(std::filesystem::exists(m_root / "a"));
+}
+
+// A path is split where the mounts over the filesystem split it -- at '\' too
+// on Windows, where the host takes it as a separator; elsewhere '\' is part of
+// a name, as it is to the host.
+TEST_F(PhysicalFileSystemNameTest, ABackslashSeparatesOnlyOnWindows) {
+    auto fs = PhysicalFileSystem::Create(Root());
+#ifdef _WIN32
+    EXPECT_TRUE(Opens(*fs, "sub\\f.txt"));
+    EXPECT_TRUE(Opens(*fs, "\\sub\\f.txt"));
+    // So "..\" climbs as "../" does, and above the root is refused alike.
+    EXPECT_TRUE(Opens(*fs, "sub\\..\\sub\\f.txt"));
+    EXPECT_FALSE(Creates(*fs, "..\\outside.txt"));
+    EXPECT_FALSE(std::filesystem::exists(m_root.parent_path() / "outside.txt"));
+#else
+    EXPECT_FALSE(Opens(*fs, "sub\\f.txt"));
+    ASSERT_TRUE(Creates(*fs, "a\\b"));
+    EXPECT_TRUE(std::filesystem::exists(m_root / "a\\b"));
+#endif
+}
+
+// Names are UTF-8, as everywhere in Haisos; on Windows they reach the host as
+// UTF-16, not through the ANSI code page, which would name another file.
+TEST_F(PhysicalFileSystemNameTest, NamesAreUtf8) {
+    auto fs = PhysicalFileSystem::Create(Root());
+    const std::string name = "caf\xC3\xA9 \xE2\x82\xAC \xE6\x97\xA5.txt";
+    ASSERT_TRUE(Creates(*fs, "/sub/" + name));
+    EXPECT_TRUE(std::filesystem::exists(m_root / "sub" / std::filesystem::u8path(name)));
+    bool listed = false;
+    for (const auto& entry : fs->ReadDirectory("/sub")) {
+        listed = listed || entry.name == name;
+    }
+    EXPECT_TRUE(listed);
+    FileStatus status;
+    EXPECT_EQ(fs->Stat("/sub/" + name, status), 0);
+    EXPECT_EQ(fs->RemoveFile("/sub/" + name), 0);
+    EXPECT_FALSE(std::filesystem::exists(m_root / "sub" / std::filesystem::u8path(name)));
+}
+
+// A root naming no directory at all gives a filesystem on which every call
+// fails, rather than one rooted somewhere else.
+TEST_F(PhysicalFileSystemNameTest, ARootNamingNoDirectoryFailsEveryCall) {
+    std::vector<std::string> roots = {""};
+#ifdef _WIN32
+    roots.push_back("/tmp/haisos_nowhere");  // the full filesystem has no /tmp
+    roots.push_back("c:relative");           // relative to drive C:'s own current directory
+#endif
+    for (const auto& root : roots) {
+        auto fs = PhysicalFileSystem::Create(root);
+        FileStatus status;
+        EXPECT_NE(fs->Stat("/", status), 0) << root;
+        EXPECT_FALSE(Creates(*fs, "/x.txt")) << root;
+    }
+}
+
+#ifdef _WIN32
+namespace {
+
+// |path| as a path of the full physical filesystem: C:\x -> /c/x.
+std::string FullPathOf(const std::filesystem::path& path) {
+    const std::string drive = path.root_name().u8string();
+    return "/" + std::string(1, static_cast<char>(std::tolower(static_cast<unsigned char>(drive[0])))) +
+        "/" + path.relative_path().generic_u8string();
+}
+
+} // namespace
+
+// On Windows a root may be written with its drive letter or as a path of the
+// full physical filesystem, with '\' or '/' in any mix.
+TEST_F(PhysicalFileSystemNameTest, ARootMayBeWrittenInEveryWindowsForm) {
+    ASSERT_EQ(m_root.root_name().u8string().size(), 2u) << "the temporary directory is on no drive";
+    const std::string full = FullPathOf(m_root);
+    std::string backwardFull = full;
+    std::replace(backwardFull.begin(), backwardFull.end(), '/', '\\');
+    std::string upperFull = full;
+    upperFull[1] = static_cast<char>(std::toupper(static_cast<unsigned char>(upperFull[1])));
+    for (const std::string& root : {Root(), m_root.generic_u8string(), full, backwardFull, upperFull, full + "/sub/.."}) {
+        auto fs = PhysicalFileSystem::Create(root);
+        EXPECT_TRUE(Opens(*fs, "/sub/f.txt")) << root;
+    }
+}
+
+// Names Windows would take for something else are refused, whatever is asked
+// of them: a device (CON is the console), a drive or an alternate data
+// stream, a name Windows trims ("sub." would be "sub", past any mount at
+// "/sub"), or a wildcard.
+TEST_F(PhysicalFileSystemNameTest, NamesWindowsTakesForSomethingElseAreRefused) {
+    auto fs = PhysicalFileSystem::Create(Root());
+    for (const char* name : {"/con", "/nul", "/sub/aux", "/com1", "/lpt9", "/conout$",
+                             "/c:x", "/sub/f.txt:hidden", "/sub.", "/sub./f.txt", "/sub /f.txt", "/a?", "/a*"}) {
+        EXPECT_FALSE(Opens(*fs, name)) << name;
+        EXPECT_FALSE(Creates(*fs, name)) << name;
+        EXPECT_NE(fs->CreateDirectory(name, S_IRWXU), 0) << name;
+        FileStatus status;
+        EXPECT_NE(fs->Stat(name, status), 0) << name;
+    }
+    // Nothing got created on the way, and "sub" was never reached as "sub.".
+    std::vector<std::string> left;
+    for (const auto& entry : std::filesystem::directory_iterator(m_root)) {
+        left.push_back(entry.path().filename().u8string());
+    }
+    EXPECT_EQ(left, std::vector<std::string>{"sub"});
+    EXPECT_FALSE(std::filesystem::exists(m_root / "sub" / "f.txt:hidden"));
+}
+
+// NUL is the null device on every Windows, wherever the path leads; NUL.txt
+// is one on Windows 10 and a file on Windows 11 -- as the host says, so a
+// file is a file wherever the host takes it for one.
+TEST_F(PhysicalFileSystemNameTest, TheHostSaysWhichNamesAreDevices) {
+    EXPECT_TRUE(FileSystem::IsDevicePath((m_root / "nul").u8string()));
+    EXPECT_FALSE(FileSystem::IsDevicePath((m_root / "sub" / "f.txt").u8string()));
+
+    auto fs = PhysicalFileSystem::Create(Root());
+    for (const char* name : {"nul.txt", "aux.c", "con.h", "com1.log"}) {
+        const bool device = FileSystem::IsDevicePath((m_root / name).u8string());
+        EXPECT_EQ(Creates(*fs, std::string("/") + name), !device) << name;
+        EXPECT_EQ(std::filesystem::exists(m_root / name), !device) << name;
+    }
+}
+
+// A junction is a link: Stat says so, removing it removes the junction only,
+// and one leading out of the root is not followed. (mklink /J needs no
+// privilege, unlike a symbolic link.)
+TEST_F(PhysicalFileSystemNameTest, AJunctionIsALink) {
+    std::filesystem::create_directories(m_root / "outside");
+    std::ofstream(m_root / "outside" / "secret.txt") << "secret";
+    std::filesystem::create_directories(m_root / "jail");
+    const std::string command = "mklink /J \"" + (m_root / "jail" / "out").string() + "\" \"" +
+        (m_root / "outside").string() + "\" > NUL 2>&1";
+    if (std::system(command.c_str()) != 0) {
+        GTEST_SKIP() << "could not make a junction: " << command;
+    }
+
+    auto fs = PhysicalFileSystem::Create((m_root / "jail").u8string());
+    EXPECT_FALSE(Opens(*fs, "/out/secret.txt"));
+
+    auto whole = PhysicalFileSystem::Create(Root());
+    FileStatus status;
+    ASSERT_EQ(whole->Stat("/jail/out", status), 0);
+    EXPECT_TRUE(status.symbolicLink);
+    EXPECT_EQ(status.type, DirectoryEntryType::Dir);
+    ASSERT_EQ(whole->Stat("/outside", status), 0);
+    EXPECT_FALSE(status.symbolicLink);
+
+    EXPECT_EQ(whole->RemoveDirectory("/jail/out"), 0);
+    EXPECT_FALSE(std::filesystem::exists(std::filesystem::symlink_status(m_root / "jail" / "out")));
+    EXPECT_TRUE(std::filesystem::exists(m_root / "outside" / "secret.txt"));
 }
 #endif

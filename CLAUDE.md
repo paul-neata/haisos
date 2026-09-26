@@ -52,6 +52,7 @@ haisos/
 │   │   ├── self_close/
 │   │   ├── agent_tools_common/
 │   │   ├── os_tools_common/
+│   │   ├── tools_common/      - ToolArguments.h: how every tool reads its arguments, never throwing
 │   │   ├── os_read_file/
 │   │   ├── os_write_file/
 │   │   ├── os_list_directory/
@@ -217,7 +218,7 @@ CREATE /notes/b.md multiline END
 # a heading -- content, not a comment
 END
 COPY ./input.txt /work/in.txt  # copy a host file into the OS
-DELETE /work/stale             # remove a file, or a directory and everything in it
+DELETE /work/stale             # remove a file, or a directory and everything in it (as rm -rf: links are removed, not followed)
 OUTCOPY /work/out.txt ./out.txt  # copy a file out to the host, once every RUN process has finished
 
 RUN /agent.md                  # start an initial process (.md agent, .lua script or builtin) at '/'; may repeat
@@ -440,6 +441,13 @@ under "Objects released last on their own threads".
 | `os_list_directory` | `src/tools/os_list_directory/` | Lists a directory on the OS's filesystem |
 | `os_start_process` | `src/tools/os_start_process/` | Starts a new OS process (`.md`/`.lua`) as a child of the calling process |
 | `os_list_processes` | `src/tools/os_list_processes/` | Lists the OS's currently running processes |
+
+Every tool reads its arguments through `src/tools/tools_common/ToolArguments.h`,
+which never throws: an optional argument that is absent or null takes its
+default, and one of the wrong type (`"append": "true"` for a boolean, say) is
+an error result naming it and the type expected -- never silently the default.
+An exception out of a tool anyway becomes that call's error result
+(`Agent::ExecuteToolCalls`), so a tool can fail its call but never the agent.
 
 The `agent_*` tools and `self_close` above are agent-management tools, returned by `ILLMService`
 and available to every agent. The `os_*` tools are the OS's own tool set,

@@ -4,7 +4,9 @@ Handles LLM API communication, request/response formatting, and tool call parsin
 
 ## Responsibilities
 
-- Builds JSON request payloads for the LLM API
+- Builds JSON request payloads for the LLM API. Building one never fails on
+  content: bytes that are not valid UTF-8 (a Latin-1 file an agent read, say)
+  are sent as U+FFFD rather than making serialization throw
 - Sends HTTP requests via `IHTTPClient`
 - Parses LLM responses including text content and tool calls
 - Supports tool schema registration so the LLM knows available functions

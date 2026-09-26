@@ -1,4 +1,10 @@
 #include <gtest/gtest.h>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
 #include "ServicesCreator.h"
 
 using namespace Haisos;
@@ -164,4 +170,159 @@ TEST(ServicesCreatorTest, CloneProducesAnIndependentServicesCreator) {
     servicesCreator.reset();
     EXPECT_NE(clone->CreateFileSystemService(), nullptr);
     EXPECT_NE(clone->CreateNetworkService(), nullptr);
+}
+
+// --- Shutting the LLM service down ---
+//
+// ~LLMService used to be defaulted: it destroyed its lock first, then its
+// agents one by one, each ~Agent waiting for its thread -- while the agents
+// further down the list were still running, and could call agent_start, i.e.
+// CreateAgent, on the lock and the list being destroyed. Now it refuses new
+// agents from the moment it begins, stops every agent, and waits for each
+// before letting go of any.
+
+namespace {
+
+// An HTTP client standing in for an LLM: its first answer asks for the tool
+// it was made with, every later one is plain text.
+class ToolCallingHTTPClient : public IHTTPClient {
+public:
+    explicit ToolCallingHTTPClient(std::string toolName) : m_toolName(std::move(toolName)) {}
+
+    HTTPResponse Get(const std::string&) override { return HTTPResponse{404, "", "not an LLM endpoint"}; }
+    HTTPResponse Post(const std::string& url, const std::string& body) override { return Post(url, body, {}); }
+    HTTPResponse Post(const std::string&, const std::string&, const std::vector<HTTPHeader>&) override {
+        if (m_asked) {
+            return HTTPResponse{200, R"({"message": {"role": "assistant", "content": "done"}, "done": true})", ""};
+        }
+        m_asked = true;
+        return HTTPResponse{200, R"({"message": {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": ")" +
+            m_toolName + R"(", "arguments": {}}}]}, "done": true})", ""};
+    }
+
+private:
+    const std::string m_toolName;
+    bool m_asked = false;
+};
+
+class ToolCallingNetworkService : public INetworkService {
+public:
+    explicit ToolCallingNetworkService(std::string toolName) : m_toolName(std::move(toolName)) {}
+    std::shared_ptr<IHTTPClient> CreateHTTPClient() override { return std::make_shared<ToolCallingHTTPClient>(m_toolName); }
+
+private:
+    const std::string m_toolName;
+};
+
+// What the "spawn" tool, the test, and the thread destroying the service share.
+struct SpawnGate {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool inTool = false;
+    bool released = false;
+    bool called = false;
+    bool refused = false;
+};
+
+// A tool that, once released, asks the LLM service for an agent -- as
+// agent_start does -- and records whether it got one.
+class SpawnToolFactory : public IToolFactory {
+public:
+    SpawnToolFactory(ILLMService* service, std::shared_ptr<SpawnGate> gate) : m_service(service), m_gate(std::move(gate)) {}
+
+    std::shared_ptr<ITool> CreateTool(const std::string& name, std::shared_ptr<IAgent>) override {
+        return name == "spawn" ? std::make_shared<SpawnTool>(m_service, m_gate) : nullptr;
+    }
+    bool HasTool(const std::string& name) const override { return name == "spawn"; }
+    std::vector<std::string> GetAvailableTools() const override { return {"spawn"}; }
+    std::vector<std::tuple<std::string, std::string, nlohmann::json>> GetAvailableToolDescriptions() const override {
+        return {{"spawn", "asks the LLM service for an agent", nlohmann::json::object()}};
+    }
+
+private:
+    class SpawnTool : public ITool {
+    public:
+        SpawnTool(ILLMService* service, std::shared_ptr<SpawnGate> gate) : m_service(service), m_gate(std::move(gate)) {}
+        ToolResult Call(std::shared_ptr<IAgent>, const nlohmann::json&) override {
+            {
+                std::unique_lock<std::mutex> lock(m_gate->mutex);
+                m_gate->inTool = true;
+                m_gate->cv.notify_all();
+                // Bounded, so a test that fails before releasing cannot hang.
+                m_gate->cv.wait_for(lock, std::chrono::seconds(10), [this] { return m_gate->released; });
+            }
+            auto agent = m_service->CreateAgent("late", nullptr, nullptr, nullptr, {"You are a helpful AI assistant."});
+            std::lock_guard<std::mutex> lock(m_gate->mutex);
+            m_gate->called = true;
+            m_gate->refused = (agent == nullptr);
+            return ToolResult{agent ? "created" : "refused", agent == nullptr};
+        }
+        nlohmann::json GetParametersSchema() const override { return nlohmann::json::object(); }
+
+    private:
+        ILLMService* m_service;
+        std::shared_ptr<SpawnGate> m_gate;
+    };
+
+    ILLMService* m_service;
+    std::shared_ptr<SpawnGate> m_gate;
+};
+
+} // namespace
+
+// An agent someone else still holds is stopped and waited for all the same:
+// it must not outlive the service, still running with tools that reach back
+// into it.
+TEST(ServicesCreatorTest, DestroyingTheLLMServiceStopsEveryAgentItCreated) {
+    auto llmService = CreateServicesCreator()->CreateLLMService(
+        std::make_shared<ToolCallingNetworkService>("unused"), "http://localhost:9999/api/chat", "llama3", "");
+    // Interactive and given nothing to do: it would wait for commands forever.
+    auto agent = llmService->CreateAgent("kept", nullptr, nullptr, nullptr, {"You are a helpful AI assistant."}, /*isInteractive=*/true);
+    ASSERT_NE(agent, nullptr);
+    EXPECT_FALSE(agent->WaitToFinish(0));
+
+    llmService.reset();
+
+    EXPECT_TRUE(agent->WaitToFinish(0));
+}
+
+// An agent busy in a tool call when the shutdown begins can still reach the
+// service. What it asks of it then is refused, cleanly: the service's lock
+// and list are still there, and so is the service, which waits for the
+// agent's call to end.
+TEST(ServicesCreatorTest, NoAgentIsCreatedOnceTheLLMServiceIsShuttingDown) {
+    auto gate = std::make_shared<SpawnGate>();
+    std::shared_ptr<ILLMService> llmService = CreateServicesCreator()->CreateLLMService(
+        std::make_shared<ToolCallingNetworkService>("spawn"), "http://localhost:9999/api/chat", "llama3", "");
+    ILLMService* service = llmService.get();
+    auto busy = llmService->CreateAgent("busy", nullptr, nullptr, std::make_shared<SpawnToolFactory>(service, gate),
+        {"You are a helpful AI assistant."}, /*isInteractive=*/false);
+    // Interactive and idle: it finishes only once the shutdown stops it, which
+    // is after new agents have been refused.
+    auto idle = llmService->CreateAgent("idle", nullptr, nullptr, nullptr, {"You are a helpful AI assistant."}, /*isInteractive=*/true);
+    ASSERT_NE(busy, nullptr);
+    ASSERT_NE(idle, nullptr);
+
+    busy->Post("spawn an agent");
+    {
+        std::unique_lock<std::mutex> lock(gate->mutex);
+        ASSERT_TRUE(gate->cv.wait_for(lock, std::chrono::seconds(10), [&] { return gate->inTool; }));
+    }
+
+    // Destroyed on a thread of its own: its destructor waits for the busy
+    // agent, whose tool call this test releases.
+    std::thread destroyer([s = std::move(llmService)]() mutable { s.reset(); });
+    const bool shutdownBegan = idle->WaitToFinish(10000);
+    {
+        std::lock_guard<std::mutex> lock(gate->mutex);
+        gate->released = true;
+    }
+    gate->cv.notify_all();
+    destroyer.join();
+
+    EXPECT_TRUE(shutdownBegan);
+    EXPECT_TRUE(busy->WaitToFinish(0));
+    std::lock_guard<std::mutex> lock(gate->mutex);
+    EXPECT_TRUE(gate->called);
+    EXPECT_TRUE(gate->refused);
 }

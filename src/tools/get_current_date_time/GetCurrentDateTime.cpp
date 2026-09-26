@@ -1,5 +1,6 @@
 #include "GetCurrentDateTime.h"
 #include "src/tools/agent_tools_common/AgentToolsCommon.h"
+#include "src/tools/tools_common/ToolArguments.h"
 
 namespace Haisos::Tools {
 
@@ -20,8 +21,8 @@ nlohmann::json GetCurrentDateTime::GetDefaultParametersSchema() {
 
 ToolResult GetCurrentDateTime::Call(std::shared_ptr<IAgent> /*callerAgent*/, const nlohmann::json& args) {
     bool getGmt = false;
-    if (args.contains("get_gmt") && args["get_gmt"].is_boolean()) {
-        getGmt = args["get_gmt"].get<bool>();
+    if (auto error = ReadOptionalArgument(args, "get_gmt", getGmt)) {
+        return *error;
     }
 
     std::string timestamp = getGmt ? GetCurrentTimestampISO8601() : GetCurrentTimestamp();

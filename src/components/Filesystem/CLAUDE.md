@@ -41,8 +41,11 @@ behaves identically no matter what you mount onto.
   underneath, timed from when the mount was made. A device is a
   `DirectoryEntryType::CharDevice` of size 0 and 0 blocks, with Linux's major
   and minor numbers for it (`deviceMajor`/`deviceMinor`, as `st_rdev`); a
-  disk's character devices are reported so on Linux too. There are no
-  permissions or owners to report yet. `EntryTypeOf` is built on it.
+  disk's character devices are reported so on Linux too. A symbolic link is
+  followed, as by `stat()`, and `symbolicLink` says the path was one (only
+  `PhysicalFileSystem` has links to report; composing filesystems pass it
+  on). There are no permissions or owners to report yet. `EntryTypeOf` is
+  built on it.
 - Holds **no current directory**. That notion belongs to a process
   (`ICurrentProcess::IO()`, an `IFileIO`), not to a filesystem: one filesystem is
   reachable from every process under an OS, so a cwd living here would be a
@@ -75,7 +78,7 @@ behaves identically no matter what you mount onto.
 ## Key Classes
 
 - `FileSystem` - Main implementation of `IFileSystem`, unrooted (operates on real paths)
-- `PhysicalFileSystem` - `IFileSystem` jailed to a real disk directory; validates every path stays within that root before delegating to an inner `FileSystem`
+- `PhysicalFileSystem` - `IFileSystem` jailed to a real disk directory; validates every path stays within that root before delegating to an inner `FileSystem`. All of it happens in `ResolveWithinRoot` (the virtual path joined to the root in `JoinUnderRoot`): the path is normalized lexically first, so no `..` can hide a component from `weakly_canonical`'s walk, then canonicalized and checked against the root. Symbolic links already on the disk (nothing here can create one) are followed only while they stay within the root, and a path ending in a link that leads nowhere is refused -- `weakly_canonical` cannot resolve a dangling link, and `open()` with `O_CREAT` would create its target, outside the root perhaps. `LocalOpenFile` also adds `O_NOFOLLOW` on POSIX, in case a link appears between the check and the open; a directory swapped for a link higher up the path in that window is not caught (it takes something outside Haisos to do it). `RemoveFile`, `RemoveDirectory` and `CreateDirectory` resolve only the directory holding the last component and take that component as it is, as `unlink()`/`rmdir()`/`mkdir()` do: a link is removed itself, never what it points at, and the root itself can be neither removed nor created. `Stat` follows links but reports one in `FileStatus::symbolicLink`, which the haisosfile's `DELETE` uses to remove a link rather than descend into it
 - `InMemoryFileSystem` - an empty, in-memory read/write `IFileSystem` (no real disk); files are plain byte buffers keyed by normalized path
 - `DeviceFileSystem` - a device filesystem, as Linux's `/dev`: a root directory holding the character devices `null` (writes discarded, reads end at once) and `zero` (writes discarded, reads return endless 0 bytes). Nothing can be created or removed in it -- files, directories, or builtins (`LocalCanHoldBuiltinCommands`) -- but a device opens with any flags, so `> /dev/null` works
 - `ReadOnlyFileSystem` - wraps another `IFileSystem`, rejecting every write/create/remove

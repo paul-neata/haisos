@@ -1,5 +1,6 @@
 #include "AgentQueryTool.h"
 #include "src/tools/agent_tools_common/AgentToolsCommon.h"
+#include "src/tools/tools_common/ToolArguments.h"
 
 namespace Haisos::Tools {
 
@@ -29,26 +30,22 @@ nlohmann::json AgentQueryTool::GetDefaultParametersSchema() {
 }
 
 ToolResult AgentQueryTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) {
-    if (!args.contains("names") || !args["names"].is_array()) {
-        return ToolResult{"Missing required field: names", true};
+    std::vector<std::string> names;
+    if (auto error = ReadRequiredArgument(args, "names", names)) {
+        return *error;
     }
-
     bool returnConsole = false;
-    if (args.contains("return_console") && args["return_console"].is_boolean()) {
-        returnConsole = args["return_console"];
+    if (auto error = ReadOptionalArgument(args, "return_console", returnConsole)) {
+        return *error;
     }
-
     bool returnMessages = false;
-    if (args.contains("return_messages") && args["return_messages"].is_boolean()) {
-        returnMessages = args["return_messages"];
+    if (auto error = ReadOptionalArgument(args, "return_messages", returnMessages)) {
+        return *error;
     }
 
     nlohmann::json results = nlohmann::json::array();
     size_t foundCount = 0;
-    for (const auto& name : args["names"]) {
-        if (!name.is_string()) continue;
-        std::string agentName = name;
-
+    for (const auto& agentName : names) {
         auto target = FindChildByName(callerAgent, agentName);
 
         nlohmann::json result;
@@ -76,10 +73,11 @@ ToolResult AgentQueryTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohm
         results.push_back(result);
     }
 
-    if (foundCount == 0) {
-        return ToolResult{results.dump(), true};
-    }
-    return ToolResult{results.dump(), false};
+    // A console or a history may hold bytes that are not UTF-8 (whatever a
+    // file the agent read contained), on which the default dump() throws:
+    // replaced, they come back as U+FFFD instead.
+    std::string content = results.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+    return ToolResult{std::move(content), foundCount == 0};
 }
 
 } // namespace Haisos::Tools

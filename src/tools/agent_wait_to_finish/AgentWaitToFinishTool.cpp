@@ -1,5 +1,6 @@
 #include "AgentWaitToFinishTool.h"
 #include "src/tools/agent_tools_common/AgentToolsCommon.h"
+#include "src/tools/tools_common/ToolArguments.h"
 
 namespace Haisos::Tools {
 
@@ -38,40 +39,33 @@ nlohmann::json AgentWaitToFinishTool::GetDefaultParametersSchema() {
 }
 
 ToolResult AgentWaitToFinishTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) {
-    if (!args.contains("names") || !args["names"].is_array()) {
-        return ToolResult{"Missing required field: names", true};
+    std::vector<std::string> names;
+    if (auto error = ReadRequiredArgument(args, "names", names)) {
+        return *error;
     }
-
     bool returnConsole = false;
-    if (args.contains("return_console") && args["return_console"].is_boolean()) {
-        returnConsole = args["return_console"];
+    if (auto error = ReadOptionalArgument(args, "return_console", returnConsole)) {
+        return *error;
     }
-
     bool returnMessages = false;
-    if (args.contains("return_messages") && args["return_messages"].is_boolean()) {
-        returnMessages = args["return_messages"];
+    if (auto error = ReadOptionalArgument(args, "return_messages", returnMessages)) {
+        return *error;
     }
 
-    bool hasTimeout = false;
-    uint64_t timeout_ms = 0;
-    if (args.contains("timeout_ms") && !args["timeout_ms"].is_null()) {
-        hasTimeout = true;
-        try {
-            timeout_ms = args["timeout_ms"].get<uint64_t>();
-        } catch (const nlohmann::json::exception&) {
-            return ToolResult{"Invalid timeout_ms: must be a non-negative integer", true};
-        }
-        if (timeout_ms > MAX_TIMEOUT_MS) {
-            return ToolResult{"timeout_ms exceeds maximum allowed value of 86400000 ms (24 hours)", true};
-        }
+    // Omitted (or null), it means "as long as allowed", which no number says.
+    std::optional<uint64_t> timeout;
+    if (auto error = ReadOptionalArgument(args, "timeout_ms", timeout)) {
+        return *error;
+    }
+    const bool hasTimeout = timeout.has_value();
+    const uint64_t timeout_ms = timeout.value_or(0);
+    if (timeout_ms > MAX_TIMEOUT_MS) {
+        return ToolResult{"timeout_ms exceeds maximum allowed value of 86400000 ms (24 hours)", true};
     }
 
     bool anyNotFound = false;
     std::string errorMessage;
-    for (const auto& name : args["names"]) {
-        if (!name.is_string()) continue;
-        std::string agentName = name;
-
+    for (const auto& agentName : names) {
         auto target = FindChildByName(callerAgent, agentName);
 
         if (!target) {

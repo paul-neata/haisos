@@ -6,6 +6,7 @@
 #include <deque>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <mutex>
 #include <thread>
 #include "HaisosOS.h"
@@ -132,6 +133,12 @@ bool HistoryMentions(const nlohmann::json& history, const std::string& text) {
         }
     }
     return false;
+}
+
+// The whole of a file on the real disk, or "" if there is none.
+std::string ReadHostFile(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
 class HaisosOSTest : public ::testing::Test {
@@ -546,6 +553,55 @@ TEST_F(HaisosOSTest, InteractiveAgentOnlyAppliesToAgentPrograms) {
     ASSERT_NE(process, nullptr);
     EXPECT_TRUE(process->WaitToFinish(kProcessWaitMs));
     EXPECT_EQ(console->ReadLineCalls(), 0);
+}
+
+// --- A script and the real OS tools ---
+
+// A file of JSON nested deeper than the Lua bridge converts reaches the script
+// reading it as its text. Converting it into tables used to recurse until the
+// Lua stack overflowed, taking the whole program down -- and any script that
+// reads a file someone else wrote could be made to.
+TEST_F(HaisosOSTest, AScriptReadingDeeplyNestedJsonGetsItsText) {
+    std::ofstream(kTestRoot + "/nested.json") << std::string(300, '[') << std::string(300, ']');
+    std::ofstream(kTestRoot + "/read_nested.lua")
+        << "local r, is_error = os_read_file({path = 'nested.json'})\n"
+        << "os_write_file({path = 'nested_result.txt', content = type(r) .. '|' .. tostring(is_error) .. '|' .. #r})\n";
+    auto os = BuildOS();
+
+    auto process = os->StartProcess(TestEnvironment(), "read_nested.lua", {}, /*workingDirectory=*/"", StartProcessOptions{});
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    EXPECT_EQ(ReadHostFile(kTestRoot + "/nested_result.txt"), "string|false|600");
+}
+
+// A wrongly typed argument is refused with a message naming it -- never read
+// as the default, and never thrown out of the tool, which used to end an agent
+// calling it. "append" as the string "true" read as false would have
+// overwritten the file instead of appending to it.
+TEST_F(HaisosOSTest, OSToolsRefuseWronglyTypedArguments) {
+    std::ofstream(kTestRoot + "/keep.txt") << "original";
+    std::ofstream(kTestRoot + "/typed_args.lua")
+        << "local lines = {}\n"
+        << "local function try(name, tool, args)\n"
+        << "  local result, is_error = tool(args)\n"
+        << "  lines[#lines + 1] = name .. '=' .. tostring(is_error) .. ':' .. result\n"
+        << "end\n"
+        << "try('write', os_write_file, {path = 'keep.txt', content = 'new', append = 'true'})\n"
+        << "try('list', os_list_directory, {path = 5})\n"
+        << "try('read', os_read_file, {path = true})\n"
+        << "try('start', os_start_process, {path = 'script.lua', args = {1, 2}})\n"
+        << "os_write_file({path = 'typed_result.txt', content = table.concat(lines, '\\n')})\n";
+    auto os = BuildOS();
+
+    auto process = os->StartProcess(TestEnvironment(), "typed_args.lua", {}, /*workingDirectory=*/"", StartProcessOptions{});
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    EXPECT_EQ(ReadHostFile(kTestRoot + "/keep.txt"), "original");
+    EXPECT_EQ(ReadHostFile(kTestRoot + "/typed_result.txt"),
+        "write=true:Invalid field append: expected a boolean (true or false), got a string\n"
+        "list=true:Invalid field path: expected a string, got a number\n"
+        "read=true:Invalid field path: expected a string, got a boolean\n"
+        "start=true:Invalid field args: expected an array of strings, got an array holding a number");
 }
 
 // --- Builtin commands ---

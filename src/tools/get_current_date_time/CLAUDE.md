@@ -17,5 +17,5 @@ Returns the current date and time.
 
 | Name | Type | Description |
 |------|------|-------------|
-| `is_error` | `boolean` | Always `false` for this tool. |
+| `is_error` | `boolean` | `false`, unless `get_gmt` is present and not a JSON boolean (null counts as omitted), which is refused. |
 | `content` | `string` | The current date and time. Local time is formatted as `YYYY-MM-DD HH:MM:SS`. GMT/UTC time is formatted as `YYYY-MM-DDTHH:MM:SSZ`. |

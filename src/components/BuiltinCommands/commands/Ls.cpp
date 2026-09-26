@@ -3,8 +3,11 @@
 #include <cstdint>
 #include <cstdio>
 #include <ctime>
+#include <cstring>
+#include <string>
 #include "BuiltinCommand.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
+#include "src/components/libheaders/CrtInvalidParameterAsError.h"
 
 namespace Haisos {
 
@@ -170,6 +173,11 @@ std::tm LocalTime(int64_t seconds) {
     const std::time_t asTimeT = static_cast<std::time_t>(seconds);
     std::tm local{};
 #ifdef _WIN32
+    // A time before 1970, which a file on the disk can have, is an invalid
+    // parameter to localtime_s -- by default the end of the program (see
+    // CrtInvalidParameterAsError). In scope, the call just fails, and |local|
+    // stays zeroed.
+    CrtInvalidParameterAsError crtErrors;
     localtime_s(&local, &asTimeT);
 #else
     localtime_r(&asTimeT, &local);
@@ -177,8 +185,27 @@ std::tm LocalTime(int64_t seconds) {
     return local;
 }
 
-// strftime, with %N (nanoseconds, as GNU date and ls have it) and %e (the day,
-// space-padded -- not every C library knows it) expanded first.
+#ifdef _WIN32
+// Whether the Microsoft C runtime's strftime knows the conversion starting at
+// format[i], just after its '%': one of its conversion characters, perhaps
+// after the '#' flag or an E or O modifier. Handed any other, that strftime
+// treats the whole call as an invalid parameter, which by default ends the
+// program (see CrtInvalidParameterAsError).
+bool MsvcStrftimeKnows(const std::string& format, size_t i) {
+    static const char kConversions[] = "aAbBcCdDeFgGhHIjmMnprRStTuUVwWxXyYzZ%";
+    if (i < format.size() && (format[i] == '#' || format[i] == 'E' || format[i] == 'O')) {
+        ++i;
+    }
+    return i < format.size() && format[i] != '\0' && std::strchr(kConversions, format[i]) != nullptr;
+}
+#endif
+
+// strftime, with %N (nanoseconds, as GNU date and ls have it), %e (the day,
+// space-padded -- not every C library knows it) and %s (seconds since the
+// epoch, a GNU extension) expanded first. On Windows a conversion its C
+// runtime does not know is written out as it stands, as glibc writes one it
+// does not know, rather than handed to that strftime, which would fail the
+// whole call -- and, by default, the program with it.
 std::string FormatDateTime(const std::string& format, const FileDateTime& time) {
     const std::tm local = LocalTime(time.seconds);
     std::string expanded;
@@ -197,15 +224,38 @@ std::string FormatDateTime(const std::string& format, const FileDateTime& time) 
                 ++i;
                 continue;
             }
+            if (format[i + 1] == 's') {
+                expanded += std::to_string(time.seconds);
+                ++i;
+                continue;
+            }
             if (format[i + 1] == '%') {
                 expanded += "%%";
                 ++i;
                 continue;
             }
+#ifdef _WIN32
+            if (!MsvcStrftimeKnows(format, i + 1)) {
+                // The '%' as a literal one; what follows it is copied as the
+                // plain text it then is.
+                expanded += "%%";
+                continue;
+            }
+#endif
         }
+#ifdef _WIN32
+        else if (format[i] == '%') {
+            // A '%' ending the format starts no conversion at all.
+            expanded += "%%";
+            continue;
+        }
+#endif
         expanded += format[i];
     }
     char buffer[256];
+    // Should that strftime still take exception to something, the call fails
+    // (and the column is left empty) rather than the program.
+    CrtInvalidParameterAsError crtErrors;
     const size_t written = std::strftime(buffer, sizeof(buffer), expanded.c_str(), &local);
     return std::string(buffer, written);
 }
@@ -255,7 +305,7 @@ bool ParseWidth(const std::string& text, size_t& width) {
 class LsCommand : public IBuiltinCommand {
 public:
     std::string Name() const override { return "ls"; }
-    std::string Version() const override { return "1.2.0"; }
+    std::string Version() const override { return "1.2.1"; }
 
     const std::vector<BuiltinOption>& Options() const override {
         using A = BuiltinArgument;
@@ -327,6 +377,7 @@ public:
             "list directory contents",
             {"ls [OPTION]... [FILE]..."},
             "Owner and group show as haisos; permissions as rwxrwxrwx.\n"
+            "On Windows, a --time-style=+FORMAT conversion its C library lacks prints as written.\n"
             "Exit status: 0 if OK, 2 if a FILE could not be accessed.\n"};
     }
 

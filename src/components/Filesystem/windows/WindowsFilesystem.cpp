@@ -11,42 +11,59 @@
 #include <cstring>
 #include <string>
 #include <algorithm>
+#include "src/components/libheaders/CrtInvalidParameterAsError.h"
 
 namespace Haisos {
 
+// Every C runtime call below runs with a CrtInvalidParameterAsError in scope.
+// A descriptor is an int any caller may hand in, and the CRT meets one that
+// is not open -- or a count it will not take -- by ending the whole program
+// through its invalid parameter handler, where close() and read() on POSIX
+// just fail. In scope, the call fails with -1 as the IFileSystem contract
+// says, and only the caller hears of it.
+
 int FileSystem::LocalOpenFile(const std::string& pathname, int flags) {
+    CrtInvalidParameterAsError crtErrors;
     return ::_open(pathname.c_str(), flags);
 }
 
 int FileSystem::LocalOpenFile(const std::string& pathname, int flags, int mode) {
+    CrtInvalidParameterAsError crtErrors;
     return ::_open(pathname.c_str(), flags, mode);
 }
 
 int FileSystem::LocalCloseFile(int fd) {
+    CrtInvalidParameterAsError crtErrors;
     return ::_close(fd);
 }
 
 ssize_t FileSystem::LocalReadFile(int fd, void* buf, size_t count) {
+    CrtInvalidParameterAsError crtErrors;
     return ::_read(fd, buf, static_cast<unsigned int>(count));
 }
 
 ssize_t FileSystem::LocalWriteFile(int fd, const void* buf, size_t count) {
+    CrtInvalidParameterAsError crtErrors;
     return ::_write(fd, buf, static_cast<unsigned int>(count));
 }
 
 int FileSystem::LocalCreateDirectory(const std::string& pathname, int /*mode*/) {
+    CrtInvalidParameterAsError crtErrors;
     return ::_mkdir(pathname.c_str());
 }
 
 int FileSystem::LocalRemoveDirectory(const std::string& pathname) {
+    CrtInvalidParameterAsError crtErrors;
     return ::_rmdir(pathname.c_str());
 }
 
 int FileSystem::LocalRemoveFile(const std::string& pathname) {
+    CrtInvalidParameterAsError crtErrors;
     return ::_unlink(pathname.c_str());
 }
 
 int FileSystem::LocalStat(const std::string& path, FileStatus& out) {
+    CrtInvalidParameterAsError crtErrors;
     struct _stat64 st;
     if (::_stat64(path.c_str(), &st) != 0) {
         return -1;

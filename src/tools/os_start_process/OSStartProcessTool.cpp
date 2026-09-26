@@ -1,5 +1,6 @@
 #include "OSStartProcessTool.h"
 #include "src/tools/os_tools_common/OSToolsCommon.h"
+#include "src/tools/tools_common/ToolArguments.h"
 #include "src/components/Logger/Logger.h"
 
 namespace Haisos::Tools {
@@ -28,8 +29,13 @@ nlohmann::json OSStartProcessTool::GetDefaultParametersSchema() {
 }
 
 ToolResult OSStartProcessTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) {
-    if (!args.contains("path") || !args["path"].is_string()) {
-        return ToolResult{"Missing required field: path", true};
+    std::string requestedPath;
+    if (auto error = ReadRequiredArgument(args, "path", requestedPath)) {
+        return *error;
+    }
+    std::vector<std::string> programArgs;
+    if (auto error = ReadOptionalArgument(args, "args", programArgs)) {
+        return *error;
     }
     auto context = GetOSToolContext(m_process);
     if (!context.IsValid()) {
@@ -39,16 +45,7 @@ ToolResult OSStartProcessTool::Call(std::shared_ptr<IAgent> callerAgent, const n
     // Resolved here rather than by the OS: IHaisosOS::StartProcess takes a
     // path against the OS root, and only this process's IFileIO knows where
     // "here" is for it.
-    std::string path = context.io->ResolvePath(args["path"]);
-
-    std::vector<std::string> programArgs;
-    if (args.contains("args") && args["args"].is_array()) {
-        for (const auto& a : args["args"]) {
-            if (a.is_string()) {
-                programArgs.push_back(a.get<std::string>());
-            }
-        }
-    }
+    std::string path = context.io->ResolvePath(requestedPath);
 
     LogDebug("OSStartProcessTool: starting process '%s' with %zu arg(s)", path.c_str(), programArgs.size());
 
@@ -68,7 +65,9 @@ ToolResult OSStartProcessTool::Call(std::shared_ptr<IAgent> callerAgent, const n
     nlohmann::json result;
     result["pid"] = process->GetPid();
     result["path"] = process->Path();
-    return ToolResult{result.dump(), false};
+    // A path is an arbitrary byte string, so it need not be valid UTF-8, on
+    // which the default dump() throws: replaced, it comes back as U+FFFD.
+    return ToolResult{result.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace), false};
 }
 
 }

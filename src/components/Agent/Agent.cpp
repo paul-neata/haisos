@@ -1,10 +1,10 @@
 #include "Agent.h"
 #include <chrono>
 #include <iterator>
+#include <optional>
 #include <nlohmann/json.hpp>
 #include "src/components/Logger/Logger.h"
 #include "src/components/libheaders/DestroyOffRuntimeThreads.h"
-#include "src/components/libheaders/SanitizeUserInput.h"
 
 namespace Haisos {
 
@@ -12,6 +12,50 @@ namespace Haisos {
 // reporting that it is still running. Only the reporting interval -- the wait
 // itself never gives up.
 constexpr uint64_t DESTRUCTION_WAIT_INTERVAL_MS = 5000;
+
+namespace {
+
+// A string field of a JSON object an LLM sent -- a tool call, or its
+// "function" -- or "" when the field is missing or not a string, or the value
+// is not an object at all. Never throws: what an LLM sends is untrusted, and
+// json::value() throws when the field is there with another type.
+std::string StringField(const nlohmann::json& object, const char* key) {
+    if (!object.is_object()) {
+        return std::string();
+    }
+    const auto it = object.find(key);
+    return (it != object.end() && it->is_string()) ? it->get<std::string>() : std::string();
+}
+
+// The name of the tool a tool call asks for: under "function" in the shape
+// Ollama sends, at the top in the flat one.
+std::string ToolCallName(const nlohmann::json& toolCall) {
+    if (toolCall.is_object()) {
+        const auto function = toolCall.find("function");
+        if (function != toolCall.end() && function->is_object()) {
+            return StringField(*function, "name");
+        }
+    }
+    return StringField(toolCall, "name");
+}
+
+// A tool's result as it goes into the history.
+LLMMessage ToolResultMessage(const std::string& toolName, const std::string& content,
+                             const std::string& toolCallId, bool isError) {
+    LLMMessage toolMsg;
+    toolMsg.role = "tool";
+    // Tool results are untrusted content, but they are structured data (file
+    // contents, JSON) that must reach the LLM verbatim. Instead of filtering
+    // them, delimit them the same way user input is delimited so the model
+    // can tell data from instructions.
+    toolMsg.is_error = isError;
+    toolMsg.content = "\n--- BEGIN TOOL RESULT ---\n" + content + "\n--- END TOOL RESULT ---\n";
+    toolMsg.name = toolName;
+    toolMsg.tool_call_id = toolCallId;
+    return toolMsg;
+}
+
+} // namespace
 
 std::shared_ptr<Agent> Agent::Create(
     std::shared_ptr<ILLMCommunicator> llmCommunicator,
@@ -227,36 +271,28 @@ std::vector<std::tuple<std::string, std::string, std::string, bool>> Agent::Exec
     toolResults.reserve(message.toolCallsJson.size());
 
     for (const auto& tc : message.toolCallsJson) {
-        std::string toolName;
-        std::string toolCallId = tc.value("id", "");
+        // Everything here is read without throwing: a tool call is whatever the
+        // LLM sent, and json::value() throws on a field of the wrong type --
+        // which used to end the agent with the tool call left unanswered.
+        const std::string toolCallId = StringField(tc, "id");
+        const std::string toolName = ToolCallName(tc);
         nlohmann::json args = nlohmann::json::object();
 
-        if (tc.contains("function") && tc["function"].is_object()) {
-            const auto& func = tc["function"];
-            toolName = func.value("name", "");
-            if (func.contains("arguments")) {
-                const auto& argField = func["arguments"];
-                if (argField.is_string()) {
-                    try {
-                        args = nlohmann::json::parse(argField.get<std::string>());
-                    } catch (const std::exception& e) {
-                        LogWarning("Agent '%s' - Failed to parse tool arguments JSON for '%s': %s", m_name.c_str(), toolName.c_str(), e.what());
-                        args = nlohmann::json::object();
-                    } catch (...) {
-                        LogWarning("Agent '%s' - Failed to parse tool arguments JSON for '%s': unknown exception", m_name.c_str(), toolName.c_str());
-                        args = nlohmann::json::object();
-                    }
-                } else {
-                    args = argField;
-                }
+        // Ollama nests the arguments under "function"; the flat shape has
+        // them at the top, next to the name.
+        const nlohmann::json* holder = &tc;
+        if (tc.is_object()) {
+            const auto function = tc.find("function");
+            if (function != tc.end() && function->is_object()) {
+                holder = &*function;
             }
-        } else {
-            toolName = tc.value("name", "");
-            if (tc.contains("arguments")) {
-                const auto& argField = tc["arguments"];
-                if (argField.is_string()) {
+        }
+        if (holder->is_object()) {
+            const auto argField = holder->find("arguments");
+            if (argField != holder->end()) {
+                if (argField->is_string()) {
                     try {
-                        args = nlohmann::json::parse(argField.get<std::string>());
+                        args = nlohmann::json::parse(argField->get<std::string>());
                     } catch (const std::exception& e) {
                         LogWarning("Agent '%s' - Failed to parse tool arguments JSON for '%s': %s", m_name.c_str(), toolName.c_str(), e.what());
                         args = nlohmann::json::object();
@@ -265,13 +301,26 @@ std::vector<std::tuple<std::string, std::string, std::string, bool>> Agent::Exec
                         args = nlohmann::json::object();
                     }
                 } else {
-                    args = argField;
+                    args = *argField;
                 }
             }
         }
 
         if (toolName.empty()) {
-            toolResults.emplace_back("", "Error: Tool name is empty", toolCallId, true);
+            toolResults.emplace_back("", "Error: the tool call names no tool (its name must be a non-empty string)", toolCallId, true);
+            continue;
+        }
+        // No arguments at all is as good as none given; anything else that is
+        // not an object has no named arguments for a tool to read.
+        if (args.is_null()) {
+            args = nlohmann::json::object();
+        }
+        if (!args.is_object()) {
+            LogWarning("Agent '%s' - arguments for tool '%s' are not a JSON object", m_name.c_str(), toolName.c_str());
+            const std::string type = args.type_name();
+            const char* article = (type == "array" || type == "object") ? "an " : "a ";
+            toolResults.emplace_back(toolName, "Error: the arguments of tool " + toolName + " must be a JSON object, not " +
+                article + type, toolCallId, true);
             continue;
         }
 
@@ -285,11 +334,24 @@ std::vector<std::tuple<std::string, std::string, std::string, bool>> Agent::Exec
         }
 
         LogDebug("Agent '%s' - Tool call received: %s", m_name.c_str(), toolName.c_str());
-        auto tool = m_toolFactory->CreateTool(toolName, shared_from_this());
-        if (tool) {
-            ToolResult result = tool->Call(shared_from_this(), args);
-            toolResults.emplace_back(toolName, result.content, toolCallId, result.isError);
-            LogVerboseDebug("Agent '%s' - Tool result: %s", m_name.c_str(), result.content.c_str());
+        // A tool that throws fails its own call, not the agent: the exception
+        // becomes the call's result, and the conversation goes on.
+        std::optional<ToolResult> result;
+        try {
+            auto tool = m_toolFactory->CreateTool(toolName, shared_from_this());
+            if (tool) {
+                result = tool->Call(shared_from_this(), args);
+            }
+        } catch (const std::exception& e) {
+            LogError("Agent '%s' - tool '%s' threw: %s", m_name.c_str(), toolName.c_str(), e.what());
+            result = ToolResult{"Error: tool " + toolName + " failed: " + e.what(), true};
+        } catch (...) {
+            LogError("Agent '%s' - tool '%s' threw an unknown exception", m_name.c_str(), toolName.c_str());
+            result = ToolResult{"Error: tool " + toolName + " failed: unknown exception", true};
+        }
+        if (result) {
+            toolResults.emplace_back(toolName, result->content, toolCallId, result->isError);
+            LogVerboseDebug("Agent '%s' - Tool result: %s", m_name.c_str(), result->content.c_str());
         } else {
             LogWarning("Agent '%s' - Unknown tool: %s", m_name.c_str(), toolName.c_str());
             if (m_console) {
@@ -321,103 +383,41 @@ void Agent::RunThread() {
     }
 
     while (true) {
+        std::string command;
         try {
-            std::string command;
             if (!m_commandQueue.Pop(command)) {
                 LogVerboseDebug("Agent '%s' command queue closed, exiting outer loop", m_name.c_str());
                 break;
             }
-
-            if (command.empty()) {
-                LogVerboseDebug("Agent '%s' received empty command, skipping", m_name.c_str());
-                continue;
-            }
-
-            LogDebug("Agent '%s' processing command: %s", m_name.c_str(), command.c_str());
-
-            std::string sanitizedCommand = SanitizeUserInput(command);
-            LLMMessage userMsg;
-            userMsg.role = "user";
-            userMsg.content = "\n--- BEGIN USER INPUT ---\n" + sanitizedCommand + "\n--- END USER INPUT ---\n";
-            {
-                std::lock_guard<std::mutex> lock(m_historyMutex);
-                m_history.push_back(userMsg);
-            }
-
-            constexpr int MAX_LLM_ROUNDS = 20;
-            int rounds = 0;
-            while (true) {
-                if (++rounds > MAX_LLM_ROUNDS) {
-                    LogWarning("Agent '%s' exceeded maximum LLM rounds (%d), breaking conversation loop", m_name.c_str(), MAX_LLM_ROUNDS);
-                    break;
-                }
-
-                LogVerboseDebug("Agent '%s' LLM round %d starting", m_name.c_str(), rounds);
-
-                std::vector<LLMMessage> localHistory;
-                {
-                    std::lock_guard<std::mutex> lock(m_historyMutex);
-                    localHistory = m_history;
-                }
-
-                LLMResponse response = m_llmCommunicator->Call(localHistory, m_cachedToolDescriptions);
-
-                if (!response.message.content.empty()) {
-                    if (m_console) {
-                        m_console->Write(response.message.content);
-                    }
-                    m_messageBuffer.Append("[" + m_name + "] " + response.message.content + "\n");
-                }
-
-                // ALWAYS push assistant response to history
-                {
-                    std::lock_guard<std::mutex> lock(m_historyMutex);
-                    m_history.push_back(response.message);
-                }
-
-                if (!response.message.toolCallsJson.empty()) {
-                    LogDebug("Agent '%s' received %zu tool call(s)", m_name.c_str(), response.message.toolCallsJson.size());
-                    auto toolResults = ExecuteToolCalls(response.message);
-                    {
-                        std::lock_guard<std::mutex> lock(m_historyMutex);
-                        for (const auto& tr : toolResults) {
-                            LLMMessage toolMsg;
-                            toolMsg.role = "tool";
-                            // Tool results are untrusted content, but they are structured data
-                            // (file contents, JSON) that must reach the LLM verbatim. Instead of
-                            // filtering them, delimit them the same way user input is delimited
-                            // so the model can tell data from instructions.
-                            toolMsg.is_error = std::get<3>(tr);
-                            toolMsg.content = "\n--- BEGIN TOOL RESULT ---\n" + std::get<1>(tr) + "\n--- END TOOL RESULT ---\n";
-                            toolMsg.name = std::get<0>(tr);
-                            toolMsg.tool_call_id = std::get<2>(tr);
-                            m_history.push_back(toolMsg);
-                        }
-                    }
-                    // Nothing was run, so there is nothing for another round to
-                    // build on: going back to the LLM would only spend calls
-                    // refusing tools until the round cap ran out.
-                    if (m_stopRequested) {
-                        LogDebug("Agent '%s' - stop requested, ending the conversation round", m_name.c_str());
-                        break;
-                    }
-                    continue;
-                }
-
-                // No tool calls present: the conversation round is complete.
-                LogVerboseDebug("Agent '%s' no tool calls, breaking conversation loop", m_name.c_str());
-                break;
-            }
-
-            if (!m_interactive) {
-                LogVerboseDebug("Agent '%s' not interactive: finished processing command, exiting outer loop", m_name.c_str());
-                break;
-            }
         } catch (const std::exception& e) {
-            LogError("Agent '%s' - Exception in RunThread: %s", m_name.c_str(), e.what());
+            // A queue that fails can hand out nothing more, and there is no
+            // command yet to report the failure against.
+            LogError("Agent '%s' - Exception in RunThread while taking its next command: %s", m_name.c_str(), e.what());
             break;
         } catch (...) {
-            LogError("Agent '%s' - Unknown exception in RunThread", m_name.c_str());
+            LogError("Agent '%s' - Unknown exception in RunThread while taking its next command", m_name.c_str());
+            break;
+        }
+
+        if (command.empty()) {
+            LogVerboseDebug("Agent '%s' received empty command, skipping", m_name.c_str());
+            continue;
+        }
+
+        // A command that fails takes only itself down, never the agent: an
+        // exception out of it -- a tool, the LLM round trip, anything -- used
+        // to end the agent's thread with nothing but a log line to show for
+        // it, so the agent simply stopped answering.
+        try {
+            ProcessCommand(command);
+        } catch (const std::exception& e) {
+            OnCommandFailed(e.what());
+        } catch (...) {
+            OnCommandFailed("unknown exception");
+        }
+
+        if (!m_interactive) {
+            LogVerboseDebug("Agent '%s' not interactive: finished processing command, exiting outer loop", m_name.c_str());
             break;
         }
     }
@@ -427,6 +427,139 @@ void Agent::RunThread() {
     }
     m_finishedCv.notify_all();
     LogDebug("Agent '%s' RunThread finished", m_name.c_str());
+}
+
+void Agent::ProcessCommand(const std::string& command) {
+    LogDebug("Agent '%s' processing command: %s", m_name.c_str(), command.c_str());
+
+    // The command goes in whole, byte for byte. It is delimited, not filtered:
+    // it is the agent's program, a line its operator typed, or a prompt from
+    // the agent that started it -- none from an untrusted third party -- and
+    // rewriting it (as a denylist of "injection" phrases once did) corrupts
+    // code, markup and ordinary prose while stopping nobody. Content that is
+    // untrusted, a tool's result, is delimited the same way.
+    LLMMessage userMsg;
+    userMsg.role = "user";
+    userMsg.content = "\n--- BEGIN USER INPUT ---\n" + command + "\n--- END USER INPUT ---\n";
+    {
+        std::lock_guard<std::mutex> lock(m_historyMutex);
+        m_history.push_back(userMsg);
+    }
+
+    constexpr int MAX_LLM_ROUNDS = 20;
+    int rounds = 0;
+    while (true) {
+        if (++rounds > MAX_LLM_ROUNDS) {
+            LogWarning("Agent '%s' exceeded maximum LLM rounds (%d), breaking conversation loop", m_name.c_str(), MAX_LLM_ROUNDS);
+            break;
+        }
+
+        LogVerboseDebug("Agent '%s' LLM round %d starting", m_name.c_str(), rounds);
+
+        std::vector<LLMMessage> localHistory;
+        {
+            std::lock_guard<std::mutex> lock(m_historyMutex);
+            localHistory = m_history;
+        }
+
+        LLMResponse response = m_llmCommunicator->Call(localHistory, m_cachedToolDescriptions);
+
+        if (!response.message.content.empty()) {
+            if (m_console) {
+                m_console->Write(response.message.content);
+            }
+            m_messageBuffer.Append("[" + m_name + "] " + response.message.content + "\n");
+        }
+
+        // ALWAYS push assistant response to history
+        {
+            std::lock_guard<std::mutex> lock(m_historyMutex);
+            m_history.push_back(response.message);
+        }
+
+        if (!response.message.toolCallsJson.empty()) {
+            LogDebug("Agent '%s' received %zu tool call(s)", m_name.c_str(), response.message.toolCallsJson.size());
+            auto toolResults = ExecuteToolCalls(response.message);
+            {
+                std::lock_guard<std::mutex> lock(m_historyMutex);
+                for (const auto& tr : toolResults) {
+                    m_history.push_back(ToolResultMessage(std::get<0>(tr), std::get<1>(tr), std::get<2>(tr), std::get<3>(tr)));
+                }
+            }
+            // Nothing was run, so there is nothing for another round to
+            // build on: going back to the LLM would only spend calls
+            // refusing tools until the round cap ran out.
+            if (m_stopRequested) {
+                LogDebug("Agent '%s' - stop requested, ending the conversation round", m_name.c_str());
+                break;
+            }
+            continue;
+        }
+
+        // No tool calls present: the conversation round is complete.
+        LogVerboseDebug("Agent '%s' no tool calls, breaking conversation loop", m_name.c_str());
+        break;
+    }
+}
+
+void Agent::OnCommandFailed(const std::string& what) {
+    // Best effort: this runs because something has already failed, and
+    // nothing here may throw out of the agent's thread.
+    try {
+        // "Exception in RunThread" is what this has always been logged as.
+        LogError("Agent '%s' - Exception in RunThread while processing a command: %s", m_name.c_str(), what.c_str());
+        try {
+            AnswerUnansweredToolCalls("Error: the command failed before this tool call was answered: " + what);
+        } catch (...) {
+            LogError("Agent '%s' - could not answer the tool calls a failed command left open", m_name.c_str());
+        }
+        // The message buffer first: it is memory, where a console may be the
+        // very thing that failed.
+        const std::string line = "Error: the command failed: " + what;
+        m_messageBuffer.Append("[" + m_name + "] " + line + "\n");
+        if (m_console) {
+            m_console->Write(line);
+        }
+        if (m_interactive) {
+            LogInfo("Agent '%s' - carrying on with its next command", m_name.c_str());
+        } else {
+            LogInfo("Agent '%s' - not interactive, so it finishes with the failed command", m_name.c_str());
+        }
+    } catch (...) {
+    }
+}
+
+void Agent::AnswerUnansweredToolCalls(const std::string& reason) {
+    std::lock_guard<std::mutex> lock(m_historyMutex);
+    size_t assistantIndex = m_history.size();
+    for (size_t i = m_history.size(); i-- > 0;) {
+        if (m_history[i].role == "assistant") {
+            assistantIndex = i;
+            break;
+        }
+    }
+    if (assistantIndex == m_history.size()) {
+        return;
+    }
+    // Results follow the message asking for them, in the order of its tool
+    // calls, so the ones already there answer its first tool calls.
+    size_t answered = 0;
+    for (size_t i = assistantIndex + 1; i < m_history.size(); ++i) {
+        if (m_history[i].role == "tool") {
+            ++answered;
+        }
+    }
+    // Built apart first: appending to the history may move the message whose
+    // tool calls are being read.
+    std::vector<LLMMessage> answers;
+    const auto& toolCalls = m_history[assistantIndex].toolCallsJson;
+    for (size_t i = answered; i < toolCalls.size(); ++i) {
+        answers.push_back(ToolResultMessage(ToolCallName(toolCalls[i]), reason, StringField(toolCalls[i], "id"), true));
+    }
+    if (!answers.empty()) {
+        LogWarning("Agent '%s' - answering %zu tool call(s) a failed command left open", m_name.c_str(), answers.size());
+    }
+    m_history.insert(m_history.end(), answers.begin(), answers.end());
 }
 
 }

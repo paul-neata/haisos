@@ -68,6 +68,21 @@ private:
     bool IsOwnThread();
 
     void RunThread();
+    // Answers one command: adds it to the history, then goes back and forth
+    // with the LLM, running the tools it asks for, until it has answered or
+    // the round cap is reached. May throw; RunThread catches it.
+    void ProcessCommand(const std::string& command);
+    // What RunThread does when ProcessCommand throws: logs the failure, keeps
+    // the history well-formed (AnswerUnansweredToolCalls) and reports it on the
+    // console and in the message buffer, so a failed command never ends an
+    // agent silently. Never throws.
+    void OnCommandFailed(const std::string& what);
+    // Gives every tool call of the last assistant message that has no result
+    // yet an error result carrying |reason|: a command cut short between a
+    // response asking for tools and their results would otherwise leave the
+    // history with tool calls nothing answered, which is not a valid
+    // conversation to send the LLM again.
+    void AnswerUnansweredToolCalls(const std::string& reason);
     std::vector<std::tuple<std::string, std::string, std::string, bool>> ExecuteToolCalls(const LLMMessage& message);
 
     std::shared_ptr<ILLMCommunicator> m_llmCommunicator;

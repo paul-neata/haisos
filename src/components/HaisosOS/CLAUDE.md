@@ -89,6 +89,17 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   exposed as a Lua global function returning `(content, is_error)` (JSON
   results are handed back as Lua tables); `print()` routes to the process's
   console
+- The Lua <-> JSON bridge behind those functions (`ToJson`/`PushJson` in
+  `LuaProcess.cpp`) must survive whatever a script passes or a tool returns,
+  since a script is untrusted and so is any file it reads. Strings keep every
+  byte, NULs included, both ways (and in the `arg` table). Tables may nest at
+  most `kMaxJsonNestingDepth` (100) levels: arguments nested deeper, or
+  containing themselves (a cycle), are refused with `(message, true)` -- the
+  tool is not called and the script goes on -- and a JSON result nested deeper
+  is handed back as its text, not as tables. Both converters reserve Lua stack
+  space at every level with `lua_checkstack`, which only reports failure;
+  never `luaL_checkstack` there, whose Lua error would `longjmp` across C++
+  frames
 - Lua processes run sandboxed: only a restricted subset of the Lua standard
   library is opened, and host-access libraries (`io`, `os`, `package`,
   `debug`) plus the file-loading globals are deliberately removed, so a script

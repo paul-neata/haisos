@@ -120,3 +120,33 @@ TEST(LLMCommunicatorTest, ReportsAFailedRequestAsReceivedToo) {
     EXPECT_NE(recorder.received[0].second.find("Couldn't connect to server"), std::string::npos)
         << recorder.received[0].second;
 }
+
+// Bytes that are not UTF-8 anywhere in the history -- a Latin-1 file an agent
+// read with os_read_file, say -- reach the LLM as U+FFFD. Serializing them
+// used to throw, which ended the agent without a word.
+TEST(LLMCommunicatorTest, BuildRequestJsonReplacesBytesThatAreNotUtf8) {
+    std::vector<LLMMessage> messages(1);
+    messages[0].role = "tool";
+    messages[0].name = "os_read_file";
+    messages[0].content = "caf" "\xe9" " cr" "\xe8" "me";
+
+    std::string request;
+    ASSERT_NO_THROW(request = LLMCommunicator::BuildRequestJson("llama3", messages, {}));
+    const auto parsed = nlohmann::json::parse(request);
+    EXPECT_EQ(parsed["messages"][0]["content"], "caf" "\xef\xbf\xbd" " cr" "\xef\xbf\xbd" "me");
+}
+
+TEST(LLMCommunicatorTest, CallSendsAHistoryHoldingBytesThatAreNotUtf8) {
+    auto mockHttp = std::make_shared<MockHTTPClient>();
+    mockHttp->SetPostResponse(R"({"message": {"role": "assistant", "content": "fine"}, "done": true})");
+    auto llm = LLMCommunicator::Create(mockHttp, "http://localhost:11434/api/chat", "llama3", "");
+
+    std::vector<LLMMessage> messages = OneUserMessage();
+    messages[0].content += " \xff\xfe";
+    LLMResponse response;
+    ASSERT_NO_THROW(response = llm->Call(messages, {}));
+
+    EXPECT_EQ(response.message.content, "fine");
+    const auto sent = nlohmann::json::parse(mockHttp->GetLastBody());
+    EXPECT_EQ(sent["messages"][0]["content"], "User prompt \xef\xbf\xbd\xef\xbf\xbd");
+}

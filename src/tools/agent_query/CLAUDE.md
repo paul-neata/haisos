@@ -38,4 +38,7 @@ For each found agent, the array contains an object with:
 
 If an agent is not found, its entry in the array is `{"name":"...","found":false}`.
 
-On error, it sets the `is_error=true` flag.
+On error, it sets the `is_error=true` flag: when no agent named is found, or an
+argument has the wrong type (`names` holding anything but strings, a flag that
+is not a JSON boolean), which is refused with a message naming it. A null
+optional argument counts as omitted.

@@ -1,5 +1,6 @@
 #include "OSWriteFileTool.h"
 #include "src/tools/os_tools_common/OSToolsCommon.h"
+#include "src/tools/tools_common/ToolArguments.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
 #include "src/components/Logger/Logger.h"
 
@@ -32,20 +33,25 @@ nlohmann::json OSWriteFileTool::GetDefaultParametersSchema() {
 }
 
 ToolResult OSWriteFileTool::Call(std::shared_ptr<IAgent> /*callerAgent*/, const nlohmann::json& args) {
-    if (!args.contains("path") || !args["path"].is_string()) {
-        return ToolResult{"Missing required field: path", true};
+    std::string path;
+    if (auto error = ReadRequiredArgument(args, "path", path)) {
+        return *error;
     }
-    if (!args.contains("content") || !args["content"].is_string()) {
-        return ToolResult{"Missing required field: content", true};
+    std::string content;
+    if (auto error = ReadRequiredArgument(args, "content", content)) {
+        return *error;
+    }
+    // A wrongly typed append ("true", say) is refused rather than taken as
+    // false: overwriting the file the model meant to append to is the one
+    // outcome worse than an error.
+    bool append = false;
+    if (auto error = ReadOptionalArgument(args, "append", append)) {
+        return *error;
     }
     auto context = GetOSToolContext(m_process);
     if (!context.IsValid()) {
         return NoCurrentProcessError(ToolName);
     }
-
-    std::string path = args["path"];
-    std::string content = args["content"];
-    bool append = args.value("append", false);
 
     LogDebug("OSWriteFileTool: writing file '%s' (resolved to '%s') append=%d",
         path.c_str(), context.io->ResolvePath(path).c_str(), append ? 1 : 0);

@@ -101,3 +101,15 @@ TEST(AgentListRunningToolTest, ListRunningNoCallerAgent) {
     EXPECT_TRUE(result.isError);
     EXPECT_EQ(result.content, "no caller agent");
 }
+
+// A wrongly typed filter is refused rather than quietly ignored, which would
+// list every agent instead of the ones asked about.
+TEST(AgentListRunningToolTest, WronglyTypedNamesAreRefused) {
+    auto callerAgent = std::make_shared<MockAgent>();
+    auto tool = AgentListRunningTool::Create();
+
+    auto result = tool->Call(callerAgent, {{"names", "child1"}});
+
+    EXPECT_TRUE(result.isError);
+    EXPECT_EQ(result.content, "Invalid field names: expected an array of strings, got a string");
+}

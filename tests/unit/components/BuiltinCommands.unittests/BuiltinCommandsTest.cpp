@@ -505,6 +505,17 @@ TEST_F(BuiltinCommandsTest, LsTimeStyles) {
     EXPECT_TRUE(Contains(lines, "ls: invalid argument 'bogus' for '--time-style'"));
 }
 
+// A conversion strftime does not know is printed as written, as glibc prints
+// one; on Windows, whose C runtime would end the whole program over it, ls
+// writes it out before strftime sees it. %s, a GNU extension, is the time in
+// seconds since the epoch everywhere.
+TEST_F(BuiltinCommandsTest, LsTimeStyleWithAConversionStrftimeDoesNotKnow) {
+    const auto lines = Run("ls", {"-l", "--time-style=+%Q|%s|%", "/docs/a.md"});
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_TRUE(std::regex_match(lines[0], std::regex("-rwxrwxrwx 1 haisos haisos 5 %Q\\|[0-9]+\\|% /docs/a\\.md")))
+        << lines[0];
+}
+
 #ifndef _WIN32
 TEST_F(BuiltinCommandsTest, LsLongFormatShowsAnOldTimeWithItsYear) {
     // A real disk file, mounted in, dated 15 March 2020: older than six months,
@@ -547,7 +558,7 @@ TEST_F(BuiltinCommandsTest, LsSortOrders) {
     int status = 0;
     auto lines = Run("ls", {"--sort=version", "-1", "/docs/sub"}, &status);
     EXPECT_EQ(status, 0);
-    EXPECT_EQ(lines, (Lines{"Parameter --sort=version is not treated by HaisosOS ls v. 1.2.0", "b.md"}));
+    EXPECT_EQ(lines, (Lines{"Parameter --sort=version is not treated by HaisosOS ls v. 1.2.1", "b.md"}));
 }
 
 TEST_F(BuiltinCommandsTest, LsLayouts) {

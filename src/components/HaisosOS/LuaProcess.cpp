@@ -1,6 +1,8 @@
 #include "LuaProcess.h"
 #include <algorithm>
 #include <chrono>
+#include <stdexcept>
+#include <string>
 #include <vector>
 #include "src/components/libheaders/DestroyOffRuntimeThreads.h"
 #include "src/components/Logger/Logger.h"
@@ -15,48 +17,103 @@ namespace Haisos {
 
 namespace {
 
-void PushJson(lua_State* L, const nlohmann::json& value) {
+// How deeply tables may nest inside one another on their way across the bridge,
+// in either direction: a tool's arguments (a Lua table turned into JSON) and a
+// tool's result (JSON turned back into Lua tables). Both conversions recurse
+// once per level and push onto the Lua stack at each one, so without a bound a
+// script -- untrusted input, which an agent can write and then start -- or a
+// file it merely reads could overflow the Lua stack or the C++ one, and take
+// the whole program down with it. Real arguments and results nest a handful of
+// levels; this is a backstop, not a budget.
+constexpr int kMaxJsonNestingDepth = 100;
+
+// Why a script's table could not be turned into tool arguments. Thrown by
+// ToJson and caught by LuaToolTrampoline, which calls ToJson directly: no Lua
+// frame lies between the throw and the catch, so the exception never has to
+// cross Lua's C code, which unwinds with longjmp and knows nothing of C++.
+class LuaArgumentsError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
+// Pushes |value| onto the Lua stack as the matching Lua value, objects and
+// arrays as tables. |depth| is the nesting level of |value| if it is an object
+// or an array (the result itself is at 1). Returns false when a table would
+// nest deeper than kMaxJsonNestingDepth, or the Lua stack cannot grow, leaving
+// whatever it had built on the stack for the caller to drop.
+bool PushJson(lua_State* L, const nlohmann::json& value, int depth) {
+    // A C function is only guaranteed LUA_MINSTACK free slots, and every level
+    // of a table holds up to three at once: the table, a key and its value.
+    // lua_checkstack only reports; luaL_checkstack would raise a Lua error,
+    // i.e. longjmp out across the C++ frames below.
+    if (!lua_checkstack(L, 3)) {
+        return false;
+    }
     switch (value.type()) {
         case nlohmann::json::value_t::null:
             lua_pushnil(L);
-            break;
+            return true;
         case nlohmann::json::value_t::boolean:
             lua_pushboolean(L, value.get<bool>());
-            break;
+            return true;
         case nlohmann::json::value_t::number_integer:
         case nlohmann::json::value_t::number_unsigned:
             lua_pushinteger(L, static_cast<lua_Integer>(value.get<int64_t>()));
-            break;
+            return true;
         case nlohmann::json::value_t::number_float:
             lua_pushnumber(L, value.get<double>());
-            break;
-        case nlohmann::json::value_t::string:
-            lua_pushstring(L, value.get<std::string>().c_str());
-            break;
+            return true;
+        case nlohmann::json::value_t::string: {
+            // With its length: a string may hold NUL bytes, where a C string ends.
+            const auto& text = value.get_ref<const std::string&>();
+            lua_pushlstring(L, text.data(), text.size());
+            return true;
+        }
         case nlohmann::json::value_t::array: {
+            if (depth > kMaxJsonNestingDepth) {
+                return false;
+            }
             lua_newtable(L);
             lua_Integer i = 1;
             for (const auto& item : value) {
-                PushJson(L, item);
+                if (!PushJson(L, item, depth + 1)) {
+                    return false;
+                }
                 lua_rawseti(L, -2, i++);
             }
-            break;
+            return true;
         }
         case nlohmann::json::value_t::object: {
+            if (depth > kMaxJsonNestingDepth) {
+                return false;
+            }
             lua_newtable(L);
             for (auto it = value.begin(); it != value.end(); ++it) {
-                PushJson(L, it.value());
-                lua_setfield(L, -2, it.key().c_str());
+                // The key with its length too, so it is pushed rather than
+                // handed to lua_setfield as a C string.
+                const std::string& key = it.key();
+                lua_pushlstring(L, key.data(), key.size());
+                if (!PushJson(L, it.value(), depth + 1)) {
+                    return false;
+                }
+                lua_rawset(L, -3);
             }
-            break;
+            return true;
         }
         default:
             lua_pushnil(L);
-            break;
+            return true;
     }
 }
 
-nlohmann::json ToJson(lua_State* L, int index) {
+// Turns the Lua value at |index| into JSON, for a tool's arguments. A table
+// whose keys are exactly 1..n becomes an array; any other table an object of
+// its string-keyed entries (keys of other types have no JSON counterpart and
+// are dropped). |depth| is the nesting level of the value if it is a table
+// (the arguments table itself is at 1), and |ancestors| the tables enclosing
+// it, by identity. Throws LuaArgumentsError instead of converting a table that
+// nests too deeply or contains itself: either would recurse without end.
+nlohmann::json ToJson(lua_State* L, int index, int depth, std::vector<const void*>& ancestors) {
     index = lua_absindex(L, index);
     switch (lua_type(L, index)) {
         case LUA_TNIL:
@@ -68,28 +125,57 @@ nlohmann::json ToJson(lua_State* L, int index) {
                 return static_cast<int64_t>(lua_tointeger(L, index));
             }
             return lua_tonumber(L, index);
-        case LUA_TSTRING:
-            return std::string(lua_tostring(L, index));
+        case LUA_TSTRING: {
+            // With its length: a string may hold NUL bytes, where a C string ends.
+            size_t length = 0;
+            const char* text = lua_tolstring(L, index, &length);
+            return std::string(text, length);
+        }
         case LUA_TTABLE: {
+            if (depth > kMaxJsonNestingDepth) {
+                throw LuaArgumentsError("arguments nested too deeply (more than " +
+                    std::to_string(kMaxJsonNestingDepth) + " levels of tables)");
+            }
+            // Only the tables on the way down from the arguments count: one
+            // reached twice through different branches is not a cycle.
+            const void* table = lua_topointer(L, index);
+            if (std::find(ancestors.begin(), ancestors.end(), table) != ancestors.end()) {
+                throw LuaArgumentsError("arguments contain a cycle (a table that contains itself)");
+            }
+            // lua_next keeps a key and its value on the stack for each entry,
+            // and a C function is only guaranteed LUA_MINSTACK free slots in
+            // all. lua_checkstack only reports; luaL_checkstack would raise a
+            // Lua error, i.e. longjmp out across these C++ frames.
+            if (!lua_checkstack(L, 3)) {
+                throw LuaArgumentsError("arguments nested too deeply for the Lua stack");
+            }
+            ancestors.push_back(table);
+
             std::vector<std::pair<lua_Integer, nlohmann::json>> intEntries;
             nlohmann::json obj = nlohmann::json::object();
-            bool hasStringKeys = false;
+            bool hasOtherKeys = false;
 
             lua_pushnil(L);
             while (lua_next(L, index) != 0) {
-                if (lua_type(L, -2) == LUA_TNUMBER && lua_isinteger(L, -2)) {
-                    intEntries.emplace_back(lua_tointeger(L, -2), ToJson(L, -1));
+                const int keyType = lua_type(L, -2);
+                if (keyType == LUA_TNUMBER && lua_isinteger(L, -2)) {
+                    const lua_Integer key = lua_tointeger(L, -2);
+                    intEntries.emplace_back(key, ToJson(L, -1, depth + 1, ancestors));
                 } else {
-                    hasStringKeys = true;
-                    std::string key = (lua_type(L, -2) == LUA_TSTRING) ? lua_tostring(L, -2) : "";
-                    if (!key.empty()) {
-                        obj[key] = ToJson(L, -1);
+                    hasOtherKeys = true;
+                    if (keyType == LUA_TSTRING) {
+                        // A string key is read in place, not converted, so
+                        // lua_next can carry on from it.
+                        size_t keyLength = 0;
+                        const char* key = lua_tolstring(L, -2, &keyLength);
+                        obj[std::string(key, keyLength)] = ToJson(L, -1, depth + 1, ancestors);
                     }
                 }
                 lua_pop(L, 1);
             }
+            ancestors.pop_back();
 
-            bool isSequence = !hasStringKeys && !intEntries.empty();
+            bool isSequence = !hasOtherKeys && !intEntries.empty();
             if (isSequence) {
                 std::sort(intEntries.begin(), intEntries.end(),
                     [](const auto& a, const auto& b) { return a.first < b.first; });
@@ -351,7 +437,20 @@ int LuaProcess::LuaToolTrampoline(lua_State* L) {
 
         nlohmann::json args = nlohmann::json::object();
         if (lua_gettop(L) >= 1 && lua_istable(L, 1)) {
-            args = ToJson(L, 1);
+            try {
+                std::vector<const void*> ancestors;
+                args = ToJson(L, 1, /*depth=*/1, ancestors);
+            } catch (const LuaArgumentsError& e) {
+                // The script's mistake, not a failure of the tool, which is
+                // never called: the script gets the usual error pair and goes on.
+                LogWarning("LuaProcess '%s': not calling tool '%s': its %s",
+                    self->m_path.c_str(), toolName ? toolName : "", e.what());
+                // Whatever the abandoned conversion left on the stack goes first.
+                lua_settop(L, 0);
+                lua_pushfstring(L, "%s: %s", toolName ? toolName : "tool", e.what());
+                lua_pushboolean(L, true);
+                return 2;
+            }
         }
 
         auto tool = self->m_toolFactory
@@ -373,10 +472,22 @@ int LuaProcess::LuaToolTrampoline(lua_State* L) {
         // back as a Lua table rather than a raw string, so scripts don't need
         // their own JSON parser for the common case.
         auto parsed = nlohmann::json::parse(result.content, nullptr, false);
+        bool pushedAsTable = false;
         if (!result.isError && !parsed.is_discarded() && (parsed.is_object() || parsed.is_array())) {
-            PushJson(L, parsed);
-        } else {
-            lua_pushstring(L, result.content.c_str());
+            const int top = lua_gettop(L);
+            pushedAsTable = PushJson(L, parsed, /*depth=*/1);
+            if (!pushedAsTable) {
+                // Nested deeper than the bridge converts: dropped half-built,
+                // and handed back as the text it is, as a result that is not
+                // JSON is.
+                lua_settop(L, top);
+                LogDebug("LuaProcess '%s': tool '%s' returned JSON nested more than %d levels deep; handing it back as text",
+                    self->m_path.c_str(), toolName ? toolName : "", kMaxJsonNestingDepth);
+            }
+        }
+        if (!pushedAsTable) {
+            // With its length: a result (a file's contents, say) may hold NUL bytes.
+            lua_pushlstring(L, result.content.data(), result.content.size());
         }
         lua_pushboolean(L, result.isError);
         return 2;
@@ -433,7 +544,8 @@ void LuaProcess::RegisterBindings(lua_State* L) {
 
     lua_newtable(L);
     for (size_t i = 0; i < m_args.size(); ++i) {
-        lua_pushstring(L, m_args[i].c_str());
+        // With its length, so an argument keeps every byte it was given.
+        lua_pushlstring(L, m_args[i].data(), m_args[i].size());
         lua_rawseti(L, -2, static_cast<lua_Integer>(i + 1));
     }
     lua_setglobal(L, "arg");

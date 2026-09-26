@@ -1,13 +1,56 @@
 #include "WinHTTPClient.h"
 #include <Windows.h>
 #include <winhttp.h>
+#include <climits>
 #include <string>
+#include <utility>
 
 #pragma comment(lib, "winhttp.lib")
 
 namespace Haisos {
 
 #ifdef _WIN32
+
+namespace {
+
+// Converts UTF-8 |text| to the UTF-16 WinHTTP takes. The lengths are explicit
+// on both sides, so |out| holds exactly the characters of |text| and no
+// terminating NUL -- one converted with a length of -1 keeps its NUL, which
+// then sits inside the URL or the header it is pasted into. Returns false if
+// |text| is not valid UTF-8 or too long to convert; an empty |text| converts
+// to an empty |out| (MultiByteToWideChar itself refuses a length of 0).
+bool Utf8ToWide(const std::string& text, std::wstring& out) {
+    out.clear();
+    if (text.empty()) {
+        return true;
+    }
+    if (text.size() > static_cast<size_t>(INT_MAX)) {
+        return false;
+    }
+    const int length = static_cast<int>(text.size());
+    const int wideLength = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), length, nullptr, 0);
+    if (wideLength <= 0) {
+        return false;
+    }
+    std::wstring wide(static_cast<size_t>(wideLength), L'\0');
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), length, &wide[0], wideLength) != wideLength) {
+        return false;
+    }
+    out = std::move(wide);
+    return true;
+}
+
+// A component WinHttpCrackUrl found: it points into the URL it was given,
+// |length| characters long and not NUL-terminated. One the URL does not have
+// comes back empty, possibly as a null pointer.
+std::wstring UrlComponent(const wchar_t* start, DWORD length) {
+    if (start == nullptr || length == 0) {
+        return std::wstring();
+    }
+    return std::wstring(start, static_cast<size_t>(length));
+}
+
+} // namespace
 
 struct WinHTTPClient::WinHTTPHandle {
     HINTERNET session;
@@ -47,25 +90,51 @@ HTTPResponse WinHTTPClient::PerformRequest(const std::string& url, const wchar_t
     }
 
     // Parse URL
+    std::wstring wideUrl;
+    if (!Utf8ToWide(url, wideUrl) || wideUrl.empty()) {
+        response.error = "Error: Failed to parse URL";
+        return response;
+    }
+
+    // WinHttpCrackUrl returns only the components asked for: a null pointer
+    // with a nonzero length asks it to point into wideUrl for that component,
+    // while a null pointer with a zero length means "not wanted" -- which is
+    // how the host name once came back empty and no server could be reached.
     URL_COMPONENTS urlComp = {};
     urlComp.dwStructSize = sizeof(urlComp);
+    urlComp.lpszScheme = nullptr;
+    urlComp.dwSchemeLength = static_cast<DWORD>(-1);
     urlComp.lpszHostName = nullptr;
-    urlComp.dwHostNameLength = 0;
+    urlComp.dwHostNameLength = static_cast<DWORD>(-1);
     urlComp.lpszUrlPath = nullptr;
-    urlComp.dwUrlPathLength = 0;
-
-    // Convert URL to wide string
-    int wideLen = MultiByteToWideChar(CP_UTF8, 0, url.c_str(), -1, nullptr, 0);
-    std::wstring wideUrl(wideLen, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, url.c_str(), -1, &wideUrl[0], wideLen);
+    urlComp.dwUrlPathLength = static_cast<DWORD>(-1);
+    urlComp.lpszExtraInfo = nullptr;
+    urlComp.dwExtraInfoLength = static_cast<DWORD>(-1);
 
     if (!WinHttpCrackUrl(wideUrl.c_str(), static_cast<DWORD>(wideUrl.size()), 0, &urlComp)) {
         response.error = "Error: Failed to parse URL";
         return response;
     }
 
-    std::wstring hostName(urlComp.lpszHostName, urlComp.dwHostNameLength);
-    std::wstring urlPath(urlComp.lpszUrlPath, urlComp.dwUrlPathLength);
+    // Copied out while wideUrl, which the components point into, is alive.
+    const std::wstring hostName = UrlComponent(urlComp.lpszHostName, urlComp.dwHostNameLength);
+    if (hostName.empty()) {
+        response.error = "Error: Failed to parse URL";
+        return response;
+    }
+    // What is requested is the path plus the query ("?..."), which
+    // WinHttpCrackUrl hands back apart, as the extra info; a fragment ("#...")
+    // is the client's own business and is never sent.
+    std::wstring urlPath = UrlComponent(urlComp.lpszUrlPath, urlComp.dwUrlPathLength);
+    if (urlPath.empty()) {
+        urlPath = L"/";
+    }
+    std::wstring extraInfo = UrlComponent(urlComp.lpszExtraInfo, urlComp.dwExtraInfoLength);
+    const size_t fragment = extraInfo.find(L'#');
+    if (fragment != std::wstring::npos) {
+        extraInfo.resize(fragment);
+    }
+    urlPath += extraInfo;
 
     // Connect
     HINTERNET connect = WinHttpConnect(m_handle->session, hostName.c_str(), urlComp.nPort, 0);
@@ -97,15 +166,20 @@ HTTPResponse WinHTTPClient::PerformRequest(const std::string& url, const wchar_t
     timeout = 30000;
     WinHttpSetOption(request, WINHTTP_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
 
-    // Build headers
+    // Build headers. Each name and value is converted without a terminating
+    // NUL: one left in would split "Content-Type\0: application/json" and
+    // break every header, Authorization included.
     std::wstring extraHeaders;
     for (const auto& h : headers) {
-        int nameLen = MultiByteToWideChar(CP_UTF8, 0, h.name.c_str(), -1, nullptr, 0);
-        int valueLen = MultiByteToWideChar(CP_UTF8, 0, h.value.c_str(), -1, nullptr, 0);
-        std::wstring wname(nameLen, L'\0');
-        std::wstring wvalue(valueLen, L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, h.name.c_str(), -1, &wname[0], nameLen);
-        MultiByteToWideChar(CP_UTF8, 0, h.value.c_str(), -1, &wvalue[0], valueLen);
+        std::wstring wname;
+        std::wstring wvalue;
+        if (!Utf8ToWide(h.name, wname) || !Utf8ToWide(h.value, wvalue)) {
+            WinHttpCloseHandle(request);
+            WinHttpCloseHandle(connect);
+            // The name only: the value may be a secret, such as an API key.
+            response.error = "Error: HTTP header " + h.name + " is not valid UTF-8";
+            return response;
+        }
         extraHeaders += wname + L": " + wvalue + L"\r\n";
     }
 

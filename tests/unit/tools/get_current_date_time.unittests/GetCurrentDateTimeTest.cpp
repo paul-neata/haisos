@@ -108,3 +108,13 @@ TEST(GetCurrentDateTimeTest, GetParametersSchemaContainsGetGmt) {
     EXPECT_TRUE(properties.contains("get_gmt"));
     EXPECT_EQ(properties["get_gmt"]["type"], "boolean");
 }
+
+// A wrongly typed flag is refused rather than quietly read as false.
+TEST(GetCurrentDateTimeTest, WronglyTypedGetGmtIsRefused) {
+    auto tool = GetCurrentDateTime::Create();
+
+    auto result = tool->Call(nullptr, {{"get_gmt", "true"}});
+
+    EXPECT_TRUE(result.isError);
+    EXPECT_EQ(result.content, "Invalid field get_gmt: expected a boolean (true or false), got a string");
+}

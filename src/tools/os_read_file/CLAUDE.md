@@ -11,5 +11,6 @@ directory), up to a 10 MB cap.
 
 ## Output format
 
-On success, returns the file contents as a plain string. On error (missing
-argument, file not found, path escapes the OS's root), sets `is_error=true`.
+On success, returns the file contents as a plain string. On error (missing or
+wrongly typed argument, file not found, path escapes the OS's root), sets
+`is_error=true`.

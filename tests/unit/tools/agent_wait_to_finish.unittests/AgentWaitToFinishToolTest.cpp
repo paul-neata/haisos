@@ -142,3 +142,30 @@ TEST(AgentWaitToFinishToolTest, WaitToFinish_AgentNotFound) {
     EXPECT_TRUE(result.isError);
     EXPECT_EQ(result.content, "nonexistent not found");
 }
+
+// A wrongly typed argument is refused with a message naming it, rather than
+// thrown (which used to end the calling agent) or quietly skipped.
+TEST(AgentWaitToFinishToolTest, WronglyTypedArgumentsAreRefused) {
+    auto callerAgent = std::make_shared<MockAgent>();
+    auto child = std::make_shared<MockAgent>();
+    child->SetName("child1");
+    child->SetFinished(true);
+    callerAgent->AddChild(child);
+    auto tool = AgentWaitToFinishTool::Create();
+
+    auto textTimeout = tool->Call(callerAgent, {{"names", nlohmann::json::array({"child1"})}, {"timeout_ms", "100"}});
+    EXPECT_TRUE(textTimeout.isError);
+    EXPECT_EQ(textTimeout.content, "Invalid field timeout_ms: expected a non-negative integer, got a string");
+
+    auto negativeTimeout = tool->Call(callerAgent, {{"names", nlohmann::json::array({"child1"})}, {"timeout_ms", -5}});
+    EXPECT_TRUE(negativeTimeout.isError);
+
+    auto namesNotAnArray = tool->Call(callerAgent, {{"names", "child1"}});
+    EXPECT_TRUE(namesNotAnArray.isError);
+    EXPECT_EQ(namesNotAnArray.content, "Invalid field names: expected an array of strings, got a string");
+
+    // A timeout written with a fraction is still a whole number of milliseconds.
+    auto floatTimeout = tool->Call(callerAgent, {{"names", nlohmann::json::array({"child1"})}, {"timeout_ms", 100.0}});
+    EXPECT_FALSE(floatTimeout.isError);
+    EXPECT_EQ(child->GetWaitTimeoutValue(), 100u);
+}

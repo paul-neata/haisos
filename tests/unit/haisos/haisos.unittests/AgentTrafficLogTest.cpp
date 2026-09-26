@@ -330,6 +330,9 @@ TEST_F(ReopeningLogFileTest, TruncatesOrAppendsOnTheFirstOpen) {
 }
 
 TEST_F(ReopeningLogFileTest, ADeletedFileIsRecreatedOnTheNextWrite) {
+#ifdef _WIN32
+    GTEST_SKIP() << "Windows does not let a file be deleted while it is open, so a log file cannot vanish under Haisos there";
+#endif
     ReopeningLogFile log(path, /*truncate=*/true);
     log.Write("before\n");
     EXPECT_FALSE(log.EnsureOpen());
@@ -343,6 +346,9 @@ TEST_F(ReopeningLogFileTest, ADeletedFileIsRecreatedOnTheNextWrite) {
 }
 
 TEST_F(ReopeningLogFileTest, EnsureOpenSaysWhenItRecreatedTheFile) {
+#ifdef _WIN32
+    GTEST_SKIP() << "Windows does not let a file be deleted while it is open, so a log file cannot vanish under Haisos there";
+#endif
     ReopeningLogFile log(path, /*truncate=*/true);
     std::filesystem::remove(path);
     EXPECT_TRUE(log.EnsureOpen());
@@ -350,6 +356,9 @@ TEST_F(ReopeningLogFileTest, EnsureOpenSaysWhenItRecreatedTheFile) {
 }
 
 TEST_F(ReopeningLogFileTest, AgentTrafficLogStartsAfreshInARecreatedFile) {
+#ifdef _WIN32
+    GTEST_SKIP() << "Windows does not let a file be deleted while it is open, so a log file cannot vanish under Haisos there";
+#endif
     auto file = std::make_shared<ReopeningLogFile>(path, /*truncate=*/true);
     AgentTrafficLog log(file, AgentTrafficLogType::Diff);
     const std::string first = R"({"model":"m","messages":[{"role":"user","content":"hi"}]})";

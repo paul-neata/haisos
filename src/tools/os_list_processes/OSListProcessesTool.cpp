@@ -35,7 +35,9 @@ ToolResult OSListProcessesTool::Call(std::shared_ptr<IAgent> /*callerAgent*/, co
             {"finished", process->WaitToFinish(0)}
         });
     }
-    return ToolResult{result.dump(), false};
+    // A path is an arbitrary byte string, so it need not be valid UTF-8, on
+    // which the default dump() throws: replaced, it comes back as U+FFFD.
+    return ToolResult{result.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace), false};
 }
 
 }

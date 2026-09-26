@@ -191,11 +191,11 @@ std::shared_ptr<ICurrentProcess> HaisosOS::StartAgentProcess(
             content += arg + "\n";
         }
     }
-    // Deliberately not passed through SanitizeUserInput: this text is the agent's
-    // own program, so every line of it is instructions by definition -- stripping
-    // "injection" phrasing buys nothing against whoever wrote the file, while its
-    // lossy rewriting (it deletes anything between '<' and '>', drops whole lines,
-    // and caps at 64KB) would silently corrupt the program being run.
+    // Posted as it is, and the agent adds it to its history whole: this text
+    // is the agent's own program, so every line of it is instructions by
+    // definition. Filtering "injection" phrasing out of it would buy nothing
+    // against whoever wrote the file, and any lossy rewriting would silently
+    // corrupt the program being run.
     uint64_t pid = NextGloballyUniquePID();
     std::string name = GetStem(programPath) + "_" + std::to_string(pid);
 
@@ -220,6 +220,11 @@ std::shared_ptr<ICurrentProcess> HaisosOS::StartAgentProcess(
         OSToolFactory::Create(processHandle),
         systemPrompts,
         interactive);
+    if (!agent) {
+        // The LLM service has said why.
+        LogError("HaisosOS: the LLM service created no agent for: %s", programPath.c_str());
+        return nullptr;
+    }
     auto concreteAgent = std::dynamic_pointer_cast<Agent>(agent);
     if (!concreteAgent) {
         LogError("HaisosOS: the LLM service returned an agent this OS cannot own: %s", programPath.c_str());

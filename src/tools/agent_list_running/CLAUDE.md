@@ -24,4 +24,6 @@ agent1,agent2
 
 If no agents match the filter or if no agents are running, returns an empty string.
 
-On error, it sets the `is_error=true` flag.
+On error, it sets the `is_error=true` flag -- also for a `names` that is not an
+array of strings, which is refused rather than ignored (ignoring it would list
+every agent).

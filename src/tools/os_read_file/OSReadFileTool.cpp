@@ -1,5 +1,6 @@
 #include "OSReadFileTool.h"
 #include "src/tools/os_tools_common/OSToolsCommon.h"
+#include "src/tools/tools_common/ToolArguments.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
 #include "src/components/Logger/Logger.h"
 
@@ -24,15 +25,15 @@ nlohmann::json OSReadFileTool::GetDefaultParametersSchema() {
 }
 
 ToolResult OSReadFileTool::Call(std::shared_ptr<IAgent> /*callerAgent*/, const nlohmann::json& args) {
-    if (!args.contains("path") || !args["path"].is_string()) {
-        return ToolResult{"Missing required field: path", true};
+    std::string path;
+    if (auto error = ReadRequiredArgument(args, "path", path)) {
+        return *error;
     }
     auto context = GetOSToolContext(m_process);
     if (!context.IsValid()) {
         return NoCurrentProcessError(ToolName);
     }
 
-    std::string path = args["path"];
     LogDebug("OSReadFileTool: reading file '%s' (resolved to '%s')",
         path.c_str(), context.io->ResolvePath(path).c_str());
 

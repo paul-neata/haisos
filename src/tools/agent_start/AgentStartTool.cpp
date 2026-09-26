@@ -1,6 +1,6 @@
 #include "AgentStartTool.h"
-#include "src/components/libheaders/SanitizeUserInput.h"
 #include "src/tools/agent_tools_common/AgentToolsCommon.h"
+#include "src/tools/tools_common/ToolArguments.h"
 
 namespace Haisos::Tools {
 
@@ -37,6 +37,11 @@ std::shared_ptr<IAgent> CreateAndStartSubagent(
         systemPrompts,
         interactive,
         startTime);
+    if (!agent) {
+        // The service has said why: typically it is shutting down.
+        LogWarning("CreateAndStartSubagent: subagent '%s' could not be created", name.c_str());
+        return nullptr;
+    }
 
     agent->Post(userPrompt);
     LogDebug("CreateAndStartSubagent: subagent '%s' posted prompt", name.c_str());
@@ -65,19 +70,27 @@ nlohmann::json AgentStartTool::GetDefaultParametersSchema() {
 }
 
 ToolResult AgentStartTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) {
-    if (!args.contains("user_prompt") || !args["user_prompt"].is_string()) {
-        return ToolResult{"Missing required field: user_prompt", true};
+    std::string userPrompt;
+    if (auto error = ReadRequiredArgument(args, "user_prompt", userPrompt)) {
+        return *error;
     }
-
-    std::string userPrompt = SanitizeUserInput(args["user_prompt"]);
-    std::vector<std::string> systemPrompts;
-    if (args.contains("system_prompt") && args["system_prompt"].is_string()) {
-        systemPrompts.push_back(SanitizeUserInput(args["system_prompt"]));
+    std::string systemPrompt;
+    if (auto error = ReadOptionalArgument(args, "system_prompt", systemPrompt)) {
+        return *error;
     }
-
+    // Refused when wrongly typed rather than read as false, which would start
+    // an agent that never finishes where one that does was asked for.
     bool oneShot = false;
-    if (args.contains("oneShot") && args["oneShot"].is_boolean()) {
-        oneShot = args["oneShot"].get<bool>();
+    if (auto error = ReadOptionalArgument(args, "oneShot", oneShot)) {
+        return *error;
+    }
+
+    // Both prompts reach the subagent exactly as the calling agent wrote them:
+    // they come from an agent with at least the subagent's own power, and are
+    // instructions by definition, so there is nothing to strip out of them.
+    std::vector<std::string> systemPrompts;
+    if (!systemPrompt.empty()) {
+        systemPrompts.push_back(systemPrompt);
     }
 
     constexpr int MAX_SUBAGENT_DEPTH = 5;
@@ -86,6 +99,9 @@ ToolResult AgentStartTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohm
     }
 
     auto agent = CreateAndStartSubagent(m_llmService, callerAgent, userPrompt, systemPrompts, !oneShot);
+    if (!agent) {
+        return ToolResult{"Failed to start the subagent: the LLM service refused to create it (it may be shutting down)", true};
+    }
 
     if (oneShot) {
         LogDebug("AgentStartTool: subagent '%s' started as one-shot", agent->Name().c_str());

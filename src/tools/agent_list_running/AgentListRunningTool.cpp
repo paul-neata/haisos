@@ -1,5 +1,6 @@
 #include "AgentListRunningTool.h"
 #include "src/tools/agent_tools_common/AgentToolsCommon.h"
+#include "src/tools/tools_common/ToolArguments.h"
 
 namespace Haisos::Tools {
 
@@ -22,12 +23,8 @@ nlohmann::json AgentListRunningTool::GetDefaultParametersSchema() {
 
 ToolResult AgentListRunningTool::Call(std::shared_ptr<IAgent> callerAgent, const nlohmann::json& args) {
     std::vector<std::string> filterNames;
-    if (args.contains("names") && args["names"].is_array()) {
-        for (const auto& name : args["names"]) {
-            if (name.is_string()) {
-                filterNames.push_back(name);
-            }
-        }
+    if (auto error = ReadOptionalArgument(args, "names", filterNames)) {
+        return *error;
     }
 
     if (!callerAgent) {

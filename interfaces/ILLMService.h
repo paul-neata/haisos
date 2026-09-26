@@ -118,6 +118,10 @@ public:
     // isInteractive is what IAgent::IsInteractive will report: an interactive
     // agent goes back to waiting for prompts once it is done, a non-interactive
     // one finishes outright.
+    // Returns null when no agent can be created: the service has no network
+    // service, or it is shutting down -- the moment its destruction has
+    // begun, it creates no more agents, since every one it made is being
+    // stopped and waited for. Callers must check.
     virtual std::shared_ptr<IAgent> CreateAgent(
         const std::string& name,
         std::shared_ptr<IAgent> parent,

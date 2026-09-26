@@ -128,6 +128,24 @@ TEST_F(FilesystemTest, ReadFilePastEnd) {
     fs->CloseFile(fd);
 }
 
+TEST_F(FilesystemTest, ReadFileReturnsErrorOnInvalidFd) {
+    auto fs = FileSystem::Create();
+    char buf[4] = {};
+    EXPECT_LT(fs->ReadFile(-1, buf, sizeof(buf)), 0);
+}
+
+// A descriptor that is not open is refused like any other bad one. The
+// Microsoft C runtime would end the whole program over it, were its invalid
+// parameter handler not told otherwise (see CrtInvalidParameterAsError).
+TEST_F(FilesystemTest, ADescriptorThatIsNotOpenIsRefused) {
+    auto fs = FileSystem::Create();
+    const int notOpen = 9999;
+    char buf[4] = {};
+    EXPECT_LT(fs->ReadFile(notOpen, buf, sizeof(buf)), 0);
+    EXPECT_LT(fs->WriteFile(notOpen, buf, sizeof(buf)), 0);
+    EXPECT_LT(fs->CloseFile(notOpen), 0);
+}
+
 TEST_F(FilesystemTest, WriteFileReturnsErrorOnInvalidFd) {
     auto fs = FileSystem::Create();
     std::string data = "test";

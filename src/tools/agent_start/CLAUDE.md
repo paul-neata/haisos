@@ -13,8 +13,8 @@ Starts a new subagent with a user prompt and returns immediately. On success, re
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `user_prompt` | `string` | Yes | The user prompt to send to the new subagent. |
-| `system_prompt` | `string` | No | Optional system prompt for the subagent. |
+| `user_prompt` | `string` | Yes | The user prompt to send to the new subagent, passed on exactly as written. |
+| `system_prompt` | `string` | No | Optional system prompt for the subagent, passed on exactly as written. |
 | `oneShot` | `boolean` | Yes | If `true`, the subagent finishes after processing its initial task. If `false`, the subagent keeps running and waits for more commands. |
 
 ## Output format
@@ -28,3 +28,9 @@ abc123def
 On error, it sets the `is_error=true` flag.
 
 If the calling agent's subagent recursion depth has already reached `MAX_SUBAGENT_DEPTH` (5), returns `"Subagent recursion depth limit exceeded"` as an error and does not start the subagent.
+
+If the LLM service creates no agent -- it refuses once it has begun shutting
+down (see the LLMService component) -- returns an error and starts nothing.
+
+A wrongly typed argument (`oneShot: "true"`, say) is an error naming it, and
+nothing is started; a null optional argument counts as omitted.

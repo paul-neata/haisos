@@ -1,5 +1,6 @@
 #include "OSListDirectoryTool.h"
 #include "src/tools/os_tools_common/OSToolsCommon.h"
+#include "src/tools/tools_common/ToolArguments.h"
 #include "src/components/Logger/Logger.h"
 
 namespace Haisos::Tools {
@@ -23,12 +24,15 @@ nlohmann::json OSListDirectoryTool::GetDefaultParametersSchema() {
 }
 
 ToolResult OSListDirectoryTool::Call(std::shared_ptr<IAgent> /*callerAgent*/, const nlohmann::json& args) {
+    std::string path = ".";
+    if (auto error = ReadOptionalArgument(args, "path", path)) {
+        return *error;
+    }
     auto context = GetOSToolContext(m_process);
     if (!context.IsValid()) {
         return NoCurrentProcessError(ToolName);
     }
 
-    std::string path = args.value("path", ".");
     LogDebug("OSListDirectoryTool: listing directory '%s' (resolved to '%s')",
         path.c_str(), context.io->ResolvePath(path).c_str());
 

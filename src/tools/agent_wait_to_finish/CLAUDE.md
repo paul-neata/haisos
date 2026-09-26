@@ -13,7 +13,7 @@ Wait for named subagents to finish. On success, returns an empty string. On erro
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | `names` | `array[string]` | Yes | List of agent names to wait for. |
-| `timeout_ms` | `integer` | No | Timeout in milliseconds, capped at 86400000 (24 hours). `0` = poll current status only; omit = wait up to that cap. Required for `oneShot=false` agents. |
+| `timeout_ms` | `integer` | No | Timeout in milliseconds, capped at 86400000 (24 hours). `0` = poll current status only; omit (or null) = wait up to that cap. Required for `oneShot=false` agents. A whole number written with a fraction (`100.0`) is accepted; anything else that is not a non-negative integer is an error. |
 | `return_console` | `boolean` | No | Whether to include the subagent's console output in the result. |
 | `return_messages` | `boolean` | No | Whether to include the subagent's message history in the result. |
 
@@ -21,4 +21,6 @@ Wait for named subagents to finish. On success, returns an empty string. On erro
 
 On success, returns an empty string.
 
-On error, it sets the `is_error=true` flag.
+On error, it sets the `is_error=true` flag -- also for an argument of the wrong
+type (`names` holding anything but strings, a flag that is not a JSON boolean),
+which is refused with a message naming it.

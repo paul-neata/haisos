@@ -80,7 +80,11 @@ std::string LLMCommunicator::BuildRequestJson(
 
     request["messages"] = std::move(messagesArray);
 
-    return request.dump();
+    // Anything in the history may hold bytes that are not UTF-8 -- a file read
+    // with os_read_file comes back as whatever bytes it holds -- and the
+    // default dump() throws on them, which used to end the agent. Replaced,
+    // they reach the LLM as U+FFFD and the conversation goes on.
+    return request.dump(-1, ' ', false, nlohmann::ordered_json::error_handler_t::replace);
 }
 
 LLMResponse LLMCommunicator::ParseResponseJson(const std::string& jsonResponse) {

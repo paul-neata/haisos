@@ -150,25 +150,39 @@ bool CopyFileBetween(IFileSystem& from, const std::string& fromPath, IFileSystem
     return true;
 }
 
-// Removes a file, or a directory after everything beneath it.
-bool RemoveTree(IFileSystem& fs, const std::string& normalizedPath, char type, std::string& outReason) {
-    if (type == DirectoryEntryType::Dir) {
-        for (const auto& entry : fs.ReadDirectory(normalizedPath)) {
-            if (entry.name == "." || entry.name == "..") {
-                continue;
-            }
-            if (!RemoveTree(fs, normalizedPath + "/" + entry.name, entry.type, outReason)) {
-                return false;
-            }
+// Removes what is at normalizedPath the way `rm -rf` does: a file, a symbolic
+// link, or a directory after everything beneath it. A link is removed itself
+// and never descended into. Stat and ReadDirectory both follow links, so a
+// link to a directory looks like that directory -- and descending into it once
+// deleted whatever it pointed at, wherever that was, before failing on the link.
+bool RemoveTree(IFileSystem& fs, const std::string& normalizedPath, std::string& outReason) {
+    FileStatus status;
+    // What cannot be stat'ed at all -- a link that leads nowhere, say -- is
+    // removed as the file it is.
+    const bool isDirectory = fs.Stat(normalizedPath, status) == 0 &&
+        status.type == DirectoryEntryType::Dir && !status.symbolicLink;
+    if (!isDirectory) {
+        if (fs.RemoveFile(normalizedPath) == 0) {
+            return true;
         }
-        if (fs.RemoveDirectory(normalizedPath) != 0) {
-            outReason = "cannot remove directory " + normalizedPath;
+        // On Windows a link to a directory is removed with rmdir, which takes
+        // the link away and leaves the directory it points at alone.
+        if (status.symbolicLink && fs.RemoveDirectory(normalizedPath) == 0) {
+            return true;
+        }
+        outReason = "cannot remove file " + normalizedPath;
+        return false;
+    }
+    for (const auto& entry : fs.ReadDirectory(normalizedPath)) {
+        if (entry.name == "." || entry.name == "..") {
+            continue;
+        }
+        if (!RemoveTree(fs, normalizedPath + "/" + entry.name, outReason)) {
             return false;
         }
-        return true;
     }
-    if (fs.RemoveFile(normalizedPath) != 0) {
-        outReason = "cannot remove file " + normalizedPath;
+    if (fs.RemoveDirectory(normalizedPath) != 0) {
+        outReason = "cannot remove directory " + normalizedPath;
         return false;
     }
     return true;
@@ -249,12 +263,11 @@ bool ApplyOne(
                 outReason = "the root directory cannot be deleted";
                 return false;
             }
-            auto type = EntryTypeOf(root, path);
-            if (!type) {
+            if (!EntryTypeOf(root, path)) {
                 outReason = "it does not exist";
                 return false;
             }
-            return RemoveTree(root, path, *type, outReason);
+            return RemoveTree(root, path, outReason);
         }
 
         case HaisosFileOperationType::Copy: {

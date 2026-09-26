@@ -27,6 +27,9 @@ private:
     ILLMService& m_llmService;
 };
 
+// Creates a subagent of |parent| and posts |userPrompt| to it. Returns the
+// subagent, or null if the service would not create one (it does not while it
+// is shutting down).
 std::shared_ptr<IAgent> CreateAndStartSubagent(
     ILLMService& llmService,
     std::shared_ptr<IAgent> parent,

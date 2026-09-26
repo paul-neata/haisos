@@ -16,10 +16,10 @@ directory -- the way a shell would.
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | `path` | `string` | Yes | Path to the `.md` or `.lua` program, or the builtin command, to run. A relative path is resolved against the calling process's working directory. |
-| `args` | `array` of `string` | No | Optional arguments passed to the process. |
+| `args` | `array` of `string` | No | Optional arguments passed to the process. An array holding anything but strings is an error. |
 
 ## Output format
 
 On success, returns a JSON object `{"pid": ..., "path": ...}`. On error
-(missing argument, process-starting disallowed for this OS, unsupported/unknown
-program extension), sets `is_error=true`.
+(missing or wrongly typed argument, process-starting disallowed for this OS,
+unsupported/unknown program extension), sets `is_error=true`.

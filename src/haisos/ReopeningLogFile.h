@@ -14,6 +14,8 @@ namespace Haisos {
 // if it does not, opens it again -- which creates it -- and goes on there.
 // Only a missing path is noticed: a path that now names some other file (as
 // after a log rotation that renames the file and creates a new one) is not.
+// On Windows none of this arises: a file open here cannot be deleted at all,
+// since the C runtime opens it without delete sharing.
 //
 // Thread-safe: log receivers run on whichever thread logged.
 class ReopeningLogFile {

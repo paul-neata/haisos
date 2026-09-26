@@ -6,13 +6,6 @@ Header-only C++ utilities. Not a formal component.
 
 - `SynchronizedQueue.h` - Thread-safe queue
 - `SynchronizedQueueEx.h` - Extended synchronized queue with additional features
-- `SanitizeUserInput.h` - Best-effort stripping of prompt-injection patterns from
-  free-form text before it reaches an LLM. It is a **lossy denylist**: it drops
-  whole lines matching known injection phrases, deletes everything between `<`
-  and `>`, and caps the result at 64KB. That makes it wrong for anything that
-  must survive verbatim -- file contents, tool output, or a program's own text
-  would be silently corrupted -- and, being a denylist, it is easily evaded by
-  rewording. Treat it as one defence among several, not a guarantee.
 - `DestroyOffRuntimeThreads.h` - keeps whatever waits for a runtime thread in
   its destructor from being destroyed on one (see "Creating things" in the root
   `CLAUDE.md`). `RuntimeThreadScope` marks the thread it is declared on as a
@@ -22,3 +15,11 @@ Header-only C++ utilities. Not a formal component.
   `DestructionThread`, one thread for the whole program, started on first use
   and drained at exit, which may wait for anything. Both a hand-off and each
   destruction there are logged.
+- `CrtInvalidParameterAsError.h` - on Windows, keeps the Microsoft C runtime
+  from ending the whole program when one of its functions is handed an invalid
+  parameter (a descriptor that is not open, a `strftime` conversion it does not
+  know, a time `localtime_s` will not take): while one is in scope, the calling
+  thread's invalid parameter handler just returns, so the function fails with
+  its documented error value instead. Put one in scope around every CRT call
+  whose arguments come from outside -- `windows/WindowsFilesystem.cpp` and
+  `ls`'s time formatting do. Elsewhere it does nothing.

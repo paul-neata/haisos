@@ -27,12 +27,39 @@ Manages LLM conversations with parent/child agent relationships. Supports subage
   (never filtered, so file contents and JSON stay intact) but wrapped in
   `--- BEGIN TOOL RESULT ---` / `--- END TOOL RESULT ---` delimiters, the same convention used
   for user input.
+- **Commands are delimited, never rewritten.** Every command -- the whole `.md`
+  program `AgentProcess` posts, each line typed into a `RUN -i` session, a
+  subagent's prompt from `agent_start` -- goes into the history byte for byte
+  between `--- BEGIN USER INPUT ---` / `--- END USER INPUT ---`. A lossy
+  sanitizer used to run over them (`SanitizeUserInput`, now deleted): it
+  dropped every line containing phrases such as "you are now" or "system:",
+  deleted everything between `<` and `>`, and cut at 64 KB. None of these
+  texts comes from an untrusted third party -- the program from the
+  haisosfile's author, typed lines from the human operator, a subagent's prompt
+  from a parent with at least the subagent's power (a subagent gets only the
+  agent-management tools) -- while the genuinely untrusted content, tool
+  results, was never sanitized, only delimited. The denylist was trivially
+  evaded by rewording, and it corrupted code (`a < b and b > c`), markup and
+  ordinary prose ("Operating system: Linux").
 - **Nothing is truncated or trimmed.** The history keeps every message for the
   agent's whole life, and message content -- an LLM reply, a tool result, the
   copy written to the log -- reaches its destination whole. What the model said
   and what a tool returned is what is kept. The cost is that a long-running
   agent's history grows without bound, and with it the size of every request:
   `MAX_LLM_ROUNDS` caps one command's rounds, nothing caps the conversation.
+- A tool call is whatever the LLM sent, so `ExecuteToolCalls` reads it without
+  throwing and answers every malformed one with an error result: no string
+  name, or arguments that are neither an object nor null (null means none).
+  A tool that throws fails its own call ("Error: tool <name> failed: ..."),
+  never the agent.
+- **A failed command never ends an agent silently.** Whatever a command throws
+  -- a tool, the LLM round trip, anything else -- is caught around that one
+  command (`ProcessCommand`): it is logged ("Exception in RunThread"), written
+  to the agent's console and message buffer as `Error: the command failed:
+  ...`, and every tool call it left without a result is given an error one
+  (`AnswerUnansweredToolCalls`), because the history is only a valid
+  conversation with one result per tool call. An interactive agent then takes
+  its next command; a non-interactive one finishes, as it would have anyway.
 - Tool descriptions are fetched from the tool factory once in the constructor and cached for the
   agent's lifetime, not rebuilt per LLM round. Tools registered after an agent is constructed are
   invisible to it, so tool registries must be populated before agents are created.

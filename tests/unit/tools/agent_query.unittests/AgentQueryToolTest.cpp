@@ -144,3 +144,42 @@ TEST(AgentQueryToolTest, QueryMissingNamesReturnsError) {
     EXPECT_TRUE(result.isError);
     EXPECT_EQ(result.content, "Missing required field: names");
 }
+
+// A wrongly typed argument is refused with a message naming it, rather than
+// thrown (which used to end the calling agent) or quietly skipped.
+TEST(AgentQueryToolTest, WronglyTypedArgumentsAreRefused) {
+    auto callerAgent = std::make_shared<MockAgent>();
+    auto child = std::make_shared<MockAgent>();
+    child->SetName("child1");
+    callerAgent->AddChild(child);
+    auto tool = AgentQueryTool::Create();
+
+    auto notStrings = tool->Call(callerAgent, {{"names", nlohmann::json::array({"child1", 7})}});
+    EXPECT_TRUE(notStrings.isError);
+    EXPECT_EQ(notStrings.content, "Invalid field names: expected an array of strings, got an array holding a number");
+
+    auto notABoolean = tool->Call(callerAgent, {{"names", nlohmann::json::array({"child1"})}, {"return_console", "yes"}});
+    EXPECT_TRUE(notABoolean.isError);
+    EXPECT_EQ(notABoolean.content, "Invalid field return_console: expected a boolean (true or false), got a string");
+
+    // Null is the same as leaving it out.
+    auto nullFlag = tool->Call(callerAgent, {{"names", nlohmann::json::array({"child1"})}, {"return_messages", nullptr}});
+    EXPECT_FALSE(nullFlag.isError);
+}
+
+// A console output holding bytes that are not UTF-8 -- whatever a file the
+// subagent read contained -- is returned with them replaced, not thrown on.
+TEST(AgentQueryToolTest, ConsoleOutputThatIsNotUtf8IsReturned) {
+    auto callerAgent = std::make_shared<MockAgent>();
+    auto child = std::make_shared<MockAgent>();
+    child->SetName("child1");
+    child->SetConsoleOutput("caf" "\xe9");
+    callerAgent->AddChild(child);
+    auto tool = AgentQueryTool::Create();
+
+    ToolResult result;
+    ASSERT_NO_THROW(result = tool->Call(callerAgent, {{"names", nlohmann::json::array({"child1"})}, {"return_console", true}}));
+    EXPECT_FALSE(result.isError);
+    auto parsed = nlohmann::json::parse(result.content);
+    EXPECT_EQ(parsed[0]["console_result"], "caf" "\xef\xbf\xbd");
+}

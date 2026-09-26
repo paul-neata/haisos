@@ -16,11 +16,28 @@ std::string Trim(const std::string& s) {
     return s.substr(start, end - start + 1);
 }
 
+bool IsBlank(char c) {
+    return c == ' ' || c == '\t';
+}
+
+bool IsQuote(char c) {
+    return c == '\'' || c == '"';
+}
+
 // Strips a trailing "# ..." comment: a '#' that starts the (trimmed) line, or
-// is preceded by whitespace, starts a comment running to the end of the line.
+// is preceded by whitespace, starts a comment running to the end of the line
+// -- unless it is inside a quoted token (see SplitTokens), which runs from a
+// quote starting a token to the next quote of the same kind.
 std::string StripComment(const std::string& line) {
     for (size_t i = 0; i < line.size(); ++i) {
-        if (line[i] == '#' && (i == 0 || line[i - 1] == ' ' || line[i - 1] == '\t')) {
+        const bool startsToken = (i == 0 || IsBlank(line[i - 1]));
+        if (startsToken && IsQuote(line[i])) {
+            const size_t close = line.find(line[i], i + 1);
+            if (close == std::string::npos) {
+                return line;
+            }
+            i = close;
+        } else if (startsToken && line[i] == '#') {
             return line.substr(0, i);
         }
     }
@@ -77,18 +94,50 @@ bool SubstituteOrFail(
     return true;
 }
 
-std::vector<std::string> SplitWhitespace(const std::string& text) {
-    std::vector<std::string> tokens;
-    std::istringstream iss(text);
-    std::string token;
-    while (iss >> token) {
-        tokens.push_back(token);
-    }
-    return tokens;
-}
-
 std::string LineError(int lineNumber, const std::string& message) {
     return "Error: line " + std::to_string(lineNumber) + ": " + message + "\n";
+}
+
+// Splits text into tokens at whitespace. A token that starts with a quote --
+// ' or " -- runs to the next quote of the same kind, which must end it, and is
+// taken without them: "C:\Program Files\x" is one token, spaces and all.
+// Nothing inside is special, '\' least of all, so a quoted token may hold the
+// other kind of quote but not its own; "" is an empty token. A quote anywhere
+// else in a token is part of it (it's). Returns false, with the error in
+// outError, if a quote is never closed or the closing one is followed by more
+// of the token.
+bool SplitTokens(const std::string& text, int lineNumber, std::vector<std::string>& tokens, std::string& outError) {
+    tokens.clear();
+    size_t i = 0;
+    while (true) {
+        while (i < text.size() && IsBlank(text[i])) {
+            ++i;
+        }
+        if (i >= text.size()) {
+            return true;
+        }
+        if (IsQuote(text[i])) {
+            const char quote = text[i];
+            const size_t close = text.find(quote, i + 1);
+            if (close == std::string::npos) {
+                outError = LineError(lineNumber, std::string("unterminated ") + (quote == '"' ? "double" : "single") +
+                    "-quoted text: " + text.substr(i));
+                return false;
+            }
+            if (close + 1 < text.size() && !IsBlank(text[close + 1])) {
+                outError = LineError(lineNumber, "unexpected text right after the closing quote: " + text.substr(i));
+                return false;
+            }
+            tokens.push_back(text.substr(i + 1, close - i - 1));
+            i = close + 1;
+        } else {
+            const size_t start = i;
+            while (i < text.size() && !IsBlank(text[i])) {
+                ++i;
+            }
+            tokens.push_back(text.substr(start, i - start));
+        }
+    }
 }
 
 // A line read on Windows, or from a file written there, still carries its '\r';
@@ -309,9 +358,19 @@ HaisosFileParseResult ParseHaisosFile(
                 result.error = "Error: line " + std::to_string(lineNumber) + ": ROOT requires a directory\n";
                 return result;
             }
-            if (!SubstituteOrFail(rest, values, lineNumber, &result.config.rootPath, &result.error)) {
+            std::string substituted;
+            if (!SubstituteOrFail(rest, values, lineNumber, &substituted, &result.error)) {
                 return result;
             }
+            std::vector<std::string> tokens;
+            if (!SplitTokens(substituted, lineNumber, tokens, result.error)) {
+                return result;
+            }
+            if (tokens.size() != 1 || tokens[0].empty()) {
+                result.error = LineError(lineNumber, "ROOT takes one filesystem name, or one directory (quote a path holding spaces)");
+                return result;
+            }
+            result.config.rootPath = tokens[0];
             sawRoot = true;
         } else if (key == "FS") {
             if (rest.empty()) {
@@ -322,7 +381,10 @@ HaisosFileParseResult ParseHaisosFile(
             if (!SubstituteOrFail(rest, values, lineNumber, &substituted, &result.error)) {
                 return result;
             }
-            auto tokens = SplitWhitespace(substituted);
+            std::vector<std::string> tokens;
+            if (!SplitTokens(substituted, lineNumber, tokens, result.error)) {
+                return result;
+            }
             if (tokens.size() < 2) {
                 result.error = "Error: line " + std::to_string(lineNumber) + ": FS requires a name and a filesystem type\n";
                 return result;
@@ -364,7 +426,10 @@ HaisosFileParseResult ParseHaisosFile(
             if (!SubstituteOrFail(rest, values, lineNumber, &substituted, &result.error)) {
                 return result;
             }
-            auto tokens = SplitWhitespace(substituted);
+            std::vector<std::string> tokens;
+            if (!SplitTokens(substituted, lineNumber, tokens, result.error)) {
+                return result;
+            }
             if (tokens.size() != 3) {
                 result.error = "Error: line " + std::to_string(lineNumber) + ": MOUNT requires <main_fs> <path> <fs_to_mount>\n";
                 return result;
@@ -385,7 +450,10 @@ HaisosFileParseResult ParseHaisosFile(
             if (!SubstituteOrFail(rest, values, lineNumber, &substituted, &result.error)) {
                 return result;
             }
-            auto tokens = SplitWhitespace(substituted);
+            std::vector<std::string> tokens;
+            if (!SplitTokens(substituted, lineNumber, tokens, result.error)) {
+                return result;
+            }
             HaisosFileRunEntry entry;
             // "-i" is only an option in front of the program, never after it:
             // everything after the program is the program's own arguments.
@@ -419,8 +487,22 @@ HaisosFileParseResult ParseHaisosFile(
                 result.error = LineError(lineNumber, key + " requires a file path and its content");
                 return result;
             }
-            size_t pathEnd = raw.find_first_of(" \t", pathStart);
-            std::string rawPath = raw.substr(pathStart, pathEnd == std::string::npos ? std::string::npos : pathEnd - pathStart);
+            // The path is a token like any other: quoted, it may hold spaces.
+            size_t pathEnd = std::string::npos;
+            std::string rawPath;
+            if (IsQuote(raw[pathStart])) {
+                const size_t close = raw.find(raw[pathStart], pathStart + 1);
+                if (close == std::string::npos || (close + 1 < raw.size() && !IsBlank(raw[close + 1]))) {
+                    result.error = LineError(lineNumber, key + ": the quoted path is " +
+                        (close == std::string::npos ? "never closed" : "followed by more of it right after its closing quote"));
+                    return result;
+                }
+                rawPath = raw.substr(pathStart + 1, close - pathStart - 1);
+                pathEnd = (close + 1 < raw.size()) ? close + 1 : std::string::npos;
+            } else {
+                pathEnd = raw.find_first_of(" \t", pathStart);
+                rawPath = raw.substr(pathStart, pathEnd == std::string::npos ? std::string::npos : pathEnd - pathStart);
+            }
             size_t specStart = (pathEnd == std::string::npos) ? std::string::npos : raw.find_first_not_of(" \t", pathEnd);
             std::string spec = (specStart == std::string::npos) ? "" : raw.substr(specStart);
 
@@ -445,7 +527,10 @@ HaisosFileParseResult ParseHaisosFile(
             if (!SubstituteOrFail(rest, values, lineNumber, &substituted, &result.error)) {
                 return result;
             }
-            auto tokens = SplitWhitespace(substituted);
+            std::vector<std::string> tokens;
+            if (!SplitTokens(substituted, lineNumber, tokens, result.error)) {
+                return result;
+            }
             if (tokens.size() < 3) {
                 result.error = LineError(lineNumber, "BUILTIN requires <fs_name> <builtin_name> <absolute_path>...");
                 return result;
@@ -468,7 +553,10 @@ HaisosFileParseResult ParseHaisosFile(
             if (!SubstituteOrFail(rest, values, lineNumber, &substituted, &result.error)) {
                 return result;
             }
-            auto tokens = SplitWhitespace(substituted);
+            std::vector<std::string> tokens;
+            if (!SplitTokens(substituted, lineNumber, tokens, result.error)) {
+                return result;
+            }
             HaisosFileOperation operation;
             operation.lineNumber = lineNumber;
             if (key == "DELETE" || key == "CREATE_DIR") {
@@ -536,6 +624,8 @@ std::string GetHaisosFileTemplate(const std::vector<std::string>& builtinNames) 
     return
         "# haisosfile - a small manifest that boots a Haisos OS.\n"
         "# Comments start with '#' (full-line, or trailing after whitespace).\n"
+        "# Any token may be quoted, '...' or \"...\", to hold spaces or a '#'; nothing\n"
+        "# inside the quotes is special, so \"C:\\Program Files\\x\" is taken as written.\n"
         "\n"
         "# ARG declares an argument, overridable from the command line via\n"
         "# `haisos -- name=value`. The value here is the default; written\n"
@@ -564,6 +654,7 @@ std::string GetHaisosFileTemplate(const std::vector<std::string>& builtinNames) 
         "# example by deleting its leading '#'; the note after it stays a comment.\n"
         "FS rootfs PHYSICAL .                   # this haisosfile's own directory\n"
         "# FS data PHYSICAL ./data              # a real disk directory (relative to this file, or absolute; may use . and ..)\n"
+        "# FS docs PHYSICAL \"/c/My Documents\"  # on Windows /c/x, c:\\x and c:/x are all C:\\x, and / is every drive\n"
         "# FS scratch MEM                       # an empty, in-memory read/write filesystem\n"
         "# FS devices DEV                       # device files, as Linux's /dev: null and zero (see below)\n"
         "# FS readonly RO rootfs                # a read-only wrapper over another declared FS\n"

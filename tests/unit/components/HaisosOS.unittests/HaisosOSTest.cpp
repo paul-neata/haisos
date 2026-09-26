@@ -18,7 +18,7 @@ using namespace Haisos;
 
 namespace {
 
-const std::string kTestRoot = "/tmp/haisos_os_test_root";
+const std::string kTestRoot = (std::filesystem::temp_directory_path() / "haisos_os_test_root").u8string();
 const std::string kUnreachableEndpoint = "http://localhost:9999/api/chat";
 // Generous: every LLM call fails fast against the unreachable endpoint, so this
 // only bounds a hang.

@@ -39,7 +39,7 @@ public:
     static bool IsSynthetic(int fd) { return fd >= kSyntheticFdBase; }
 
     // A fresh synthetic fd. The counter is the program's, not this table's:
-    // filesystems stack (a read-only view over one with mounts of its own, say),
+    // filesystems stack (a read-only wrapper over one with mounts of its own, say),
     // and a synthetic fd handed out by an inner one travels up through the outer
     // one untranslated, so two tables issuing the same number would make the
     // outer one claim a descriptor that was never its own. Also used for the

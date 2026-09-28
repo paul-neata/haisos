@@ -26,9 +26,10 @@ namespace Haisos {
 // should generally depend on.
 //
 // Note there is no way to obtain an unrooted filesystem here. Every filesystem
-// handed out is anchored somewhere, and an OS is given its root at creation and
-// can never step outside it: it can only compose further filesystems *on top of* that
-// root via IFileSystemService.
+// handed out is anchored somewhere -- the full physical filesystem at the
+// host's own root, which is as far as any path can reach -- and an OS is given
+// its root at creation and can never step outside it: it can only compose
+// further filesystems *on top of* that root via IFileSystemService.
 class IFactory {
 public:
     virtual ~IFactory() = default;
@@ -41,7 +42,25 @@ public:
     // one inside another filesystem (an in-memory one, say) keeps that property
     // for the paths it covers, because each call is routed to whichever
     // filesystem owns the path and that filesystem decides what the call means.
+    //
+    // rootPath is absolute, or relative to the current directory. On Windows
+    // it may be written with '\' or '/', and a path starting with a single
+    // one is a path of CreateFullPhysicalFileSystem()'s filesystem: /c/x and
+    // c:\x (or c:/x) are the same directory, and "/" is that whole filesystem.
+    // A UNC path (\\server\share\x) is taken too. A symbolic link inside the
+    // directory is followed only while it stays inside -- which a SubFileSystem
+    // of the full filesystem would not ensure. See
+    // src/components/Filesystem/PhysicalPath.h for every form.
     virtual std::shared_ptr<IFileSystem> CreatePhysicalFileSystem(const std::string& rootPath) = 0;
+
+    // The host's whole disk as one filesystem, its paths separated by '/'
+    // like every IFileSystem's. On Linux that is CreatePhysicalFileSystem("/").
+    // On Windows, which has a root per drive, it is a filesystem whose root
+    // holds a directory per drive, named by its letter in lowercase, as
+    // Cygwin shows them: /c/Users/x.txt is C:\Users\x.txt. A removable drive
+    // with no medium in lists as empty. The directories CreatePhysicalFileSystem
+    // takes are named in it.
+    virtual std::shared_ptr<IFileSystem> CreateFullPhysicalFileSystem() = 0;
 
     // A new, empty environment, to be filled in and then handed to an OS, a
     // process or a sub-OS. An existing one is duplicated with

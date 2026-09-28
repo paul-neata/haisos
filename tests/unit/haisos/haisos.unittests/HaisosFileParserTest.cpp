@@ -535,3 +535,95 @@ TEST(HaisosFileParserTest, TemplateBuiltinExamplesParseOnceUncommented) {
     EXPECT_EQ(result.config.setupOperations[0].type, HaisosFileOperationType::CreateDir);
     EXPECT_EQ(result.config.setupOperations[1].type, HaisosFileOperationType::Builtin);
 }
+
+// --- Quoted tokens ---
+//
+// A token starting with ' or " runs to the next quote of the same kind, taken
+// without the quotes and with nothing inside special -- so a path may hold
+// spaces (C:\Users\John Doe), a '#' or backslashes.
+
+TEST(HaisosFileParserTest, AQuotedTokenMayHoldSpacesAndBackslashes) {
+    auto result = ParseHaisosFile(
+        "FS data PHYSICAL \"C:\\Users\\John Doe\\data\"\n"
+        "FS more PHYSICAL '/home/john doe/more'\n"
+        "RUN /agent.md\n", {});
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    ASSERT_EQ(result.config.fsSteps.size(), 2u);
+    ASSERT_EQ(result.config.fsSteps[0].declare.args.size(), 1u);
+    EXPECT_EQ(result.config.fsSteps[0].declare.args[0], "C:\\Users\\John Doe\\data");
+    EXPECT_EQ(result.config.fsSteps[1].declare.args[0], "/home/john doe/more");
+}
+
+TEST(HaisosFileParserTest, AHashInsideQuotesIsNoComment) {
+    auto result = ParseHaisosFile("FS data PHYSICAL \"take #1\"   # but this is one\nRUN /echo.lua \"a # b\" c # gone\n", {});
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    EXPECT_EQ(result.config.fsSteps[0].declare.args[0], "take #1");
+    ASSERT_EQ(result.config.runEntries[0].args.size(), 2u);
+    EXPECT_EQ(result.config.runEntries[0].args[0], "a # b");
+    EXPECT_EQ(result.config.runEntries[0].args[1], "c");
+}
+
+TEST(HaisosFileParserTest, RunArgumentsMayBeQuotedOrEmpty) {
+    auto result = ParseHaisosFile("RUN /bin/echo \"hello world\" 'say \"hi\"' \"\" it's\n", {});
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    const auto& args = result.config.runEntries[0].args;
+    ASSERT_EQ(args.size(), 4u);
+    EXPECT_EQ(args[0], "hello world");
+    EXPECT_EQ(args[1], "say \"hi\"");
+    EXPECT_EQ(args[2], "");
+    // A quote inside a token is part of it.
+    EXPECT_EQ(args[3], "it's");
+}
+
+TEST(HaisosFileParserTest, AQuotedTokenIsSubstitutedFirst) {
+    auto result = ParseHaisosFile("ARG dir=my files\nFS data PHYSICAL \"./${dir}\"\nRUN /agent.md\n", {});
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    EXPECT_EQ(result.config.fsSteps[0].declare.args[0], "./my files");
+
+    // Unquoted, the value's space splits it: one argument too many.
+    auto split = ParseHaisosFile("ARG dir=my files\nFS data PHYSICAL ./${dir}\nRUN /agent.md\n", {});
+    EXPECT_NE(split.error.find("expects 1 argument"), std::string::npos) << split.error;
+}
+
+TEST(HaisosFileParserTest, AnUnterminatedQuoteIsAnError) {
+    auto result = ParseHaisosFile("CREATE_DIR /in\nCOPY \"in.txt /in.txt\nRUN /agent.md\n", {});
+    EXPECT_NE(result.error.find("line 2"), std::string::npos) << result.error;
+    EXPECT_NE(result.error.find("unterminated double-quoted"), std::string::npos) << result.error;
+}
+
+TEST(HaisosFileParserTest, TextRightAfterAClosingQuoteIsAnError) {
+    auto result = ParseHaisosFile("FS data PHYSICAL \"a b\"c\nRUN /agent.md\n", {});
+    EXPECT_NE(result.error.find("right after the closing quote"), std::string::npos) << result.error;
+}
+
+TEST(HaisosFileParserTest, RootTakesOneTokenQuotedOrNot) {
+    auto quoted = ParseHaisosFile("ROOT \"my root\"\nRUN /agent.md\n", {});
+    ASSERT_TRUE(quoted.error.empty()) << quoted.error;
+    EXPECT_EQ(quoted.config.rootPath, "my root");
+
+    auto two = ParseHaisosFile("ROOT my root\nRUN /agent.md\n", {});
+    EXPECT_NE(two.error.find("ROOT takes one"), std::string::npos) << two.error;
+}
+
+TEST(HaisosFileParserTest, CopyAndOutCopyHostPathsMayBeQuoted) {
+    auto result = ParseHaisosFile(
+        "COPY \"C:\\My Files\\in.txt\" /in.txt\n"
+        "RUN /agent.md\n"
+        "OUTCOPY /out.txt '../my results/out.txt'\n", {});
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    ASSERT_EQ(result.config.setupOperations.size(), 1u);
+    EXPECT_EQ(result.config.setupOperations[0].hostPath, "C:\\My Files\\in.txt");
+    ASSERT_EQ(result.config.outCopyOperations.size(), 1u);
+    EXPECT_EQ(result.config.outCopyOperations[0].hostPath, "../my results/out.txt");
+}
+
+TEST(HaisosFileParserTest, ACreatePathMayBeQuoted) {
+    auto result = ParseHaisosFile("CREATE \"/notes/my file.txt\" 'content # kept'\nRUN /agent.md\n", {});
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    ASSERT_EQ(result.config.setupOperations.size(), 1u);
+    EXPECT_EQ(result.config.setupOperations[0].path, "/notes/my file.txt");
+    EXPECT_EQ(result.config.setupOperations[0].content, "content # kept");
+
+    auto open = ParseHaisosFile("CREATE \"/notes/my file.txt 'content'\nRUN /agent.md\n", {});
+    EXPECT_NE(open.error.find("never closed"), std::string::npos) << open.error;
+}

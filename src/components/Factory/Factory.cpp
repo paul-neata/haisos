@@ -4,6 +4,9 @@
 #include "src/components/Console/Console.h"
 #include "src/components/Environment/Environment.h"
 #include "src/components/Filesystem/PhysicalFileSystem.h"
+#ifdef _WIN32
+#include "src/components/Filesystem/windows/WindowsFullPhysicalFileSystem.h"
+#endif
 #include "src/components/HaisosOS/HaisosOS.h"
 #include "src/components/ServicesCreator/ServicesCreator.h"
 #include "src/components/libheaders/GloballyUniquePID.h"
@@ -23,6 +26,14 @@ std::shared_ptr<IPhysicalConsole> Factory::CreatePhysicalConsole() {
 
 std::shared_ptr<IFileSystem> Factory::CreatePhysicalFileSystem(const std::string& rootPath) {
     return PhysicalFileSystem::Create(rootPath);
+}
+
+std::shared_ptr<IFileSystem> Factory::CreateFullPhysicalFileSystem() {
+#ifdef _WIN32
+    return WindowsFullPhysicalFileSystem::Create();
+#else
+    return PhysicalFileSystem::Create("/");
+#endif
 }
 
 std::shared_ptr<IEnvironment> Factory::CreateEnvironment() {

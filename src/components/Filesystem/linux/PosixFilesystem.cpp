@@ -1,4 +1,5 @@
 #include "Filesystem.h"
+#include "NoCriticalErrorDialogs.h"
 #include <memory>
 #include <fcntl.h>
 #include <unistd.h>
@@ -111,6 +112,21 @@ int FileSystem::LocalStat(const std::string& path, FileStatus& out) {
     out.changeTime = FileDateTime{static_cast<int64_t>(st.st_ctim.tv_sec), static_cast<uint32_t>(st.st_ctim.tv_nsec)};
     return 0;
 }
+
+bool FileSystem::IsLink(const std::string& hostPath) {
+    struct stat st;
+    return ::lstat(hostPath.c_str(), &st) == 0 && S_ISLNK(st.st_mode);
+}
+
+// A POSIX host has no device names: /dev/null is a path like any other, and
+// a physical filesystem reaches it only if it lies within its root.
+bool FileSystem::IsDevicePath(const std::string& /*hostPath*/) {
+    return false;
+}
+
+// No host here shows a dialog for a drive that is not ready.
+NoCriticalErrorDialogs::NoCriticalErrorDialogs() = default;
+NoCriticalErrorDialogs::~NoCriticalErrorDialogs() = default;
 
 std::shared_ptr<IFileSystem> CreateFilesystem() {
     return FileSystem::Create();

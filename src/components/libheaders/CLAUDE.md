@@ -23,3 +23,8 @@ Header-only C++ utilities. Not a formal component.
   its documented error value instead. Put one in scope around every CRT call
   whose arguments come from outside -- `windows/WindowsFilesystem.cpp` and
   `ls`'s time formatting do. Elsewhere it does nothing.
+- `WideText.h` - Windows only: `Utf8ToWide` and `WideToUtf8`, converting
+  between the UTF-8 Haisos uses everywhere and the UTF-16 the Windows API's
+  "W" functions take. Nothing hands a name to a narrow ("A") Windows or C
+  runtime function, which would read it in the ANSI code page. Used by the
+  WinHTTP client and the Windows filesystem.

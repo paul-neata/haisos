@@ -4,6 +4,7 @@
 #include <sstream>
 #include <system_error>
 #include "src/components/Filesystem/FilesystemUtils.h"
+#include "src/components/Filesystem/PhysicalPath.h"
 #include "src/components/Filesystem/VirtualPath.h"
 #include "src/components/Logger/Logger.h"
 
@@ -191,20 +192,29 @@ bool RemoveTree(IFileSystem& fs, const std::string& normalizedPath, std::string&
 // A host file, as the directory holding it (reached through a physical
 // filesystem jailed there) and its name within it.
 struct HostFile {
-    std::filesystem::path absolute;
-    std::string directory;
-    std::string nameInDirectory;
+    std::string directory;       // a host path, in UTF-8
+    std::string nameInDirectory; // "/<name>"
 };
 
+// hostPath is written as FS ... PHYSICAL directories are -- /c/x, c:\x or
+// c:/x alike on Windows -- and taken from the haisosfile's directory when
+// relative.
 bool ResolveHostFile(const std::filesystem::path& haisosFileDir, const std::string& hostPath, HostFile& out, std::string& outReason) {
-    // operator/ keeps an absolute hostPath as it is.
-    out.absolute = (haisosFileDir / hostPath).lexically_normal();
-    if (!out.absolute.has_filename()) {
+    std::error_code ec;
+    const std::filesystem::path base = std::filesystem::absolute(haisosFileDir, ec);
+    std::string reason;
+    const auto resolved = ResolvePhysicalPath(hostPath, ec ? haisosFileDir.u8string() : base.u8string(), &reason);
+    if (!resolved) {
+        outReason = reason;
+        return false;
+    }
+    const std::filesystem::path absolute = std::filesystem::u8path(*resolved).lexically_normal();
+    if (!absolute.has_filename()) {
         outReason = "the host path '" + hostPath + "' does not name a file";
         return false;
     }
-    out.directory = out.absolute.parent_path().string();
-    out.nameInDirectory = "/" + out.absolute.filename().string();
+    out.directory = absolute.parent_path().u8string();
+    out.nameInDirectory = "/" + absolute.filename().u8string();
     return true;
 }
 
@@ -288,7 +298,7 @@ bool ApplyOne(
             // it: a physical filesystem cannot reach above its own root to
             // create the directories leading down to it.
             std::error_code ec;
-            std::filesystem::create_directories(host.directory, ec);
+            std::filesystem::create_directories(std::filesystem::u8path(host.directory), ec);
             if (ec) {
                 outReason = "cannot create host directory " + host.directory + ": " + ec.message();
                 return false;

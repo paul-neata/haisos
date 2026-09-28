@@ -56,7 +56,7 @@ protected:
 
     // Asked by IsBuiltinCommand for a path that is neither in this
     // filesystem's own builtin list nor under a mount point. A filesystem that
-    // is a view of another one (read-only, sub-path, composed) passes the
+    // wraps another one (read-only, sub-path, composed) passes the
     // question on to it; one with nothing underneath has no builtins but its
     // own, which is the default.
     virtual std::optional<std::string> LocalIsBuiltinCommand(const std::string& /*path*/) { return std::nullopt; }

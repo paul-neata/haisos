@@ -1,10 +1,53 @@
 #include "HaisosFileSystemBuilder.h"
+#include <system_error>
 #include <unordered_map>
+#include "src/components/Filesystem/PhysicalPath.h"
 #include "src/components/Logger/Logger.h"
 
 namespace Haisos {
 
 namespace {
+
+// FS <name> PHYSICAL <directory>, or a ROOT naming a directory: that directory
+// of the host's full physical filesystem, as a filesystem of its own. It may be
+// written in any form CreatePhysicalFileSystem takes -- /c/x, c:\x or c:/x on
+// Windows -- and a relative one is taken from the haisosfile's directory. It
+// is jailed at the directory (CreatePhysicalFileSystem), not a SubFileSystem of
+// the full one: a symbolic link inside it then stays inside, where a
+// SubFileSystem, confining paths only as written, would follow it anywhere on
+// the disk. A directory that is not there is an error here, rather than a
+// process failing to start later. |directive| names the line, for errors.
+std::shared_ptr<IFileSystem> TakePhysicalDirectory(
+    IFactory& factory,
+    const std::filesystem::path& haisosFileDir,
+    const std::string& directory,
+    const std::string& directive,
+    std::string& outError)
+{
+    std::shared_ptr<IFileSystem> fs;
+    std::string where = directory;
+    if (IsFullFileSystemRoot(directory)) {
+        fs = factory.CreateFullPhysicalFileSystem();
+    } else {
+        std::error_code ec;
+        const std::filesystem::path base = std::filesystem::absolute(haisosFileDir, ec);
+        std::string reason;
+        auto hostPath = ResolvePhysicalPath(directory, ec ? haisosFileDir.u8string() : base.u8string(), &reason);
+        if (!hostPath) {
+            outError = "Error: " + directive + ": " + reason + "\n";
+            return nullptr;
+        }
+        // As written in the error; the host resolves ".." itself, after links.
+        where = std::filesystem::u8path(*hostPath).lexically_normal().u8string();
+        fs = factory.CreatePhysicalFileSystem(*hostPath);
+    }
+    FileStatus status;
+    if (!fs || fs->Stat("/", status) != 0 || status.type != DirectoryEntryType::Dir) {
+        outError = "Error: " + directive + ": " + where + " is not a directory\n";
+        return nullptr;
+    }
+    return fs;
+}
 
 std::string JoinArgs(const std::vector<std::string>& args) {
     std::string joined;
@@ -28,10 +71,9 @@ std::shared_ptr<IFileSystem> BuildRootFileSystem(
     std::unordered_map<std::string, std::shared_ptr<IFileSystem>>* outNamedFileSystems)
 {
     if (config.fsSteps.empty()) {
-        std::string rootPath = config.rootPath.empty()
-            ? haisosFileDir.string()
-            : (haisosFileDir / config.rootPath).string();
-        return factory.CreatePhysicalFileSystem(rootPath);
+        // No FS at all: ROOT is a directory (the haisosfile's own, if omitted).
+        const std::string directory = config.rootPath.empty() ? "." : config.rootPath;
+        return TakePhysicalDirectory(factory, haisosFileDir, directory, "ROOT " + directory, outError);
     }
 
     std::unordered_map<std::string, std::shared_ptr<IFileSystem>> namedFs;
@@ -47,7 +89,10 @@ std::shared_ptr<IFileSystem> BuildRootFileSystem(
             }
             std::shared_ptr<IFileSystem> fs;
             if (decl.type == "PHYSICAL") {
-                fs = factory.CreatePhysicalFileSystem((haisosFileDir / decl.args[0]).string());
+                fs = TakePhysicalDirectory(factory, haisosFileDir, decl.args[0], "FS " + decl.name + " PHYSICAL " + decl.args[0], outError);
+                if (!fs) {
+                    return nullptr;
+                }
             } else if (decl.type == "MEM") {
                 fs = filesystemService.CreateEmptyInMemFileSystem();
             } else if (decl.type == "DEV") {
@@ -113,13 +158,16 @@ std::shared_ptr<IFileSystem> BuildRootFileSystem(
     if (namedIt != namedFs.end()) {
         return namedIt->second;
     }
-    if (!config.rootPath.empty()) {
-        // ROOT didn't name a declared filesystem: legacy shorthand, treat it
-        // as a plain directory path.
-        LogWarning("HaisosFileSystemBuilder: ROOT '%s' does not match a declared FS; treating it as a plain directory path", config.rootPath.c_str());
-        return factory.CreatePhysicalFileSystem((haisosFileDir / config.rootPath).string());
+    // Once any FS is declared, ROOT names one of them: a directory path there
+    // is most likely a mistyped name, and taken as a path it would boot an OS
+    // on the wrong files, or on none, with nothing pointing at ROOT.
+    std::string declared;
+    for (const auto& step : config.fsSteps) {
+        if (!step.isMount) {
+            declared += (declared.empty() ? "" : ", ") + step.declare.name;
+        }
     }
-    outError = "Error: could not determine a root filesystem\n";
+    outError = "Error: ROOT " + rootName + ": no filesystem of that name is declared with FS (declared: " + declared + ")\n";
     return nullptr;
 }
 

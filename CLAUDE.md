@@ -162,7 +162,7 @@ after a literal `--` is parsed as `key=value` pairs fed to the haisosfile as
 
 | Argument | Description |
 |----------|-------------|
-| `<haisosfile>` | Path to the haisosfile to run (positional; defaults to `./haisosfile`) |
+| `<haisosfile>` | Path to the haisosfile to run (positional; defaults to `./haisosfile`), relative to the current directory or absolute, written as `FS ... PHYSICAL` directories are (on Windows `c:\x\haisosfile` or `/c/x/haisosfile`) |
 | `-- key=value ...` | `ARG` overrides passed to the haisosfile |
 | `--init` | Write a commented starter haisosfile to `./haisosfile` and exit (refuses to overwrite an existing one) |
 | `--version` | Show version information |
@@ -192,9 +192,10 @@ ENV GREETING=${greeting}      # set one outright
 
 # FS declares a named filesystem: FS <name> <type> <args...>
 FS rootfs PHYSICAL .                 # a real disk directory (relative to this file, or absolute)
+FS data PHYSICAL "C:\My Data"        # on Windows also /c/My Data or c:/My Data; quoted, as it holds a space
 FS scratch MEM                       # an empty, in-memory read/write filesystem
 FS devfs DEV                         # device files, as Linux's /dev: null and zero
-FS readonly RO rootfs                # a read-only view of another declared filesystem
+FS readonly RO rootfs                # a read-only wrapper over another declared filesystem
 FS inner SUB rootfs tools            # confined to a sub-path of another filesystem
 
 # MOUNT overlays one filesystem inside another at a path, in place, overriding
@@ -234,10 +235,31 @@ and nothing can be created in it or deleted from it -- not even a `BUILTIN`.
 `haisos --init` writes the two lines that mount it, commented out.
 
 `ROOT`'s value is looked up by name against the declared `FS`s; if omitted, the
-last `FS` declared is used. If a haisosfile declares no `FS` at all, `ROOT`
-falls back to the original shorthand -- a plain directory path (or the
-haisosfile's own directory, if `ROOT` is also omitted) -- so simple haisosfiles
-never need `FS`.
+last `FS` declared is used, and naming none of them is an error. If a
+haisosfile declares no `FS` at all, `ROOT` falls back to the original shorthand
+-- a plain directory path (or the haisosfile's own directory, if `ROOT` is also
+omitted) -- so simple haisosfiles never need `FS`.
+
+A `PHYSICAL` directory (and a plain-path `ROOT`) is a directory of the host's
+full physical filesystem (`IFactory::CreateFullPhysicalFileSystem`): the disk
+from its root on Linux; on Windows a directory per drive, named by its
+lowercase letter, as Cygwin shows them. It is relative to the haisosfile's
+directory, or absolute, and must be there -- a missing one is an error, not a
+process failing to start later. On Linux it is a host path as the host takes
+it, `\` included. On Windows `\` and `/` both separate, in any mix: `/c/x`,
+`\c\x`, `c:\x` and `c:/x` are all `C:\x`, `\\server\share\x` (or
+`//server/share/x`) is a UNC path, and `/` alone is the full filesystem, every
+drive in it; a drive-relative `c:x` and a `/tmp` that names no drive are
+refused. Each directory is taken with `IFactory::CreatePhysicalFileSystem`,
+jailed there -- not as a `SubFileSystem` of the full filesystem, which confines
+paths only as written, so a symbolic link inside would lead anywhere on the
+disk. `COPY`/`OUTCOPY` host paths, and the haisosfile path on the command line,
+follow the same rules (`src/components/Filesystem/PhysicalPath.h`).
+
+Any token -- a path, a `RUN` argument -- may be quoted, `'...'` or `"..."`, to
+hold spaces or a `#`: it runs to the next quote of the same kind and is taken
+without the quotes, with nothing inside special (no escapes: `"C:\Program
+Files\x"` is taken as written). A quote elsewhere in a token is part of it.
 
 `RUN` takes an absolute program path, and the process starts in `/`. `RUN -i`
 (only in front of the path) runs a `.md` agent interactively -- see
@@ -269,10 +291,11 @@ before any process starts. `OUTCOPY` may appear anywhere after that, and always
 runs last.
 
 Mistakes are reported rather than silently absorbed: a `${name}` that resolves
-to nothing declared, a duplicate `FS` name, a `-- key=value` override naming an
-argument the file never declares, a `RUN` left empty by substitution, a relative
-path inside the OS, and a file directive that fails when applied are all
-errors. `ARG name` without `=` declares an argument with no default, which
+to nothing declared, a duplicate `FS` name, a `ROOT` naming no declared `FS`, a
+`PHYSICAL` directory that is not there, an unterminated quote, a `-- key=value`
+override naming an argument the file never declares, a `RUN` left empty by
+substitution, a relative path inside the OS, and a file directive that fails
+when applied are all errors. `ARG name` without `=` declares an argument with no default, which
 must then be supplied via `-- name=value`. A `VAR`/`ARG` right-hand side may only
 reference names declared above it. Each `RUN` starts a top-most process (its
 parent is the OS); Haisos exits once all of them have finished. Composed/temporary filesystems from
@@ -417,8 +440,8 @@ under "Objects released last on their own threads".
 | **Console** | `src/components/Console/` | Async physical console output and line input, plus adapters giving agents a view onto it (or onto memory only) |
 | **Logger** | `src/components/Logger/` | Thread-safe logging with configurable receivers |
 | **HTTPClient** | `src/components/HTTPClient/` | Platform-specific HTTP implementation (Curl/WinHTTP/Fetch) |
-| **Factory** | `src/components/Factory/` | Creates the root concepts: physical console, disk-backed filesystem, the services layer, and the OS itself |
-| **Filesystem** | `src/components/Filesystem/` | Composable `IFileSystem` implementations: an unrooted passthrough, a `PhysicalFileSystem` jailed to a real disk path, plus in-memory, read-only, sub-path and mounted/overlay views |
+| **Factory** | `src/components/Factory/` | Creates the root concepts: physical console, disk-backed filesystems (a directory, or the host's whole disk), the services layer, and the OS itself |
+| **Filesystem** | `src/components/Filesystem/` | Composable `IFileSystem` implementations: an unrooted passthrough, a `PhysicalFileSystem` jailed to a real disk path, the Windows-only `WindowsFullPhysicalFileSystem` (every drive under `/`, as `/c/...`), plus in-memory, read-only, sub-path and mounted/overlay ones |
 | **ServicesCreator** | `src/components/ServicesCreator/` | Factory-of-services built on `IFactory`; creates `IFileSystemService`/`INetworkService`/`ILLMService`, passing each the services it depends on |
 | **NetworkService** | `src/components/NetworkService/` | Service-layer wrapper over network access (creates `IHTTPClient`) |
 | **FileSystemService** | `src/components/FileSystemService/` | Stateless factory that composes filesystems (read-only / in-memory / sub / mount); holds no filesystem of its own |

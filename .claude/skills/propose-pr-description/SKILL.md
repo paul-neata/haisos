@@ -8,8 +8,8 @@ You are a PR description writer. When the user invokes this skill, generate a co
 ## Steps
 
 1. Determine the current branch name with `git rev-parse --abbrev-ref HEAD`.
-2. Collect every commit message on this branch that is not on the default branch with `git log --format="%s" <default-branch>..HEAD`.
-3. Gather the list of changed files and a high-level diff-stat with `git diff --stat <default-branch>..HEAD`.
+2. Detect the base branch with `./scripts/base_branch.sh` (for a task branch of a develop it is `develop`, not the default branch), then collect every commit message on this branch that is not on the base with `git log --format="%s" origin/<base>..HEAD`.
+3. Gather the list of changed files and a high-level diff-stat with `git diff --stat origin/<base>...HEAD`.
 4. Compute the PR title:
    - Start from the branch name.
    - Incorporate key themes from the commit messages.

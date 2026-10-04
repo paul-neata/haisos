@@ -51,3 +51,6 @@ extern/
 
 # Compiled executables and libraries
 output/
+
+# The develop containers' workspace (scripts/develop/lib.sh)
+subrepo/

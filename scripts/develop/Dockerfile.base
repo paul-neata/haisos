@@ -1,0 +1,25 @@
+# The task container's base image: the tools -- build tools, git, node, Claude
+# Code and the ollama CLI -- and no credentials of any kind. Slow to build, so
+# built only when one of their versions changes; it is named after them
+# (haisos-devtask-base:git<v>-cmake<v>-gcc<v>-node<v>-claude<v>-ollama<v>-...).
+# Built by scripts/develop/image.sh, which adds the host's own ollama binary to
+# the build context. The image the containers run, with the entrypoint, is
+# built on top of it from ./Dockerfile. See .claude/develop/WORKFLOW.md.
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        ca-certificates curl git jq cmake g++ make libcurl4-openssl-dev \
+        nodejs npm python3 procps file less \
+ && rm -rf /var/lib/apt/lists/*
+
+# Declared here, not above: a build argument is part of the cache key of every
+# RUN after it, and a new Claude Code must not re-run apt.
+ARG CLAUDE_CODE_VERSION=latest
+RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+ && npm cache clean --force
+
+# The ollama CLI, a client of the host's server (reached over --network host).
+COPY ollama /usr/local/bin/ollama
+RUN chmod 0755 /usr/local/bin/ollama

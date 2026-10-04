@@ -3,19 +3,31 @@ name: CI
 on:
   push:
 
+# Every pushed branch is built, task branches of a develop included -- code
+# that was not reviewed yet (see .claude/develop/WORKFLOW.md). So the token is
+# read-only, checkouts keep no credentials, and secrets reach master only.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Build Linux
         run: .github/scripts/build-linux.sh
       - name: Run tests
         run: .github/scripts/run-tests-linux.sh
         env:
-          HAISOS_ENDPOINT: ${{ secrets.HAISOS_ENDPOINT }}
-          HAISOS_MODEL: ${{ secrets.HAISOS_MODEL }}
-          HAISOS_API_KEY: ${{ secrets.HAISOS_API_KEY }}
+          HAISOS_ENDPOINT: ${{ github.ref == 'refs/heads/master' && secrets.HAISOS_ENDPOINT || '' }}
+          HAISOS_MODEL: ${{ github.ref == 'refs/heads/master' && secrets.HAISOS_MODEL || '' }}
+          HAISOS_API_KEY: ${{ github.ref == 'refs/heads/master' && secrets.HAISOS_API_KEY || '' }}
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -26,6 +38,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Build Windows
         shell: cmd
         run: .github\scripts\build-windows.bat
@@ -33,9 +47,9 @@ jobs:
         shell: cmd
         run: .github\scripts\run-tests-windows.bat
         env:
-          HAISOS_ENDPOINT: ${{ secrets.HAISOS_ENDPOINT }}
-          HAISOS_MODEL: ${{ secrets.HAISOS_MODEL }}
-          HAISOS_API_KEY: ${{ secrets.HAISOS_API_KEY }}
+          HAISOS_ENDPOINT: ${{ github.ref == 'refs/heads/master' && secrets.HAISOS_ENDPOINT || '' }}
+          HAISOS_MODEL: ${{ github.ref == 'refs/heads/master' && secrets.HAISOS_MODEL || '' }}
+          HAISOS_API_KEY: ${{ github.ref == 'refs/heads/master' && secrets.HAISOS_API_KEY || '' }}
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -47,6 +61,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Download Linux artifacts
         uses: actions/download-artifact@v4
         with:

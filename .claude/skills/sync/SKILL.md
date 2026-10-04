@@ -5,6 +5,11 @@ description: Sync the current branch by auto-committing any local changes, fetch
 
 Sync the current branch with the latest upstream changes.
 
+**Not on `develop`.** If the current branch is `develop`, stop and say so:
+`develop` is shared by the develop workflow and task PRs are based on it, so
+its history is never rewritten (see "Two sessions, one develop" in
+`.claude/develop/WORKFLOW.md`; `master` is brought in with a merge instead).
+
 ## Steps
 
 ### 1. Auto-commit local changes

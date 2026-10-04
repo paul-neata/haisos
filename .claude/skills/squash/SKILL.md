@@ -5,6 +5,11 @@ description: Squash all commits on the current branch into a single commit using
 
 Squash all commits on the current branch (from the detected base branch up to HEAD) into a single commit, reusing the message from the branch's first commit.
 
+**Not on `develop`.** If the current branch is `develop`, stop and say so:
+`develop` is shared by the develop workflow and task PRs are based on it, so
+its history is never rewritten (see "Two sessions, one develop" in
+`.claude/develop/WORKFLOW.md`; `master` is brought in with a merge instead).
+
 ## Steps
 
 ### 1. Detect the base branch

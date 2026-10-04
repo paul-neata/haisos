@@ -5,6 +5,11 @@ description: Rebase the current branch onto its base branch. Resolve conflicts i
 
 Rebase the current branch onto its detected base branch. If conflicts occur, resolve them automatically where possible, then build and test to ensure correctness.
 
+**Not on `develop`.** If the current branch is `develop`, stop and say so:
+`develop` is shared by the develop workflow and task PRs are based on it, so
+its history is never rewritten (see "Two sessions, one develop" in
+`.claude/develop/WORKFLOW.md`; `master` is brought in with a merge instead).
+
 ## Steps
 
 ### 1. Detect the base branch

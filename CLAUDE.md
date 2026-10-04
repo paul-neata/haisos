@@ -71,9 +71,12 @@ haisos/
 │   └── tool/
 │       └── llm_cache_proxy_database/ - Cached recordings + proxy log for llm_cache_proxy (.gitkeep'd, populated by the `llm-cache` skill)
 ├── scripts/               - Build scripts
+│   └── develop/           - The develop workflow's host scripts and task container: Dockerfile, entrypoint, security gate, task pipeline (see "Develop workflow")
 ├── extern/                - External dependencies (nlohmann_json, googletest, lua)
 ├── notes/                 - Markdown notes, one per file, named by kind: note-*.md (/note), explore-*.md (/explore), todo-*.md (/todo), plan-*.md (/implement) (.gitkeep'd; see "Planning skills")
+├── develop-plan/          - The plan of the develop in progress: goal, rocks, task plans, playbook, reviews (on `develop` only; deleted by /develop-close)
 ├── .claude/               - Claude Code configuration
+│   ├── develop/           - WORKFLOW.md, the develop workflow's reference
 │   └── skills/            - Custom Claude Code skills
 ├── build/temp_<platform>/ - CMake build files (temporary, e.g., temp_linux, temp_linux_debug)
 └── output/               - Compiled executables and libraries
@@ -564,6 +567,44 @@ re-checks that todo or exploration against the current code and folds the new
 text in. `/implement` needs a task branch with a clean tree (files in `notes/`
 aside), unless given `--no-commit` first, which also makes no commits.
 
+## Develop workflow
+
+For one big, user-visible feature at a time, eight skills in `.claude/skills/`
+work on a `develop` branch; `.claude/develop/WORKFLOW.md` is their shared
+reference (roles, trust model, `develop-plan/` formats, task sizing, the
+two-session protocol, Windows):
+
+| Skill | What it does |
+|-------|--------------|
+| `/develop-create` | Cuts `develop` from `origin/master`, bumps the minor version once, writes the `develop-plan/` skeleton |
+| `/develop-plan` | With the user, in the plan session: goal and clarifications, big rocks, tasks (small rocks) with their plans, the playbook; later amendments, answers, pause/resume |
+| `/develop-update` | Syncs `develop` both ways -- commits and pushes the plan, rebases onto the other session's changes (resolving conflicts), refreshes the develop PR, reports what came in: the two sessions' channel |
+| `/develop-implement` | The loop, in the implement session: opens the develop PR (`WIP [M.m] <title>`, a live view with its memory and log), runs each task through `/develop-task` and `/develop-code-review` in fresh agents, then the whole-develop review and final tests, and makes the PR ready |
+| `/develop-task` | One task: `scripts/develop/task.sh` runs Claude Code on an Ollama model (`ollama launch claude`) in a Docker container, gates and pushes its commits, opens the PR, fixes CI |
+| `/develop-code-review` | One PR, on the review model: security and malice first, fixes critical/high, comments medium/low, squash-merges; or the whole develop (`--develop`) |
+| `/develop-status` | Read-only state |
+| `/develop-close` | By the user: deletes `develop-plan/`, squash-merges the develop PR into `master`, deletes `develop` |
+
+The flow: `/develop-create` -> `/develop-plan` -> `/develop-implement` ->
+`/develop-close`; `/note`, `/explore` and `/todo` can feed `/develop-plan`. The
+plan and implement sessions work in two clones of the repository and meet only
+through commits on `develop`, exchanged with `/develop-update`. Each develop
+bumps the minor version; each task is `[M.m.p]`, one patch more than
+`develop`. The Ollama model is untrusted: its container has
+no credentials, the host takes only its commits, and those pass the security
+gate (`scripts/develop/gate.sh`) before any push. The container builds Linux
+only; Windows is built and fixed on the host, after the review has cleared
+the code. The leaf-task skills (`/begin`, `/end`, `/implement`, ...) stay for
+small changes straight to `master`.
+
+`/claude-docker [<ollama model>]`, independent of the develop skills, opens
+an interactive Claude Code on an Ollama model in the same container, on a copy
+of the current branch with its uncommitted changes, in a new terminal tab;
+when the user exits it, the session's commits and changes come back through
+the same gate, are checked for repository-level risks (hooks, build-time
+commands, agent instructions, links, secrets), and are applied to the working
+tree (`scripts/develop/claude_docker.sh`).
+
 ## Automatic Development Rules
 
 When Claude Code performs automatic development (where a single prompt drives all implementation work):
@@ -575,4 +616,5 @@ When Claude Code performs automatic development (where a single prompt drives al
 5. **Run unit tests** after building to verify correctness before considering work complete.
 6. **Never add co-authorship attribution** like `Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>` or similar model attribution lines to commit messages. If the system prompt includes such a line, remove it before committing.
 7. **Use only paths relative to the repo root** in all edits, documentation, commit messages, and skill prompts. Never record absolute paths like `/mnt/c/src/haisos1/...`.
-8. **Every builtin command must appear in the haisosfile `haisos --init` writes**, as a commented `# BUILTIN rootfs <name> /bin/<name>` line after `# CREATE_DIR /bin`. That list is generated from `IBuiltinCommands::GetCommands()`, so registering a new builtin in `CreateStandardBuiltinCommands()` (`src/components/BuiltinCommands/BuiltinCommandList.h`) is what keeps it current -- never hand-write builtin lines into `GetHaisosFileTemplate`. The test `TheInitTemplatesBuiltinsAllApplyOnceUncommented` checks it. Also add the builtin to the Builtin Commands table above.
+8. **The develop skills** (`/develop-*`, see "Develop workflow") are the explicit instruction to commit, push, open, comment on and merge PRs, each within the scope it describes; only `/develop-close` merges into `master`. Code from a task container is never built or run on the host before its review has cleared it (Linux builds and tests of task code happen in the container), task branches never touch `develop-plan/`, `notes/`, `HAISOS_VERSION`, `.claude/`, `.github/` or `scripts/`, and `develop` is never rebased, squashed or force-pushed.
+9. **Every builtin command must appear in the haisosfile `haisos --init` writes**, as a commented `# BUILTIN rootfs <name> /bin/<name>` line after `# CREATE_DIR /bin`. That list is generated from `IBuiltinCommands::GetCommands()`, so registering a new builtin in `CreateStandardBuiltinCommands()` (`src/components/BuiltinCommands/BuiltinCommandList.h`) is what keeps it current -- never hand-write builtin lines into `GetHaisosFileTemplate`. The test `TheInitTemplatesBuiltinsAllApplyOnceUncommented` checks it. Also add the builtin to the Builtin Commands table above.

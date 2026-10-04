@@ -22,7 +22,28 @@ fi
 
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
 
-# 3. Git upstream tracking
+# 3. The develop workflow (.claude/develop/WORKFLOW.md): a base recorded for the
+# branch (branch.<name>.haisos-base, set for develop and its task branches);
+# else develop's own base is master, and a task branch named
+# task/<big-rock>--<small-rock> is based on develop while there is one.
+if [ -n "$CURRENT_BRANCH" ]; then
+    BASE_BRANCH=$(git config "branch.$CURRENT_BRANCH.haisos-base" 2>/dev/null || true)
+    if [ -n "$BASE_BRANCH" ]; then
+        echo "$BASE_BRANCH"
+        exit 0
+    fi
+    if [ "$CURRENT_BRANCH" = "develop" ]; then
+        echo "master"
+        exit 0
+    fi
+    if [[ "$CURRENT_BRANCH" =~ ^task/[a-z0-9-]+--[a-z0-9-]+$ ]] && \
+       git rev-parse -q --verify refs/remotes/origin/develop >/dev/null 2>&1; then
+        echo "develop"
+        exit 0
+    fi
+fi
+
+# 4. Git upstream tracking
 # Note: a plain `git push -u origin <branch>` makes the branch track itself
 # (its upstream is origin/<branch>, not the actual base), so that self-
 # referential case must be ignored here rather than reported as the base.
@@ -35,8 +56,8 @@ if [ -n "$UPSTREAM" ]; then
     fi
 fi
 
-# 4. Git config merge ref for current branch
-# Same self-tracking caveat as step 3 applies here (`git push -u` sets this too).
+# 5. Git config merge ref for current branch
+# Same self-tracking caveat as step 4 applies here (`git push -u` sets this too).
 if [ -n "$CURRENT_BRANCH" ]; then
     BASE_BRANCH=$(git config "branch.$CURRENT_BRANCH.merge" 2>/dev/null | sed 's|refs/heads/||' || true)
     if [ -n "$BASE_BRANCH" ] && [ "$BASE_BRANCH" != "$CURRENT_BRANCH" ]; then
@@ -45,14 +66,14 @@ if [ -n "$CURRENT_BRANCH" ]; then
     fi
 fi
 
-# 5. Default branch from origin/HEAD
+# 6. Default branch from origin/HEAD
 DEFAULT_REF=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || true)
 if [ -n "$DEFAULT_REF" ]; then
     echo "${DEFAULT_REF#refs/remotes/origin/}"
     exit 0
 fi
 
-# 6. Ancestry check against origin/master and origin/main
+# 7. Ancestry check against origin/master and origin/main
 for CANDIDATE in master main; do
     if git merge-base --is-ancestor "origin/$CANDIDATE" HEAD 2>/dev/null || \
        [ -n "$(git log --oneline "origin/$CANDIDATE..HEAD" 2>/dev/null | head -1)" ]; then
@@ -61,7 +82,7 @@ for CANDIDATE in master main; do
     fi
 done
 
-# 7. Fallback to local refs
+# 8. Fallback to local refs
 for CANDIDATE in main master; do
     if git show-ref --verify --quiet "refs/heads/$CANDIDATE" 2>/dev/null || \
        git show-ref --verify --quiet "refs/remotes/origin/$CANDIDATE" 2>/dev/null; then

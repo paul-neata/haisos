@@ -5,9 +5,14 @@
 # it kills every other process in the container and resets the repository's git
 # metadata, so nothing left behind can alter what it hands back.
 #
+# Mounts: /work, the repository's subrepo/ folder (the working tree), and
+# /gitdir, its git metadata (kept off the host's repository; /work/.git is a
+# file pointing there). /in read-only, /out.
+#
 # Environment:
 #   MODE           implement | fix | test | interactive (/claude-docker: Claude
-#                  on the terminal, on the base plus /in/uncommitted.patch)
+#                  on the terminal, on the base plus /in/staged.patch and
+#                  /in/unstaged.patch)
 #   TASK_ID, TASK_BRANCH
 #   MODEL          the Ollama model (implement, fix)
 #   TIMEOUT_MIN    minutes the model may run (default 120)
@@ -18,13 +23,15 @@
 #   LAUNCHER       ollama (default: `ollama launch claude`) | direct (claude with
 #                  the ANTHROPIC_* variables pointed at ollama)
 #   OLLAMA_HOST    the host's ollama server (default 127.0.0.1:11434)
-#   USER_GIT_NAME, USER_GIT_EMAIL   interactive: the identity for commits
+#   USER_GIT_NAME, USER_GIT_EMAIL   the user's identity, for every commit made
+#                  here (also written to ~/.gitconfig)
 # In (read-only): /in/in.bundle holding refs/develop-in/base (and, for fix and
 #   test, refs/develop-in/branch), /in/task.md, /in/feedback.md (optional),
-#   /in/uncommitted.patch (interactive, optional).
+#   /in/staged.patch and /in/unstaged.patch (interactive: the host's index
+#   against HEAD, and its working tree against the index, new files included).
 # Out: /out/result.json (always, written last); /out/out.bundle (implement,
-#   fix and interactive, when there are new commits); /out/uncommitted.patch
-#   (interactive: what was left uncommitted, new files included);
+#   fix and interactive, when there are new commits); /out/staged.patch and
+#   /out/unstaged.patch (interactive: the same two, as the session left them);
 #   /out/prompt.md, /out/claude.jsonl, /out/claude.stderr, /out/summary.md
 #   (written by the model), /out/build.log, /out/test.log.
 set -uo pipefail
@@ -42,12 +49,8 @@ export OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 
 SAFE_PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH="$SAFE_PATH"
-GIT_NAME="haisos-task (${MODEL:-no model})"
-GIT_EMAIL="task@haisos.invalid"
-if [ "$MODE" = interactive ]; then
-    GIT_NAME="${USER_GIT_NAME:-$GIT_NAME}"
-    GIT_EMAIL="${USER_GIT_EMAIL:-$GIT_EMAIL}"
-fi
+GIT_NAME="${USER_GIT_NAME:-haisos-task (${MODEL:-no model})}"
+GIT_EMAIL="${USER_GIT_EMAIL:-task@haisos.invalid}"
 
 STARTED=$(date +%s)
 ERROR=""
@@ -67,13 +70,17 @@ NO_TESTS=false
 BUNDLE=false
 UNCOMMITTED_FILES=0
 HEAD_BRANCH=""
+STAGED_FILES=0
+IN_PROGRESS=""
 
 say() { echo "[entrypoint $(date +%H:%M:%S)] $*"; }
 
 # git as the entrypoint runs it: no global or system config, no hooks, no
-# fsmonitor, no pager, no signing -- whatever the untrusted programs left.
+# fsmonitor, no pager, no signing -- whatever the untrusted programs left --
+# and the metadata in /gitdir, whatever /work/.git says.
 g() {
     env -i PATH="$SAFE_PATH" HOME=/nonexistent LANG=C.UTF-8 ${GIT_INDEX_FILE:+GIT_INDEX_FILE="$GIT_INDEX_FILE"} \
+        GIT_DIR=/gitdir GIT_WORK_TREE=/work \
         GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
         GIT_AUTHOR_NAME="$GIT_NAME" GIT_AUTHOR_EMAIL="$GIT_EMAIL" \
         GIT_COMMITTER_NAME="$GIT_NAME" GIT_COMMITTER_EMAIL="$GIT_EMAIL" \
@@ -81,16 +88,31 @@ g() {
             -c commit.gpgSign=false -c core.untrackedCache=false -C /work "$@"
 }
 
-# Undoes what an earlier program may have planted in the repository's metadata.
+# Undoes what an earlier program may have planted in the repository's metadata,
+# and creates it on the first run. fileMode is off: /work may be on a Windows
+# drive, where every file shows as executable. (scripts/develop/lib.sh's
+# sanitize_subrepo does the same on the host.)
 reset_git_meta() {
-    if [ ! -d /work/.git ] || [ -L /work/.git ]; then
-        rm -rf /work/.git
+    if [ ! -f /gitdir/HEAD ] || [ -L /gitdir/HEAD ] || [ -L /gitdir/objects ] || [ -L /gitdir/refs ]; then
+        find /gitdir -mindepth 1 -maxdepth 1 -exec rm -rf {} +
         g init -q
     fi
-    rm -rf /work/.git/hooks /work/.git/info/attributes /work/.git/config /work/.git/objects/info/alternates
-    mkdir -p /work/.git/hooks
-    printf '[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n\tlogallrefupdates = true\n' \
-        > /work/.git/config
+    rm -rf /gitdir/hooks /gitdir/info /gitdir/commondir /gitdir/config \
+        /gitdir/objects/info/alternates /gitdir/objects/info/http-alternates
+    mkdir -p /gitdir/hooks
+    printf '[core]\n\trepositoryformatversion = 0\n\tfilemode = false\n\tbare = false\n\tlogallrefupdates = true\n' \
+        > /gitdir/config
+    rm -rf /work/.git
+    printf 'gitdir: /gitdir\n' > /work/.git
+}
+
+# The user's identity for the git the model runs (the entrypoint's own git
+# ignores it, see g).
+write_gitconfig() {
+    rm -f "$HOME/.gitconfig"
+    (cd / && git config --file "$HOME/.gitconfig" user.name "$GIT_NAME" \
+          && git config --file "$HOME/.gitconfig" user.email "$GIT_EMAIL") \
+        || say "cannot write $HOME/.gitconfig"
 }
 
 # Kills every process in the container except the init and this script.
@@ -126,9 +148,15 @@ prepare() {
     if [ "$CLEAN_BUILD" = 1 ]; then
         rm -rf /work/build /work/output
     fi
-    if [ "$MODE" = interactive ] && [ -s /in/uncommitted.patch ]; then
-        g apply --binary --whitespace=nowarn /in/uncommitted.patch \
-            || { ERROR="the uncommitted changes do not apply"; return 1; }
+    if [ "$MODE" = interactive ]; then
+        if [ -s /in/staged.patch ]; then
+            g apply --index --binary --whitespace=nowarn /in/staged.patch \
+                || { ERROR="the staged changes do not apply"; return 1; }
+        fi
+        if [ -s /in/unstaged.patch ]; then
+            g apply --binary --whitespace=nowarn /in/unstaged.patch \
+                || { ERROR="the unstaged changes do not apply"; return 1; }
+        fi
     fi
     START_SHA=$(g rev-parse HEAD)
     BASE_SHA=$(g rev-parse refs/in/base)
@@ -239,17 +267,29 @@ run_interactive() {
     say "Claude exited ($MODEL_RC); collecting the session's work"
 }
 
-# /claude-docker: what was left uncommitted, new files included, as one patch
-# against HEAD -- built in a separate index, after nothing else runs any more.
-collect_uncommitted() {
-    local idx=/tmp/claude-docker.index
+# /claude-docker: the state the session left, after nothing else runs any
+# more -- its branch and HEAD, the index against HEAD (staged.patch) and the
+# working tree against the index, new files included (unstaged.patch, built in
+# a copy of the index, so the index itself is untouched).
+collect_state() {
+    local idx=/tmp/claude-docker.index tree s
     HEAD_BRANCH=$(g symbolic-ref -q --short HEAD || echo "(detached)")
+    HEAD_SHA=$(g rev-parse -q --verify HEAD || true)
+    for s in MERGE_HEAD REBASE_HEAD CHERRY_PICK_HEAD REVERT_HEAD rebase-merge rebase-apply; do
+        [ ! -e "/gitdir/$s" ] || IN_PROGRESS="$IN_PROGRESS $s"
+    done
+    IN_PROGRESS="${IN_PROGRESS# }"
+    [ -n "$HEAD_SHA" ] || { ERROR="the session left no HEAD commit"; return 1; }
+    tree=$(g write-tree) || { ERROR="the index has unresolved conflicts"; return 1; }
+    g diff --cached --binary HEAD > /out/staged.patch \
+        || { ERROR="cannot collect the staged changes"; return 1; }
+    STAGED_FILES=$(g diff --cached --name-only HEAD | grep -c . || true)
     rm -f "$idx"
-    GIT_INDEX_FILE="$idx" g read-tree HEAD \
-        && GIT_INDEX_FILE="$idx" g add -A \
-        && GIT_INDEX_FILE="$idx" g diff --cached --binary HEAD > /out/uncommitted.patch \
-        || { ERROR="cannot collect the uncommitted changes"; return 1; }
-    UNCOMMITTED_FILES=$(GIT_INDEX_FILE="$idx" g diff --cached --name-only HEAD | grep -c . || true)
+    if [ -f /gitdir/index ]; then cp /gitdir/index "$idx"; else GIT_INDEX_FILE="$idx" g read-tree HEAD; fi
+    GIT_INDEX_FILE="$idx" g add -A \
+        && GIT_INDEX_FILE="$idx" g diff --cached --binary "$tree" > /out/unstaged.patch \
+        || { ERROR="cannot collect the unstaged changes"; return 1; }
+    UNCOMMITTED_FILES=$(GIT_INDEX_FILE="$idx" g diff --cached --name-only "$tree" | grep -c . || true)
     rm -f "$idx"
 }
 
@@ -278,13 +318,15 @@ make_bundle() {
     kill_others
     reset_git_meta
     fetch_in || { ERROR="cannot re-read /in/in.bundle"; return 1; }
-    local not=refs/in/base
+    local not=refs/in/base branch="$TASK_BRANCH"
     [ "$MODE" = fix ] && not=refs/in/branch
-    HEAD_SHA=$(g rev-parse -q --verify "refs/heads/$TASK_BRANCH" || true)
-    [ -n "$HEAD_SHA" ] || { ERROR="$TASK_BRANCH is gone"; return 1; }
-    COMMITS=$(g rev-list --count "$not..refs/heads/$TASK_BRANCH" 2>/dev/null || echo 0)
+    # interactive: the branch the session ended on, whatever its name
+    [ "$MODE" = interactive ] && branch="$HEAD_BRANCH"
+    HEAD_SHA=$(g rev-parse -q --verify "refs/heads/$branch" || true)
+    [ -n "$HEAD_SHA" ] || { ERROR="$branch is gone"; return 1; }
+    COMMITS=$(g rev-list --count "$not..refs/heads/$branch" 2>/dev/null || echo 0)
     if [ "$COMMITS" -gt 0 ]; then
-        g bundle create /out/out.bundle "refs/heads/$TASK_BRANCH" "^$not" 2>/dev/null && BUNDLE=true
+        g bundle create /out/out.bundle "refs/heads/$branch" "^$not" 2>/dev/null && BUNDLE=true
         [ "$BUNDLE" = true ] || ERROR="cannot create /out/out.bundle"
     fi
 }
@@ -311,6 +353,7 @@ write_result() {
         --argjson bundle "$BUNDLE" --argjson seconds "$(( $(date +%s) - STARTED ))" \
         --argjson usage "$usage" \
         --arg head_branch "$HEAD_BRANCH" --argjson uncommitted_files "${UNCOMMITTED_FILES:-0}" \
+        --argjson staged_files "${STAGED_FILES:-0}" --arg in_progress "$IN_PROGRESS" \
         '{mode: $mode, task: $task, branch: $branch, model: $model, launcher: $launcher,
           start_sha: $start, base_sha: $base, head_sha: $head, commits: $commits,
           leftover_autocommit: $leftover, wrong_branch: $wrong_branch,
@@ -318,22 +361,28 @@ write_result() {
           build_exit: $build_exit,
           tests: {selector: $tests, exit: $test_exit, passed: $passed, failed: $failed, none_found: $no_tests},
           bundle: $bundle, seconds: $seconds, usage: $usage, error: $error,
-          head_branch: $head_branch, uncommitted_files: $uncommitted_files}' \
+          head_branch: $head_branch, staged_files: $staged_files,
+          uncommitted_files: $uncommitted_files, in_progress: $in_progress}' \
         > /out/result.json.tmp && mv -f /out/result.json.tmp /out/result.json
 }
 
 main() {
-    rm -f /out/result.json /out/out.bundle /out/uncommitted.patch
+    rm -f /out/result.json /out/out.bundle /out/staged.patch /out/unstaged.patch
+    write_gitconfig
     if [ "$MODE" = interactive ]; then
         if prepare; then
             run_interactive
             kill_others
             reset_git_meta
-            collect_uncommitted
-            make_bundle
+            if collect_state && [ "$HEAD_BRANCH" != "(detached)" ]; then
+                make_bundle
+            elif [ -z "$ERROR" ]; then
+                ERROR="the session ended on a detached HEAD: switch to a branch before exiting"
+            fi
         fi
+        reset_git_meta
         write_result
-        say "done: $(jq -c '{commits, uncommitted_files, head_branch, error}' /out/result.json 2>/dev/null)"
+        say "done: $(jq -c '{head_branch, commits, staged_files, uncommitted_files, in_progress, error}' /out/result.json 2>/dev/null)"
         return
     fi
     if prepare; then
@@ -349,6 +398,7 @@ main() {
             HEAD_SHA=$START_SHA
         fi
     fi
+    reset_git_meta
     write_result
     say "done: $(jq -c '{commits, build_exit, tests, timed_out, error}' /out/result.json 2>/dev/null)"
 }

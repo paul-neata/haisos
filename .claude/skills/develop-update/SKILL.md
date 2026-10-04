@@ -1,11 +1,16 @@
 ---
 name: develop-update
 description: Sync this clone's develop with origin/develop and publish the plan -- fetch, commit what changed in develop-plan/ (and notes/, HAISOS_VERSION), rebase onto whatever the other session or merged task PRs pushed (resolving conflicts), push, refresh the develop PR, and report what came in. How the plan and implement sessions talk to each other; with nothing to commit it just brings develop up to date.
+model: sonnet
 args:
   - name: message
     description: Optional commit message for the local plan changes; derived from the changes when omitted
     required: false
 ---
+
+Runs on Sonnet (`model: sonnet` above): the work is procedural. In the plan
+session it is how the plan, edited in plan mode (`/develop-plan begin`), is
+published -- by hand, whenever the user wants.
 
 One step of the conversation between the two develop sessions (see "Two
 sessions, one develop" in `.claude/develop/WORKFLOW.md`): publish what this
@@ -33,7 +38,9 @@ Not on `develop`: if the working tree is clean and `origin/develop` exists,
 Only `develop-plan/`, `notes/` and `HAISOS_VERSION` are committed; anything
 else in the tree stays as it is (the script says so). If they have changes,
 the message is the argument, or a short one derived from them -- what changed
-in the plan, e.g. `Plan: add task pipes--three-stage; answer 2 questions`.
+in the plan, e.g. `Plan: add task pipes--three-stage; answer 2 questions`
+(`git diff HEAD -- develop-plan notes HAISOS_VERSION`, and the new files, show
+what changed).
 
 ### 3. Run it
 

@@ -1,6 +1,6 @@
 ---
 name: develop-create
-description: Start a develop -- one big, user-visible feature at a time. Cuts `develop` from a fresh origin/master, bumps the minor version once for the whole develop, writes the develop-plan/ skeleton (goal with settings and metadata, rocks, playbook), commits and pushes it. Refuses while another develop exists. Next step: /develop-plan.
+description: Start a develop -- one big, user-visible feature at a time. Cuts `develop` from a fresh origin/master, bumps the minor version once for the whole develop, writes the develop-plan/ skeleton (goal with settings and metadata, rocks, playbook), commits and pushes it. Refuses while another develop exists. Next step: /develop-plan begin.
 args:
   - name: title
     description: A short title for the develop, e.g. "Pipes and redirections" (optional; /develop-plan can set it)
@@ -126,7 +126,7 @@ the develop PR):
 
 ```
 
-The version lives in `HAISOS_VERSION` alone: `/develop-plan version` may set
+The version lives in `HAISOS_VERSION` alone: plan mode (`/develop-plan begin`) may set
 it to anything, each task adds one to its patch (see "Versions" in
 `WORKFLOW.md`).
 
@@ -143,7 +143,8 @@ No `Co-Authored-By` or other trailers in the message.
 ### 6. Report
 
 - The branch, the version (`<old> -> <new>`), the commit.
-- Next: `/develop-plan <the goal>` in the plan session.
+- Next, in the plan session: `/develop-plan begin`, then describe the goal;
+  publish the plan with `/develop-update` whenever it is worth sharing.
 - For the implement session, a second clone on `develop`, e.g.:
   `git clone <origin url> ~/src/haisos-implement && cd ~/src/haisos-implement && git switch develop`,
   then copy `.claude/settings.local.json` into it (it is not versioned), and

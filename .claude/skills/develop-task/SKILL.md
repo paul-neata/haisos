@@ -49,8 +49,12 @@ still red after the fix rounds), `blocked` (the gate refused a fix), or
 Diagnose the environment, not the task:
 
 - docker not running, or the image does not build:
-  `tail -n 30 ~/.haisos-develop/image-build.log`,
-  `bash scripts/develop/image.sh --force`;
+  `tail -n 30 ~/.haisos-develop/image-build-base.log` (the tools) or
+  `~/.haisos-develop/image-build.log` (the top image),
+  `bash scripts/develop/image.sh --force` (or `--refresh`, which rebuilds
+  the base without the cache);
+- a container still holding the subrepo, or a /claude-docker session open
+  on it (`claude-docker-*` in `docker ps`): the task waits for the user;
 - ollama not answering (`curl -s 127.0.0.1:11434/api/version`), a model
   missing (`bash scripts/develop/preflight.sh`);
 - `gh` not logged in; a push rejected because the remote branch moved;

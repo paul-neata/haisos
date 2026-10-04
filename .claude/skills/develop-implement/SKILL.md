@@ -107,7 +107,8 @@ The first row, in playbook order, whose status is `todo`, `in-progress` or
   `--no-final`).
 - None, but some are `blocked` -> publish (`--log "waiting: <blocked tasks>"`)
   and stop: report the blocked tasks and the open questions;
-  `/develop-plan answer` in the plan session unblocks them.
+  the user answers them in plan mode in the plan session (`/develop-plan
+  begin`) and publishes with `/develop-update`.
 
 ### 2d. Check its plan -- cheaply first
 
@@ -191,7 +192,7 @@ By its `VERDICT`:
 - `malicious` -> **stop everything**: status `blocked`, `Pause: yes`, a
   Question with the evidence, publish (`--log "STOPPED: suspected malicious
   change in <id>"`); empty the container's workspace
-  (`rm -rf ~/.haisos-develop/work`); tell the user plainly what was found and
+  (`bash scripts/develop/subrepo.sh wipe`); tell the user plainly what was found and
   where. Do not resume without the user.
 
 ### 2g. Windows, on the host

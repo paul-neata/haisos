@@ -1,72 +1,116 @@
 ---
 name: develop-plan
-description: Plan the develop in progress, in the plan session -- the goal and its clarifications, the big rocks, the small rocks as task plans sized for an Ollama implementer, and the playbook; later amend them on the fly, answer the implement session's questions, give it directions, pause or resume it, set the version or the settings, explore an idea or take a note. Writes only develop-plan/, notes/ and HAISOS_VERSION, and publishes them with /develop-update.
+description: "Plan mode for the develop in progress, in the plan session. `/develop-plan begin` enters it: from then on every prompt in this conversation plans -- the goal and its clarifications, the big rocks, the small rocks as task plans sized for an Ollama implementer, the playbook, and later amendments, answers, directions, pause/resume, version, settings, notes and explorations -- editing only develop-plan/, notes/ and HAISOS_VERSION, uncommitted, until `/develop-plan end`. With no argument it says whether the mode is on and, if so, shows the plan's uncommitted diff with a few words on what it changes. Publishing is by hand, with /develop-update."
 args:
-  - name: request
-    description: "Empty (continue where the plan stands); the goal (': text' literal, text, a notes/ file name, or a file path); or an amendment such as 'add ...', 'change ...', 'replan <task-id>', 'answer', 'direction <text>', 'pause', 'resume', 'version <M.m.p>', 'set <setting> <value>', 'explore <topic>', 'note <text>'"
+  - name: mode
+    description: "begin (enter plan mode), end (leave it), or nothing (show the mode and the uncommitted plan diff)"
     required: false
 ---
 
-Plan a develop with the user: steps 2-5 of the develop workflow, and every
-change to the plan afterwards. Read `.claude/develop/WORKFLOW.md` first (all
-of it, once per session) -- the file formats, the sizing rules and the
-two-session protocol are defined there.
+Plan mode for a develop: steps 2-5 of the develop workflow, and every change
+to the plan afterwards, made in conversation with the user. Read
+`.claude/develop/WORKFLOW.md` once per session, all of it -- the file formats,
+the sizing rules and the two-session protocol are defined there.
 
-This skill **never writes code**: only files in `develop-plan/` and
-`notes/`, and `HAISOS_VERSION`. Invoking it is the instruction to commit and
-push those files on `develop`, always through **`/develop-update`** --
-`bash scripts/develop/update.sh -m "<message>"`, with its step 4 when a
-rebase conflicts (`.claude/skills/develop-update/SKILL.md`). That is also how
-the implement session hears about every change: it takes the plan in again
-before each task.
+## The mode
 
-Claude pays for planning, Ollama for implementing: keep this skill's own
-reading focused (the CLAUDE.md files and the code the goal touches), and put
-the effort where it pays -- clear goals, well-cut tasks, complete plans.
+**Plan mode is on** from a `/develop-plan begin` in this conversation until
+the next `/develop-plan end`; otherwise -- no `begin` yet, or `end` came last
+-- it is off. The conversation itself is the state: look for the last
+`begin` or `end` (or, after a summary, the last `develop-plan mode: on/off`
+it mentions). Nothing is written to disk for it.
 
-## Steps
+While it is on:
 
-### 1. Sync
+- **Every prompt of the user is planning**, unless it plainly is not: a goal,
+  an answer to a clarification, "add a task for ...", "split X", "pause",
+  "tell the implement session to ...", "bump the version to 1.0.0". Each one
+  ends as edits to the plan files (see "Planning" below). A question about
+  the plan or the code is answered -- and edits the plan only if the answer
+  changes it.
+- **Write only** `develop-plan/`, `notes/` and `HAISOS_VERSION`. Never code,
+  tests, docs, scripts or skills: asked for that, say it needs
+  `/develop-plan end` first.
+- **Never commit, push or run `scripts/develop/update.sh`.** The changes stay
+  uncommitted, so the user can iterate on them (`/develop-plan` shows the
+  diff), and publishes them by hand with `/develop-update`.
+- `/note` and `/explore` may be used: they write in `notes/`.
+- End each reply that changed the plan with one line:
+  `Plan: <n> file(s) changed, unpublished -- /develop-plan shows the diff, /develop-update publishes.`
+
+Claude pays for planning, Ollama for implementing: keep your own reading
+focused (the CLAUDE.md files and the code the goal touches), and put the
+effort where it pays -- clear goals, well-cut tasks, complete plans.
+
+## The argument
+
+Only `begin`, `end` or nothing; anything else: say so and change nothing.
+
+### `begin`
+
+1. Be on `develop`:
+   ```bash
+   git fetch -q origin
+   git rev-parse --abbrev-ref HEAD
+   git status --porcelain
+   ```
+   Not on `develop`: if `origin/develop` exists and the tree is clean,
+   `git switch develop`; if there is no develop at all, stop and point to
+   `/develop-create` (the mode stays off).
+2. Read `develop-plan/goal.md`, `develop-plan/rocks.md` and
+   `develop-plan/playbook.md`, and run `bash scripts/develop/state.sh`.
+3. If `develop` is behind `origin/develop` (`git rev-list --count
+   HEAD..origin/develop`), say so: the implement session or a merged task
+   moved it, and `/develop-update` takes that in -- best before planning.
+4. If the playbook's `## Questions` has entries without `-> answered`, show
+   them: they are the first thing to answer in the mode.
+5. Reply, starting with **`develop-plan mode: on`**: where the plan stands
+   and the next step -- the goal still says `(to be written ...)`: ask for
+   the goal; no rocks: propose them; no tasks: cut them; tasks without a plan
+   file: write them; everything planned: ask what to change.
+
+### `end`
+
+Reply, starting with **`develop-plan mode: off`**: the plan files still
+uncommitted (`git status --short -- develop-plan notes HAISOS_VERSION`), and
+that `/develop-update` publishes them. From then on, behave as usual.
+
+### Nothing
+
+Reply, starting with **`develop-plan mode: on`** or **`develop-plan mode:
+off`**. Then, when on (when off, only the number of uncommitted plan files):
 
 ```bash
-git rev-parse --abbrev-ref HEAD
-bash scripts/develop/update.sh
-bash scripts/develop/state.sh
+git status --short -- develop-plan notes HAISOS_VERSION
+git diff HEAD -- develop-plan notes HAISOS_VERSION
+git ls-files --others --exclude-standard -- develop-plan notes
 ```
 
-- Not on `develop` in this clone: if `origin/develop` exists, `git switch
-  develop` (after checking the tree is clean); if there is no develop at all,
-  stop and point to `/develop-create`.
-- Then read `develop-plan/goal.md`, `develop-plan/rocks.md` and
-  `develop-plan/playbook.md`. The `INCOMING` part of the update tells what
-  the implement session did since: tasks started, merged, blocked.
+and, for each new file, `git diff --no-index /dev/null <file>`. Command
+output does not reach the user: show the diff in your reply, in a `diff`
+block -- all of it up to about 300 lines; beyond that the `--stat`, the
+hunks that matter most, and a note of what was left out. Then, in two to
+four short lines, what the changes mean for the develop: tasks added, cut or
+re-planned, decisions taken, what the implement session will do differently.
+No changes: say the plan is as published.
 
-### 2. Open questions first
+## Planning
 
-If the playbook's `## Questions` has entries without `-> answered`, show them
-before anything else and ask the user (`AskUserQuestion`, recommended option
-first, when the choices are clear; otherwise in plain text). Write each answer
-after its question (`-> answered: <answer>`), apply what it implies (a task
-back to `todo` for a retry, a task split, a setting changed -- see step 5),
-and publish (`"Plan: answer questions"`).
+What a prompt in plan mode leads to. Within the ownership rules of
+`WORKFLOW.md` ("Two sessions, one develop"): the Status/PR/Tries/Review
+cells, `reviews/` and `final-review.md` belong to the implement session. A
+task `in-progress` or later is never re-planned; add a follow-up task
+instead.
 
-### 3. Decide what to do
+### The initial plan
 
-- The request names an amendment (`add`, `change`, `replan`, `answer`,
-  `direction`, `pause`, `resume`, `version`, `set`, `explore`, `note`, ...):
-  go to step 5.
-- Otherwise, continue the plan where it stands: the goal still says
-  `(to be written ...)` -> step 4a; no rocks yet -> 4b; no tasks in the
-  playbook -> 4c; tasks without a plan file -> 4d; everything planned ->
-  show the state (`state.sh` output, the playbook) and ask what to change.
+In order, each step agreed with the user before the next.
 
-### 4. The initial plan
+#### The goal
 
-#### 4a. The goal
-
-**The seed** is the request: `: text` (literal), a `notes/` file name with or
-without `.md`, a file path with an extension (its exact text), or text to
-interpret (from the conversation). No seed: ask the user for the goal.
+**The seed** is the user's prompt: text to interpret, a `notes/` file name
+with or without `.md`, or a file path with an extension (its exact text). No
+seed yet: ask the user for the goal.
 
 1. Ground it: read the root `CLAUDE.md` and the `CLAUDE.md` of each component
    or tool the goal touches, and the code where the goal lands. For a large
@@ -83,17 +127,17 @@ interpret (from the conversation). No seed: ask the user for the goal.
    root `CLAUDE.md` already decide; decide it and say so.
 4. Write `goal.md` (title, `## Goal`, `## Clarifications` as `- Q: ... -- A:
    ...`, `## Acceptance scenarios`, `## Out of scope`); leave `## Metadata`
-   and `## Settings` as they are. Publish: `"Plan: goal"`.
+   and `## Settings` as they are.
 
-#### 4b. The big rocks
+#### The big rocks
 
 Propose 2-6 **big rocks**: the big categories of work, in dependency order,
 each with its purpose (what it gives the user), the components it touches and
 a rough size. A rock is not a task; it will hold several. Show them and ask
-the user to accept or adjust. Write `rocks.md` (the `Tasks:` lines come in
-4c). Publish: `"Plan: big rocks"`.
+the user to accept or adjust. Write `rocks.md` (the `Tasks:` lines come with
+the task list).
 
-#### 4c. The small rocks -- the task list
+#### The small rocks -- the task list
 
 Cut each rock into **tasks** (small rocks) following "Sizing for cost" in
 `WORKFLOW.md` -- about 300-800 changed lines each, merge anything under ~150
@@ -107,9 +151,9 @@ it **before** the plans are written (writing plans is the expensive step).
 Then fill the playbook table (one row per task: `#`, the task linked as
 `[<id>](tasks/<id>.md)`, `todo`, an empty Version -- the implement session
 numbers each task when it starts it -- the `#`s it depends on, empty cells)
-and the `Tasks:` lines of `rocks.md`. Publish: `"Plan: task list"`.
+and the `Tasks:` lines of `rocks.md`.
 
-#### 4d. The task plans
+#### The task plans
 
 Spawn the planning agents **in parallel** (one message), `general-purpose`,
 one per rock (or per group of at most 4 tasks of a big rock). Each writes its
@@ -164,27 +208,26 @@ their replies: where two tasks name the same contract differently, settle it
 -- `interfaces/` wins -- and fix the affected plans (a small edit here, or
 `SendMessage` to the agent that wrote it). Apply proposed splits or merges
 (update the playbook and `rocks.md`). Ask the user what the agents flagged
-for decision. Publish: `"Plan: task plans"`.
+for decision.
 
-Report: the playbook, and that `/develop-implement` in the implement session
-starts the work.
+Report: the playbook; once it is published (`/develop-update`),
+`/develop-implement` in the implement session starts the work.
 
-### 5. Amendments
+### Amendments
 
-Always within the ownership rules of `WORKFLOW.md` ("Two sessions, one
-develop"): the Status/PR/Tries/Review cells, `reviews/` and
-`final-review.md` belong to the implement session. A task `in-progress` or
-later is never re-planned; add a follow-up task instead.
+Later prompts change the plan:
 
 - **add / change / remove** a task, a rock or the goal: edit the files; a new
-  or changed task gets a full plan (4d's prompt, one agent, or directly here
+  or changed task gets a full plan (the prompt of "The task plans", one agent, or directly here
   when small); removing a `todo` task marks it `obsolete`, with a reason in
   Notes.
 - **replan `<task-id>`** (a `todo` or `blocked` task): re-check its plan
   against the current `develop`, rewrite what changed, update `Plan checked
   against`; a `blocked` task goes back to `todo`, with an Adjustments line
   `(plan) <why>`.
-- **answer**: step 2.
+- **answer** (the implement session's Questions): write each answer after
+  its question (`-> answered: <answer>`) and apply what it implies -- a task
+  back to `todo` for a retry, a task split, a setting changed.
 - **direction `<text>`**: an instruction to the implement session, which
   reads it before its next task -- e.g. "stop after parser--tokens", "run
   redirection--append before pipes--*", "use minimax-m2.7:cloud for
@@ -201,6 +244,5 @@ later is never re-planned; add a follow-up task instead.
   `notes/explore-*.md`), then offer to fold its conclusions into the plan.
 - **note `<text>`**: invoke `/note <text>`.
 
-Publish each amendment on its own, with a message saying what changed
-(`"Plan: add task parser--heredoc"`), and report it in a line or two, with
-what came in from the implement session.
+Report each change in a line or two. Several changes may pile up before the
+user publishes them; `/develop-update` derives one message from them all.

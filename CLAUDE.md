@@ -75,6 +75,7 @@ haisos/
 ├── extern/                - External dependencies (nlohmann_json, googletest, lua)
 ├── notes/                 - Markdown notes, one per file, named by kind: note-*.md (/note), explore-*.md (/explore), todo-*.md (/todo), plan-*.md (/implement) (.gitkeep'd; see "Planning skills")
 ├── develop-plan/          - The plan of the develop in progress: goal, rocks, task plans, playbook, reviews (on `develop` only; deleted by /develop-close)
+├── subrepo/               - The develop containers' workspace (git-ignored; created by the first task or /claude-docker run): a haisos working tree whose git metadata lives in ~/.haisos-develop/subrepos/
 ├── .claude/               - Claude Code configuration
 │   ├── develop/           - WORKFLOW.md, the develop workflow's reference
 │   └── skills/            - Custom Claude Code skills
@@ -577,33 +578,40 @@ two-session protocol, Windows):
 | Skill | What it does |
 |-------|--------------|
 | `/develop-create` | Cuts `develop` from `origin/master`, bumps the minor version once, writes the `develop-plan/` skeleton |
-| `/develop-plan` | With the user, in the plan session: goal and clarifications, big rocks, tasks (small rocks) with their plans, the playbook; later amendments, answers, pause/resume |
-| `/develop-update` | Syncs `develop` both ways -- commits and pushes the plan, rebases onto the other session's changes (resolving conflicts), refreshes the develop PR, reports what came in: the two sessions' channel |
+| `/develop-plan` | Plan mode, in the plan session: `begin` turns every following prompt into planning -- goal and clarifications, big rocks, tasks (small rocks) with their plans, the playbook, later amendments, answers, pause/resume -- written to `develop-plan/` uncommitted, until `end`; with no argument it shows the mode and the plan's uncommitted diff |
+| `/develop-update` | On Sonnet. Syncs `develop` both ways -- commits and pushes the plan (published by hand, whenever the user wants), rebases onto the other session's changes (resolving conflicts), refreshes the develop PR, reports what came in: the two sessions' channel |
 | `/develop-implement` | The loop, in the implement session: opens the develop PR (`WIP [M.m] <title>`, a live view with its memory and log), runs each task through `/develop-task` and `/develop-code-review` in fresh agents, then the whole-develop review and final tests, and makes the PR ready |
 | `/develop-task` | One task: `scripts/develop/task.sh` runs Claude Code on an Ollama model (`ollama launch claude`) in a Docker container, gates and pushes its commits, opens the PR, fixes CI |
 | `/develop-code-review` | One PR, on the review model: security and malice first, fixes critical/high, comments medium/low, squash-merges; or the whole develop (`--develop`) |
 | `/develop-status` | Read-only state |
 | `/develop-close` | By the user: deletes `develop-plan/`, squash-merges the develop PR into `master`, deletes `develop` |
 
-The flow: `/develop-create` -> `/develop-plan` -> `/develop-implement` ->
-`/develop-close`; `/note`, `/explore` and `/todo` can feed `/develop-plan`. The
-plan and implement sessions work in two clones of the repository and meet only
+The flow: `/develop-create` -> `/develop-plan begin` ... `/develop-update` ->
+`/develop-implement` -> `/develop-close`; `/note`, `/explore` and `/todo` can
+feed the plan. The plan and implement sessions work in two clones of the repository and meet only
 through commits on `develop`, exchanged with `/develop-update`. Each develop
 bumps the minor version; each task is `[M.m.p]`, one patch more than
 `develop`. The Ollama model is untrusted: its container has
 no credentials, the host takes only its commits, and those pass the security
-gate (`scripts/develop/gate.sh`) before any push. The container builds Linux
-only; Windows is built and fixed on the host, after the review has cleared
+gate (`scripts/develop/gate.sh`) before any push. The containers work in the
+repository's git-ignored `subrepo/` folder, their git metadata kept in
+`~/.haisos-develop/subrepos/` (so no host tool runs git with what the model
+planted), and commit with the user's git name and email. Their image is two:
+`haisos-devtask-base:<tool versions>`, rebuilt only when a version changes,
+and `haisos-devtask:<hash>` on top, with the entrypoint and prompt. The
+container builds Linux only; Windows is built and fixed on the host, after the review has cleared
 the code. The leaf-task skills (`/begin`, `/end`, `/implement`, ...) stay for
 small changes straight to `master`.
 
-`/claude-docker [<ollama model>]`, independent of the develop skills, opens
-an interactive Claude Code on an Ollama model in the same container, on a copy
-of the current branch with its uncommitted changes, in a new terminal tab;
-when the user exits it, the session's commits and changes come back through
-the same gate, are checked for repository-level risks (hooks, build-time
-commands, agent instructions, links, secrets), and are applied to the working
-tree (`scripts/develop/claude_docker.sh`).
+`/claude-docker [<ollama model>]` (default `kimi-k3:cloud`), independent of
+the develop skills, opens an interactive Claude Code on an Ollama model in the
+same container, in `subrepo/` put in this clone's exact state (branch,
+commit, staged and unstaged changes), in a new terminal tab; when the user
+exits it, what the session left comes back through the same gate, is checked
+for repository-level risks (hooks, build-time commands, agent instructions,
+links, secrets) by a Sonnet agent, and this clone is put in the session's
+exact state -- the branch it ended on, its history, staged and unstaged
+changes (`scripts/develop/claude_docker.sh`).
 
 ## Automatic Development Rules
 

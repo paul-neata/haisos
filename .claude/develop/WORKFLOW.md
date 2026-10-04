@@ -7,9 +7,10 @@ This file is the reference the `develop-*` skills share; each skill says which
 parts it needs.
 
 ```
-/develop-create  ->  /develop-plan  ->  /develop-implement  ->  /develop-close
-  develop from         goal, rocks,       loop: /develop-task     develop PR
-  origin/master        tasks, playbook    + /develop-code-review  into master
+/develop-create  ->  /develop-plan begin  ->  /develop-implement  ->  /develop-close
+  develop from         plan mode: goal,     loop: /develop-task     develop PR
+  origin/master        rocks, tasks,        + /develop-code-review  into master
+                       playbook
                               \______ /develop-update ______/
                                  (the two sessions' channel)
 ```
@@ -17,8 +18,8 @@ parts it needs.
 | Skill | Runs in | Does |
 |-------|---------|------|
 | `/develop-create` | either session | cuts `develop` from `origin/master`, bumps the version, writes the `develop-plan/` skeleton |
-| `/develop-plan` | plan session | goal and clarifications, big rocks, small rocks (tasks), task plans, playbook; later amendments, answers, explorations, notes |
-| `/develop-update` | either session | syncs `develop` both ways: commits and pushes the plan, rebases onto the other side (resolving conflicts), refreshes the develop PR, reports what came in |
+| `/develop-plan` | plan session | plan mode: `begin` ... `end`; every prompt in between edits the plan, uncommitted -- goal and clarifications, big rocks, small rocks (tasks), task plans, playbook, later amendments, answers, explorations, notes; with no argument, the mode and the uncommitted diff |
+| `/develop-update` | either session, on Sonnet | syncs `develop` both ways: commits and pushes the plan (in the plan session, by hand, whenever the user wants), rebases onto the other side (resolving conflicts), refreshes the develop PR, reports what came in |
 | `/develop-implement` | implement session | opens the develop PR, runs the loop, ends with the whole-develop review, the final tests and the PR made ready |
 | `/develop-task` | a fresh agent (helper model) | one task: container runs, gate, push, PR, CI and CI fix rounds -- `scripts/develop/task.sh` |
 | `/develop-code-review` | a fresh agent (review model) | one PR: review, fix critical/high, comment medium/low, merge; or the whole develop |
@@ -40,8 +41,10 @@ files stay in the PRs' history on GitHub; open review findings go to
 ## Sessions and roles
 
 - **Plan session** -- a Claude Code session on the Anthropic model, in its own
-  clone of the repository on `develop`. Runs `/develop-plan` (and `/explore`,
-  `/note`, `/todo` through it). Writes plan files and notes only, never code.
+  clone of the repository on `develop`. Runs `/develop-plan begin`, after
+  which the user's prompts plan (`/explore` and `/note` too), until
+  `/develop-plan end`. Writes plan files and notes only, never code, and
+  leaves them uncommitted: the user publishes with `/develop-update`.
 - **Implement session** -- another Claude Code session, in **another clone**
   (git refuses the same branch in two worktrees of one clone). Runs
   `/develop-implement`, which keeps the loop and delegates the rest:
@@ -63,17 +66,30 @@ not versioned: copy them into the second clone.
 The Ollama model is not trusted. What keeps the host safe:
 
 1. **The container holds nothing worth stealing.** No `gh`, no SSH keys or
-   agent, no `~/.claude`, no `/mnt/c`, no WSL interop, no credentials in its
-   environment; `--cap-drop ALL`, `no-new-privileges`, an unprivileged user
-   with the host user's ids. It reaches the host's ollama over
-   `--network host` (and the internet; accepted).
-2. **It works in its own repository**, `$HAISOS_DEVELOP_HOME/work` (default
-   `~/.haisos-develop/work`), which no host program runs git in. Input is a
-   git bundle (`in/`, read-only); output is a bundle plus logs (`out/`).
-   The container's entrypoint (from the image, built from the trusted
-   checkout) kills every other process and resets the git metadata before
-   it collects the results, so hooks, config or background processes the
-   model leaves behind cannot tamper with them.
+   agent, no `~/.claude`, nothing of `/mnt/c` but the repository's
+   `subrepo/` folder, no WSL interop, no credentials in its environment;
+   `--cap-drop ALL`, `no-new-privileges`, an unprivileged user with the host
+   user's ids. Of the user's git config it gets the name and email only
+   (its commit identity) -- never the file, which may hold credential
+   helpers or tokens. It reaches the host's ollama over `--network host`
+   (and the internet; accepted).
+2. **It works in `subrepo/`**, a git-ignored folder of the clone: the
+   working tree, mounted at `/work`. Its git metadata is not there but in
+   `$HAISOS_DEVELOP_HOME/subrepos/<clone key>/git`, mounted at `/gitdir`;
+   `subrepo/.git` is a file pointing to `/gitdir`, a path that exists in the
+   container only -- so git on the host (an IDE scanning folders included)
+   refuses `subrepo/` rather than running hooks or config the model
+   planted. No host program runs git in it; `scripts/develop/lib.sh` resets
+   the metadata after every run with file operations only. Input is a git
+   bundle (`in/`, read-only); output is a bundle plus logs (`out/`). The
+   container's entrypoint (from the image, built from the trusted checkout)
+   kills every other process and resets the git metadata before it collects
+   the results, so hooks, config or background processes the model leaves
+   behind cannot tamper with them. The files in `subrepo/` are the model's:
+   never open it as a project, build or run anything from it, or read it
+   from a Claude session on the host (its `CLAUDE.md` would be loaded).
+   One container at a time works on a clone's subrepo (a task, or a
+   `/claude-docker` session); `subrepo.sh wipe` empties it.
 3. **The host takes commits, never files or programs**: it verifies the
    bundle, fetches it into `refs/develop-quarantine/<task-id>`, checks the
    commits descend from where the task started (no rewritten history), and
@@ -231,13 +247,14 @@ Pause: no
 - **Version**: the task's `M.m.p`, set when it starts (see "Versions").
 - **Tries**: container attempts (implement + fixes); **Review**: counts by
   severity, fixed or open.
-- **`Pause: yes`** (set by the user through `/develop-plan pause`) makes
+- **`Pause: yes`** (set by the user in plan mode) makes
   `/develop-implement` stop at its next task boundary.
 - **Directions** carry the plan session's instructions to the implement
-  session (`/develop-plan direction ...`): read before every task, marked
+  session (written in plan mode): read before every task, marked
   `-> done` when acted on.
 - **Questions** carry what the implement session needs the user to decide;
-  `/develop-plan` shows them first and writes the answers.
+  `/develop-plan begin` shows them first, and the answers are written in
+  plan mode.
 - **Adjustments** is append-only: every change the implement session makes to
   the plan on its own, with its reason.
 
@@ -272,8 +289,8 @@ restart, `/develop-implement` reads them first.
 ## Versions
 
 - `/develop-create` bumps the minor version and sets the patch to 0
-  (`0.3.0` -> `0.4.0`). During planning, `/develop-plan version <M.m.p>` may
-  set `HAISOS_VERSION` to anything.
+  (`0.3.0` -> `0.4.0`). During planning, plan mode may set
+  `HAISOS_VERSION` to anything.
 - Each task is numbered when it starts: `develop`'s version with the patch
   plus one (`0.4.0` -> `0.4.1`), in its playbook row. Its PR is titled
   `[0.4.1] <PR title>`, its description starts with `[0.4.1]`, and its squash
@@ -427,9 +444,12 @@ The final phase builds and tests the whole develop on Windows the same way.
 | `gate.sh <base> <head>` | the security gate |
 | `wait_ci.sh <pr>` | waits for a PR's checks, keeps failed logs |
 | `windows.sh prepare\|build\|test` | Windows build and tests on the host, for reviewed code |
-| `image.sh` | builds the task image (`Dockerfile`, `entrypoint.sh`, `task_prompt.md`) |
-| `claude_docker.sh prepare\|open\|run\|wait\|collect\|apply\|discard` | `/claude-docker`: an interactive Claude on an Ollama model in the same container, on a copy of any branch |
+| `image.sh [--force] [--refresh]` | builds the task images: `haisos-devtask-base:git<v>-cmake<v>-gcc<v>-node<v>-claude<v>-ollama<v>-ubuntu<v>-<hash>` (`Dockerfile.base`: the tools; rebuilt only when Ubuntu, Claude Code, ollama or the file change, without the cache on `--refresh`), and `haisos-devtask:<hash>` on it (`Dockerfile`: the user, `entrypoint.sh`, `task_prompt.md`; seconds) |
+| `subrepo.sh where\|wipe` | the containers' workspace: `subrepo/` and its git metadata |
+| `claude_docker.sh prepare\|open\|run\|wait\|collect\|apply\|discard` | `/claude-docker`: an interactive Claude on an Ollama model in the same container, in `subrepo/`, from and back to the clone's exact state |
 
-`HAISOS_DEVELOP_HOME` (default `~/.haisos-develop`) holds the container
-workspace, the runs, the review worktrees and the image build log -- keep it
-on the Linux filesystem for speed.
+`HAISOS_DEVELOP_HOME` (default `~/.haisos-develop`) holds the subrepos' git
+metadata and run input/output, the runs, the review worktrees and the image
+build logs -- keep it on the Linux filesystem for speed. The working tree,
+`subrepo/`, lives in the clone itself: on a Windows drive, container builds
+are slower there.

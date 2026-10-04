@@ -20,6 +20,6 @@ Show where the develop stands, without changing anything (see
    ```
 3. Print both as they are, then at most three lines of your own: what is
    running or next, what is blocked and why, and the questions waiting for
-   `/develop-plan answer`.
+   an answer in plan mode (`/develop-plan begin`, then `/develop-update`).
 
 Do not commit, push, pull, switch branches or start anything.

@@ -3,13 +3,23 @@
 # The workflow these scripts implement is described in .claude/develop/WORKFLOW.md.
 #
 # The repository is the one the caller stands in (git rev-parse --show-toplevel),
-# the scripts are the ones next to this file. HAISOS_DEVELOP_HOME (default
-# ~/.haisos-develop) holds everything outside the repository:
-#   work/     the task container's workspace (a git repository only containers touch)
-#   in/ out/  the current container run's input and output
+# the scripts are the ones next to this file.
+#
+# The containers work in the repository's `subrepo/` folder (git-ignored): the
+# working tree of a haisos repository, mounted at /work. Its git metadata is
+# not there but in $HAISOS_DEVELOP_HOME/subrepos/<key>/git, mounted at
+# /gitdir: subrepo/.git is only a file saying "gitdir: /gitdir", which means
+# something inside the container alone -- so no git, IDE or tool on the host
+# ever runs with the hooks or config the model may plant in it.
+#
+# HAISOS_DEVELOP_HOME (default ~/.haisos-develop) holds everything else
+# outside the repository:
+#   subrepos/<key>/   per clone (<key>: its folder name and a hash of its path):
+#     git/      the subrepo's git metadata
+#     in/ out/  the current container run's input and output
+#     lock      held while a container runs on the subrepo
 #   runs/<develop-id>/<task-id>/<NN>-<mode>[-<model>]/   every run's files, kept
 #   review/<task-id>/   the worktree /develop-code-review fixes a PR in
-#   lock      held while a container runs
 
 set -euo pipefail
 
@@ -17,7 +27,11 @@ DEV_SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEV_REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "ERROR: not inside a git repository" >&2; exit 1; }
 DEV_HOME="${HAISOS_DEVELOP_HOME:-$HOME/.haisos-develop}"
 DEV_PLAN="$DEV_REPO/develop-plan"
-DEV_IMAGE_REPO="haisos-develop"
+DEV_SUBREPO="$DEV_REPO/subrepo"
+DEV_SUBREPO_HOME="$DEV_HOME/subrepos/$(basename "$DEV_REPO")-$(printf '%s' "$DEV_REPO" | sha256sum | cut -c1-8)"
+DEV_SUBREPO_GIT="$DEV_SUBREPO_HOME/git"
+DEV_BASE_IMAGE_REPO="haisos-devtask-base"
+DEV_IMAGE_REPO="haisos-devtask"
 DEV_CONTAINER_PREFIX="haisos-develop"
 DEV_DEFAULT_MODEL="kimi-k3:cloud"
 
@@ -103,3 +117,56 @@ local_secret_values() {
       done
     } | awk 'length($0) >= 12 && $0 != "ollama"'
 }
+
+# The user's git identity, for the commits made in the containers. Only
+# user.name and user.email are passed in -- never the whole ~/.gitconfig, which
+# may hold credential helpers, tokens in url rewrites, includes or aliases
+# that run commands.
+user_git_name()  { git -C "$DEV_REPO" config user.name  || true; }
+user_git_email() { git -C "$DEV_REPO" config user.email || true; }
+
+# The git config the subrepo's metadata is reset to, on both sides of a run.
+# fileMode is off: the repository may be on a Windows drive, where every
+# file shows as executable.
+SUBREPO_GIT_CONFIG='[core]
+	repositoryformatversion = 0
+	filemode = false
+	bare = false
+	logallrefupdates = true
+'
+
+# Creates subrepo/ and its metadata folder when missing; the container checks
+# the files out on its first run.
+ensure_subrepo() {
+    mkdir -p "$DEV_SUBREPO" "$DEV_SUBREPO_GIT"
+    [ -f "$DEV_SUBREPO/.git" ] && [ ! -L "$DEV_SUBREPO/.git" ] || sanitize_subrepo
+}
+
+# After a run (the container resets these itself, unless it was killed): no
+# hooks, a known config, no links out of the metadata, and subrepo/.git the
+# plain "gitdir: /gitdir" file. File operations only -- never git -- and
+# links are removed, never followed.
+sanitize_subrepo() {
+    local g="$DEV_SUBREPO_GIT" p
+    if [ -L "$g/objects" ] || [ -L "$g/refs" ]; then
+        rm -rf "$g"; mkdir -p "$g"           # tampered beyond repair: the next run starts afresh
+    fi
+    for p in hooks info commondir config objects/info; do
+        if [ -L "$g/$p" ]; then rm -f "$g/$p"; fi
+    done
+    rm -rf "$g/hooks" "$g/info" "$g/commondir" "$g/objects/info/alternates" "$g/objects/info/http-alternates"
+    if [ -e "$g/HEAD" ]; then
+        rm -f "$g/config"
+        printf '%s' "$SUBREPO_GIT_CONFIG" > "$g/config"
+    fi
+    rm -rf "$DEV_SUBREPO/.git"
+    printf 'gitdir: /gitdir\n' > "$DEV_SUBREPO/.git"
+}
+
+# Holds the subrepo's lock on file descriptor 9 for the rest of the script.
+lock_subrepo() {
+    mkdir -p "$DEV_SUBREPO_HOME"
+    exec 9>"$DEV_SUBREPO_HOME/lock"
+    flock -n 9 || die "a container is already running on $DEV_SUBREPO (a task or a /claude-docker session)"
+}
+subrepo_locked() { [ -e "$DEV_SUBREPO_HOME/lock" ] && ! flock -n "$DEV_SUBREPO_HOME/lock" true; }

@@ -92,7 +92,7 @@ render_head() {  # render_head full|summary
     local q d
     q=$(section "$P" Questions | grep -E '^- ' | grep -v -- '-> answered' || true)
     if [ -n "$q" ] && [ "$mode" = full ]; then
-        echo; echo "**Open questions** (answered with /develop-plan)"; echo; echo "$q"
+        echo; echo "**Open questions** (answered in plan mode: /develop-plan begin)"; echo; echo "$q"
     fi
     d=$(section "$P" Directions | grep -E '^- ' | grep -v -- '-> done' || true)
     if [ -n "$d" ] && [ "$mode" = full ]; then

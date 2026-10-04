@@ -14,8 +14,10 @@
 #   --clean-build         remove build/ and output/ first
 #   --launcher <l>        ollama (default) or direct
 #
-# The container gets the workspace, its input (read-only) and its output folder
-# -- no credentials, no home directory, no /mnt. The run's files are kept in
+# The container gets the workspace -- the repository's subrepo/ folder at
+# /work, its git metadata at /gitdir (see lib.sh) -- its input (read-only) and
+# its output folder; no credentials, no home directory, nothing else of /mnt.
+# The user's git name and email are its commit identity. The run's files are kept in
 # $HAISOS_DEVELOP_HOME/runs/<develop-id>/<task-id>/<NN>-<mode>[-<model>]/
 # (the develop id is its creation time, see lib.sh).
 # Prints the result.json on one line, then the run folder on the last line.
@@ -64,11 +66,10 @@ fi
 
 IMAGE=$(bash "$DEV_SCRIPTS/image.sh")
 
-mkdir -p "$DEV_HOME/work"
-exec 9>"$DEV_HOME/lock"
-flock -n 9 || die "another task container is running (lock: $DEV_HOME/lock)"
+lock_subrepo
+ensure_subrepo
 
-IN="$DEV_HOME/in"; OUT="$DEV_HOME/out"
+IN="$DEV_SUBREPO_HOME/in"; OUT="$DEV_SUBREPO_HOME/out"
 rm -rf "$IN" "$OUT"
 mkdir -p "$IN" "$OUT"
 
@@ -94,7 +95,7 @@ RUN_DIR="$TASK_RUNS/$(printf '%02d' $((N + 1)))-$MODE${MODEL:+-${MODEL//[:\/]/_}
 mkdir -p "$RUN_DIR"
 
 NAME="$DEV_CONTAINER_PREFIX-$$"
-trap 'docker rm -f "$NAME" >/dev/null 2>&1 || true' EXIT
+trap 'docker rm -f "$NAME" >/dev/null 2>&1 || true; sanitize_subrepo' EXIT
 log "container $NAME: $MODE $TASK_ID${MODEL:+ with $MODEL}, log: $RUN_DIR/container.log"
 rc=0
 timeout --kill-after=30 "$((TIMEOUT_MIN + 200))m" \
@@ -102,11 +103,12 @@ timeout --kill-after=30 "$((TIMEOUT_MIN + 200))m" \
         --network host \
         --user "$(id -u):$(id -g)" \
         --cap-drop ALL --security-opt no-new-privileges --pids-limit 4096 \
-        -v "$DEV_HOME/work:/work" -v "$IN:/in:ro" -v "$OUT:/out" \
+        -v "$DEV_SUBREPO:/work" -v "$DEV_SUBREPO_GIT:/gitdir" -v "$IN:/in:ro" -v "$OUT:/out" \
         -e MODE="$MODE" -e TASK_ID="$TASK_ID" -e TASK_BRANCH="$BRANCH_NAME" \
         -e MODEL="$MODEL" -e TIMEOUT_MIN="$TIMEOUT_MIN" -e TESTS="$TESTS" \
         -e CONTINUE="$CONTINUE" -e CLEAN_BUILD="$CLEAN_BUILD" -e LAUNCHER="$LAUNCHER" \
         -e OLLAMA_HOST=127.0.0.1:11434 \
+        -e USER_GIT_NAME="$(user_git_name)" -e USER_GIT_EMAIL="$(user_git_email)" \
         ${HAISOS_ENDPOINT:+-e HAISOS_ENDPOINT="$HAISOS_ENDPOINT"} \
         ${HAISOS_MODEL:+-e HAISOS_MODEL="$HAISOS_MODEL"} \
         "$IMAGE" > "$RUN_DIR/container.log" 2>&1 || rc=$?

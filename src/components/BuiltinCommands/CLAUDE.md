@@ -15,12 +15,13 @@ through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
    directory in place. The haisosfile's `BUILTIN` directive goes through here.
 2. `IHaisosOS::StartProcess` asks its root filesystem `IsBuiltinCommand(path)`
    before looking at the extension. If it names a builtin, the OS fills in a
-   `BuiltinCommandHost` -- its own weak self, a fresh pid, itself as parent, the
-   program path, and a console tagged `<name>_<pid>` -- and calls
-   `IBuiltinCommands::RunCommand`, whose other parameters are those of
-   `StartProcess` with the builtin's name in place of the path.
-3. `RunCommand` builds a `BuiltinProcess` and returns at once; the command runs
-   on the process's own thread.
+   `BuiltinCommandHost` -- its own weak self, a fresh pid, itself as parent,
+   the program path -- and calls `IBuiltinCommands::RunCommand`, whose other
+   parameters are those of `StartProcess` with the builtin's name in place of
+   the path, the standard streams resolved already (a null one is refused).
+3. `RunCommand` builds a `BuiltinProcess`, which installs the resolved streams
+   as slots 0/1/2 of its `IFileIO` table before its thread starts, and returns
+   at once; the command runs on the process's own thread.
 
 ## Key Classes
 
@@ -46,10 +47,22 @@ through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
 
 ## Output
 
-There is no stdin, stdout or stderr yet. `BuiltinContext::Out` buffers text
-into lines and writes each as one console `Write` (a final unterminated line
-is flushed when the command ends); `Error` writes `<name>: <message>` to the
-same console. Messages follow the GNU coreutils wording.
+A builtin writes to its process's descriptor table, fetched once by
+`BuiltinContext` at construction: `Out` to slot 1, `Error`
+(`<name>: <message>`), the `Try '... --help'` line and the "not treated"
+reports to slot 2. The output rule:
+
+- stdout to a terminal is unbuffered -- each `Out(text)` is one write, so a
+  partial line (a prompt) shows at once;
+- stdout to anything else (a file, a pipe, a device) is block-buffered --
+  written when the buffer reaches `kBuiltinOutBufferSize` (4096 bytes), before
+  anything is written to stderr, and when the command ends (`~BuiltinContext`
+  flushes it, which is how `echo -n` still shows its text);
+- stderr is unbuffered -- every message is one write.
+
+So `ls: cannot access ...` lands on the host's stderr (through the console
+error descriptor), and `echo hi` lands raw and untagged on its stdout.
+Messages follow the GNU coreutils wording.
 
 ## The commands
 

@@ -43,6 +43,14 @@ public:
     int Dup2(int oldFd, int newFd) override;
     int CloseDescriptor(int fd) override;
 
+    // Places in, out and err in slots 0, 1 and 2 of a table that has no
+    // descriptor yet. Returns false, changing nothing, if any is null or the
+    // table is not empty. Called by a process's Create() before its program
+    // starts.
+    bool InstallStandardStreams(std::shared_ptr<IFileDescriptor> in,
+                                std::shared_ptr<IFileDescriptor> out,
+                                std::shared_ptr<IFileDescriptor> err);
+
     // Releases every descriptor in the table (the table is left empty and still
     // usable). Called by the process classes when their program ends, before they
     // report finished. Releases outside the lock.

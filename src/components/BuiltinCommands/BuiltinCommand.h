@@ -1,5 +1,6 @@
 #pragma once
 #include <atomic>
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string>
@@ -69,21 +70,32 @@ struct BuiltinHelp {
 
 class IBuiltinCommand;
 
+// The block size at which a buffered (non-terminal) stdout is written out.
+constexpr size_t kBuiltinOutBufferSize = 4096;
+
 // What a running builtin command is handed: the process it runs as (the only
-// door out of it -- files through process.IO()), its arguments, and somewhere
-// to print.
+// door out of it -- files through process.IO()), its arguments, and its
+// standard streams, read once at construction from the process's descriptor
+// table: Out writes to descriptor 1, Error and the rest to descriptor 2.
 //
-// There is no stdout or stderr yet, so both kinds of output go to the process's
-// console. Output is buffered into lines, each one a single console Write; a
-// final line without a newline is written when the command ends (which is how
-// `echo -n` still shows its text).
+// The output rule:
+//   * stdout to a terminal is unbuffered: each Out(text) is written at once,
+//     as one write of text (nothing is held back, so a partial line such as a
+//     prompt shows immediately);
+//   * stdout to anything else (a file, a pipe, a device) is block-buffered:
+//     Out appends to a buffer, which is written when it reaches
+//     kBuiltinOutBufferSize, before anything is written to stderr, and when the
+//     command ends (~BuiltinContext flushes it) -- which is how `echo -n`
+//     still shows its text;
+//   * stderr is unbuffered: every message is one write.
+// Output reaches its descriptor no later than the command's end, and a
+// terminal never waits for a newline.
 class BuiltinContext {
 public:
     BuiltinContext(
         ICurrentProcess& process,
         const IBuiltinCommand& command,
         const std::vector<std::string>& args,
-        std::shared_ptr<IAgentConsole> console,
         const std::atomic<bool>& stopRequested);
     ~BuiltinContext();
 
@@ -115,18 +127,30 @@ public:
     // work (a recursive ls, say) checks it and finishes early.
     bool StopRequested() const { return m_stopRequested.load(); }
 
-    // Writes out what is left of a line not ended by a newline.
+    // Writes out what is left in the stdout buffer.
     void Flush();
 
 private:
+    // The one place a builtin's bytes reach a descriptor: loops over partial
+    // writes until every byte is out; a null descriptor or a negative result
+    // stops the loop and returns false.
+    // Seam for pipes--pipe-service: a kIOBrokenPipe result here is where that
+    // task makes the command stop quietly with exit code 141.
+    bool WriteAll(IFileDescriptor* descriptor, const std::string& bytes);
+
     ICurrentProcess& m_process;
     std::shared_ptr<IFileIO> m_io;
     std::string m_name;
     std::string m_version;
     const std::vector<std::string>& m_args;
-    std::shared_ptr<IAgentConsole> m_console;
+    // Slots 1 and 2 of the process's table, fetched once at construction.
+    std::shared_ptr<IFileDescriptor> m_out;
+    std::shared_ptr<IFileDescriptor> m_err;
+    bool m_outIsTerminal;
     const std::atomic<bool>& m_stopRequested;
-    std::string m_pendingLine;
+    std::string m_outBuffer;
+    // Once a write to stdout has failed, later stdout output is dropped.
+    bool m_outFailed = false;
     std::vector<std::string> m_reportedNotTreated;
 };
 

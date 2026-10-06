@@ -25,9 +25,6 @@ struct BuiltinCommandHost {
     // The path the command was started from (what IProcess::Path() reports),
     // as opposed to the builtin's own name.
     std::string programPath;
-    // Where the command's output goes: there is no stdout yet, so each line a
-    // builtin prints is one Write here.
-    std::shared_ptr<IAgentConsole> console;
 };
 
 // The commands compiled into Haisos itself -- echo, cat, ls, pwd, mkdir -- as
@@ -38,8 +35,8 @@ struct BuiltinCommandHost {
 //
 // Each command takes the same arguments as the real command of that name, as
 // far as Haisos can honour them: features that need what an OS here does not
-// have yet (stdin, stdout, stderr, permissions, file times) are left out, and
-// a command's --help says what it supports.
+// have yet (permissions, file times) are left out, and a command's --help says
+// what it supports.
 class IBuiltinCommands {
 public:
     virtual ~IBuiltinCommands() = default;
@@ -54,7 +51,10 @@ public:
     // Starts builtinName as a process and returns straight away: the command
     // runs on a thread of its own. The parameters after host are those of
     // IHaisosOS::StartProcess, with the builtin's name in place of a program
-    // path; options.interactiveAgent is meaningless for a builtin and ignored.
+    // path; options.stdIn/stdOut/stdErr become the process's descriptors
+    // 0/1/2, so a null one is refused (returns null) -- IHaisosOS::StartProcess
+    // always fills them. options.interactive needs nothing more from a
+    // builtin: its stdin already says where input comes from.
     // Returns null for an unknown builtin, a null environment, or a host with
     // no OS.
     virtual std::shared_ptr<IProcess> RunCommand(

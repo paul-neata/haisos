@@ -155,6 +155,26 @@ int ProcessFileIO::CloseDescriptor(int fd) {
     return 0;
 }
 
+bool ProcessFileIO::InstallStandardStreams(std::shared_ptr<IFileDescriptor> in,
+                                           std::shared_ptr<IFileDescriptor> out,
+                                           std::shared_ptr<IFileDescriptor> err) {
+    if (!in || !out || !err) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(m_descriptorsMutex);
+    for (const auto& slot : m_descriptors) {
+        if (slot) {
+            return false;
+        }
+    }
+    // The table is empty: three pushes land in slots 0, 1 and 2.
+    m_descriptors.clear();
+    m_descriptors.push_back(std::move(in));
+    m_descriptors.push_back(std::move(out));
+    m_descriptors.push_back(std::move(err));
+    return true;
+}
+
 void ProcessFileIO::ReleaseAllDescriptors() {
     std::vector<std::shared_ptr<IFileDescriptor>> released;
     {

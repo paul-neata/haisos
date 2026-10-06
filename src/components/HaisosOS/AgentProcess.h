@@ -16,7 +16,7 @@ namespace Haisos {
 //
 // An interactive process also owns the AgentInputLoop feeding its agent the
 // lines typed on its console, and is not finished until that loop is: see
-// StartProcessOptions::interactiveAgent.
+// StartProcessOptions::interactive.
 class AgentProcess : public ICurrentProcess {
 public:
     // Returns nullptr if agent or environment is null: both are required for

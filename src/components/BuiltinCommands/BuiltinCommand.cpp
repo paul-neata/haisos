@@ -7,14 +7,15 @@ BuiltinContext::BuiltinContext(
     ICurrentProcess& process,
     const IBuiltinCommand& command,
     const std::vector<std::string>& args,
-    std::shared_ptr<IAgentConsole> console,
     const std::atomic<bool>& stopRequested)
     : m_process(process)
     , m_io(process.IO())
     , m_name(command.Name())
     , m_version(command.Version())
     , m_args(args)
-    , m_console(std::move(console))
+    , m_out(m_io ? m_io->GetDescriptor(IFileIO::kStdOut) : nullptr)
+    , m_err(m_io ? m_io->GetDescriptor(IFileIO::kStdErr) : nullptr)
+    , m_outIsTerminal(m_out && m_out->IsTerminal())
     , m_stopRequested(stopRequested)
 {
 }
@@ -24,15 +25,22 @@ BuiltinContext::~BuiltinContext() {
 }
 
 void BuiltinContext::Out(const std::string& text) {
-    for (char c : text) {
-        if (c == '\n') {
-            if (m_console) {
-                m_console->Write(m_pendingLine);
-            }
-            m_pendingLine.clear();
-        } else {
-            m_pendingLine += c;
+    if (!m_out || m_outFailed) {
+        return;
+    }
+    if (m_outIsTerminal) {
+        // One write per Out: a partial line -- a prompt -- shows at once.
+        if (text.empty()) {
+            return;
         }
+        if (!WriteAll(m_out.get(), text)) {
+            m_outFailed = true;
+        }
+        return;
+    }
+    m_outBuffer += text;
+    if (m_outBuffer.size() >= kBuiltinOutBufferSize) {
+        Flush();
     }
 }
 
@@ -40,16 +48,12 @@ void BuiltinContext::Error(const std::string& message) {
     // Output written so far comes first, as it would on a terminal showing
     // stdout and stderr together.
     Flush();
-    if (m_console) {
-        m_console->Write(m_name + ": " + message);
-    }
+    WriteAll(m_err.get(), m_name + ": " + message + "\n");
 }
 
 void BuiltinContext::TryHelp() {
     Flush();
-    if (m_console) {
-        m_console->Write("Try '" + m_name + " --help' for more information.");
-    }
+    WriteAll(m_err.get(), "Try '" + m_name + " --help' for more information.\n");
 }
 
 void BuiltinContext::ReportNotTreated(const ParsedBuiltinArgs& parsed) {
@@ -66,18 +70,34 @@ void BuiltinContext::NotTreated(const std::string& spelling) {
     }
     m_reportedNotTreated.push_back(spelling);
     Flush();
-    if (m_console) {
-        m_console->Write("Parameter " + spelling + " is not treated by HaisosOS " + m_name + " v. " + m_version);
-    }
+    WriteAll(m_err.get(), "Parameter " + spelling + " is not treated by HaisosOS " + m_name + " v. " + m_version + "\n");
 }
 
 void BuiltinContext::Flush() {
-    if (!m_pendingLine.empty()) {
-        if (m_console) {
-            m_console->Write(m_pendingLine);
-        }
-        m_pendingLine.clear();
+    if (!m_out || m_outFailed || m_outBuffer.empty()) {
+        m_outBuffer.clear();
+        return;
     }
+    std::string buffered;
+    buffered.swap(m_outBuffer);
+    if (!WriteAll(m_out.get(), buffered)) {
+        m_outFailed = true;
+    }
+}
+
+bool BuiltinContext::WriteAll(IFileDescriptor* descriptor, const std::string& bytes) {
+    if (!descriptor) {
+        return false;
+    }
+    size_t written = 0;
+    while (written < bytes.size()) {
+        const ssize_t result = descriptor->Write(bytes.data() + written, bytes.size() - written);
+        if (result < 0) {
+            return false;
+        }
+        written += static_cast<size_t>(result);
+    }
+    return true;
 }
 
 std::string BuiltinReferenceUrl(const std::string& name) {

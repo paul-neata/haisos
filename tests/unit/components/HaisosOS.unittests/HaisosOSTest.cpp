@@ -14,6 +14,7 @@
 #include "src/components/Filesystem/FilesystemUtils.h"
 #include "Factory.h"
 #include "ServicesCreator.h"
+#include "tests/mocks/MockFileDescriptor.h"
 
 using namespace Haisos;
 
@@ -36,7 +37,14 @@ class ScriptedPhysicalConsole : public IPhysicalConsole {
 public:
     explicit ScriptedPhysicalConsole(std::vector<std::string> lines) : m_lines(lines.begin(), lines.end()) {}
 
-    void Write(const std::string&) override {}
+    void Write(const std::string& bytes) override {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_written += bytes;
+    }
+    void WriteError(const std::string& bytes) override {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_writtenError += bytes;
+    }
     std::optional<std::string> ReadLine() override {
         std::lock_guard<std::mutex> lock(m_mutex);
         ++m_readLineCalls;
@@ -54,11 +62,22 @@ public:
         std::lock_guard<std::mutex> lock(m_mutex);
         return m_readLineCalls;
     }
+    // What stdout, and stderr, were given so far.
+    std::string Written() const {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_written;
+    }
+    std::string WrittenError() const {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_writtenError;
+    }
 
 private:
     mutable std::mutex m_mutex;
     std::deque<std::string> m_lines;
     int m_readLineCalls = 0;
+    std::string m_written;
+    std::string m_writtenError;
 };
 
 // A root filesystem that holds every open of one path until Release(), and
@@ -133,6 +152,7 @@ private:
 class BlockingPhysicalConsole : public IPhysicalConsole {
 public:
     void Write(const std::string&) override {}
+    void WriteError(const std::string&) override {}
     std::optional<std::string> ReadLine() override {
         std::unique_lock<std::mutex> lock(m_mutex);
         m_cv.wait(lock, [this] { return m_released; });
@@ -611,7 +631,7 @@ TEST_F(HaisosOSTest, AnAgentsDescriptorsAreReleasedWhenItsConversationEnds) {
 
     auto os = BuildOS(console);
     StartProcessOptions options;
-    options.interactiveAgent = true;
+    options.interactive = true;
     auto process = std::dynamic_pointer_cast<ICurrentProcess>(
         os->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/"", options));
     ASSERT_NE(process, nullptr);
@@ -655,7 +675,7 @@ TEST_F(HaisosOSTest, AnInteractiveAgentIsFedConsoleLinesUntilInputEnds) {
     auto console = std::make_shared<ScriptedPhysicalConsole>(std::vector<std::string>{"typed by the user"});
     auto os = BuildOS(console);
     StartProcessOptions options;
-    options.interactiveAgent = true;
+    options.interactive = true;
 
     auto process = os->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/"", options);
     ASSERT_NE(process, nullptr);
@@ -673,11 +693,14 @@ TEST_F(HaisosOSTest, AnInteractiveAgentIsFedConsoleLinesUntilInputEnds) {
     EXPECT_TRUE(HistoryMentions(history, "typed by the user"));
 }
 
-TEST_F(HaisosOSTest, InteractiveAgentOnlyAppliesToAgentPrograms) {
+// `-i` is not agents-only: a script run with it gets the console's input as
+// its stdin (its Lua runtime does not read it yet -- that is a later task),
+// and the script still runs and finishes like any other.
+TEST_F(HaisosOSTest, AnInteractiveScriptIsNotAnAgent) {
     auto console = std::make_shared<ScriptedPhysicalConsole>(std::vector<std::string>{"never read"});
     auto os = BuildOS(console);
     StartProcessOptions options;
-    options.interactiveAgent = true;
+    options.interactive = true;
 
     auto process = os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"", options);
     ASSERT_NE(process, nullptr);
@@ -759,6 +782,39 @@ TEST_F(HaisosOSTest, AnOSWithoutBuiltinCommandsCannotStartABuiltin) {
         m_factory->CreateServicesCreator(), m_factory->CreatePhysicalConsole(), root, /*builtinCommands=*/nullptr, TestEnvironment());
     ASSERT_NE(os, nullptr);
     EXPECT_EQ(os->StartProcess(TestEnvironment(), "/echo", {"hi"}, "", StartProcessOptions{}), nullptr);
+}
+
+// Default options mean the console: a builtin's stdout and stderr go to the
+// host's stdout and stderr through the console descriptors.
+TEST_F(HaisosOSTest, ABuiltinWithoutGivenStreamsWritesToTheConsole) {
+    auto console = std::make_shared<ScriptedPhysicalConsole>(std::vector<std::string>{});
+    auto os = BuildOS(console);
+    auto root = os->GetRootFileSystem();
+    ASSERT_EQ(root->CreateDirectory("/bin", 0755), 0);
+    ASSERT_TRUE(m_factory->CreateBuiltinConfigurator()->AddBuiltinCommand(root, "/bin/echo", "echo"));
+
+    auto process = os->StartProcess(TestEnvironment(), "/bin/echo", {"hi"}, /*workingDirectory=*/"", StartProcessOptions{});
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    EXPECT_EQ(console->Written(), "hi\n");
+}
+
+// A given stream wins over the default: stdout bypasses the console entirely.
+TEST_F(HaisosOSTest, AGivenStdoutBypassesTheConsole) {
+    auto console = std::make_shared<ScriptedPhysicalConsole>(std::vector<std::string>{});
+    auto os = BuildOS(console);
+    auto root = os->GetRootFileSystem();
+    ASSERT_EQ(root->CreateDirectory("/bin", 0755), 0);
+    ASSERT_TRUE(m_factory->CreateBuiltinConfigurator()->AddBuiltinCommand(root, "/bin/echo", "echo"));
+
+    auto out = std::make_shared<Mocks::MockFileDescriptor>();
+    StartProcessOptions options;
+    options.stdOut = out;
+    auto process = os->StartProcess(TestEnvironment(), "/bin/echo", {"hi"}, /*workingDirectory=*/"", options);
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    EXPECT_EQ(out->Written(), "hi\n");
+    EXPECT_EQ(console->Written(), "");
 }
 
 // --- Objects released last on their own threads ---

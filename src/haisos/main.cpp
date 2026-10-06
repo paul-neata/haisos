@@ -363,7 +363,7 @@ int main(int argc, char* argv[]) {
         // Each RUN starts at the OS's root; a haisosfile has no way to say
         // otherwise yet.
         StartProcessOptions options;
-        options.interactiveAgent = runEntry.interactive;
+        options.interactive = runEntry.interactive;
         auto process = os->StartProcess(
             os->GetOsEnvironment()->Clone(), runEntry.programPath, runEntry.args, /*workingDirectory=*/"/", options);
         if (!process) {

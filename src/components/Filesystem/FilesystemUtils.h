@@ -22,6 +22,7 @@ namespace Haisos {
 constexpr int kFileOpenReadOnly = _O_RDONLY | _O_BINARY;
 constexpr int kFileOpenWriteCreateTruncate = _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY;
 constexpr int kFileOpenWriteCreateAppend = _O_WRONLY | _O_CREAT | _O_APPEND | _O_BINARY;
+constexpr int kFileOpenReadWriteCreate = _O_RDWR | _O_CREAT | _O_BINARY;  // the <> redirection (dash)
 constexpr int kFileCreateMode = _S_IREAD | _S_IWRITE;
 constexpr int kFileWriteOnlyBit = _O_WRONLY;
 constexpr int kFileReadWriteBit = _O_RDWR;
@@ -32,6 +33,7 @@ constexpr int kFileAppendBit = _O_APPEND;
 constexpr int kFileOpenReadOnly = O_RDONLY;
 constexpr int kFileOpenWriteCreateTruncate = O_WRONLY | O_CREAT | O_TRUNC;
 constexpr int kFileOpenWriteCreateAppend = O_WRONLY | O_CREAT | O_APPEND;
+constexpr int kFileOpenReadWriteCreate = O_RDWR | O_CREAT;  // the <> redirection (dash)
 constexpr int kFileCreateMode = S_IRUSR | S_IWUSR;
 constexpr int kFileWriteOnlyBit = O_WRONLY;
 constexpr int kFileReadWriteBit = O_RDWR;

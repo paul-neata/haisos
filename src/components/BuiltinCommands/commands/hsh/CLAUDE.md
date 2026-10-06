@@ -107,13 +107,20 @@ task of the hsh rock and adds its files here:
   -y", `-c requires an argument`, status 2).
 - `HshShell.h/.cpp` - the executor (`Shell`), running one shell inside the
   builtin's process: see "Running" below.
-- `HshBuiltins.h/.cpp` - the shell's own builtins (`:`, `exit`, `false`,
-  `true`): a sorted table of name, special/regular, function; later tasks add
-  rows (and files of their own for the bigger ones).
+- `HshRedirection.h/.cpp` - `RedirectionScope`, applying a command's
+  redirections to the shell's own descriptor table and undoing them, and
+  `PlaceDescriptor`: see "Redirections" below.
+- `HshDescriptors.h/.cpp` - `ClosedDescriptor`, what a child gets in place of
+  a closed slot.
+- `HshBuiltins.h/.cpp` - the shell's own builtins (`:`, `exec`, `exit`,
+  `false`, `true`): a sorted table of name, special/regular, function; later
+  tasks add rows (and files of their own for the bigger ones).
+- `HshBuiltinExec.cpp` - `exec`: with no command its redirections stay; with
+  one, the command runs in the shell's place.
 - `Hsh.cpp` - the `hsh` builtin itself: the option table (every dash option,
   treated or marked for the not-treated report), the dash-based `--help`
   (`BuiltinHelp::basedOn`), `ParseInvocation`, and `Shell` on the context.
-- (later tasks: redirections, pipelines, the rest of the shell builtins,
+- (later tasks: pipelines, the rest of the shell builtins,
   control flow, the interactive loop.)
 
 ## AST dump
@@ -267,9 +274,59 @@ polls in 50 ms slices so a stop of the shell reaches the child
 
 What is not implemented yet reports `<what> is not supported yet` with status
 2 through the `NotYet` helper: `&`, pipelines of more than one command and
-`$(...)` (hsh--pipelines), redirections (hsh--redirections), every compound
-command and function definitions (hsh--control-flow). Each later task removes
-its uses; hsh--control-flow removes the helper.
+`$(...)` (hsh--pipelines), every compound command and function definitions
+(hsh--control-flow). Each later task removes its uses; hsh--control-flow
+removes the helper.
+
+## Redirections
+
+A simple command's redirections change the shell's own descriptor table (the
+process's `IFileIO` slots) for the length of the command. `RedirectionScope`
+(`HshRedirection.h`): `Apply` applies them in dash's order, after the command
+words have expanded, and the table is put back when the scope ends (after the
+child has been waited for) unless `exec` with no command called
+`Shell::KeepRedirections()`, which makes the scope `Keep()` the changes. Every
+slot is saved (`GetDescriptor`, possibly null) before its first change in the
+scope -- before an `AddDescriptor`, a `Dup2`, a `CloseDescriptor`, and before a
+`CreatePipe` (whose two new slots may be the ones about to be changed) -- and
+`Restore()` puts the saved content back, latest change undone first through
+`PlaceDescriptor`, never writing or throwing. On the first failure `Apply`
+undoes what that call did and returns the message in dash's words (`cannot
+open /x: No such file`, `cannot create /x: File exists` / `Directory
+nonexistent` / `Is a directory` / `Permission denied` from
+`OpenFailureReason`, `<m>: Bad file descriptor` for a dup of an empty slot,
+`<n>: Too many open files` when the table is full, `Pipe call failed`); the
+caller reports it with status 2 -- unless the command is a special builtin or
+the dup word expanded to something that is no digit, both fatal
+(`Syntax error: Bad fd number`, thrown through `Shell::Fail`), as dash exits
+on them.
+
+The open flags per kind: `<` read-only; `>` and `&>` write-create-truncate,
+refused with `File exists` when `-C`/`noclobber` is on and the target is an
+existing regular file (an existing device such as `/dev/null` or a directory
+is spared the check, as dash); `>|` the same without the check, `>>`
+write-create-append, `<>` read-write-create (`kFileOpenReadWriteCreate`,
+`FilesystemUtils.h`). `n>&m`/`n<&m` is `Dup2(m, n)` (`n` unchanged when
+`m == n`); `n>&-`/`n<&-` closes the slot, an empty one closing fine
+(`exec 9>&-` succeeds). `&>f` is `>f` then `2>&1`. A heredoc or here-string is
+a pipe (`IFileIO::CreatePipe`) sized exactly to its text (at least 1), filled
+whole and closed before anything is started -- a write of `capacity` bytes
+into an empty pipe never blocks, so no thread is needed; the reader sees the
+text, then end of file. Everything goes through `IFileIO` (`OpenFile`,
+`CreatePipe`, the table operations): no `IFileSystem`, no host, as everywhere
+else in the shell.
+
+A child started by a command gets slots 0/1/2 as they are then; an empty
+(closed) slot goes to it as `ClosedDescriptor` (`HshDescriptors.h`), whose
+reads and writes fail with `kIOError` -- never as null, which
+`StartProcessOptions` would read as "use the console".
+
+`exec` (`HshBuiltinExec.cpp`, a special builtin): alone (a leading `--`
+skipped) it returns 0 and its command's redirections stay. With a command it
+looks it up with `LookUpCommand` -- PATH and paths only, never a shell
+builtin, so `exec :` is `exec: :: not found` -- starts it (`not found` 127,
+`Permission denied` 126, in its own name) and ends the shell with its status
+(`throw ShellExit`), as dash's exec replaces the shell.
 
 ## How the end of a `$(...)` is found
 

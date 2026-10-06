@@ -308,6 +308,16 @@ TEST(HshLexerTest, HereDocuments) {
         EXPECT_FALSE(hd.terminated);
         EXPECT_EQ(tokens.back().kind, TokenKind::EndOfInput);
     }
+    // <<- with a last line of only tabs and no newline: the stripped line is
+    // empty, the body too, and the join test must not read past it.
+    {
+        std::vector<Token> tokens = LexTokens("cat <<-E\n\t\t");
+        ASSERT_TRUE(tokens[2].hereDoc != nullptr);
+        const HereDocument& hd = *tokens[2].hereDoc;
+        EXPECT_EQ(hd.rawBody, "");
+        EXPECT_TRUE(hd.complete);
+        EXPECT_FALSE(hd.terminated);
+    }
     // A quoted heredoc with an empty body keeps no part.
     {
         std::vector<Token> tokens = LexTokens("cat <<'E'\nE\n");
@@ -507,6 +517,18 @@ TEST(HshLexerTest, HereDocLineContinuation) {
         ASSERT_EQ(hd->body.parts.size(), 1u);
         EXPECT_EQ(hd->body.parts[0].text, "aE\n");
         EXPECT_EQ(tokens[4].line, 5);
+    }
+    // Two backslashes before the newline: an even count pairs off into literal
+    // backslashes and does NOT join, so the next line ends the body raw.
+    {
+        std::vector<Token> tokens = LexTokens("cat <<E\na\\\\\nE\nnext\n");
+        std::shared_ptr<HereDocument> hd = tokens[2].hereDoc;
+        ASSERT_TRUE(hd != nullptr);
+        EXPECT_EQ(hd->rawBody, "a\\\\\n");
+        EXPECT_TRUE(hd->terminated);
+        EXPECT_EQ(tokens[3].kind, TokenKind::Newline);
+        EXPECT_EQ(tokens[4].kind, TokenKind::Word); // "next" is a command now
+        EXPECT_EQ(tokens[4].line, 4);
     }
     // Quoted delimiter: raw-line matching, no continuation handling.
     {

@@ -886,9 +886,21 @@ struct Lexer::Impl {
                     // A backslash-newline inside an unquoted heredoc body is a
                     // line continuation: join the lines before the delimiter
                     // comparison, as dash does (a quoted delimiter's body keeps
-                    // raw lines).
-                    while (raw.size() >= 2 && raw[raw.size() - 2] == '\\' &&
-                           raw.back() == '\n' && pos < src->size()) {
+                    // raw lines). Only an ODD run of backslashes before the
+                    // newline joins: they pair off into literal backslashes,
+                    // and only the last one is a continuation marker.
+                    for (;;) {
+                        // raw is empty for a last line of only tabs under <<-.
+                        if (raw.empty() || raw.back() != '\n' || pos >= src->size()) {
+                            break;
+                        }
+                        size_t backslashes = 0;
+                        for (size_t i = raw.size() - 1; i > 0 && raw[i - 1] == '\\'; --i) {
+                            ++backslashes;
+                        }
+                        if (backslashes % 2 == 0) {
+                            break;  // paired-off literal backslashes: raw lines
+                        }
                         raw.erase(raw.size() - 2);
                         lineStart = pos;
                         while (pos < src->size() && (*src)[pos] != '\n') {

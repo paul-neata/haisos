@@ -77,6 +77,15 @@ TEST(HshGlobTest, MatchesInTheWorkingDirectory) {
     EXPECT_TRUE(ExpandPathname("nomatch*", source).empty());
 }
 
+TEST(HshGlobTest, BracketNeverSpansASlash) {
+    FakePathnameSource source = WorkingDirSource();
+    // "[a/b]" is not one bracket expression matching "a": the '/' splits the
+    // pattern, so the components "[a" and "b]" match nothing.
+    EXPECT_TRUE(ExpandPathname("[a/b]", source).empty());
+    // An ordinary bracket without a '/' is unaffected.
+    EXPECT_EQ(ExpandPathname("[ab]", source), (std::vector<std::string>{"a"}));
+}
+
 TEST(HshGlobTest, Components) {
     FakePathnameSource source = TreeSource();
 

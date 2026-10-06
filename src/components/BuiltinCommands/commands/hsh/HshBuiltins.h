@@ -21,6 +21,7 @@ struct ShellBuiltin {
 
 // The shell builtins of this task; later tasks add theirs in files of their own.
 int BuiltinColon(Shell& shell, const std::vector<std::string>& args);
+int BuiltinExec(Shell& shell, const std::vector<std::string>& args);
 int BuiltinExit(Shell& shell, const std::vector<std::string>& args);
 int BuiltinFalse(Shell& shell, const std::vector<std::string>& args);
 int BuiltinTrue(Shell& shell, const std::vector<std::string>& args);

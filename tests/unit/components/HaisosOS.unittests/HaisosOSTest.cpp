@@ -604,7 +604,8 @@ TEST_F(HaisosOSTest, ALuaScriptsDescriptorsAreReleasedWhenItEnds) {
     ASSERT_NE(process, nullptr);
 
     auto releases = std::make_shared<std::atomic<int>>(0);
-    ASSERT_EQ(process->IO()->AddDescriptor(ReleaseCountingDescriptor::Create(releases)), 0);
+    // Slots 0, 1 and 2 already hold the process's standard streams.
+    ASSERT_EQ(process->IO()->AddDescriptor(ReleaseCountingDescriptor::Create(releases)), 3);
 
     // The script is still spinning, so nothing may have been released yet.
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -637,7 +638,8 @@ TEST_F(HaisosOSTest, AnAgentsDescriptorsAreReleasedWhenItsConversationEnds) {
     ASSERT_NE(process, nullptr);
 
     auto releases = std::make_shared<std::atomic<int>>(0);
-    ASSERT_EQ(process->IO()->AddDescriptor(ReleaseCountingDescriptor::Create(releases)), 0);
+    // Slots 0, 1 and 2 already hold the process's standard streams.
+    ASSERT_EQ(process->IO()->AddDescriptor(ReleaseCountingDescriptor::Create(releases)), 3);
 
     // The input loop is blocked on the console, so the conversation is open.
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -706,6 +708,71 @@ TEST_F(HaisosOSTest, AnInteractiveScriptIsNotAnAgent) {
     ASSERT_NE(process, nullptr);
     EXPECT_TRUE(process->WaitToFinish(kProcessWaitMs));
     EXPECT_EQ(console->ReadLineCalls(), 0);
+}
+
+// A given stdin wins over the default: the console's input is never read, and
+// the interactive agent is fed the descriptor's lines instead.
+TEST_F(HaisosOSTest, AnInteractiveAgentReadsAGivenStdin) {
+    auto console = std::make_shared<ScriptedPhysicalConsole>(std::vector<std::string>{"never read"});
+    auto os = BuildOS(console);
+
+    auto input = std::make_shared<Mocks::MockFileDescriptor>();
+    input->Feed("from a pipe\n");
+    input->EndInput();
+    StartProcessOptions options;
+    options.interactive = true;
+    options.stdIn = input;
+
+    auto process = os->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/"", options);
+    ASSERT_NE(process, nullptr);
+    // End of the pipe's input stops the agent, as end of console input would.
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    EXPECT_EQ(console->ReadLineCalls(), 0);
+
+    auto agent = std::dynamic_pointer_cast<ICurrentProcess>(process)->AsAgent();
+    ASSERT_NE(agent, nullptr);
+    auto history = agent->GetHistory();
+    EXPECT_TRUE(HistoryMentions(history, "Say hello."));
+    EXPECT_TRUE(HistoryMentions(history, "from a pipe"));
+}
+
+// An LLM round trip that fails is a diagnostic, not an answer: it belongs on
+// the process's stderr, with nothing on its stdout.
+TEST_F(HaisosOSTest, AnAgentsLLMFailureGoesToStderr) {
+    auto os = BuildOS();
+
+    auto out = std::make_shared<Mocks::MockFileDescriptor>();
+    auto err = std::make_shared<Mocks::MockFileDescriptor>();
+    StartProcessOptions options;
+    options.stdOut = out;
+    options.stdErr = err;
+    auto process = os->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/"", options);
+    ASSERT_NE(process, nullptr);
+    // Wait for the agent before reading the mocks back: it writes them on its
+    // own runtime thread.
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+
+    // The endpoint is unreachable, so the one round trip failed.
+    EXPECT_NE(err->Written().find("Error: HTTP request failed"), std::string::npos);
+    EXPECT_EQ(out->Written().find("Error:"), std::string::npos);
+}
+
+// A script's print goes to the process's stdout -- a given one, not the
+// console behind the default.
+TEST_F(HaisosOSTest, AScriptPrintsToAGivenStdout) {
+    std::ofstream(kTestRoot + "/greet.lua") << "print('hi')";
+    auto console = std::make_shared<ScriptedPhysicalConsole>(std::vector<std::string>{});
+    auto os = BuildOS(console);
+
+    auto out = std::make_shared<Mocks::MockFileDescriptor>();
+    StartProcessOptions options;
+    options.stdOut = out;
+    auto process = os->StartProcess(TestEnvironment(), "greet.lua", {}, /*workingDirectory=*/"", options);
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+
+    EXPECT_EQ(out->Written(), "hi\n");
+    EXPECT_EQ(console->Written(), "");
 }
 
 // --- A script and the real OS tools ---

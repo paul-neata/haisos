@@ -15,17 +15,19 @@ namespace Haisos {
 // than TriggerStop to do to an agent, so nothing here offers one.
 //
 // An interactive process also owns the AgentInputLoop feeding its agent the
-// lines typed on its console, and is not finished until that loop is: see
+// lines read from its stdin, and is not finished until that loop is: see
 // StartProcessOptions::interactive.
 class AgentProcess : public ICurrentProcess {
 public:
     // Returns nullptr if agent or environment is null: both are required for
-    // the life of the process, so every method here may assume them.
+    // the life of the process, so every method here may assume them. Also
+    // nullptr if options' standard streams cannot be installed.
     //
-    // Once the process exists, program is posted to the agent as its first
-    // command, so the process is running when this returns. interactiveInput,
-    // when non-null, is the console the process's agent is then fed from, a
-    // line at a time; pass null for an agent that just runs its program.
+    // options' streams become the process's descriptors 0, 1 and 2 before the
+    // agent is given anything to do. Once the process exists, program is
+    // posted to the agent as its first command, so the process is running when
+    // this returns. With options.interactive set, the agent is then fed the
+    // lines of options.stdIn, a line at a time.
     static std::shared_ptr<AgentProcess> Create(
         uint64_t pid,
         uint64_t parentPid,
@@ -36,7 +38,7 @@ public:
         std::shared_ptr<CurrentProcessHandle> selfHandle,
         std::shared_ptr<Agent> agent,
         const std::string& program,
-        std::shared_ptr<IAgentConsole> interactiveInput);
+        const StartProcessOptions& options);
     ~AgentProcess() override;
 
     // IProcess
@@ -65,8 +67,7 @@ private:
         const std::string& path,
         const std::string& workingDirectory,
         std::weak_ptr<IHaisosOS> os,
-        std::shared_ptr<Agent> agent,
-        std::shared_ptr<IAgentConsole> interactiveInput);
+        std::shared_ptr<Agent> agent);
 
     uint64_t m_pid;
     uint64_t m_parentPid;

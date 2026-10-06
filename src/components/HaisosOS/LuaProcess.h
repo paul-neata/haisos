@@ -16,11 +16,14 @@ struct lua_State;
 namespace Haisos {
 
 // An ICurrentProcess whose runtime is a Lua script. Each OS tool is exposed as
-// a Lua global function returning (content, is_error); output from Lua's print()
-// routes through the process's IAgentConsole. Runs on its own background
-// thread, matching Agent's lifecycle shape.
+// a Lua global function returning (content, is_error); Lua's print() writes its
+// line plus '\n' to the process's stdout (descriptor 1), and a load or runtime
+// error goes to its stderr (descriptor 2). Runs on its own background thread,
+// matching Agent's lifecycle shape.
 class LuaProcess : public ICurrentProcess {
 public:
+    // options' streams become the process's descriptors 0, 1 and 2 before the
+    // script's thread starts; nullptr (after a log line) if they do not.
     static std::shared_ptr<LuaProcess> Create(
         uint64_t pid,
         uint64_t parentPid,
@@ -32,7 +35,7 @@ public:
         std::string scriptContent,
         std::vector<std::string> args,
         std::shared_ptr<IToolFactory> toolFactory,
-        std::shared_ptr<IAgentConsole> console);
+        const StartProcessOptions& options);
     ~LuaProcess() override;
 
     // IProcess
@@ -71,8 +74,7 @@ private:
         std::weak_ptr<IHaisosOS> os,
         std::string scriptContent,
         std::vector<std::string> args,
-        std::shared_ptr<IToolFactory> toolFactory,
-        std::shared_ptr<IAgentConsole> console);
+        std::shared_ptr<IToolFactory> toolFactory);
 
     // Starts the script's thread. Called by Create() once the process is fully
     // built, so the thread never observes a half-constructed object.
@@ -82,6 +84,9 @@ private:
     void RegisterBindings(lua_State* L);
     // Whether the calling thread is the script's own.
     bool IsOwnThread();
+    // All of bytes to the process's descriptor fd, wherever it points now; an
+    // empty slot drops them.
+    void WriteToDescriptor(int fd, const std::string& bytes);
 
     static int LuaToolTrampoline(lua_State* L);
     static int LuaPrintTrampoline(lua_State* L);
@@ -100,7 +105,6 @@ private:
     std::string m_scriptContent;
     std::vector<std::string> m_args;
     std::shared_ptr<IToolFactory> m_toolFactory;
-    std::shared_ptr<IAgentConsole> m_console;
 
     lua_State* m_luaState = nullptr;
     std::thread m_thread;

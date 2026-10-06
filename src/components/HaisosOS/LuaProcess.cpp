@@ -220,8 +220,9 @@ LuaProcess* SelfFromState(lua_State* L) {
 //    the whole sandbox. Nil'ing `load` is simpler and strictly safer than
 //    wrapping it to force mode "t", and no .lua process needs to compile source
 //    at runtime;
-//  - `warn` writes straight to the host process's stderr, bypassing the `print`
-//    override and the per-process console tagging.
+//  - `warn` writes straight to the host process's stderr, bypassing the
+//    process's own stderr (its descriptor 2), which is where a script's
+//    diagnostics belong.
 void OpenSafeLuaLibs(lua_State* L) {
     luaL_requiref(L, "_G", luaopen_base, 1);
     luaL_requiref(L, LUA_TABLIBNAME, luaopen_table, 1);
@@ -270,7 +271,7 @@ std::shared_ptr<LuaProcess> LuaProcess::Create(
     std::string scriptContent,
     std::vector<std::string> args,
     std::shared_ptr<IToolFactory> toolFactory,
-    std::shared_ptr<IAgentConsole> console)
+    const StartProcessOptions& options)
 {
     // The script's own thread can hold the last reference to it -- inside an
     // os_* tool call -- and the destructor waits for that thread.
@@ -284,9 +285,17 @@ std::shared_ptr<LuaProcess> LuaProcess::Create(
             std::move(os),
             std::move(scriptContent),
             std::move(args),
-            std::move(toolFactory),
-            std::move(console)),
+            std::move(toolFactory)),
         DestroyOffRuntimeThreads<LuaProcess>("LuaProcess '" + path + "' pid=" + std::to_string(pid)));
+    // Slots 0, 1 and 2 before the thread starts: print() and the error path
+    // below write through them from the script's first instruction. False means
+    // a null stream was passed in -- a caller that skipped
+    // HaisosOS::ResolveStandardStreams.
+    if (!process->m_io->InstallStandardStreams(options.stdIn, options.stdOut, options.stdErr)) {
+        LogError("LuaProcess: refusing to create a process for '%s': its standard streams could not be installed",
+            path.c_str());
+        return nullptr;
+    }
     // The script's tools reach the process through this handle. It is filled in
     // before Start(), so the script's thread can never observe it empty.
     if (selfHandle) {
@@ -305,8 +314,7 @@ LuaProcess::LuaProcess(
     std::weak_ptr<IHaisosOS> os,
     std::string scriptContent,
     std::vector<std::string> args,
-    std::shared_ptr<IToolFactory> toolFactory,
-    std::shared_ptr<IAgentConsole> console)
+    std::shared_ptr<IToolFactory> toolFactory)
     : m_pid(pid)
     , m_parentPid(parentPid)
     , m_environment(std::move(environment))
@@ -316,7 +324,6 @@ LuaProcess::LuaProcess(
     , m_scriptContent(std::move(scriptContent))
     , m_args(std::move(args))
     , m_toolFactory(std::move(toolFactory))
-    , m_console(std::move(console))
 {
 }
 
@@ -424,6 +431,25 @@ bool LuaProcess::IsKillRequested() const {
     return m_killed.load();
 }
 
+void LuaProcess::WriteToDescriptor(int fd, const std::string& bytes) {
+    auto descriptor = m_io->GetDescriptor(fd);
+    if (!descriptor) {
+        // The slot is empty (or was never filled): the bytes are dropped, not
+        // redirected anywhere else.
+        return;
+    }
+    size_t written = 0;
+    while (written < bytes.size()) {
+        const ssize_t n = descriptor->Write(bytes.data() + written, bytes.size() - written);
+        // Seam for pipes--pipe-service: a kIOBrokenPipe here is where that
+        // task makes the process stop quietly.
+        if (n < 0) {
+            return;
+        }
+        written += static_cast<size_t>(n);
+    }
+}
+
 int LuaProcess::LuaToolTrampoline(lua_State* L) {
     // Lua is built as C and unwinds with longjmp, so a C++ exception escaping
     // into its frames would reach std::terminate rather than any handler. Tool
@@ -504,8 +530,8 @@ int LuaProcess::LuaToolTrampoline(lua_State* L) {
 
 int LuaProcess::LuaPrintTrampoline(lua_State* L) {
     // See LuaToolTrampoline: a C++ exception must not unwind into Lua's C frames.
-    // Building the line and writing to the console both allocate, so a failure
-    // here drops the output rather than taking the process down.
+    // Building the line and writing it both allocate, so a failure here drops
+    // the output rather than taking the process down.
     try {
         LuaProcess* self = SelfFromState(L);
         int n = lua_gettop(L);
@@ -519,9 +545,8 @@ int LuaProcess::LuaPrintTrampoline(lua_State* L) {
             line.append(s, len);
             lua_pop(L, 1);
         }
-        if (self->m_console) {
-            self->m_console->Write(line);
-        }
+        // As print() on a terminal: the line and one newline, on stdout.
+        self->WriteToDescriptor(IFileIO::kStdOut, line + "\n");
     } catch (...) {
         return 0;
     }
@@ -577,9 +602,8 @@ void LuaProcess::RunThread() {
         if (luaL_loadbufferx(m_luaState, m_scriptContent.data(), m_scriptContent.size(), m_path.c_str(), "t") != LUA_OK) {
             const char* err = lua_tostring(m_luaState, -1);
             LogError("LuaProcess '%s': failed to load script: %s", m_path.c_str(), err ? err : "unknown error");
-            if (m_console) {
-                m_console->Write("[" + m_path + "] Error: " + std::string(err ? err : "failed to load script"));
-            }
+            WriteToDescriptor(IFileIO::kStdErr,
+                "[" + m_path + "] Error: " + std::string(err ? err : "failed to load script") + "\n");
         } else if (lua_pcall(m_luaState, 0, 0, 0) != LUA_OK) {
             const char* err = lua_tostring(m_luaState, -1);
             if (IsKillRequested()) {
@@ -588,9 +612,8 @@ void LuaProcess::RunThread() {
                 LogInfo("LuaProcess '%s': killed by request", m_path.c_str());
             } else {
                 LogError("LuaProcess '%s': script error: %s", m_path.c_str(), err ? err : "unknown error");
-                if (m_console) {
-                    m_console->Write("[" + m_path + "] Error: " + std::string(err ? err : "script error"));
-                }
+                WriteToDescriptor(IFileIO::kStdErr,
+                    "[" + m_path + "] Error: " + std::string(err ? err : "script error") + "\n");
             }
         }
 

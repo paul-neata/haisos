@@ -29,8 +29,9 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   the OS on every call rather than holding it, so a process handed a narrowed
   OS does its I/O through that OS's root and nothing else. The same `IFileIO`
   holds the process's **descriptor table**: its open files by number, as a
-  POSIX process holds them -- slots 0, 1 and 2 reserved for stdin, stdout and
-  stderr (left empty for now), 3 and up ordinary, at most
+  POSIX process holds them -- slots 0, 1 and 2 holding its stdin, stdout and
+  stderr (installed from the resolved `StartProcessOptions` before the program
+  runs; see below), 3 and up ordinary, at most
   `IFileIO::kMaxDescriptors` (1024) in all. `OpenFile` hands back the
   descriptor itself without numbering it; placing it in the table
   (`AddDescriptor`, lowest free slot), duplicating it (`Dup`, lowest free slot;
@@ -88,14 +89,20 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   refusals, one place for the defaults (`ResolveStandardStreams`): stdout the
   OS's console output, stderr its console error (console descriptors, see the
   Console component), stdin the console's input when `interactive` is set, else
-  an empty input whose reads end at once. The resolved options are handed to
-  the runtime: a builtin gets the three streams as slots 0/1/2 of its table
-  before its thread starts; agent and Lua runtimes are handed them but ignore
-  the descriptors for now (streams--runtime-streams). For a `.md` program,
+  an empty input whose reads end at once. Every runtime then gets the three
+  streams as slots 0/1/2 of its table, installed before its program starts --
+  before the agent is given its program, the script's thread begins or the
+  builtin's thread starts, so a runtime's first output already reaches them.
+  What a runtime writes there: a builtin writes its stdout and stderr; an agent
+  writes its replies to slot 1 and its diagnostics (an LLM, HTTP or parse
+  failure, an unknown tool, a failed command) to slot 2, through
+  `ProcessAgentConsole`; a Lua script's `print` writes its line to slot 1 and a
+  load or runtime error goes to slot 2. For a `.md` program,
   `interactive` also makes the agent interactive: it gets an extra system
   prompt telling it that further messages are lines typed on the console and
   that `self_close` ends the session, and its `AgentProcess` owns an
-  `AgentInputLoop` reading its console. The loop posts each line to the agent
+  `AgentInputLoop` reading its stdin (slot 0). The loop posts each line to the
+  agent
   while `WaitToFinish(0)` says it is still running; it ends when a line
   arrives for an agent that has closed (that line is dropped), or at end of
   input, when it asks the agent to stop. An interactive process is finished
@@ -113,8 +120,9 @@ console, and a services layer; starts processes and spawns sub-OS instances.
 - Merges the OS's own tools with an agent-backed process's LLM tools via
   `CompositeToolFactory`; a Lua process gets the OS's tools directly, each
   exposed as a Lua global function returning `(content, is_error)` (JSON
-  results are handed back as Lua tables); `print()` routes to the process's
-  console
+  results are handed back as Lua tables); `print()` writes its line plus `\n`
+  to the process's stdout (descriptor 1), and a load or runtime error goes to
+  its stderr (descriptor 2) as `[<path>] Error: <message>`
 - The Lua <-> JSON bridge behind those functions (`ToJson`/`PushJson` in
   `LuaProcess.cpp`) must survive whatever a script passes or a tool returns,
   since a script is untrusted and so is any file it reads. Strings keep every
@@ -174,10 +182,18 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   or environment, so the rest of the class assumes both. It also posts the
   program to the agent -- only once the process exists, so a tool can find it --
   and then starts the input loop of an interactive process
-- `AgentInputLoop` - the thread that feeds an interactive agent the lines typed
-  on its console (see `StartProcessOptions` above). Its destructor waits the
-  thread out however long it takes, since a blocked `ReadLine` cannot be
-  interrupted
+- `AgentInputLoop` - the thread that feeds an interactive agent the lines read
+  from its stdin (see `StartProcessOptions` above), line by line through a
+  `DescriptorLineReader`. Its destructor waits the
+  thread out however long it takes: a line being read cannot be abandoned, and
+  a read blocked on the console's input cannot be interrupted (D7), though a
+  pipe's can
+- `ProcessAgentConsole` - an agent process's `IAgentConsole`: `Write` (a reply)
+  goes to the process's descriptor 1, `WriteError` (a diagnostic) to descriptor
+  2, each plus a `\n`. Created before the process, so it reaches it through the
+  same `CurrentProcessHandle` the OS tools use, and looks the descriptor up on
+  every write: a process whose table was replaced or released writes wherever
+  it says, or nowhere
 - `LuaProcess` - `ICurrentProcess` backed by an embedded Lua script, running on
   its own thread. Its `Kill()` aborts the script via a Lua instruction-count
   hook -- an interpreter really can be interrupted mid-instruction -- and

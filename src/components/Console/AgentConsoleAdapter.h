@@ -7,8 +7,10 @@
 namespace Haisos {
 
 // Bridges a single agent's IAgentConsole onto a shared IPhysicalConsole: every
-// write is one line, forward to the physical console as message + "\n",
-// untagged; lines are read from it.
+// write is one line, forwarded to the physical console as message + "\n",
+// untagged -- Write to its output, WriteError to its error. For agents running
+// without an OS (the integration tests); a process's agent talks to the
+// process's own descriptors instead (see ProcessAgentConsole in HaisosOS).
 class AgentConsoleAdapter : public IAgentConsole {
 public:
     static std::shared_ptr<AgentConsoleAdapter> Create(std::shared_ptr<IPhysicalConsole> physicalConsole) {
@@ -17,7 +19,7 @@ public:
     ~AgentConsoleAdapter() override;
 
     void Write(const std::string& message) override;
-    std::optional<std::string> ReadLine() override;
+    void WriteError(const std::string& message) override;
 
 private:
     explicit AgentConsoleAdapter(std::shared_ptr<IPhysicalConsole> physicalConsole);

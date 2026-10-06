@@ -23,6 +23,13 @@ Header-only C++ utilities. Not a formal component.
   its documented error value instead. Put one in scope around every CRT call
   whose arguments come from outside -- `windows/WindowsFilesystem.cpp` and
   `ls`'s time formatting do. Elsewhere it does nothing.
+- `DescriptorLineReader.h` - `DescriptorLineReader`, lines out of an
+  `IFileDescriptor` for a reader that owns its input: reads ahead up to 4096
+  bytes at a time and keeps the rest, strips the `\n` (and a `\r` before it),
+  hands out a last line without one too, and reports end of input as
+  `std::nullopt` -- once at end, or once a read has failed, always. The
+  interactive agent's input loop (`AgentInputLoop`) reads a process's stdin
+  with it.
 - `WideText.h` - Windows only: `Utf8ToWide` and `WideToUtf8`, converting
   between the UTF-8 Haisos uses everywhere and the UTF-16 the Windows API's
   "W" functions take. Nothing hands a name to a narrow ("A") Windows or C

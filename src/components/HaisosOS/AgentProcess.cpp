@@ -15,7 +15,7 @@ std::shared_ptr<AgentProcess> AgentProcess::Create(
     std::shared_ptr<CurrentProcessHandle> selfHandle,
     std::shared_ptr<Agent> agent,
     const std::string& program,
-    std::shared_ptr<IAgentConsole> interactiveInput)
+    const StartProcessOptions& options)
 {
     // The two things this process cannot be without, refused here so that every
     // method below may simply use them. An agent process with no agent has no
@@ -35,9 +35,19 @@ std::shared_ptr<AgentProcess> AgentProcess::Create(
     // and stops the agent, whose thread that is.
     auto process = std::shared_ptr<AgentProcess>(
         new AgentProcess(
-            pid, parentPid, std::move(environment), path, workingDirectory, std::move(os), std::move(agent),
-            std::move(interactiveInput)),
+            pid, parentPid, std::move(environment), path, workingDirectory, std::move(os), std::move(agent)),
         DestroyOffRuntimeThreads<AgentProcess>("AgentProcess '" + path + "' pid=" + std::to_string(pid)));
+
+    // Slots 0, 1 and 2 before anything can use them: the agent's console writes
+    // through them, so they must be installed before the agent is given its
+    // program. False means a null stream was passed in -- a caller that skipped
+    // HaisosOS::ResolveStandardStreams.
+    if (!process->m_io->InstallStandardStreams(options.stdIn, options.stdOut, options.stdErr)) {
+        LogError("AgentProcess: refusing to create a process for '%s': its standard streams could not be installed",
+            path.c_str());
+        return nullptr;
+    }
+
     // The process's own tools reach it through this handle. Filling it in here
     // -- before the agent is given anything to do -- is what guarantees no tool
     // can ever observe it empty.
@@ -45,11 +55,22 @@ std::shared_ptr<AgentProcess> AgentProcess::Create(
         selfHandle->Set(process);
     }
 
+    // An interactive process is fed the lines of its stdin. The loop holds its
+    // own reference to the descriptor, so the table being released at the
+    // conversation's end never pulls it out from under a blocked read.
+    if (options.interactive) {
+        process->m_inputLoop = AgentInputLoop::Create(process->m_agent, options.stdIn);
+        if (!process->m_inputLoop) {
+            // AgentInputLoop::Create has already said why.
+            return nullptr;
+        }
+    }
+
     // An agent process's program is its agent's conversation, so this process's
-    // descriptors are released when that conversation ends -- before the agent
-    // reports finished, the same guarantee the other runtimes give. Weak: the
-    // hook runs on the agent's thread, and nothing an agent's end holds should
-    // keep the process's I/O alive past it.
+    // descriptors are released when that conversation ends -- after the agent's
+    // last write, before the agent reports finished, the same guarantee the
+    // other runtimes give. Weak: the hook runs on the agent's thread, and
+    // nothing an agent's end holds should keep the process's I/O alive past it.
     std::weak_ptr<ProcessFileIO> ioWeak = process->m_io;
     process->m_agent->SetFinishedHook([ioWeak] {
         if (auto io = ioWeak.lock()) {
@@ -74,8 +95,7 @@ AgentProcess::AgentProcess(
     const std::string& path,
     const std::string& workingDirectory,
     std::weak_ptr<IHaisosOS> os,
-    std::shared_ptr<Agent> agent,
-    std::shared_ptr<IAgentConsole> interactiveInput)
+    std::shared_ptr<Agent> agent)
     : m_pid(pid)
     , m_parentPid(parentPid)
     , m_environment(std::move(environment))
@@ -83,7 +103,6 @@ AgentProcess::AgentProcess(
     , m_os(os)
     , m_io(ProcessFileIO::Create(std::move(os), workingDirectory))
     , m_agent(std::move(agent))
-    , m_inputLoop(interactiveInput ? AgentInputLoop::Create(m_agent, std::move(interactiveInput)) : nullptr)
 {
 }
 

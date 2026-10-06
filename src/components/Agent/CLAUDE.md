@@ -55,11 +55,23 @@ Manages LLM conversations with parent/child agent relationships. Supports subage
 - **A failed command never ends an agent silently.** Whatever a command throws
   -- a tool, the LLM round trip, anything else -- is caught around that one
   command (`ProcessCommand`): it is logged ("Exception in RunThread"), written
-  to the agent's console and message buffer as `Error: the command failed:
+  to the agent's console's error stream (`WriteError`) and message buffer as
+  `Error: the command failed:
   ...`, and every tool call it left without a result is given an error one
   (`AnswerUnansweredToolCalls`), because the history is only a valid
   conversation with one result per tool call. An interactive agent then takes
   its next command; a non-interactive one finishes, as it would have anyway.
+- **Replies and diagnostics are two streams on the agent's console.** What the
+  agent says -- the text of an assistant message -- goes to
+  `IAgentConsole::Write`. What goes wrong in its own running goes to
+  `WriteError` instead: an LLM, HTTP or parse failure (a response the
+  LLMCommunicator marked with done_reason `"error"`, `"parse_error"` or
+  `"http_error"`; its content is the `Error: ...` text), `Error: Unknown tool -
+  <name>`, and `Error: the command failed: ...`. A process's console
+  (`ProcessAgentConsole`) lays the first out on the process's stdout and the
+  second on its stderr. The history and the message buffer
+  (`GetConsoleOutput()`) keep an error response exactly like a reply: none of
+  what the LLM is sent changes with the stream a line lands on.
 - Tool descriptions are fetched from the tool factory once in the constructor and cached for the
   agent's lifetime, not rebuilt per LLM round. Tools registered after an agent is constructed are
   invisible to it, so tool registries must be populated before agents are created.

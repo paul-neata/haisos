@@ -4,7 +4,7 @@
 #include <sstream>
 #include "AgentProcess.h"
 #include "LuaProcess.h"
-#include "src/components/Console/AgentConsoleAdapter.h"
+#include "ProcessAgentConsole.h"
 #include "src/components/Console/ConsoleDescriptors.h"
 #include "interfaces/IBuiltinCommands.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
@@ -221,12 +221,14 @@ std::shared_ptr<ICurrentProcess> HaisosOS::StartAgentProcess(
     uint64_t pid = NextGloballyUniquePID();
     std::string name = GetStem(programPath) + "_" + std::to_string(pid);
 
-    auto console = AgentConsoleAdapter::Create(m_physicalConsole);
     // The OS tool set is built per process, around the process rather than
     // around this OS: ICurrentProcess is the only door out of a process (see
     // the Security section of the root CLAUDE.md). The handle exists before the
-    // process does, because the agent needs its tools first.
+    // process does, because the agent needs its tools first -- and its console:
+    // the agent writes to the process's own stdout and stderr descriptors
+    // through it, looked up on the handle at every write.
     auto processHandle = CurrentProcessHandle::Create();
+    auto console = ProcessAgentConsole::Create(processHandle);
     // A non-interactive agent answers what its program asked and then
     // finishes, which is what makes the process finish too. An interactive one
     // then goes on to answer whatever is typed on its console, until it closes
@@ -262,12 +264,11 @@ std::shared_ptr<ICurrentProcess> HaisosOS::StartAgentProcess(
     // be strong. A narrowed per-process OS would be passed here instead.
     // AgentProcess::Create posts the program only once the process exists:
     // the agent's first command may call a tool, and a tool must find the
-    // process it acts for. An interactive process is then fed from the same
-    // console the agent writes to.
+    // process it acts for. An interactive process is then fed the lines of its
+    // stdin.
     auto process = AgentProcess::Create(
         pid, /*parentPid=*/m_osProcessId, std::move(environment), programPath, workingDirectory,
-        weak_from_this(), processHandle, concreteAgent, content,
-        interactive ? std::move(console) : nullptr);
+        weak_from_this(), processHandle, concreteAgent, content, options);
     if (!process) {
         // AgentProcess::Create has already said why. The agent is dropped here
         // unstarted: nothing was posted to it, and its destructor waits out the
@@ -331,8 +332,6 @@ std::shared_ptr<ICurrentProcess> HaisosOS::StartLuaProcess(
     const std::string& workingDirectory,
     const StartProcessOptions& options)
 {
-    // options.stdIn/stdOut/stdErr are resolved but not yet handed to the
-    // runtime: that is streams--runtime-streams.
     std::string content;
     if (!ReadWholeFile(*m_rootFileSystem, programPath, content)) {
         LogError("HaisosOS: failed to read process file: %s", programPath.c_str());
@@ -342,9 +341,9 @@ std::shared_ptr<ICurrentProcess> HaisosOS::StartLuaProcess(
     uint64_t pid = NextGloballyUniquePID();
     std::string name = GetStem(programPath) + "_" + std::to_string(pid);
 
-    auto console = AgentConsoleAdapter::Create(m_physicalConsole);
     // As for an agent process: the tool set is built around the process, and
-    // LuaProcess::Create fills the handle in before the script's thread starts.
+    // LuaProcess::Create installs the process's standard streams and fills the
+    // handle in before the script's thread starts.
     auto processHandle = CurrentProcessHandle::Create();
     // The parent is this OS, as for an agent process above.
     auto process = LuaProcess::Create(
@@ -353,7 +352,7 @@ std::shared_ptr<ICurrentProcess> HaisosOS::StartLuaProcess(
         // The OS tool set and nothing else. The LLM tool set (get_current_date_time,
         // agent_*) belongs to agents: it is handed out by ILLMService and reaches
         // a process only through the agent running it, never through a script.
-        OSToolFactory::Create(processHandle), std::move(console));
+        OSToolFactory::Create(processHandle), options);
 
     {
         std::lock_guard<std::mutex> lock(m_processesMutex);

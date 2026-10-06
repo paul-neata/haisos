@@ -1,8 +1,8 @@
 # Console
 
 Asynchronous, physical console output and line input, the descriptors a process
-sees the console through, plus the adapters that give individual
-agents/processes a view onto it (or onto nothing but memory).
+sees the console through, plus the adapters that give an agent without a
+process a view onto it (or onto nothing but memory).
 
 ## Responsibilities
 
@@ -11,8 +11,10 @@ agents/processes a view onto it (or onto nothing but memory).
 - Writes raw: `Write(bytes)`/`WriteError(bytes)` put exactly those bytes on the
   host's stdout / stderr, adding no newline, and flush the stream after every
   write, so a prompt without a newline shows at once
-- Reads lines of input (`ReadLine`, blocking, from stdin), which is what feeds an
-  interactive agent (see `AgentInputLoop` in the HaisosOS component)
+- Reads lines of input (`ReadLine`, blocking, from stdin), which reaches an
+  interactive process's agent only through the console input descriptor and the
+  input loop reading the process's stdin (see `AgentInputLoop` in the HaisosOS
+  component)
 - Provides the console descriptors (`ConsoleDescriptors.h`), the only way the
   console reaches a process: an OS hands them to it as its descriptors 0, 1
   and 2 (see `StartProcessOptions` in `interfaces/IHaisosOS.h`)
@@ -30,12 +32,12 @@ agents/processes a view onto it (or onto nothing but memory).
 - `EmptyInputDescriptor` - no input at all: reads end at once, as /dev/null;
   not a terminal. The default stdin of a non-interactive process
 - `AgentConsoleAdapter` - `IAgentConsole` that forwards each write to a shared
-  `IPhysicalConsole` as one line (`message + "\n"`), untagged, and reads lines
-  from it. Still behind agent and Lua processes until streams--runtime-streams
-  moves them onto descriptors 1 and 2
+  `IPhysicalConsole` as one line (`message + "\n"`), untagged -- `Write` to its
+  output, `WriteError` to its error. For agents running without an OS (the
+  integration tests): a process's agent talks to the process's own descriptors
+  instead, and nothing inside a process holds the physical console
 - `InMemoryAgentConsole` - standalone `IAgentConsole` that just accumulates
-  writes in memory; it has nothing to read, so `ReadLine` reports end of input
-  at once
+  writes in memory, diagnostics (`WriteError`) alike
 
 ## Notes
 

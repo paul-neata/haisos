@@ -16,10 +16,11 @@ void AgentConsoleAdapter::Write(const std::string& message) {
     }
 }
 
-std::optional<std::string> AgentConsoleAdapter::ReadLine() {
-    // Input is not tagged: what the user types is addressed to whoever is
-    // reading, and a label would only have to be stripped off again.
-    return m_physicalConsole ? m_physicalConsole->ReadLine() : std::nullopt;
+void AgentConsoleAdapter::WriteError(const std::string& message) {
+    if (m_physicalConsole) {
+        // A diagnostic goes to the host's stderr, like a reply goes to stdout.
+        m_physicalConsole->WriteError(message + "\n");
+    }
 }
 
 }

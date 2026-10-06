@@ -14,6 +14,10 @@ public:
 
     void SetMessageResponse(const std::string& message) { m_messageResponse = message; }
 
+    // Puts |doneReason| on every response, the way the real communicator marks
+    // a failure ("error", "parse_error", "http_error").
+    void SetDoneReason(const std::string& doneReason) { m_doneReason = doneReason; }
+
     // Makes the next response ask for |toolName|, so an agent's tool-calling
     // path can be exercised without a real LLM.
     void SetToolCallResponse(const std::string& toolName) { m_toolCallName = toolName; }
@@ -51,6 +55,7 @@ public:
         response.message.role = "assistant";
         response.message.content = m_messageResponse;
         response.done = true;
+        response.done_reason = m_doneReason;
 
         if (!m_toolCallName.empty()) {
             nlohmann::json toolCall;
@@ -74,6 +79,7 @@ public:
 
 private:
     std::string m_messageResponse;
+    std::string m_doneReason;
     std::string m_toolCallName;
     nlohmann::json m_rawToolCall;
     int m_throwOnCall = 0;

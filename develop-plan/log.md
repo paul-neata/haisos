@@ -34,3 +34,4 @@
 - 2026-10-06 14:15 UTC -- builtins--wc merged #28 as 0.4.10: 1H fixed, 1M 4L open, 1 tries; review restarted twice after API 529s
 - 2026-10-06 14:20 UTC -- start builtins--man (0.4.11)
 - 2026-10-06 14:34 UTC -- builtins--man: PR #29, ready
+- 2026-10-06 14:37 UTC -- builtins--man merged #29 as 0.4.11: 3L open, 1 tries

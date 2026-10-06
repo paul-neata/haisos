@@ -16,7 +16,7 @@ Pause: no
 | 9 | [builtins--directories](tasks/builtins--directories.md) | done | 0.4.8 | 4 | #26 | 1 | 3L open | |
 | 10 | [builtins--unicode](tasks/builtins--unicode.md) | done | 0.4.9 | - | #27 | 1 | 4L open | Windows red from the 30 s HaisosOS limit; green on re-run |
 | 11 | [builtins--wc](tasks/builtins--wc.md) | done | 0.4.10 | 9, 10 | #28 | 1 | 1H fixed, 1M 4L open | reviewer added a chunk-split test |
-| 12 | [builtins--man](tasks/builtins--man.md) | in-review | 0.4.11 | 6, 9, 11 | #29 | 1 | | |
+| 12 | [builtins--man](tasks/builtins--man.md) | done | 0.4.11 | 6, 9, 11 | #29 | 1 | 3L open | |
 | 13 | [hsh--lexer](tasks/hsh--lexer.md) | todo | | 9 | | | | |
 | 14 | [hsh--parser](tasks/hsh--parser.md) | todo | | 13 | | | | |
 | 15 | [hsh--arith-glob](tasks/hsh--arith-glob.md) | todo | | 13 | | | | |

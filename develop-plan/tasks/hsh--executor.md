@@ -3,7 +3,7 @@
 - Rock: hsh
 - Depends on: hsh--expansion, pipes--broken-pipe (and through them hsh--parser, hsh--arith-glob, streams--exit-codes, builtins--directories)
 - Size: ~1000 changed lines in ~14 files (split: redirections, pipelines, the shell builtins, control flow and the interactive mode are the next five hsh tasks)
-- Plan checked against: develop @ 0d92271
+- Plan checked against: develop @ 7fd962a
 - PR title: hsh: register the shell, run simple commands and lists
 
 (The second half of the hsh rock came out at ~5000 lines, so it is six tasks:
@@ -121,6 +121,16 @@ The code this task touches today: `BuiltinCommand.h/.cpp` (`BuiltinHelp`,
 (`ListsEveryBuiltinSortedWithAVersion`, `EveryBuiltinsHelpHasTheSameShape`).
 
 ## Changes
+
+### Preliminary fix from the hsh--expansion review (PR #34)
+
+- `src/components/BuiltinCommands/commands/hsh/HshExpansion.cpp`, `Expander::WalkDoubleQuoted` (~line 290):
+  only a **lone** `"$@"` vanishes when there are no positional parameters. Today `onlyPlainAt` starts
+  as `!part.parts.empty()`, so `"$@$@"` and `"${@}${@}"` also give no field; dash gives one empty
+  field. Start it as `part.parts.size() == 1` and update the comment above it to say so.
+- Test: in `tests/unit/components/Hsh.unittests/HshExpansionTest.cpp`, `PositionalParameters`, the
+  block with no positional parameters (`empty`): `"$@$@"` and `"${@}${@}"` both give `Fields({""})`,
+  next to the existing lone-`"$@"` case, which gives `Fields({})`.
 
 Everything new is in namespace `Haisos::Hsh` (except `CreateHshCommand`, in
 `Haisos`), in `src/components/BuiltinCommands/commands/hsh/`. Plain portable
@@ -723,6 +733,8 @@ tests run from their executable directly, since `haisos` would also select
   based on dash); the directory-tree line of `BuiltinCommands/` lists `hsh`.
 
 ## Acceptance
+
+- [ ] `"$@$@"` and `"${@}${@}"` with no positional parameters give one empty field; a lone `"$@"` still gives none (preliminary fix, with its test).
 
 - [ ] `hsh` is registered; `haisos --init` lists `# BUILTIN rootfs hsh /bin/hsh` (generated, not hand-written); `TheInitTemplatesBuiltinsAllApplyOnceUncommented` passes.
 - [ ] `--help` has the one shape, its second line naming dash's page through `BuiltinHelp::basedOn`; every other builtin's help is unchanged.

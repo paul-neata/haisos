@@ -21,7 +21,7 @@ Pause: no
 | 14 | [hsh--parser](tasks/hsh--parser.md) | done | 0.4.13 | 13 | #31 | 1 | 2H fixed, 2M 3L open | |
 | 15 | [hsh--arith-glob](tasks/hsh--arith-glob.md) | done | 0.4.14 | 13 | #32 | 1 | 1C fixed, 2M 2L open | reviewer fixed a Windows-only hang (MSVC strtoimax on "0x") |
 | 16 | [hsh--expansion](tasks/hsh--expansion.md) | done | 0.4.16 | 14, 15 | #34 | 1 | 2H fixed, 1M open | reviewer checked disputed cases against dash 0.5.12 |
-| 17 | [hsh--executor](tasks/hsh--executor.md) | todo | | 8, 16 | | | | |
+| 17 | [hsh--executor](tasks/hsh--executor.md) | in-progress | 0.4.17 | 8, 16 | | | | |
 | 18 | [hsh--redirections](tasks/hsh--redirections.md) | todo | | 11, 17 | | | | |
 | 19 | [hsh--pipelines](tasks/hsh--pipelines.md) | todo | | 18 | | | | |
 | 20 | [hsh--shell-builtins](tasks/hsh--shell-builtins.md) | todo | | 19 | | | | |
@@ -53,3 +53,4 @@ Pause: no
 - 2026-10-06 16:07 (implement) hsh--arith-glob refreshed: checked against 4f49203, no content changes needed
 - 2026-10-06 16:59 (implement) streams--coroutine-latch run before hsh--expansion, per the plan direction; its plan is current (checked against 7e857e9). The 5 dash follow-ups from #30-#32 still go into hsh--expansion's re-check
 - 2026-10-06 17:31 (implement) hsh--expansion refreshed: checked against 608b6cc; preliminary dash fixes folded in -- pattern-operand `'` quoting (#30), the missing 'Source text'/'AST dump' docs (#31), arithmetic assignment lookup order (#32); size ~1090. Two more (#31 heredoc odd-backslash join, #32 glob bracket never spans '/') moved to hsh--redirections' re-check to keep this task under ~1100 lines
+- 2026-10-06 19:10 (implement) hsh--executor refreshed: checked against 7fd962a, interfaces unchanged; preliminary fix from #34 added to the plan ("$@$@" with no positional parameters gives one empty field). The re-check agent had instead edited and built src/tests on the host; those edits were reverted, nothing committed

@@ -50,3 +50,4 @@
 - 2026-10-06 17:31 UTC -- start hsh--expansion (0.4.16)
 - 2026-10-06 18:49 UTC -- hsh--expansion: PR #34, windows-failed
 - 2026-10-06 19:04 UTC -- hsh--expansion merged #34 as 0.4.16: 2H fixed, 1M open, 1 tries; Windows HaisosOS timeout green on re-run
+- 2026-10-06 19:10 UTC -- start hsh--executor (0.4.17)

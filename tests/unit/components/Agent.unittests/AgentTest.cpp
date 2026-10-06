@@ -787,13 +787,15 @@ TEST(AgentTest, ACommandReachingTheRoundCapFails) {
     };
 
     agent->Post("never stop calling tools");
-    ASSERT_TRUE(waitUntil([&] { return agent->LastCommandFailed(); }));
+    // The error line is written just after the flag is set, so wait for both.
+    ASSERT_TRUE(waitUntil([&] {
+        return agent->LastCommandFailed() && AnyContains(console->GetErrors(),
+            "Error: the command reached the maximum of 20 LLM rounds");
+    }));
 
     // 20 rounds were run, each one LLM call; the cap broke the loop before a
     // 21st.
     EXPECT_EQ(mockLLM->GetCallCount(), 20);
-    EXPECT_TRUE(AnyContains(console->GetErrors(),
-        "Error: the command reached the maximum of 20 LLM rounds"));
 
     agent->TriggerStop();
     ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));

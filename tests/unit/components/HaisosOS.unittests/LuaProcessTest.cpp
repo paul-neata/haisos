@@ -303,6 +303,23 @@ TEST(LuaProcessTest, CoroutinesStillWork) {
     EXPECT_EQ(run.err->Written(), "");
     ASSERT_TRUE(run.process->ExitCode().has_value());
     EXPECT_EQ(*run.process->ExitCode(), 0);
+
+    // A wrapped coroutine's error reaches the caller with the caller's
+    // position prefixed, as the original wrap does it; arguments to wrap after
+    // the function are ignored, as the original ignores them.
+    run = RunScript(toolFactory,
+        "print(pcall(function() local r = coroutine.wrap(function() error('x', 0) end)() return r end))\n"
+        "print(coroutine.wrap(function(a) return a end, 9)(3))\n"
+        "print(select(2, pcall(coroutine.wrap)))\n"
+        "print(select(2, pcall(coroutine.resume, 1)))");
+    EXPECT_EQ(run.out->Written(),
+        "false\ttest_lua.lua:1: x\n"
+        "3\n"
+        "bad argument #1 to 'coroutine.wrap' (function expected, got no value)\n"
+        "bad argument #1 to 'coroutine.resume' (coroutine expected, got number)\n");
+    EXPECT_EQ(run.err->Written(), "");
+    ASSERT_TRUE(run.process->ExitCode().has_value());
+    EXPECT_EQ(*run.process->ExitCode(), 0);
 }
 
 TEST(LuaProcessTest, AStoppedScriptExits143) {

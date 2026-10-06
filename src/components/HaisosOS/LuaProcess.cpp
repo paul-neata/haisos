@@ -318,6 +318,10 @@ void ArmLatchedKillHook(lua_State* L) {
 // returned is never acted on. It holds no C++ object across lua_call (see the
 // comment on LuaToolTrampoline).
 int LuaResumeTrampoline(lua_State* L) {
+    // Checked here, as the original's getco does, so a bad argument is
+    // reported against 'resume' (the original, called from C, would only find
+    // itself as '?').
+    luaL_argexpected(L, lua_type(L, 1) == LUA_TTHREAD, 1, "coroutine");
     // The original coroutine.resume is the upvalue; the arguments follow it.
     lua_pushvalue(L, lua_upvalueindex(1));
     lua_insert(L, 1);
@@ -331,10 +335,14 @@ int LuaResumeTrampoline(lua_State* L) {
 
 // One call of a function coroutine.wrap returned, wrapped. The wrapped call
 // raises the coroutine's error in the caller, so it runs protected here, the
-// caller is armed when the latch is set, and the error is re-raised unchanged:
-// the hook still strips each pcall level, as it does for resume. lua_error is
-// allowed here because this closure holds no C++ locals (see the comment on
-// LuaToolTrampoline).
+// caller is armed when the latch is set, and the error is re-raised: the hook
+// still strips each pcall level, as it does for resume. The original prefixes a
+// string error with its caller's position (luaL_where(L, 1)), which from here
+// is this C closure and so empty; the prefix is added here instead, from this
+// closure's own caller, so the message is the one the original gives (bar a
+// memory error inside the coroutine, which the original leaves bare and which
+// reaches here as an ordinary error). lua_error is allowed here because this
+// closure holds no C++ locals (see the comment on LuaToolTrampoline).
 int LuaWrapCallTrampoline(lua_State* L) {
     // The function the original coroutine.wrap returned is the upvalue.
     lua_pushvalue(L, lua_upvalueindex(1));
@@ -345,6 +353,11 @@ int LuaWrapCallTrampoline(lua_State* L) {
         ArmLatchedKillHook(L);
     }
     if (status != LUA_OK) {
+        if (status != LUA_ERRMEM && lua_type(L, -1) == LUA_TSTRING) {
+            luaL_where(L, 1);
+            lua_insert(L, -2);
+            lua_concat(L, 2);
+        }
         return lua_error(L);
     }
     return lua_gettop(L);
@@ -353,8 +366,13 @@ int LuaWrapCallTrampoline(lua_State* L) {
 // coroutine.wrap, wrapped: as the original, but the function it hands back is
 // wrapped in LuaWrapCallTrampoline above.
 int LuaWrapTrampoline(lua_State* L) {
-    // The original coroutine.wrap is the upvalue; wrap(f) takes one argument
-    // and returns one function, which becomes the call wrapper's upvalue.
+    // wrap(f) takes exactly one argument, checked as the original checks it
+    // (so the message names 'wrap'); anything after it is dropped, as the
+    // original ignores it, so the lua_call below always sees one argument.
+    luaL_checktype(L, 1, LUA_TFUNCTION);
+    lua_settop(L, 1);
+    // The original coroutine.wrap is the upvalue; it returns one function,
+    // which becomes the call wrapper's upvalue.
     lua_pushvalue(L, lua_upvalueindex(1));
     lua_insert(L, 1);
     lua_call(L, 1, 1);

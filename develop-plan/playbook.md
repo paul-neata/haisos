@@ -27,7 +27,7 @@ Pause: no
 | 20 | [hsh--shell-builtins](tasks/hsh--shell-builtins.md) | todo | | 19 | | | | |
 | 21 | [hsh--control-flow](tasks/hsh--control-flow.md) | todo | | 20 | | | | |
 | 22 | [hsh--interactive](tasks/hsh--interactive.md) | todo | | 12, 21 | | | | |
-| 23 | [streams--coroutine-latch](tasks/streams--coroutine-latch.md) | in-review | 0.4.15 | 6, 8 | #33 | 1 | | follow-up to #23/#25 findings; run before hsh--expansion |
+| 23 | [streams--coroutine-latch](tasks/streams--coroutine-latch.md) | done | 0.4.15 | 6, 8 | #33 | 1 | 1C 2H 1M fixed, 1M 1L open | follow-up to #23/#25 findings; reviewer fixed coroutine.wrap argument handling |
 
 ## Directions
 - (plan, 2026-10-06) Run streams--coroutine-latch (#23) next, before hsh--expansion. -> done: started it next, as 0.4.15

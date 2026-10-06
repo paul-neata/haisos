@@ -67,3 +67,4 @@
 - 2026-10-06 22:58 UTC -- hsh--control-flow merged #39 as 0.4.21: 2H 1M fixed, 3M 4L open, 1 tries; question on goal scenario 3
 - 2026-10-06 23:08 UTC -- start hsh--interactive (0.4.22), the last task
 - 2026-10-06 23:48 UTC -- hsh--interactive: PR #40, windows-failed (HaisosOS timeout)
+- 2026-10-06 23:56 UTC -- hsh--interactive merged #40 as 0.4.22: 1M 4L open, 1 tries; all tasks done -- final phase

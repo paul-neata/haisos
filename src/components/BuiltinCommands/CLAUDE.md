@@ -1,7 +1,7 @@
 # BuiltinCommands
 
-The commands compiled into Haisos itself -- `cat`, `echo`, `ls`, `mkdir`,
-`pwd`, `wc` -- and what places them on filesystems. Implements `IBuiltinCommands`
+The commands compiled into Haisos itself -- `cat`, `echo`, `ls`, `man`,
+`mkdir`, `pwd`, `wc` -- and what places them on filesystems. Implements `IBuiltinCommands`
 and `IBuiltinConfigurator` (`interfaces/IBuiltinCommands.h`); both are created
 through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
 
@@ -54,6 +54,9 @@ through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
 - `ParseBuiltinArgs` - a GNU `getopt_long`-style parser shared by the commands:
   clustered short options, unambiguous long-option prefixes, options mixed with
   operands, `--`. `--help`/`--version` are recognized for every command.
+  `BuiltinArgument::OptionalAttached` is man-db's `-Tutf8` kind: the argument
+  is taken only when attached (`-Tutf8`, `--troff-device=utf8`), never from the
+  next word (`-T utf8` is `-T`, then the operand utf8).
 
 ## Output
 
@@ -108,9 +111,18 @@ that table, so the help can never disagree with what is parsed.
 | `cat` | 1.2.0 | every option of GNU cat; with no FILE, or a FILE of `-`, the standard input is read | -- |
 | `echo` | 1.1.0 | `-n -e -E`, the `-e` escapes; `--help`/`--version` only as the sole argument, as GNU echo | -- |
 | `ls` | 1.3.0 | `-a -A -B -c -C -d -f -g -G -h -k -l -m -N -o -p -r -R -s -S -t -u -U -w -x -X -1`, `--file-type --format --full-time --group-directories-first --sort --time --time-style`; off a terminal (stdout a pipe, a file, a device), one name per line unless `-C`/`-x`/`-m`/`-l` asks for a layout, and names literal with control characters written raw -- GNU's own defaults when stdout is not a terminal; `-1` after `-l` keeps the long listing | owner and group are `haisos`, permissions `rwxrwxrwx` (no users or permissions yet), so a device shows as `crwxrwxrwx`, with its major and minor numbers in the size column as GNU ls shows them; columns are padded with spaces, not tabs; the width is 80 unless `-w` says otherwise; `--sort=version/width` and `--time=birth` are reported as not treated; on Windows, a `--time-style=+FORMAT` conversion the Microsoft C runtime lacks (`%k`, `%P`, ...) prints as written, as glibc prints one it does not know |
+| `man` | 1.0.0 | `-f -k -i -I`, a section first (`man 1 ls`), several pages | pages are compiled in (each builtin's `ManPage()`, its `--help` unless overridden), all section 1, plain text, no pager; `-k` matches names and summaries only; everything else of man-db's reported as not treated |
 | `mkdir` | 1.1.0 | `-p -v` | `-m`/`--mode`, `-Z`/`--context` not treated (no permissions or security contexts) |
 | `pwd` | 1.1.0 | `-L -P` (the same: no symlinks) | -- |
 | `wc` | 1.0.0 | `-c -m -l -L -w`, `--files0-from`, `--total`; with no FILE, or a FILE of `-`, the standard input is read | standard input has no size, so with it the columns are at least 7 wide (GNU sizes a redirected file); character classes and display widths come from the `Unicode` component's compact tables (unassigned code points count as printable; rare scripts' widths are approximate); `--debug` not treated |
+
+`man` reaches the pages through `CreateStandardBuiltinCommands()` directly: a
+pure function returning fresh, stateless command objects compiled into Haisos
+-- program data, like a static table, not something outside the process. So
+`man` is handed no `IHaisosOS`, no `IBuiltinCommands` and no filesystem, and
+the `ICurrentProcess` rule holds untouched; the price is that man shows the
+page of every builtin compiled into Haisos, whether or not it is placed on
+the filesystem and whichever `IBuiltinCommands` the OS was created with.
 
 `ls` follows GNU ls as it prints to a terminal: the column layout (a line
 kept shorter than the width), `-l` with a `total` line in 1K blocks, link

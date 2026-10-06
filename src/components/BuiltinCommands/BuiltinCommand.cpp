@@ -142,7 +142,7 @@ std::string OptionSynopsis(const BuiltinOption& option) {
         text += option.longName;
         if (option.argument == BuiltinArgument::Required) {
             text += "=" + option.argumentName;
-        } else if (option.argument == BuiltinArgument::Optional) {
+        } else if (option.argument == BuiltinArgument::Optional || option.argument == BuiltinArgument::OptionalAttached) {
             text += "[=" + option.argumentName + "]";
         }
     } else if (option.argument != BuiltinArgument::None) {
@@ -260,6 +260,15 @@ ParsedBuiltinArgs ParseBuiltinArgs(const std::vector<std::string>& args, const s
                         parsed.error = std::string("option requires an argument -- '") + arg[j] + "'";
                         return parsed;
                     }
+                    found.hasArgument = true;
+                    parsed.options.push_back(std::move(found));
+                    break;
+                }
+                if (option->argument == BuiltinArgument::OptionalAttached && j + 1 < arg.size()) {
+                    // "-Tutf8": the rest of the cluster is the argument, and
+                    // ends the cluster; "-T" alone has none ("-T utf8" takes
+                    // utf8 as an operand, never as the argument).
+                    found.argument = arg.substr(j + 1);
                     found.hasArgument = true;
                     parsed.options.push_back(std::move(found));
                     break;

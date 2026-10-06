@@ -6,6 +6,7 @@ add_library(BuiltinCommands STATIC
     commands/cat/Cat.cpp
     commands/echo/Echo.cpp
     commands/ls/Ls.cpp
+    commands/man/Man.cpp
     commands/mkdir/Mkdir.cpp
     commands/pwd/Pwd.cpp
     commands/wc/Wc.cpp

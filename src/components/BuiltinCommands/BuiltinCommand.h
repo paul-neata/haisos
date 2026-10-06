@@ -10,9 +10,11 @@
 namespace Haisos {
 
 // Whether an option takes an argument: never ("-l"), always ("-w 80",
-// "--width=80"), or only when attached to a long option ("--color",
-// "--color=auto").
-enum class BuiltinArgument { None, Required, Optional };
+// "--width=80"), only when attached to a long option ("--color",
+// "--color=auto"), or attached to either spelling but never as the next word
+// (OptionalAttached: man-db's "-Tutf8", "--troff-device=utf8"; "-T utf8" is
+// -T, then the operand utf8).
+enum class BuiltinArgument { None, Required, Optional, OptionalAttached };
 
 // An id no treated option uses: it marks an option of the real command that
 // Haisos recognizes but does not act on (see BuiltinContext::ReportNotTreated).

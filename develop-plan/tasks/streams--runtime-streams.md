@@ -3,7 +3,7 @@
 - Rock: streams
 - Depends on: streams--console-and-start
 - Size: ~700 changed lines in ~22 files
-- Plan checked against: develop @ 0d92271
+- Plan checked against: develop @ f2cc5d5
 - PR title: Agents and Lua scripts read slot 0 and write to slots 1 and 2
 
 ## Goal
@@ -69,17 +69,38 @@ What earlier tasks provide (as if already on `develop`):
   `SetWriteResult`, terminal flag).
 
 Today (read the code): `HaisosOS::StartAgentProcess` creates an
-`AgentConsoleAdapter` and passes it to `ILLMService::CreateAgent` and, when
-interactive, to `AgentProcess::Create` as `interactiveInput`;
-`AgentProcess` builds an `AgentInputLoop(agent, console)`; `AgentInputLoop::Run`
-calls `m_console->ReadLine()`; `Agent.cpp` writes to `m_console` at three
-places (reply content ~line 469, unknown tool ~358, `OnCommandFailed` ~521);
+`AgentConsoleAdapter` (untagged, `AgentConsoleAdapter::Create(m_physicalConsole)`)
+and passes it to `ILLMService::CreateAgent` and, when `options.interactive`,
+to `AgentProcess::Create` as `interactiveInput`; `AgentProcess` builds an
+`AgentInputLoop(agent, console)`; `AgentInputLoop::Run` calls
+`m_console->ReadLine()`; `Agent.cpp` writes to `m_console` at three places
+(reply content ~line 509, unknown tool ~377, inside `OnCommandFailed` ~561);
 the LLM error responses are made in `src/components/LLMCommunicator/LLMCommunicator.cpp`
 with `done_reason` `"error"`, `"parse_error"` or `"http_error"` and content
 `Error: ...`; `LuaProcess` takes an `IAgentConsole` and writes `print` lines
-and error lines to it.
+and error lines to it. `StartProcessOptions` (now in `interfaces/IHaisosOS.h`,
+landed by `streams--console-and-start`) already carries `stdIn`/`stdOut`/
+`stdErr`/`interactive` and is resolved by `HaisosOS::ResolveStandardStreams`
+before `StartAgentProcess`/`StartLuaProcess` are called; both already take
+`const StartProcessOptions& options` but still ignore the three descriptors --
+that wiring is this task's to do. `Agent::SetFinishedHook` (set by
+`AgentProcess::Create`, run on the agent's own thread before it reports
+finished) already exists and already releases the process's descriptor table
+at the end of the conversation (`fd--process-table`) -- nothing new to add for
+that; this task only adds what writes through the table meanwhile.
 
 ## Changes
+
+### `tests/mocks/MockFileDescriptor.h` -- fix first (preliminary)
+
+This task is the first to drive real assertions off `MockFileDescriptor`'s
+write count. Its review from `streams--console-and-start` (PR #21) found a bug:
+`Write` returns early with the forced result (`SetWriteResult`) *before*
+`++m_writeCalls`, so `WriteCalls()` does not count a failed write even though
+its own comment says "every Write call, failed ones included"; `m_writtenCalls`
+is incremented but never read by anything. Fix both before writing this task's
+tests: increment `m_writeCalls` on every call, forced result or not, and drop
+the unused `m_writtenCalls` member entirely.
 
 ### `interfaces/ILLMService.h` -- `IAgentConsole`
 
@@ -262,6 +283,14 @@ the lines of the stdout mock's `Written()`. New:
   stdout does not contain `Error:`.
 - `HaisosOSTest.AScriptPrintsToAGivenStdout` -- a `.lua` printing `hi` with a
   `stdOut` mock: it holds `hi\n`.
+
+All of the above write to a mock descriptor from the process's own runtime
+thread while the test thread reads it back; a script or a non-interactive
+agent can finish before the test gets around to asserting. Follow the pattern
+the existing `ABuiltinWithoutGivenStreamsWritesToTheConsole`/
+`AGivenStdoutBypassesTheConsole` tests already use: `ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs))`
+(or the agent's/script's own wait) before reading `Written()` -- never assert
+on a mock's content while the process may still be running.
 
 `tests/unit/components/Agent.unittests/AgentTest.cpp`:
 

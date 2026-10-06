@@ -9,7 +9,7 @@ Pause: no
 | 2 | [fd--descriptor-objects](tasks/fd--descriptor-objects.md) | done | 0.4.1 | - | #19 | 1 | 1C fixed, 1M 2L open | Windows min-macro fixed by the reviewer |
 | 3 | [fd--process-table](tasks/fd--process-table.md) | done | 0.4.2 | 2 | #20 | 1 | 1H fixed, 1M 1L open | reviewer fixed a racy test |
 | 4 | [streams--console-and-start](tasks/streams--console-and-start.md) | done | 0.4.3 | 3 | #21 | 1 | 1M 4L open | |
-| 5 | [streams--runtime-streams](tasks/streams--runtime-streams.md) | todo | | 4 | | | | |
+| 5 | [streams--runtime-streams](tasks/streams--runtime-streams.md) | in-progress | 0.4.4 | 4 | | | | |
 | 6 | [streams--exit-codes](tasks/streams--exit-codes.md) | todo | | 5 | | | | |
 | 7 | [pipes--pipe-service](tasks/pipes--pipe-service.md) | todo | | 6 | | | | |
 | 8 | [pipes--broken-pipe](tasks/pipes--broken-pipe.md) | todo | | 7 | | | | |
@@ -35,3 +35,4 @@ Pause: no
 ## Adjustments
 - 2026-10-06 05:57 (implement) fd--process-table refreshed: checked-against line fixed to 7b72167; Tests note to drop the stale 'IFileIO keeps int fds' comment (PR #19 finding)
 - 2026-10-06 06:28 (implement) streams--console-and-start refreshed: checked against 9492a45, no content changes needed
+- 2026-10-06 07:01 (implement) streams--runtime-streams refreshed: checked against f2cc5d5; Context notes what #19-#21 provide, Agent.cpp line numbers fixed; preliminary MockFileDescriptor WriteCalls fix (PR #21 finding); Tests: wait for the process before reading a mock's writes

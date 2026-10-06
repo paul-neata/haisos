@@ -496,15 +496,19 @@ int Shell::RunStage(const Command& command, std::shared_ptr<IFileDescriptor> in,
     return RunSubshell([&]() -> int {
         PlaceDescriptor(IO(), IFileIO::kStdIn, std::move(in));
         PlaceDescriptor(IO(), IFileIO::kStdOut, std::move(out));
+        // Kept and restored, not simply nulled: a command substitution in the
+        // command's own expansion runs a pipeline of its own, which uses this
+        // very slot.
+        std::shared_ptr<IProcess>* const keep = m_startInsteadOfWait;
         m_startInsteadOfWait = started;
         int status;
         try {
             status = ExecuteCommand(command);
         } catch (...) {
-            m_startInsteadOfWait = nullptr;
+            m_startInsteadOfWait = keep;
             throw;
         }
-        m_startInsteadOfWait = nullptr;
+        m_startInsteadOfWait = keep;
         return status;
     });
 }

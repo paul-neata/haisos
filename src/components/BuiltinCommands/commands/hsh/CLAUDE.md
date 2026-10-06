@@ -106,21 +106,29 @@ task of the hsh rock and adds its files here:
   to be reported; invocation mistakes in dash's own words ("Illegal option
   -y", `-c requires an argument`, status 2).
 - `HshShell.h/.cpp` - the executor (`Shell`), running one shell inside the
-  builtin's process: see "Running" below.
+  builtin's process: see "Running" and "Pipelines, subshells, jobs" below.
 - `HshRedirection.h/.cpp` - `RedirectionScope`, applying a command's
   redirections to the shell's own descriptor table and undoing them, and
   `PlaceDescriptor`: see "Redirections" below.
 - `HshDescriptors.h/.cpp` - `ClosedDescriptor`, what a child gets in place of
-  a closed slot.
+  a closed slot, and `NullInputDescriptor`, the empty stdin of a background
+  command.
+- `HshUnboundedPipe.h/.cpp` - `CreateUnboundedPipe`: a pipe without a
+  capacity (writes never block), for the pairs of reader/writer where the
+  reader runs only after the writer (two in-shell pipeline stages, `$(...)`).
+- `HshSubshell.h/.cpp` - `SubshellScope`, an in-process subshell's save and
+  restore of everything it may change: see "Pipelines, subshells, jobs".
 - `HshBuiltins.h/.cpp` - the shell's own builtins (`:`, `exec`, `exit`,
-  `false`, `true`): a sorted table of name, special/regular, function; later
-  tasks add rows (and files of their own for the bigger ones).
+  `false`, `true`, `wait`): a sorted table of name, special/regular,
+  function; later tasks add rows (and files of their own for the bigger ones).
 - `HshBuiltinExec.cpp` - `exec`: with no command its redirections stay; with
   one, the command runs in the shell's place.
+- `HshBuiltinWait.cpp` - `wait`: waits for the background jobs, all of them
+  or by pid, with dash's statuses and messages.
 - `Hsh.cpp` - the `hsh` builtin itself: the option table (every dash option,
   treated or marked for the not-treated report), the dash-based `--help`
   (`BuiltinHelp::basedOn`), `ParseInvocation`, and `Shell` on the context.
-- (later tasks: pipelines, the rest of the shell builtins,
+- (later tasks: the rest of the shell builtins,
   control flow, the interactive loop.)
 
 ## AST dump
@@ -273,10 +281,82 @@ polls in 50 ms slices so a stop of the shell reaches the child
 (`TriggerStop`, 5 s grace) before the shell unwinds with `ShellStopped`.
 
 What is not implemented yet reports `<what> is not supported yet` with status
-2 through the `NotYet` helper: `&`, pipelines of more than one command and
-`$(...)` (hsh--pipelines), every compound command and function definitions
-(hsh--control-flow). Each later task removes its uses; hsh--control-flow
-removes the helper.
+2 through the `NotYet` helper: every compound command and function definitions
+(hsh--control-flow, which also removes the helper).
+
+## Pipelines, subshells, jobs
+
+A pipeline `a | b | c` (and a negated `! a | b`) runs its stages at the same
+time, connected by pipes; its status is the last stage's. A stage is either a
+**child stage** (`IsChildStage`: a simple command with at least one word whose
+first word is literal text, `LiteralText`, naming neither a shell builtin nor
+-- hsh--control-flow -- a function), a child process started at once so that
+every child stage runs concurrently, or an **in-shell stage** (a shell
+builtin, an assignment-only command, later a compound command or a function),
+run one at a time after every child has been started. Then the shell waits
+for each child in order. A child stage of a pipeline is started but not
+waited: `RunStage` runs the command with its stdin/stdout replaced (slots 0
+and 1, in a subshell) and `ExecuteSimpleCommand`'s `m_startInsteadOfWait`
+hands the started child back instead of waiting for it.
+
+The pipe between two stages is a real one (`IFileIO::CreatePipe`: 64 KiB,
+blocking), except an **unbounded pipe** (`CreateUnboundedPipe`,
+`HshUnboundedPipe.h`: writes append and never block) before an in-shell
+reader that follows an in-shell stage. That split keeps a pipeline
+deadlock-free without a single thread: the in-shell stages run one at a time,
+after every child has been started, so a bounded pipe's reader is either a
+running child or the first in-shell stage (which runs at once), and a writer
+whose reader comes later is an in-shell stage writing into an unbounded pipe.
+Right after a stage is started or has run, the shell drops its own references
+to the pipe ends it handed over, so a reader sees end of file once its
+writers are gone. An in-shell writer whose reader is done meets a broken pipe
+there and the subshell ends, with 141 -- only the subshell dies of it, as a
+forked dash subshell would (`WriteOut`/`WriteErr` throw `ShellExit` in a
+subshell, where at the top level they keep stopping the shell itself,
+`StopForBrokenPipe`).
+
+`SubshellScope` (`HshSubshell.h`) is the in-process subshell: what a subshell
+may change and must not leak -- the `ShellState` (variables, options,
+positional parameters, `$?`, `$!`), the working directory, every slot of the
+descriptor table and the job list -- saved at construction and put back at
+destruction (the directory first, then the slots), so `echo b | read w`
+leaves `w` unset and `x=$(cd /; pwd)` the directory alone. It also counts the
+shell's subshell depth. `Shell::RunSubshell` wraps a body in one: `exit`
+(`ShellExit`) and fatal errors (`ShellError`, reported as at the top level,
+status 2) end only the subshell; `ShellStopped` passes through, to end the
+whole shell.
+
+A background list `cmd &` is started without waiting. One that is a single
+pipeline of child stages only starts its stages as a pipeline does, without
+the waiting (the first stage's stdin is a `NullInputDescriptor`: an
+asynchronous list's stdin is empty, as dash's /dev/null with no job control,
+before its own redirections). One that needs the shell itself (a builtin,
+`&&`/`||`, and from hsh--control-flow a compound command or a function) runs
+as a **child hsh**: `hsh -c` of `BackgroundScript(item)` --
+`BackgroundPrelude()` then the item's `sourceText` -- started from the
+running shell's own path (`IProcess::Path()`, no PATH lookup), with `$0` and
+the positional parameters passed on, the options that are on among e u f x C
+a as one invocation argument (there is no `set` builtin yet), the exported
+variables, the shell's working directory and its stdout/stderr, and an empty
+stdin. Documented exception: an **unexported** variable does not reach that
+child, where a forked dash subshell would see it (the child is a process, not
+a fork: it sees only its environment). Either way the start records a **job**
+-- every process started and the last stage's pid, which `$!` shows -- kept
+in `m_jobs`, oldest first; past 1024 jobs the finished ones are dropped,
+oldest first. `wait` (`HshBuiltinWait.cpp`, a regular builtin) waits for
+every job's processes (status 0 always) or, given pids, for each one's job --
+status the job's last exit code; with dash's messages and statuses
+(`wait: Illegal number: <x>` and `wait: No such job: <x>`, both 2; a pid that
+is no job's, no process of a job included: 127, no message), and it unwinds
+with `ShellStopped` when the shell is asked to stop.
+
+`$(...)` and `` `...` `` are `Shell::RunCommandSubstitution`: the text is
+parsed (`ParseProgram`, first line the substitution's), run as a subshell
+with its stdout on an **unbounded pipe** -- the reader runs only after the
+writer, so a bounded pipe would deadlock past 64 KiB -- and the pipe is read
+to end of file (a background child of the subshell that still holds the write
+end is waited out, as dash waits for end of file). The expansion drops the
+trailing newlines and makes `$?` the substitution's status.
 
 ## Redirections
 
@@ -361,6 +441,9 @@ delimiter line has not come yet, and a source ending in a backslash-newline.
   unset.
 - `&>` and `<<<` are bash's operators (`echo a &>f` redirects stdout and
   stderr to `f`; in dash it would be `echo a &` then `>f`).
+- A background (`&`) list that needs the shell runs in a child `hsh -c`
+  process, which sees only the exported variables (a forked dash subshell
+  would see them all).
 - `${x:}` is a `Bad substitution` (`ParameterOp::Bad`, failing at expansion)
   rather than dash's syntax error `Missing '}'`.
 - `$'...'` is not ANSI-C quoting (as dash): a plain `$` followed by the quote.

@@ -1,5 +1,6 @@
 #include "commands/hsh/HshBuiltins.h"
 
+#include <limits>
 #include <string>
 
 #include "commands/hsh/HshNumber.h"

@@ -29,6 +29,12 @@ TEST_F(HshShellTest, Cd) {
         {"cd /nonexist; echo after", "after\n", "hsh: 1: cd: can't cd to /nonexist\n", 0},
         {"cd -x", "", "hsh: 1: cd: Illegal option -x\n", 2},
         {"cd -- /docs; pwd", "/docs\n"},
+        {"cd /docs; echo $PWD $OLDPWD", "/docs /\n"},
+        {"cd /docs; cd sub; pwd", "/docs/sub\n"},
+        {"cd /docs; cd ..; pwd", "/\n"},
+        {"HOME=/docs; cd; pwd", "/docs\n"},
+        // Children started afterwards start in the new directory.
+        {"cd /docs; hsh -c pwd", "/docs\n"},
     };
     for (const auto& c : cases) {
         ExpectSh(c, "Cd");
@@ -66,6 +72,10 @@ TEST_F(HshShellTest, ExportAndReadonly) {
         // Options: -p clusters, "--" ends them; other letters are illegal.
         {"export -- X=1; export -p", "export PWD='/'\nexport X='1'\n"},
         {"export -z; echo after", "", "hsh: 1: export: Illegal option -z\n", 2},
+        // Exported variables reach children; unset ones no longer do.
+        {"export y=5; hsh -c 'echo $y'", "5\n"},
+        {"export E=1; unset E; hsh -c 'echo \"[$E]\"'", "[]\n"},
+        {"readonly x=1; x=2; echo no", "", "hsh: 1: x: is read only\n", 2},
     };
     for (const auto& c : cases) {
         ExpectSh(c, "ExportAndReadonly");
@@ -131,6 +141,10 @@ TEST_F(HshShellTest, SetOptions) {
         {"set -o nosuch", "", "hsh: 1: set: Illegal option -o nosuch\n", 2},
         {"set +o nosuch", "", "hsh: 1: set: Illegal option -o nosuch\n", 2},
         {"set --frob", "", "hsh: 1: set: Illegal option --\n", 2},
+        {"set -- -x; echo $1", "-x\n"},
+        {"set - a; echo $1 \"[$-]\"", "a []\n"},
+        {"set -C; echo a > /noclobber.txt; echo b > /noclobber.txt", "",
+            "hsh: 1: cannot create /noclobber.txt: File exists\n", 2},
     };
     for (const auto& c : cases) {
         ExpectSh(c, "SetOptions");
@@ -249,6 +263,12 @@ TEST_F(HshShellTest, TestAndBracket) {
         {"[ ! -d /docs ]", "", "", 1},
         {"[ -d /docs -a -f /notes.txt ]"}, {"[ -d /docs -a -f /none ]", "", "", 1},
         {"[ -d /none -o -f /notes.txt ]"},
+        {"[ \\( 1 = 1 \\) -o 1 = 2 ]"}, {"test -n a -a -z \"\""},
+        {"test x = x -a ! y = z"}, {"test ! ! a"}, {"test \"\" -a a", "", "", 1},
+        {"[ 1 -eq ]", "", "hsh: 1: [: -eq: argument expected\n", 2},
+        {"[ x -foo y ]", "", "hsh: 1: [: x: unexpected operator\n", 2},
+        {"test a b", "", "hsh: 1: test: a: unexpected operator\n", 2},
+        {"test 1 -eq 1x", "", "hsh: 1: test: Illegal number: 1x\n", 2},
         // test errors are reported, status 2, and the shell goes on (test is
         // a regular builtin).
         {"[ a -eq 1 ]; echo after", "after\n", "hsh: 1: [: Illegal number: a\n", 0},
@@ -269,6 +289,10 @@ TEST_F(HshShellTest, Xtrace) {
     // space) -- and dash makes the assignments before tracing, so a PS4
     // assignment restyles its own trace line.
     ExpectSh({"set -x; PS4='>'; echo a", "a\n", ">PS4=>\n>echo a\n"}, "Xtrace");
+    // The trace goes to the stderr from before the command's redirections,
+    // as dash: `2>f` does not catch it.
+    ExpectSh({"set -x; echo a 2>/t.txt; : 2>/t.txt", "a\n", "+ echo a\n+ :\n"}, "Xtrace");
+    EXPECT_EQ(ReadRootFile("/t.txt"), "");
     // +x turns it back off; set +x itself is still traced.
     ExpectSh({"set -x; echo a; set +x; echo b", "a\nb\n", "+ echo a\n+ set +x\n"}, "Xtrace");
 }

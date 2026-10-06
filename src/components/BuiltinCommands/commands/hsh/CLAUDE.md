@@ -310,7 +310,8 @@ running then is logged, `hsh: child (pid <pid>, <path>) did not stop
 within <ms> ms`) before the shell unwinds with `ShellStopped`.
 
 Under `-x` (xtrace), the trace of a command is dash's: written to stderr
-after the redirections apply (so `echo a 2>f` traces into `f`), after the
+after the redirections apply but to the stderr from before them (so
+`echo a 2>f` traces to the shell's stderr, not into `f`, as dash), after the
 prefix assignments are made (so `PS4=X` restyles its own trace line) and
 nowhere on a redirection error. It is PS4's value as it is, never expanded
 (a documented exception), glued to the line with no separator -- only the

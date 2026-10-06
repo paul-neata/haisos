@@ -343,7 +343,9 @@ int Shell::ExecuteSimpleCommand(const SimpleCommand& command) {
     // of the command and are undone afterwards, unless a builtin (exec with no
     // command) asks to keep them. As dash they apply before the prefix
     // assignments even expand and before the trace: a failure runs none of
-    // them, and is fatal for a special builtin.
+    // them, and is fatal for a special builtin. The trace still goes to the
+    // stderr in place before them, as dash's (`echo a 2>f` traces to it).
+    const std::shared_ptr<IFileDescriptor> traceErr = IO().GetDescriptor(IFileIO::kStdErr);
     RedirectionScope scope(*this);
     if (const std::optional<std::string> error = scope.Apply(command.redirections)) {
         if (!fields.empty()) {
@@ -361,10 +363,10 @@ int Shell::ExecuteSimpleCommand(const SimpleCommand& command) {
     }
 
     // dash's trace, after the assignments are made (so a `PS4=X` assignment
-    // restyles its own line) and stderr already redirected: PS4 as it is (not
-    // expanded, a documented exception), then the assignments as name=value
-    // and the fields, joined by single spaces.
-    const auto trace = [this, &assignments, &fields] {
+    // restyles its own line), to the stderr from before the redirections:
+    // PS4 as it is (not expanded, a documented exception), then the
+    // assignments as name=value and the fields, joined by single spaces.
+    const auto trace = [this, &assignments, &fields, &traceErr] {
         std::string text = m_state.variables.Get("PS4").value_or("");
         bool first = true;
         for (const auto& [name, value] : assignments) {
@@ -375,7 +377,7 @@ int Shell::ExecuteSimpleCommand(const SimpleCommand& command) {
             text += (first ? "" : " ") + field;
             first = false;
         }
-        WriteErr(text + "\n");
+        WriteTo(traceErr, text + "\n");
     };
 
     if (fields.empty()) {
@@ -466,12 +468,15 @@ void Shell::WriteOut(const std::string& bytes) { WriteDescriptor(IFileIO::kStdOu
 void Shell::WriteErr(const std::string& bytes) { WriteDescriptor(IFileIO::kStdErr, bytes); }
 
 void Shell::WriteDescriptor(int fd, const std::string& bytes) {
+    WriteTo(IO().GetDescriptor(fd), bytes);
+}
+
+void Shell::WriteTo(const std::shared_ptr<IFileDescriptor>& descriptor, const std::string& bytes) {
     // A shell whose output found a broken pipe is dying quietly: nothing more
     // may go out, as for any program after SIGPIPE.
     if (m_brokenPipe) {
         return;
     }
-    auto descriptor = IO().GetDescriptor(fd);
     if (!descriptor) {
         return;
     }

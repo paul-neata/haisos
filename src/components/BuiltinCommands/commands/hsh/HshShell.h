@@ -154,6 +154,9 @@ private:
     // removes the helper.
     int NotYet(const std::string& what);
     void WriteDescriptor(int fd, const std::string& bytes);
+    // WriteDescriptor's work on a descriptor already in hand (the trace's
+    // stderr from before a command's redirections); null writes nothing.
+    void WriteTo(const std::shared_ptr<IFileDescriptor>& descriptor, const std::string& bytes);
 
     // A `&` list item: as a nowait pipeline when its and-or list is one
     // pipeline of child stages only, else as a child hsh running its text.

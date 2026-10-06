@@ -10,6 +10,8 @@ add_library(BuiltinCommands STATIC
     commands/mkdir/Mkdir.cpp
     commands/pwd/Pwd.cpp
     commands/wc/Wc.cpp
+    commands/hsh/HshWord.cpp
+    commands/hsh/HshLexer.cpp
 )
 target_include_directories(BuiltinCommands PUBLIC
     ${CMAKE_SOURCE_DIR}/interfaces

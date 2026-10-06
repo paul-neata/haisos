@@ -7,7 +7,7 @@ Pause: no
 |---|------|--------|---------|---------|----|-------|--------|-------|
 | 1 | [links--follow-anywhere](tasks/links--follow-anywhere.md) | obsolete | | - | | | | implemented directly on develop in 76079bd |
 | 2 | [fd--descriptor-objects](tasks/fd--descriptor-objects.md) | done | 0.4.1 | - | #19 | 1 | 1C fixed, 1M 2L open | Windows min-macro fixed by the reviewer |
-| 3 | [fd--process-table](tasks/fd--process-table.md) | todo | | 2 | | | | |
+| 3 | [fd--process-table](tasks/fd--process-table.md) | in-progress | 0.4.2 | 2 | | | | |
 | 4 | [streams--console-and-start](tasks/streams--console-and-start.md) | todo | | 3 | | | | |
 | 5 | [streams--runtime-streams](tasks/streams--runtime-streams.md) | todo | | 4 | | | | |
 | 6 | [streams--exit-codes](tasks/streams--exit-codes.md) | todo | | 5 | | | | |
@@ -33,3 +33,4 @@ Pause: no
 ## Questions
 
 ## Adjustments
+- 2026-10-06 05:57 (implement) fd--process-table refreshed: checked-against line fixed to 7b72167; Tests note to drop the stale 'IFileIO keeps int fds' comment (PR #19 finding)

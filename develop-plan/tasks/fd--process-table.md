@@ -3,7 +3,7 @@
 - Rock: fd
 - Depends on: fd--descriptor-objects
 - Size: ~650 changed lines in ~20 files
-- Plan checked against: develop @ 0d92271 (after fd--descriptor-objects)
+- Plan checked against: develop @ 7b72167
 - PR title: Give every process a descriptor table on IFileIO
 
 ## Goal
@@ -276,6 +276,10 @@ Adapt the existing uses:
 - `tests/unit/components/BuiltinCommands.unittests/BuiltinCommandsTest.cpp`,
   `AProcessCanReadButNotWriteABuiltin`:
   `EXPECT_EQ(io->OpenFile("/bin/ls", kFileOpenWriteCreateTruncate, kFileCreateMode), nullptr)`.
+  That line (around line 286) currently carries a trailing comment,
+  `// IFileIO keeps int fds in this task` (a review finding of PR #19, left
+  behind by `fd--descriptor-objects`) -- remove it along with the line it was
+  on, since this task is the one that stops `IFileIO` keeping int fds.
 
 New file `tests/unit/components/HaisosOS.unittests/ProcessFileIOTest.cpp`,
 added to `HaisosOS.unittests` in `tests/unit/components/HaisosOS.unittests/CMakeLists.txt`.

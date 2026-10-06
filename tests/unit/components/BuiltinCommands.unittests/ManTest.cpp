@@ -21,11 +21,49 @@ const std::string kCatLine = WhatisLine("cat", "concatenate files and print on t
 
 TEST_F(BuiltinCommandsTest, ManPrintsEachBuiltinsHelp) {
     for (const auto& name : builtins->GetCommands()) {
+        if (name == "hsh") {
+            continue;  // hsh overrides ManPage(): its page is not its help
+        }
         const Captured man = RunCaptured("man", {name});
         const Captured help = RunCaptured(name, {"--help"});
         EXPECT_EQ(man.out, help.out) << name;
         EXPECT_EQ(man.err, "") << name;
         EXPECT_EQ(man.status, 0) << name;
+    }
+}
+
+TEST_F(BuiltinCommandsTest, ManShowsTheShellsFullPage) {
+    // `man hsh` prints the shell's full manual page, not its --help text.
+    const std::string page = CreateHshCommand()->ManPage();
+    const Captured man = RunCaptured("man", {"hsh"});
+    EXPECT_EQ(man.out, page);
+    EXPECT_EQ(man.err, "");
+    EXPECT_EQ(man.status, 0);
+    const Captured help = RunCaptured("hsh", {"--help"});
+    EXPECT_GT(SplitLines(page).size(), SplitLines(help.out).size());
+
+    // Every section heading, at column 0, in order.
+    const std::vector<std::string> headings = {
+        "NAME", "SYNOPSIS", "DESCRIPTION", "OPTIONS", "QUOTING AND ESCAPING",
+        "PARAMETERS AND EXPANSIONS", "PIPELINES", "REDIRECTIONS",
+        "HERE-DOCUMENTS (HEREDOCS)", "LISTS", "GROUPS AND SUBSHELLS", "IF",
+        "WHILE AND UNTIL", "FOR", "CASE", "FUNCTIONS", "BUILTIN COMMANDS",
+        "EXIT STATUS", "DIFFERENCES FROM DASH", "SEE ALSO",
+    };
+    const Lines lines = SplitLines(page);
+    size_t next = 0;
+    for (const std::string& heading : headings) {
+        while (next < lines.size() && lines[next] != heading) {
+            ++next;
+        }
+        ASSERT_LT(next, lines.size()) << heading;
+        ++next;
+    }
+    for (const std::string& line : lines) {
+        EXPECT_LE(line.size(), 79u) << line;
+        if (line.find("Example: ") != std::string::npos) {
+            EXPECT_EQ(line.rfind("       Example: ", 0), 0u) << line;
+        }
     }
 }
 

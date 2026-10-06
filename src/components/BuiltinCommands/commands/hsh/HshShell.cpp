@@ -53,6 +53,11 @@ long Shell::LiveChildCountForTest() {
 }
 
 std::string OpenFailureReason(IFileIO& io, const std::string& path, bool creating) {
+    // An empty path (a redirection target that expands to nothing, say) is no
+    // file: Stat of it finds the working directory. dash's wording.
+    if (path.empty()) {
+        return creating ? "Directory nonexistent" : "No such file";
+    }
     FileStatus status;
     if (io.Stat(path, status) == 0) {
         return status.type == DirectoryEntryType::Dir ? "Is a directory" : "Permission denied";
@@ -93,6 +98,9 @@ int Shell::Run() {
     // A stop can surface from anywhere output is written, an error path
     // included; it always ends the shell the same way.
     try {
+        if (m_state.options.interactive && m_invocation.source == Invocation::Source::StandardInput) {
+            return RunInteractive();
+        }
         std::string source;
         switch (m_invocation.source) {
         case Invocation::Source::CommandString:
@@ -110,7 +118,6 @@ int Shell::Run() {
         case Invocation::Source::StandardInput: {
             // Read whole, as dash's block reads amount to for a non-interactive
             // shell: commands reading the same stdin see nothing of the script.
-            // hsh--interactive reads an interactive stdin line by line instead.
             auto in = IO().GetDescriptor(IFileIO::kStdIn);
             if (in) {
                 char buffer[4096];
@@ -141,13 +148,12 @@ int Shell::Run() {
                 return 2;
             }
             try {
-                status = ExecuteList(result.commands);
+                status = RunOneCommand(result.commands);
             } catch (const ShellExit& e) {
                 return e.status & 0xFF;
-            } catch (const ShellError& e) {
-                WriteErr(FormatShellError(m_state.arg0, e.Line() ? e.Line() : m_currentLine, e.what()));
-                // A non-interactive shell exits on a fatal error; the
-                // interactive one (hsh--interactive) goes on.
+            } catch (const ShellError&) {
+                // Non-interactive (RunOneCommand rethrew): a fatal error ends
+                // the shell; it was reported already.
                 return 2;
             }
             if (m_context.StopRequested()) {
@@ -160,6 +166,109 @@ int Shell::Run() {
         // The process records 143, or 141 after StopForBrokenPipe, whatever
         // this returns.
         return kExitCodeStopped;
+    }
+}
+
+int Shell::RunOneCommand(const CommandList& commands) {
+    try {
+        return ExecuteList(commands);
+    } catch (const ShellError& e) {
+        WriteErr(FormatShellError(m_state.arg0, e.Line() ? e.Line() : m_currentLine, e.what()));
+        m_state.lastExitStatus = 2;
+        if (m_state.options.interactive) {
+            return 2;  // an interactive shell goes on after an error (dash)
+        }
+        throw;
+    }
+}
+
+int Shell::RunInteractive() {
+    std::string buffer;       // the lines of the command being typed
+    int lineNumber = 0;       // every line read so far (what errors number)
+    int bufferFirstLine = 1;  // the line number of the buffer's first line
+    int status = m_state.lastExitStatus;
+    for (;;) {
+        // The prompt: PS1 for a fresh command, PS2 while one is incomplete;
+        // written as the variable is, never expanded, nothing when unset.
+        WriteErr(m_state.variables.Get(buffer.empty() ? "PS1" : "PS2").value_or(""));
+        const std::optional<std::string> line = ReadInputLine();
+        const bool atEnd = !line.has_value();
+        if (atEnd && buffer.empty()) {
+            WriteErr("\n");  // dash's newline at the end of the input
+            return status;
+        }
+        if (line) {
+            ++lineNumber;
+            buffer += *line + '\n';
+        }
+        // The buffer is re-parsed whole from its first line. Every complete
+        // command in it is collected first, and run only when the buffer
+        // parsed to its end: ParseNext can return a Command whose heredoc is
+        // unterminated without reporting it until the next call sees the end
+        // of the buffer, and an already-run line must not run again. A parse
+        // error that is not "more input needed" (or any error is, at the end
+        // of the input) ends the pending command. At the end of the input
+        // with a buffer pending it is parsed once without the interactive
+        // flag, so what a script would accept runs and what it would not
+        // gives its error; the next read then ends the shell.
+        Parser parser(buffer, {bufferFirstLine, !atEnd, "end of file"});
+        std::vector<CommandList> parsed;
+        bool incomplete = false;
+        bool failed = false;
+        for (;;) {
+            ParseResult result = parser.ParseNext();
+            if (result.status == ParseResult::Status::EndOfInput) {
+                break;
+            }
+            if (result.status == ParseResult::Status::Error) {
+                if (result.incomplete && !atEnd) {
+                    incomplete = true;  // the buffer is kept; PS2 shows next
+                } else {
+                    WriteErr(FormatShellError(m_state.arg0, result.errorLine, result.errorMessage));
+                    status = m_state.lastExitStatus = 2;
+                }
+                failed = true;
+                break;
+            }
+            parsed.push_back(std::move(result.commands));
+        }
+        if (!failed) {
+            for (const CommandList& commands : parsed) {
+                try {
+                    status = RunOneCommand(commands);
+                } catch (const ShellExit& e) {
+                    return e.status & 0xFF;  // exit: the shell ends, no newline
+                }
+                if (m_context.StopRequested()) {
+                    throw ShellStopped{};
+                }
+            }
+        }
+        if (incomplete) {
+            continue;  // the buffer grows until its command completes
+        }
+        buffer.clear();
+        bufferFirstLine = lineNumber + 1;
+    }
+}
+
+std::optional<std::string> Shell::ReadInputLine() {
+    const std::shared_ptr<IFileDescriptor> in = IO().GetDescriptor(IFileIO::kStdIn);
+    std::string line;
+    for (;;) {
+        char c = 0;
+        const ssize_t count = in ? in->Read(&c, 1) : 0;
+        if (count == kIOInterrupted) {
+            throw ShellStopped{};  // the shell was asked to stop
+        }
+        if (count <= 0) {
+            // The end of the input: the last line may end without its '\n'.
+            return line.empty() ? std::nullopt : std::optional<std::string>(line);
+        }
+        if (c == '\n') {
+            return line;
+        }
+        line += c;
     }
 }
 
@@ -784,6 +893,13 @@ bool Shell::IsChildStage(const Command& command) const {
     }
     for (const Assignment& assignment : simple.assignments) {
         if (PartsHoldCommandSubstitution(assignment.value.parts)) {
+            return false;
+        }
+    }
+    for (const Redirection& redirection : simple.redirections) {
+        // ... nor in a redirection's target word (`: | /bin/cat < $(cat)`
+        // would deadlock the same way).
+        if (PartsHoldCommandSubstitution(redirection.target.parts)) {
             return false;
         }
     }

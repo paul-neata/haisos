@@ -177,6 +177,9 @@ TEST_F(BuiltinCommandsTest, EveryBuiltinsHelpHasTheSameShape) {
 
 TEST_F(BuiltinCommandsTest, EveryBuiltinsManPageIsItsHelp) {
     for (const auto& command : CreateStandardBuiltinCommands()) {
+        if (command->Name() == "hsh") {
+            continue;  // hsh overrides ManPage(): its page is not its help
+        }
         EXPECT_EQ(command->ManPage(), BuiltinHelpText(*command)) << command->Name();
         EXPECT_EQ(command->ManPage().back(), '\n') << command->Name();
     }

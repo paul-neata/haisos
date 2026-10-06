@@ -1,4 +1,4 @@
-add_executable(Hsh.unittests HshLexerTest.cpp HshParserTest.cpp HshPatternTest.cpp HshGlobTest.cpp HshArithmeticTest.cpp HshVariablesTest.cpp HshExpansionTest.cpp HshInvocationTest.cpp HshShellTest.cpp HshRedirectionTest.cpp HshPipelineTest.cpp HshUnboundedPipeTest.cpp HshBuiltinsTest.cpp HshControlFlowTest.cpp)
+add_executable(Hsh.unittests HshLexerTest.cpp HshParserTest.cpp HshPatternTest.cpp HshGlobTest.cpp HshArithmeticTest.cpp HshVariablesTest.cpp HshExpansionTest.cpp HshInvocationTest.cpp HshShellTest.cpp HshRedirectionTest.cpp HshPipelineTest.cpp HshUnboundedPipeTest.cpp HshBuiltinsTest.cpp HshControlFlowTest.cpp HshInteractiveTest.cpp)
 target_include_directories(Hsh.unittests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/components/Factory
     ${CMAKE_SOURCE_DIR}/tests/unit/components/BuiltinCommands.unittests

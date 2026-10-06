@@ -3,10 +3,12 @@
 #include "commands/hsh/HshBuiltins.h"
 #include "commands/hsh/HshError.h"
 #include "commands/hsh/HshInvocation.h"
+#include "commands/hsh/HshManPage.h"
 #include "commands/hsh/HshShell.h"
+#include "interfaces/IFileIO.h"
 
 namespace Haisos::Hsh {
-const char* HshVersion() { return "0.5.0"; }
+const char* HshVersion() { return "1.0.0"; }
 } // namespace Haisos::Hsh
 
 namespace Haisos {
@@ -76,6 +78,9 @@ public:
         return help;
     }
 
+    // The one builtin with more to say than its --help: a full manual page.
+    std::string ManPage() const override { return Hsh::HshManPage(); }
+
     int Run(BuiltinContext& context) override {
         const auto& args = context.Args();
         // As dash: --help / --version count only as the very first argument.
@@ -94,6 +99,17 @@ public:
         if (!invocation.error.empty()) {
             context.ErrorText(Hsh::FormatShellError("hsh", 0, invocation.error));
             return 2;
+        }
+        // dash's rule: interactive on -i, or when the commands come from the
+        // standard input (no -c, no script) and both it and the standard
+        // error are terminals. -i alone changes $- and the error handling.
+        if (!invocation.options.interactive &&
+            invocation.source == Hsh::Invocation::Source::StandardInput) {
+            const auto in = context.IO().GetDescriptor(IFileIO::kStdIn);
+            const auto err = context.IO().GetDescriptor(IFileIO::kStdErr);
+            if (in && err && in->IsTerminal() && err->IsTerminal()) {
+                invocation.options.interactive = true;
+            }
         }
         Hsh::Shell shell(context, std::move(invocation));
         return shell.Run();

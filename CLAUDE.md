@@ -243,6 +243,7 @@ ROOT rootfs                    # which declared filesystem (by name) becomes the
 # host paths are relative to this file (or absolute).
 CREATE_DIR /bin                # create a directory and any missing parents (fine if it exists)
 BUILTIN rootfs ls /bin/ls        # place a builtin on a declared FS, at each path given
+ENV PATH=/bin                  # where hsh, the shell, finds commands by name
 CREATE /notes/a.txt 'hello'    # write a file (replacing it); content is 'quoted' or "quoted"
 APPEND /notes/a.txt text: more # append (creating if missing); text: takes the rest of the line as-is
 CREATE /notes/b.md multiline END
@@ -256,6 +257,7 @@ RUN /agent.md                  # start an initial process (.md agent, .lua scrip
 RUN /bin/ls -l /               # a builtin, placed by BUILTIN above
 RUN /tools/setup.lua ${greeting}
 RUN -i /chat.md                # an interactive agent, fed each line typed on the console (any program may be run with -i)
+RUN -i /bin/hsh                # an interactive shell on the console
 ```
 
 `FS <name> DEV` is a device filesystem, meant to be mounted at `/dev`: it holds
@@ -299,7 +301,8 @@ stdin is the console's input (instead of an input that ends at once), and a
 stdin -- the console's input here, though another descriptor can feed it when
 the process is started through `StartProcessOptions` -- is posted to it, until
 it closes itself with the `self_close` tool (noticed when the next line
-arrives) or input ends.
+arrives) or input ends. `RUN -i /bin/hsh` runs the shell interactively, its
+prompt on stderr.
 
 `CREATE`/`APPEND` content is one of `'text'` / `"text"` (up to the next quote of
 the same kind; a comment may follow), `text:<rest of line>` (taken exactly as
@@ -586,7 +589,7 @@ use a builtin with what it already knows about the real command:
 |---------|-------------|
 | `cat` | Concatenates files and standard input (`-A -b -e -E -n -s -t -T -u -v`) |
 | `echo` | Prints its arguments (`-n -e -E`) |
-| `hsh` | The Haisos shell, after dash: the whole command language -- `-c`, scripts, stdin; simple commands, lists, pipelines, background lists (`&`, `wait`), command substitution (`$(...)`, `` `...` ``); `{ }` `( )` `if` `while` `until` `for` `case` and functions with `return`; redirections and heredocs/here-strings; the shell builtins `.` `:` `[` `break` `cd` `continue` `eval` `exec` `exit` `export` `false` `read` `readonly` `return` `set` `shift` `test` `true` `unset` `wait`, with `-e`/`-x`/`-a`/`-n` as dash (interactive mode to come in this develop) |
+| `hsh` | The Haisos shell, after dash: `-c`, scripts, stdin or interactive (`RUN -i /bin/hsh`); quoting, expansions, pipelines, redirections, heredocs, lists, control flow, functions; commands found in `PATH` |
 | `ls` | Lists directories as GNU ls prints them to a terminal: columns, `-l` with `total`/links/owner/group/size/time, sorting, time styles, quoting; to a pipe or file, one name per line, unquoted |
 | `man` | Prints a builtin's manual page (`man ls`, `man 1 ls`, `-f`, `-k`): its `--help` text, or a full page for `hsh` |
 | `mkdir` | Creates directories (`-p -v`) |

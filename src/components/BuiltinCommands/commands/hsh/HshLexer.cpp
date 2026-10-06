@@ -948,7 +948,20 @@ struct Lexer::Impl {
                     part.text = rawBody;
                     hd->body.parts.push_back(std::move(part));
                 }
+            } else if (terminated) {
+                // The body is complete text that no further line can change,
+                // so a lexing error in it (a "${x" with no "}") is not an
+                // incomplete input: force the flag off, else an interactive
+                // shell would treat it as "read more" and never recover --
+                // every new line re-parses the same unparseable body.
+                try {
+                    hd->body = LexHereDocBody(rawBody, bodyLine);
+                } catch (const ShellError& e) {
+                    throw ShellError(e.what(), e.Line(), false);
+                }
             } else {
+                // Only part of the body is in: such a body's errors stay
+                // "more input" -- a later line may complete it.
                 hd->body = LexHereDocBody(rawBody, bodyLine);
             }
             if (!terminated) {

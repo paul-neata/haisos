@@ -695,6 +695,9 @@ std::string GetHaisosFileTemplate(const std::vector<std::string>& builtinNames) 
         "# and its directory cannot be deleted while it is there. Every builtin:\n"
         + builtinExamples +
         "#\n"
+        "# hsh, the shell, finds commands by name in PATH; with the builtins in /bin:\n"
+        "# ENV PATH=/bin\n"
+        "#\n"
         "# CREATE <path> <content> writes a file, replacing it if it exists;\n"
         "# APPEND <path> <content> appends to one, creating it if it does not.\n"
         "# Missing parent directories are created. The content is taken\n"
@@ -732,6 +735,9 @@ std::string GetHaisosFileTemplate(const std::vector<std::string>& builtinNames) 
         "# the console is sent to it, until it closes itself (with its self_close\n"
         "# tool) or input ends.\n"
         "# RUN -i /chat.md\n"
+        "#\n"
+        "# An interactive shell on the console:\n"
+        "# RUN -i /bin/hsh\n"
         "RUN /agent.md\n";
 }
 

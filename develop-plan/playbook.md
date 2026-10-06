@@ -10,7 +10,7 @@ Pause: no
 | 3 | [fd--process-table](tasks/fd--process-table.md) | done | 0.4.2 | 2 | #20 | 1 | 1H fixed, 1M 1L open | reviewer fixed a racy test |
 | 4 | [streams--console-and-start](tasks/streams--console-and-start.md) | done | 0.4.3 | 3 | #21 | 1 | 1M 4L open | |
 | 5 | [streams--runtime-streams](tasks/streams--runtime-streams.md) | done | 0.4.4 | 4 | #22 | 1 | 1M 4L open | |
-| 6 | [streams--exit-codes](tasks/streams--exit-codes.md) | in-progress | 0.4.5 | 5 | | | | |
+| 6 | [streams--exit-codes](tasks/streams--exit-codes.md) | in-review | 0.4.5 | 5 | #23 | 1 | | |
 | 7 | [pipes--pipe-service](tasks/pipes--pipe-service.md) | todo | | 6 | | | | |
 | 8 | [pipes--broken-pipe](tasks/pipes--broken-pipe.md) | todo | | 7 | | | | |
 | 9 | [builtins--directories](tasks/builtins--directories.md) | todo | | 4 | | | | |

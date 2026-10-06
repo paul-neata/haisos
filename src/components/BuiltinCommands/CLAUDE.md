@@ -57,6 +57,8 @@ through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
   `BuiltinArgument::OptionalAttached` is man-db's `-Tutf8` kind: the argument
   is taken only when attached (`-Tutf8`, `--troff-device=utf8`), never from the
   next word (`-T utf8` is `-T`, then the operand utf8).
+- `commands/hsh/` - `hsh`, the Haisos shell (dash reimplemented), in progress:
+  not a builtin yet; has its own CLAUDE.md.
 
 ## Output
 

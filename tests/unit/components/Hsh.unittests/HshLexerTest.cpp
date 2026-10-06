@@ -156,6 +156,10 @@ TEST(HshLexerTest, Parameters) {
     ExpectLex("${#x:-a}", {"W(P(<bad>))"});
     ExpectLex("${x:2:3}", {"W(P(<bad>))"});
     ExpectLex("${x:}", {"W(P(<bad>))"}); // dash says "Missing '}': a documented deviation
+    // Merging happens in operands too, at every level.
+    ExpectLex("${x:-a'b'c}", {"W(P(x:-[L'a' Q'b' L'c']))"});
+    ExpectLex("${x:-'a''b'}", {"W(P(x:-[Q'ab']))"});
+    ExpectLex("x${x}y", {"W(L'x' P(x) L'y')"});
 }
 
 TEST(HshLexerTest, CommandSubstitutionEnds) {
@@ -194,6 +198,8 @@ TEST(HshLexerTest, Arithmetic) {
     ExpectLex("$((1+$y))", {"W(A[L'1+' P(y)])"});
     ExpectLex("$((x))a", {"W(A[L'x'] L'a')"});
     ExpectLex("$((1 +\n2))", {"W(A[L'1 +\n2'])"});
+    // Quotes are plain characters in arithmetic, as dash.
+    ExpectLex("$((a'b'))", {"W(A[L'a'b''])"});
 }
 
 TEST(HshLexerTest, HereDocuments) {

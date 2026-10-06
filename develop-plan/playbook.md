@@ -10,7 +10,7 @@ Pause: no
 | 3 | [fd--process-table](tasks/fd--process-table.md) | done | 0.4.2 | 2 | #20 | 1 | 1H fixed, 1M 1L open | reviewer fixed a racy test |
 | 4 | [streams--console-and-start](tasks/streams--console-and-start.md) | done | 0.4.3 | 3 | #21 | 1 | 1M 4L open | |
 | 5 | [streams--runtime-streams](tasks/streams--runtime-streams.md) | done | 0.4.4 | 4 | #22 | 1 | 1M 4L open | |
-| 6 | [streams--exit-codes](tasks/streams--exit-codes.md) | in-review | 0.4.5 | 5 | #23 | 1 | | |
+| 6 | [streams--exit-codes](tasks/streams--exit-codes.md) | done | 0.4.5 | 5 | #23 | 1 | 1C fixed, 2M 3L open | reviewer fixed an unprotected Lua __tostring (host abort) |
 | 7 | [pipes--pipe-service](tasks/pipes--pipe-service.md) | todo | | 6 | | | | |
 | 8 | [pipes--broken-pipe](tasks/pipes--broken-pipe.md) | todo | | 7 | | | | |
 | 9 | [builtins--directories](tasks/builtins--directories.md) | todo | | 4 | | | | |
@@ -31,6 +31,7 @@ Pause: no
 ## Directions
 
 ## Questions
+- (implement, 2026-10-06) streams--exit-codes (#23) left a medium: `exit()` inside a Lua coroutine re-arms the stop hook only on the coroutine's thread, so after `coroutine.resume` catches it the script runs up to ~1000 more instructions, tool calls included (LuaProcess.cpp:614; fix: also re-arm on `self->m_luaState` in LuaExitTrampoline, test `coroutine.resume(coroutine.create(function() exit(2) end)) print('after')` prints nothing, exits 2). Plus no test for the LLM-round-cap failure (Agent.cpp:507). Add a small follow-up task now, or leave both for the final-review fixes? Until answered: left for the final review.
 
 ## Adjustments
 - 2026-10-06 05:57 (implement) fd--process-table refreshed: checked-against line fixed to 7b72167; Tests note to drop the stale 'IFileIO keeps int fds' comment (PR #19 finding)

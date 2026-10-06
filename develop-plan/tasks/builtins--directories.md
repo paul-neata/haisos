@@ -3,7 +3,7 @@
 - Rock: builtins
 - Depends on: streams--console-and-start (and, through it, fd--descriptor-objects, fd--process-table)
 - Size: ~500 changed lines in ~14 files (five of them renames)
-- Plan checked against: develop @ 0d92271
+- Plan checked against: develop @ 51f49c3
 - PR title: Builtins in directories of their own; cat reads stdin, ls pipes
 
 ## Goal
@@ -255,8 +255,8 @@ Add to the fixture:
   `stdOut`/`stdErr`, starts the process with those in `StartProcessOptions`,
   waits (`kWaitMs`), releases its own descriptor pointers, reads `/out` and
   `/err` back with `ReadWholeFile(*streams, ...)`. The status is read the same
-  way `Run` reads it (`BuiltinProcess::ExitStatus()`, or
-  `IProcess::ExitCode()` if streams--exit-codes has replaced it by then).
+  way `Run` reads it: `process->ExitCode().value_or(-1)` after the wait (it is
+  always set by then).
 - ```cpp
   // Places empty files cat, echo, ls, mkdir, pwd in /five: a directory whose
   // listing does not change as builtins are added to /bin.

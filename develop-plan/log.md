@@ -23,3 +23,4 @@
 - 2026-10-06 10:35 UTC -- start pipes--broken-pipe (0.4.7)
 - 2026-10-06 10:51 UTC -- pipes--broken-pipe: PR #25, ready
 - 2026-10-06 10:55 UTC -- pipes--broken-pipe merged #25 as 0.4.7: 1M 2L open, 1 tries
+- 2026-10-06 10:59 UTC -- start builtins--directories (0.4.8)

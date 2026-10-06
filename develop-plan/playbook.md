@@ -13,7 +13,7 @@ Pause: no
 | 6 | [streams--exit-codes](tasks/streams--exit-codes.md) | done | 0.4.5 | 5 | #23 | 1 | 1C fixed, 2M 3L open | reviewer fixed an unprotected Lua __tostring (host abort) |
 | 7 | [pipes--pipe-service](tasks/pipes--pipe-service.md) | done | 0.4.6 | 6 | #24 | 1 | 2M 2L open | Windows test time fixed on the host |
 | 8 | [pipes--broken-pipe](tasks/pipes--broken-pipe.md) | done | 0.4.7 | 7 | #25 | 1 | 1M 2L open | |
-| 9 | [builtins--directories](tasks/builtins--directories.md) | todo | | 4 | | | | |
+| 9 | [builtins--directories](tasks/builtins--directories.md) | in-progress | 0.4.8 | 4 | | | | |
 | 10 | [builtins--unicode](tasks/builtins--unicode.md) | todo | | - | | | | |
 | 11 | [builtins--wc](tasks/builtins--wc.md) | todo | | 9, 10 | | | | |
 | 12 | [builtins--man](tasks/builtins--man.md) | todo | | 6, 9, 11 | | | | |
@@ -42,3 +42,4 @@ Pause: no
 - 2026-10-06 07:36 (implement) streams--exit-codes refreshed: checked against 04a0a36; agent_*.js test step now fails on `result.status !== 0 || result.signal` (PR #22 finding)
 - 2026-10-06 08:27 (implement) pipes--pipe-service refreshed: checked against 9c15ee7; AReaderSeesEndOfFileWhenTheWritersProgramEnds waits for the writer before ExitCode()
 - 2026-10-06 10:35 (implement) pipes--broken-pipe refreshed: checked against faf4c9e; new pipe/builtin tests wait for the process before reading its exit code or output
+- 2026-10-06 10:59 (implement) builtins--directories refreshed: checked against 51f49c3; RunCaptured reads ExitCode() (ExitStatus() is gone since #23)

@@ -11,7 +11,7 @@ Pause: no
 | 4 | [streams--console-and-start](tasks/streams--console-and-start.md) | done | 0.4.3 | 3 | #21 | 1 | 1M 4L open | |
 | 5 | [streams--runtime-streams](tasks/streams--runtime-streams.md) | done | 0.4.4 | 4 | #22 | 1 | 1M 4L open | |
 | 6 | [streams--exit-codes](tasks/streams--exit-codes.md) | done | 0.4.5 | 5 | #23 | 1 | 1C fixed, 2M 3L open | reviewer fixed an unprotected Lua __tostring (host abort) |
-| 7 | [pipes--pipe-service](tasks/pipes--pipe-service.md) | todo | | 6 | | | | |
+| 7 | [pipes--pipe-service](tasks/pipes--pipe-service.md) | in-progress | 0.4.6 | 6 | | | | |
 | 8 | [pipes--broken-pipe](tasks/pipes--broken-pipe.md) | todo | | 7 | | | | |
 | 9 | [builtins--directories](tasks/builtins--directories.md) | todo | | 4 | | | | |
 | 10 | [builtins--unicode](tasks/builtins--unicode.md) | todo | | - | | | | |
@@ -38,3 +38,4 @@ Pause: no
 - 2026-10-06 06:28 (implement) streams--console-and-start refreshed: checked against 9492a45, no content changes needed
 - 2026-10-06 07:01 (implement) streams--runtime-streams refreshed: checked against f2cc5d5; Context notes what #19-#21 provide, Agent.cpp line numbers fixed; preliminary MockFileDescriptor WriteCalls fix (PR #21 finding); Tests: wait for the process before reading a mock's writes
 - 2026-10-06 07:36 (implement) streams--exit-codes refreshed: checked against 04a0a36; agent_*.js test step now fails on `result.status !== 0 || result.signal` (PR #22 finding)
+- 2026-10-06 08:27 (implement) pipes--pipe-service refreshed: checked against 9c15ee7; AReaderSeesEndOfFileWhenTheWritersProgramEnds waits for the writer before ExitCode()

@@ -3,7 +3,7 @@
 - Rock: pipes
 - Depends on: streams--exit-codes (and through it fd--descriptor-objects, fd--process-table, streams--console-and-start, streams--runtime-streams)
 - Size: ~900 changed lines in ~25 files (code ~480, tests ~390, docs ~30)
-- Plan checked against: develop @ 0d92271, plus the plans fd--descriptor-objects, fd--process-table, streams--console-and-start, streams--runtime-streams, streams--exit-codes
+- Plan checked against: develop @ 9c15ee7
 - PR title: Add IPipeService, IFileIO::CreatePipe and interruptible pipe I/O
 
 ## Goal
@@ -572,7 +572,9 @@ separately; `ReadLine` returns nullopt), an environment with `HAISOS_ENDPOINT`
   -> nullopt.
 - `AReaderSeesEndOfFileWhenTheWritersProgramEnds` -- pipe from the service;
   start `/bin/echo hi` with `options.stdOut` = the write end; release the
-  test's copy; read until 0: "hi\n"; `ExitCode()` 0.
+  test's copy; read until 0: "hi\n"; `WaitToFinish(kProcessWaitMs)` (the
+  process may still be a few instructions from reporting finished when the
+  read returns 0 -- its descriptors are released first) then `ExitCode()` 0.
 - `ABuiltinBlockedOnAFullPipeStopsWhenAskedTo` -- start `/bin/echo` with one
   argument of 100000 'x' and `stdOut` = a write end (the test keeps the read
   end, unread, and releases its copy of the write end); `WaitToFinish(200)` is

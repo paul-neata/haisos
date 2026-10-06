@@ -17,6 +17,7 @@ delete `develop` -- the only skill that touches `master`. See
 ### 1. Check that it can close
 
 ```bash
+bash scripts/develop/git_ssh.sh          # OK or FIXED
 git rev-parse --abbrev-ref HEAD          # develop, in this clone
 git status --porcelain                   # clean
 bash scripts/develop/update.sh
@@ -28,6 +29,7 @@ docker ps --filter name=haisos-develop- --format '{{.Names}}'
 
 Stop and report when:
 
+- `git_ssh.sh` says `FAIL`: git cannot reach origin over SSH;
 - a task PR into `develop` is still open -- once `develop` is deleted, GitHub
   retargets open PRs based on it to `master`: merge or close them first;
 - there is no open develop PR into `master`, or it is still a draft / `WIP`

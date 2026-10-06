@@ -50,10 +50,12 @@ Only `begin`, `end` or nothing; anything else: say so and change nothing.
 
 1. Be on `develop`:
    ```bash
+   bash scripts/develop/git_ssh.sh
    git fetch -q origin
    git rev-parse --abbrev-ref HEAD
    git status --porcelain
    ```
+   `git_ssh.sh` says `FAIL`: stop and show its line (the mode stays off).
    Not on `develop`: if `origin/develop` exists and the tree is clean,
    `git switch develop`; if there is no develop at all, stop and point to
    `/develop-create` (the mode stays off).

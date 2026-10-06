@@ -1,6 +1,7 @@
 #!/bin/bash
-# Checks what /develop-implement needs before it starts a task: GitHub, docker
-# and the task image, ollama and the configured models, the develop branch.
+# Checks what /develop-implement needs before it starts a task: git over SSH,
+# GitHub, docker and the task image, ollama and the configured models, the
+# develop branch.
 #
 # Usage: scripts/develop/preflight.sh
 # One line per check, "OK ..." or "FAIL ..."; exit status 1 if any failed.
@@ -11,6 +12,8 @@ ok()   { echo "OK   $*"; }
 fail() { echo "FAIL $*"; FAILS=$((FAILS + 1)); }
 
 GIT=(git -C "$DEV_REPO")
+# Points git at a running ssh agent if this shell has none (see git_ssh.sh).
+SSH_LINE=$(bash "$DEV_SCRIPTS/git_ssh.sh") && echo "$SSH_LINE" || { echo "$SSH_LINE"; FAILS=$((FAILS + 1)); }
 "${GIT[@]}" fetch -q origin --prune || fail "git fetch origin"
 if "${GIT[@]}" rev-parse -q --verify origin/develop > /dev/null; then
     ok "origin/develop at $("${GIT[@]}" rev-parse --short origin/develop), version $(develop_version)"

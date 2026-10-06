@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
@@ -124,6 +125,54 @@ private:
     std::condition_variable m_cv;
     bool m_held = false;
     bool m_released = false;
+};
+
+// A physical console whose ReadLine stays blocked until Release() and then
+// reports end of input: an interactive agent fed from it stays alive exactly
+// as long as it blocks. Writes are discarded.
+class BlockingPhysicalConsole : public IPhysicalConsole {
+public:
+    void Write(const std::string&) override {}
+    std::optional<std::string> ReadLine() override {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_cv.wait(lock, [this] { return m_released; });
+        return std::nullopt;
+    }
+    void Start() override {}
+    void Stop() override {}
+
+    void Release() {
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_released = true;
+        }
+        m_cv.notify_all();
+    }
+
+private:
+    std::mutex m_mutex;
+    std::condition_variable m_cv;
+    bool m_released = false;
+};
+
+// A descriptor that counts its own destructions, so a test can see exactly
+// when a process's table lets a file go. Reads end at once; writes take
+// everything.
+class ReleaseCountingDescriptor : public IFileDescriptor {
+public:
+    static std::shared_ptr<ReleaseCountingDescriptor> Create(std::shared_ptr<std::atomic<int>> releases) {
+        return std::shared_ptr<ReleaseCountingDescriptor>(new ReleaseCountingDescriptor(std::move(releases)));
+    }
+    ~ReleaseCountingDescriptor() override { ++*m_releases; }
+
+    ssize_t Read(void*, size_t) override { return 0; }
+    ssize_t Write(const void*, size_t count) override { return static_cast<ssize_t>(count); }
+    bool IsTerminal() const override { return false; }
+
+private:
+    explicit ReleaseCountingDescriptor(std::shared_ptr<std::atomic<int>> releases) : m_releases(std::move(releases)) {}
+
+    std::shared_ptr<std::atomic<int>> m_releases;
 };
 
 bool HistoryMentions(const nlohmann::json& history, const std::string& text) {
@@ -473,11 +522,11 @@ TEST_F(HaisosOSTest, FileIOReadsAndWritesThroughTheWorkingDirectory) {
     ASSERT_NE(process, nullptr);
     auto io = process->IO();
 
-    int fd = io->OpenFile("note.txt", kFileOpenWriteCreateTruncate, kFileCreateMode);
-    ASSERT_GE(fd, 0);
+    auto file = io->OpenFile("note.txt", kFileOpenWriteCreateTruncate, kFileCreateMode);
+    ASSERT_NE(file, nullptr);
     const std::string payload = "written from sub";
-    EXPECT_EQ(io->WriteFile(fd, payload.data(), payload.size()), static_cast<ssize_t>(payload.size()));
-    io->CloseFile(fd);
+    EXPECT_EQ(file->Write(payload.data(), payload.size()), static_cast<ssize_t>(payload.size()));
+    file.reset();
 
     // The bare name landed in the working directory, not at the root.
     EXPECT_TRUE(std::filesystem::exists(kTestRoot + "/sub/note.txt"));
@@ -496,6 +545,87 @@ TEST_F(HaisosOSTest, FileIOReadsAndWritesThroughTheWorkingDirectory) {
         }
     }
     EXPECT_TRUE(sawNote);
+}
+
+// OpenFile hands back the open file itself and puts nothing in the process's
+// descriptor table; a number is something a caller asks for with AddDescriptor.
+TEST_F(HaisosOSTest, OpenFileHandsBackAnUnnumberedDescriptor) {
+    auto os = BuildOS();
+    auto process = std::dynamic_pointer_cast<ICurrentProcess>(
+        os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"", StartProcessOptions{}));
+    ASSERT_NE(process, nullptr);
+    // The script ends at once, releasing its table as it does: wait for that
+    // first, or the release could empty slot 0 between AddDescriptor and
+    // GetDescriptor below. The table stays usable after the end.
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    auto io = process->IO();
+
+    auto file = io->OpenFile("x.txt", kFileOpenWriteCreateTruncate, kFileCreateMode);
+    ASSERT_NE(file, nullptr);
+    for (int fd = 0; fd <= 3; ++fd) {
+        EXPECT_EQ(io->GetDescriptor(fd), nullptr) << "slot " << fd << " held a descriptor after OpenFile";
+    }
+
+    EXPECT_EQ(io->AddDescriptor(file), 0);
+    file.reset();
+    EXPECT_EQ(io->GetDescriptor(0)->Write("hi", 2), 2);
+    EXPECT_EQ(io->CloseDescriptor(0), 0);
+
+    EXPECT_EQ(ReadHostFile(kTestRoot + "/x.txt"), "hi");
+}
+
+// Every descriptor a process holds is released when its program ends, before
+// it reports finished -- here, a Lua script's.
+TEST_F(HaisosOSTest, ALuaScriptsDescriptorsAreReleasedWhenItEnds) {
+    std::ofstream(kTestRoot + "/spin.lua") << "while true do end";
+    auto os = BuildOS();
+    auto process = std::dynamic_pointer_cast<ICurrentProcess>(
+        os->StartProcess(TestEnvironment(), "spin.lua", {}, /*workingDirectory=*/"", StartProcessOptions{}));
+    ASSERT_NE(process, nullptr);
+
+    auto releases = std::make_shared<std::atomic<int>>(0);
+    ASSERT_EQ(process->IO()->AddDescriptor(ReleaseCountingDescriptor::Create(releases)), 0);
+
+    // The script is still spinning, so nothing may have been released yet.
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_EQ(releases->load(), 0);
+
+    process->TriggerStop();
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    // Already released at the moment WaitToFinish returned -- not after.
+    EXPECT_EQ(releases->load(), 1);
+}
+
+// And the same for an agent's: its program is its conversation, so the table
+// is released when the conversation thread ends (through Agent::SetFinishedHook,
+// set by AgentProcess::Create).
+TEST_F(HaisosOSTest, AnAgentsDescriptorsAreReleasedWhenItsConversationEnds) {
+    auto console = std::make_shared<BlockingPhysicalConsole>();
+    // On every path out: a failed assertion must not leave the console blocked,
+    // or the input loop waits in ReadLine forever and this test hangs in
+    // teardown.
+    struct ConsoleReleaser {
+        std::shared_ptr<BlockingPhysicalConsole> console;
+        ~ConsoleReleaser() { console->Release(); }
+    } releaser{console};
+
+    auto os = BuildOS(console);
+    StartProcessOptions options;
+    options.interactiveAgent = true;
+    auto process = std::dynamic_pointer_cast<ICurrentProcess>(
+        os->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/"", options));
+    ASSERT_NE(process, nullptr);
+
+    auto releases = std::make_shared<std::atomic<int>>(0);
+    ASSERT_EQ(process->IO()->AddDescriptor(ReleaseCountingDescriptor::Create(releases)), 0);
+
+    // The input loop is blocked on the console, so the conversation is open.
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_EQ(releases->load(), 0);
+
+    console->Release();
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    EXPECT_EQ(releases->load(), 1);
 }
 
 TEST_F(HaisosOSTest, CreateHaisosOSWithoutAnEnvironmentReturnsNull) {

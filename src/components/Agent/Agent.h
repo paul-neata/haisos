@@ -2,6 +2,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -48,6 +49,12 @@ public:
     void AddChild(std::shared_ptr<IAgent> child) override;
 
     bool IsFinished() const;
+
+    // Runs |hook| once, on the agent's own thread, when its conversation thread
+    // ends -- before the agent reports finished (WaitToFinish). If the thread has
+    // already ended, runs it at once on the calling thread. Exceptions from the
+    // hook are caught and logged.
+    void SetFinishedHook(std::function<void()> hook);
 
 private:
     Agent(
@@ -115,6 +122,13 @@ private:
     std::condition_variable m_finishedCv;
     std::mutex m_finishedMutex;
     std::mutex m_joinMutex;
+
+    // A single hook run when the conversation thread ends, before m_finished is
+    // set. Guarded by the mutex; m_finishedHookTaken says the thread has passed
+    // the point of running it, so a hook set later runs at once instead.
+    std::mutex m_finishedHookMutex;
+    std::function<void()> m_finishedHook;
+    bool m_finishedHookTaken = false;
 };
 
 }

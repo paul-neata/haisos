@@ -114,6 +114,14 @@ destroyed on the destruction thread once its thread is done; on its own thread,
 `IsFinished()` is public on the concrete `Agent` only, not on `IAgent`, which
 answers the same question through `WaitToFinish(0)`.
 
+`SetFinishedHook(hook)` is likewise on the concrete `Agent` only: the hook runs
+exactly once, on the agent's own thread, when its conversation thread ends --
+before the agent reports finished through `WaitToFinish`. Set after the thread
+has already ended, it runs at once on the calling thread. Its exceptions are
+caught and logged. It exists so that the process the agent runs as can release
+its descriptor table at the end of the conversation; `AgentProcess::Create` is
+the one caller.
+
 `AddChild` is **protected** on `IAgent`, with `LLMService` as its only friend:
 an agent's children are decided by the one thing that creates agents, not by
 another agent or a tool. It stays public on the concrete `Agent`, which nothing

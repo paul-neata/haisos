@@ -45,6 +45,18 @@ std::shared_ptr<AgentProcess> AgentProcess::Create(
         selfHandle->Set(process);
     }
 
+    // An agent process's program is its agent's conversation, so this process's
+    // descriptors are released when that conversation ends -- before the agent
+    // reports finished, the same guarantee the other runtimes give. Weak: the
+    // hook runs on the agent's thread, and nothing an agent's end holds should
+    // keep the process's I/O alive past it.
+    std::weak_ptr<ProcessFileIO> ioWeak = process->m_io;
+    process->m_agent->SetFinishedHook([ioWeak] {
+        if (auto io = ioWeak.lock()) {
+            io->ReleaseAllDescriptors();
+        }
+    });
+
     // Only now: the agent's first command may call a tool, and a tool must
     // find the process it acts for, which the handle now provides.
     process->m_agent->Post(program);

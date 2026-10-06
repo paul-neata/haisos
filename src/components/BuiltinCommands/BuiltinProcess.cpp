@@ -95,6 +95,10 @@ void BuiltinProcess::RunThread() {
     }
     m_exitStatus = status;
     LogDebug("BuiltinProcess '%s': %s exited with status %d", m_path.c_str(), name.c_str(), status);
+    // Every descriptor this process opened is released before it reports
+    // finished, so a pipe's reader sees end of file when its writer's program
+    // ends.
+    m_io->ReleaseAllDescriptors();
     {
         std::lock_guard<std::mutex> lock(m_finishedMutex);
         m_finished = true;

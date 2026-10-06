@@ -399,7 +399,10 @@ given, plus the working directory they resolve against. That is what makes a
 bare name or a relative path mean anything at all -- an `IFileSystem`
 understands absolute paths alone, so `IFileIO` is the one place a path and the
 process's position are brought together. `os_start_process` also starts a child
-in the caller's directory, the way a shell would.
+in the caller's directory, the way a shell would. `IFileIO` also holds the
+process's descriptor table -- its open files by number (0 stdin, 1 stdout, 2
+stderr, then 3 and up) -- so whatever a process has open, it holds there,
+behind the same door, and every one is released when its program ends.
 
 `IFileIO` deliberately omits `Mount`/`Unmount`, which `IFileSystem` has:
 composing filesystems is how an OS is assembled, not something a program running

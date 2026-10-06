@@ -226,6 +226,44 @@ TEST(AgentTest, PostAndWaitToFinish) {
     EXPECT_EQ(mockLLM->GetCallCount(), 1);
 }
 
+TEST(AgentTest, TheFinishedHookRunsOnceBeforeTheAgentReportsFinished) {
+    auto mockLLM = std::make_shared<MockLLMCommunicator>();
+    mockLLM->SetMessageResponse("Hello from agent");
+    auto mockConsole = std::make_shared<MockAgentConsole>();
+    auto toolFactory = ToolFactory::Create();
+
+    auto agent = Agent::Create(mockLLM, std::move(toolFactory), mockConsole,
+        std::vector<std::string>{"You are a helpful AI assistant."},
+        "test_agent", nullptr, "", /*interactive=*/false);
+
+    auto hookRuns = std::make_shared<std::atomic<int>>(0);
+    agent->SetFinishedHook([hookRuns] { ++*hookRuns; });
+
+    agent->Post("Test command");
+    ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
+    // The hook ran on the agent's thread, before the agent reported finished.
+    EXPECT_EQ(hookRuns->load(), 1);
+}
+
+TEST(AgentTest, AFinishedHookSetAfterTheEndRunsAtOnce) {
+    auto mockLLM = std::make_shared<MockLLMCommunicator>();
+    mockLLM->SetMessageResponse("Hello from agent");
+    auto mockConsole = std::make_shared<MockAgentConsole>();
+    auto toolFactory = ToolFactory::Create();
+
+    auto agent = Agent::Create(mockLLM, std::move(toolFactory), mockConsole,
+        std::vector<std::string>{"You are a helpful AI assistant."},
+        "test_agent", nullptr, "", /*interactive=*/false);
+
+    agent->Post("Test command");
+    ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
+
+    auto hookRuns = std::make_shared<std::atomic<int>>(0);
+    agent->SetFinishedHook([hookRuns] { ++*hookRuns; });
+    // Set after the thread had ended, the hook ran before SetFinishedHook returned.
+    EXPECT_EQ(hookRuns->load(), 1);
+}
+
 TEST(AgentTest, CommandProcessingWritesToConsole) {
     auto mockLLM = std::make_shared<MockLLMCommunicator>();
     mockLLM->SetMessageResponse("Agent response");

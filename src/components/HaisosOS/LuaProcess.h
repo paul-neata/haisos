@@ -94,7 +94,9 @@ private:
     // cycle neither could escape.
     std::weak_ptr<IHaisosOS> m_os;
     // This process's file I/O, and the only route it has to a filesystem.
-    std::shared_ptr<IFileIO> m_io;
+    // Concrete, so RunThread can reach the descriptor table's
+    // ReleaseAllDescriptors, which is not on IFileIO.
+    std::shared_ptr<ProcessFileIO> m_io;
     std::string m_scriptContent;
     std::vector<std::string> m_args;
     std::shared_ptr<IToolFactory> m_toolFactory;

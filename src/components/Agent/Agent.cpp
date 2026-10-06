@@ -244,6 +244,25 @@ bool Agent::IsFinished() const {
     return m_finished.load();
 }
 
+void Agent::SetFinishedHook(std::function<void()> hook) {
+    {
+        std::lock_guard<std::mutex> lock(m_finishedHookMutex);
+        if (!m_finishedHookTaken) {
+            m_finishedHook = std::move(hook);
+            return;
+        }
+    }
+    // The conversation thread has already ended, so the hook runs at once, on
+    // this thread, with the same catching as on the agent's own.
+    try {
+        hook();
+    } catch (const std::exception& e) {
+        LogError("Agent '%s' - its finished hook, set after the end, failed: %s", m_name.c_str(), e.what());
+    } catch (...) {
+        LogError("Agent '%s' - its finished hook, set after the end, failed with an unknown exception", m_name.c_str());
+    }
+}
+
 std::string Agent::GetStartTime() const {
     return m_startTime;
 }
@@ -419,6 +438,27 @@ void Agent::RunThread() {
         if (!m_interactive) {
             LogVerboseDebug("Agent '%s' not interactive: finished processing command, exiting outer loop", m_name.c_str());
             break;
+        }
+    }
+    // The finished hook (a process's descriptor table release, for instance)
+    // runs here, on this thread, before m_finished is set: whoever sees
+    // WaitToFinish return true must find its work already done. Taken out under
+    // the mutex and run unlocked, so it never runs under a lock and a hook set
+    // from another thread at the same time runs there instead.
+    std::function<void()> finishedHook;
+    {
+        std::lock_guard<std::mutex> lock(m_finishedHookMutex);
+        m_finishedHookTaken = true;
+        finishedHook = std::move(m_finishedHook);
+        m_finishedHook = nullptr;
+    }
+    if (finishedHook) {
+        try {
+            finishedHook();
+        } catch (const std::exception& e) {
+            LogError("Agent '%s' - its finished hook failed: %s", m_name.c_str(), e.what());
+        } catch (...) {
+            LogError("Agent '%s' - its finished hook failed with an unknown exception", m_name.c_str());
         }
     }
     {

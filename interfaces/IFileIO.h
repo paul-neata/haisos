@@ -3,6 +3,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "IFileDescriptor.h"
 #include "IFileSystemService.h"
 
 namespace Haisos {
@@ -26,6 +27,12 @@ class IFileIO {
 public:
     virtual ~IFileIO() = default;
 
+    // The standard slots of the descriptor table, and its size (as RLIMIT_NOFILE).
+    static constexpr int kStdIn = 0;
+    static constexpr int kStdOut = 1;
+    static constexpr int kStdErr = 2;
+    static constexpr int kMaxDescriptors = 1024;
+
     // --- Where the process is ---
 
     // Always an absolute path within the OS's root; "/" is that root.
@@ -45,19 +52,20 @@ public:
     virtual std::string ResolvePath(const std::string& path) const = 0;
 
     // --- The IFileSystem operations, on resolved paths ---
-    // Unlike IFileSystem, whose OpenFile returns the IFileDescriptor itself,
-    // OpenFile/ReadFile/WriteFile/CloseFile here work through numbers of the
-    // process's own (never 0, 1 or 2), each standing for an IFileDescriptor the
-    // process holds. Otherwise each is the counterpart of the IFileSystem
-    // method of the same name (see IFileSystem for what |flags| and |mode|
-    // mean); the only difference is that a relative path is allowed here.
+    // Each is the counterpart of the IFileSystem method of the same name (see
+    // IFileSystem for what |flags| and |mode| mean); the only difference is
+    // that a relative path is allowed here. OpenFile hands back the open file
+    // itself -- the IFileSystem counterpart's result -- without numbering it;
+    // the descriptor table below is what gives a file a number, and only what
+    // is placed there is released when the process's program ends.
     // A failure to reach the OS at all is reported the same way as any other
-    // failure: a negative result, or an empty listing.
-    virtual int OpenFile(const std::string& pathname, int flags) = 0;
-    virtual int OpenFile(const std::string& pathname, int flags, int mode) = 0;
-    virtual int CloseFile(int fd) = 0;
-    virtual ssize_t ReadFile(int fd, void* buf, size_t count) = 0;
-    virtual ssize_t WriteFile(int fd, const void* buf, size_t count) = 0;
+    // failure: a null descriptor, a negative result, or an empty listing.
+
+    // As open(), resolving |pathname| against the working directory: the open
+    // file, or null on failure. It is NOT placed in the descriptor table; pass it
+    // to AddDescriptor (or Dup2 it in) to give it a number.
+    virtual std::shared_ptr<IFileDescriptor> OpenFile(const std::string& pathname, int flags) = 0;
+    virtual std::shared_ptr<IFileDescriptor> OpenFile(const std::string& pathname, int flags, int mode) = 0;
     virtual int CreateDirectory(const std::string& pathname, int mode) = 0;
     virtual int RemoveDirectory(const std::string& pathname) = 0;
     virtual int RemoveFile(const std::string& pathname) = 0;
@@ -70,6 +78,30 @@ public:
     // assembled (see IBuiltinConfigurator), for the same reason Mount is not
     // here either.
     virtual std::optional<std::string> IsBuiltinCommand(const std::string& path) = 0;
+
+    // --- The descriptor table ---
+    // The process's open files by number, as a POSIX process holds them: 0 stdin,
+    // 1 stdout, 2 stderr, then 3 and up, at most kMaxDescriptors slots. A slot
+    // holds a shared_ptr, so several slots (and several processes) may hold the
+    // same open file -- one position, closed when the last holder releases it.
+    // Every one is released when the process's program ends.
+
+    // The descriptor in slot |fd|, or null if the slot is empty or out of range.
+    virtual std::shared_ptr<IFileDescriptor> GetDescriptor(int fd) const = 0;
+    // Places |descriptor| in the lowest free slot and returns it; -1 if the table
+    // is full or |descriptor| is null.
+    virtual int AddDescriptor(std::shared_ptr<IFileDescriptor> descriptor) = 0;
+    // As dup(): places slot |fd|'s descriptor in the lowest free slot as well and
+    // returns it; -1 if |fd| is empty or out of range, or the table is full.
+    virtual int Dup(int fd) = 0;
+    // As dup2(): makes slot |newFd| hold slot |oldFd|'s descriptor, releasing
+    // what |newFd| held, in one step; returns newFd. -1 if |oldFd| is empty or
+    // out of range or |newFd| is out of range (then nothing changes). With
+    // oldFd == newFd and oldFd holding a descriptor, returns newFd and changes nothing.
+    virtual int Dup2(int oldFd, int newFd) = 0;
+    // As close(): empties slot |fd|, releasing its descriptor; 0, or -1 if it was
+    // empty or out of range.
+    virtual int CloseDescriptor(int fd) = 0;
 
     // Deliberately NOT here, though IFileSystem has them: Mount and Unmount.
     // Composing filesystems is how an OS is built, not something a program

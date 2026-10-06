@@ -607,6 +607,14 @@ void LuaProcess::RunThread() {
         m_luaState = nullptr;
     }
 
+    // Every descriptor this process opened is released before it reports
+    // finished, so a pipe's reader sees end of file when its writer's program
+    // ends. Like the finished-marking below, it has to run on every path out.
+    try {
+        m_io->ReleaseAllDescriptors();
+    } catch (...) {
+        LogError("LuaProcess '%s': unexpected exception releasing its descriptors", m_path.c_str());
+    }
     {
         std::lock_guard<std::mutex> lock(m_finishedMutex);
         m_finished = true;

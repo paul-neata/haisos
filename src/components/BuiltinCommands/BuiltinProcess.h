@@ -12,6 +12,8 @@
 
 namespace Haisos {
 
+class ProcessFileIO;
+
 // An ICurrentProcess whose runtime is a builtin command: the command runs on a
 // thread of its own, the process finishing when it returns. Shaped like
 // LuaProcess -- built, then started by Create() once it is whole, so the
@@ -65,7 +67,9 @@ private:
     std::shared_ptr<IEnvironment> m_environment;
     // Weak: the OS owns its processes.
     std::weak_ptr<IHaisosOS> m_os;
-    std::shared_ptr<IFileIO> m_io;
+    // Concrete, so RunThread (and the tests) can reach the descriptor table's
+    // ReleaseAllDescriptors, which is not on IFileIO.
+    std::shared_ptr<ProcessFileIO> m_io;
     std::shared_ptr<IAgentConsole> m_console;
     std::shared_ptr<IBuiltinCommand> m_command;
     std::vector<std::string> m_args;

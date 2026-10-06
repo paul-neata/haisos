@@ -55,85 +55,113 @@ int ProcessFileIO::ChangeDirectory(const std::string& path) {
     return 0;
 }
 
-namespace {
-
-// Interim, until fd--process-table: put |file| into the process's number map
-// at the lowest number >= 3 not taken, and return that number.
-int AddOpenFile(std::map<int, std::shared_ptr<IFileDescriptor>>& openFiles,
-                std::mutex& mutex, std::shared_ptr<IFileDescriptor> file) {
-    std::lock_guard<std::mutex> lock(mutex);
-    int number = 3;
-    while (openFiles.count(number) > 0) {
-        ++number;
-    }
-    openFiles[number] = std::move(file);
-    return number;
+std::shared_ptr<IFileDescriptor> ProcessFileIO::OpenFile(const std::string& pathname, int flags) {
+    auto fs = RootFileSystem();
+    return fs ? fs->OpenFile(ResolvePath(pathname), flags) : nullptr;
 }
 
-} // namespace
-
-int ProcessFileIO::OpenFile(const std::string& pathname, int flags) {
+std::shared_ptr<IFileDescriptor> ProcessFileIO::OpenFile(const std::string& pathname, int flags, int mode) {
     auto fs = RootFileSystem();
-    if (!fs) {
+    return fs ? fs->OpenFile(ResolvePath(pathname), flags, mode) : nullptr;
+}
+
+// --- The descriptor table ---
+// None of these reaches the OS: a file already open works on its own. Every
+// shared_ptr dropped -- by CloseDescriptor, Dup2 replacing a slot, or
+// ReleaseAllDescriptors -- is moved into a local under the lock and let go of
+// only after unlocking: a descriptor's destructor may later block or call back
+// (a pipe end waking its peer, a console flushing), and it must never run
+// under the table's mutex.
+
+std::shared_ptr<IFileDescriptor> ProcessFileIO::GetDescriptor(int fd) const {
+    std::lock_guard<std::mutex> lock(m_descriptorsMutex);
+    if (fd < 0 || static_cast<size_t>(fd) >= m_descriptors.size()) {
+        return nullptr;
+    }
+    return m_descriptors[static_cast<size_t>(fd)];
+}
+
+int ProcessFileIO::AddDescriptor(std::shared_ptr<IFileDescriptor> descriptor) {
+    if (!descriptor) {
         return -1;
     }
-    auto file = fs->OpenFile(ResolvePath(pathname), flags);
-    return file ? AddOpenFile(m_openFiles, m_openFilesMutex, std::move(file)) : -1;
-}
-
-int ProcessFileIO::OpenFile(const std::string& pathname, int flags, int mode) {
-    auto fs = RootFileSystem();
-    if (!fs) {
+    std::lock_guard<std::mutex> lock(m_descriptorsMutex);
+    for (size_t i = 0; i < m_descriptors.size(); ++i) {
+        if (!m_descriptors[i]) {
+            m_descriptors[i] = std::move(descriptor);
+            return static_cast<int>(i);
+        }
+    }
+    if (m_descriptors.size() >= static_cast<size_t>(IFileIO::kMaxDescriptors)) {
         return -1;
     }
-    auto file = fs->OpenFile(ResolvePath(pathname), flags, mode);
-    return file ? AddOpenFile(m_openFiles, m_openFilesMutex, std::move(file)) : -1;
+    m_descriptors.push_back(std::move(descriptor));
+    return static_cast<int>(m_descriptors.size() - 1);
 }
 
-// Interim, until fd--process-table: the three below look the descriptor up by
-// its number and act on the object itself -- the OS is not needed any more,
-// since a descriptor works on its own. The shared_ptr is taken out under the
-// mutex and used after it is released, so a CloseFile racing a ReadFile does
-// not tear the descriptor down beneath it.
-int ProcessFileIO::CloseFile(int fd) {
-    std::shared_ptr<IFileDescriptor> file;
+int ProcessFileIO::Dup(int fd) {
+    std::lock_guard<std::mutex> lock(m_descriptorsMutex);
+    if (fd < 0 || static_cast<size_t>(fd) >= m_descriptors.size() || !m_descriptors[static_cast<size_t>(fd)]) {
+        return -1;
+    }
+    auto descriptor = m_descriptors[static_cast<size_t>(fd)];
+    for (size_t i = 0; i < m_descriptors.size(); ++i) {
+        if (!m_descriptors[i]) {
+            m_descriptors[i] = std::move(descriptor);
+            return static_cast<int>(i);
+        }
+    }
+    if (m_descriptors.size() >= static_cast<size_t>(IFileIO::kMaxDescriptors)) {
+        return -1;
+    }
+    m_descriptors.push_back(std::move(descriptor));
+    return static_cast<int>(m_descriptors.size() - 1);
+}
+
+int ProcessFileIO::Dup2(int oldFd, int newFd) {
+    std::shared_ptr<IFileDescriptor> evicted;
     {
-        std::lock_guard<std::mutex> lock(m_openFilesMutex);
-        auto it = m_openFiles.find(fd);
-        if (it == m_openFiles.end()) {
+        std::lock_guard<std::mutex> lock(m_descriptorsMutex);
+        if (oldFd < 0 || static_cast<size_t>(oldFd) >= m_descriptors.size() || !m_descriptors[static_cast<size_t>(oldFd)]) {
             return -1;
         }
-        file = std::move(it->second);
-        m_openFiles.erase(it);
+        if (newFd < 0 || static_cast<size_t>(newFd) >= static_cast<size_t>(IFileIO::kMaxDescriptors)) {
+            return -1;
+        }
+        if (oldFd == newFd) {
+            return newFd;
+        }
+        if (static_cast<size_t>(newFd) >= m_descriptors.size()) {
+            m_descriptors.resize(static_cast<size_t>(newFd) + 1);
+        }
+        evicted = std::move(m_descriptors[static_cast<size_t>(newFd)]);
+        m_descriptors[static_cast<size_t>(newFd)] = m_descriptors[static_cast<size_t>(oldFd)];
     }
-    file.reset();
+    evicted.reset();
+    return newFd;
+}
+
+int ProcessFileIO::CloseDescriptor(int fd) {
+    std::shared_ptr<IFileDescriptor> evicted;
+    {
+        std::lock_guard<std::mutex> lock(m_descriptorsMutex);
+        if (fd < 0 || static_cast<size_t>(fd) >= m_descriptors.size() || !m_descriptors[static_cast<size_t>(fd)]) {
+            return -1;
+        }
+        evicted = std::move(m_descriptors[static_cast<size_t>(fd)]);
+        m_descriptors[static_cast<size_t>(fd)] = nullptr;
+    }
+    evicted.reset();
     return 0;
 }
 
-ssize_t ProcessFileIO::ReadFile(int fd, void* buf, size_t count) {
-    std::shared_ptr<IFileDescriptor> file;
+void ProcessFileIO::ReleaseAllDescriptors() {
+    std::vector<std::shared_ptr<IFileDescriptor>> released;
     {
-        std::lock_guard<std::mutex> lock(m_openFilesMutex);
-        auto it = m_openFiles.find(fd);
-        if (it == m_openFiles.end()) {
-            return -1;
-        }
-        file = it->second;
+        std::lock_guard<std::mutex> lock(m_descriptorsMutex);
+        released.swap(m_descriptors);
     }
-    return file->Read(buf, count);
-}
-
-ssize_t ProcessFileIO::WriteFile(int fd, const void* buf, size_t count) {
-    std::shared_ptr<IFileDescriptor> file;
-    {
-        std::lock_guard<std::mutex> lock(m_openFilesMutex);
-        auto it = m_openFiles.find(fd);
-        if (it == m_openFiles.end()) {
-            return -1;
-        }
-        file = it->second;
-    }
-    return file->Write(buf, count);
+    released.clear();
 }
 
 int ProcessFileIO::CreateDirectory(const std::string& pathname, int mode) {

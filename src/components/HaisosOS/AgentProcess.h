@@ -76,7 +76,9 @@ private:
     // cycle neither could escape.
     std::weak_ptr<IHaisosOS> m_os;
     // This process's file I/O, and the only route it has to a filesystem.
-    std::shared_ptr<IFileIO> m_io;
+    // Concrete, so Create can hook the descriptor table's
+    // ReleaseAllDescriptors, which is not on IFileIO, onto the agent's end.
+    std::shared_ptr<ProcessFileIO> m_io;
     std::shared_ptr<Agent> m_agent;
     // Null for a non-interactive process. Declared after m_agent so it is
     // destroyed first: it holds the agent too, and waits its thread out.

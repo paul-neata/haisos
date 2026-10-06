@@ -1,11 +1,15 @@
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <regex>
 #include <string>
+#include <thread>
 #include <vector>
 #include "Factory.h"
 #include "BuiltinCommand.h"
@@ -54,6 +58,45 @@ constexpr int kDirMode = _S_IREAD | _S_IWRITE;
 #else
 constexpr int kDirMode = S_IRWXU;
 #endif
+
+// A descriptor that counts its own destructions, so a test can see exactly
+// when a process's table lets a file go. Reads end at once; writes take
+// everything.
+class ReleaseCountingDescriptor : public IFileDescriptor {
+public:
+    static std::shared_ptr<ReleaseCountingDescriptor> Create(std::shared_ptr<std::atomic<int>> releases) {
+        return std::shared_ptr<ReleaseCountingDescriptor>(new ReleaseCountingDescriptor(std::move(releases)));
+    }
+    ~ReleaseCountingDescriptor() override { ++*m_releases; }
+
+    ssize_t Read(void*, size_t) override { return 0; }
+    ssize_t Write(const void*, size_t count) override { return static_cast<ssize_t>(count); }
+    bool IsTerminal() const override { return false; }
+
+private:
+    explicit ReleaseCountingDescriptor(std::shared_ptr<std::atomic<int>> releases) : m_releases(std::move(releases)) {}
+
+    std::shared_ptr<std::atomic<int>> m_releases;
+};
+
+// A command that runs until asked to stop, so a test can hold a builtin
+// process alive mid-run and watch what happens to its descriptors at the end.
+class WaitCommand : public IBuiltinCommand {
+public:
+    std::string Name() const override { return "wait"; }
+    std::string Version() const override { return "1"; }
+    const std::vector<BuiltinOption>& Options() const override { return m_options; }
+    BuiltinHelp Help() const override { return BuiltinHelp{"wait for a stop request", {"wait"}, ""}; }
+    int Run(BuiltinContext& context) override {
+        while (!context.StopRequested()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return 0;
+    }
+
+private:
+    std::vector<BuiltinOption> m_options;
+};
 
 class BuiltinCommandsTest : public ::testing::Test {
 protected:
@@ -283,9 +326,30 @@ TEST_F(BuiltinCommandsTest, AProcessCanReadButNotWriteABuiltin) {
     std::string content;
     ASSERT_TRUE(ReadWholeFile(*io, "/bin/ls", content));
     EXPECT_EQ(content, BuiltinCommandFileContent("ls"));
-    EXPECT_LT(io->OpenFile("/bin/ls", kFileOpenWriteCreateTruncate, kFileCreateMode), 0);  // IFileIO keeps int fds in this task
+    EXPECT_EQ(io->OpenFile("/bin/ls", kFileOpenWriteCreateTruncate, kFileCreateMode), nullptr);
     EXPECT_NE(io->RemoveFile("/bin/ls"), 0);
     EXPECT_NE(io->RemoveDirectory("/bin"), 0);
+}
+
+// Every descriptor a process holds is released when its program ends, before
+// it reports finished -- here, a builtin's Run returning (of a stop).
+TEST_F(BuiltinCommandsTest, ABuiltinsDescriptorsAreReleasedWhenItsCommandReturns) {
+    BuiltinCommandHost host{os, /*pid=*/1, /*parentPid=*/1, "/wait", /*console=*/nullptr};
+    auto process = BuiltinProcess::Create(host, factory->CreateEnvironment(),
+        std::make_shared<WaitCommand>(), {}, "/");
+    ASSERT_NE(process, nullptr);
+
+    auto releases = std::make_shared<std::atomic<int>>(0);
+    ASSERT_EQ(process->IO()->AddDescriptor(ReleaseCountingDescriptor::Create(releases)), 0);
+
+    // The command is still waiting, so nothing may have been released yet.
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_EQ(releases->load(), 0);
+
+    process->TriggerStop();
+    ASSERT_TRUE(process->WaitToFinish(kWaitMs));
+    // Already released at the moment WaitToFinish returned -- not after.
+    EXPECT_EQ(releases->load(), 1);
 }
 
 // --- echo ---

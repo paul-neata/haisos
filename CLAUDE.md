@@ -178,6 +178,28 @@ after a literal `--` is parsed as `key=value` pairs fed to the haisosfile as
 | `-L`, `--log-agent-to-file <path>` | Write every agent's LLM traffic to `<path>`: each request sent (`SEND`) and response received (`RECEIVE`), headed by the agent's path (its ancestors' names then its own, joined by `>`, e.g. `main_2>aaaaer6o`) and the time. Each entry is indented by the agent's depth in its agent tree: two tabs and a `\|` per level, none for a top-level agent. Re-created if deleted while Haisos runs, starting afresh (requests in full again) |
 | `--log-agent-to-file-type <type>` | `xdiff` (default): like `diff`, JSON-like, but shorter -- unchanged fields are left out, `messages` is written `m` and shows only its new entries, `tools` lists only each tool's name with its description, a tool call is written as `m[1].tool_calls[0].function.name = "..."` lines, text is wrapped to 80 characters (line breaks kept) in `"""` blocks, and empty strings plus response timings (`model`, `created_at`, `*_duration`) are dropped; `diff`: each request as its JSON difference from the same agent's previous one, responses in full; `full`: everything in full JSON. Requires `--log-agent-to-file` |
 
+## Exit codes
+
+Every process reports an exit code, `IProcess::ExitCode()`: empty while it
+runs, then a shell-style 0-255 that never changes once set. A program's own
+code is taken modulo 256 (`exit(256)` is 0, `exit(-1)` is 255); a process
+stopped through `TriggerStop()` reports 143 (128 + SIGTERM, as a shell would
+for a killed program); 141 (128 + SIGPIPE) is reserved for the pipes work to
+come. A `RUN` whose process never starts has no code -- as with a shell's 127,
+reporting it is the launcher's business, not the process's.
+
+haisos's own exit status is the exit code of the first `RUN` (in file order)
+that did not exit 0 -- 127 when one or no process could be started, else 0 --
+with haisos's own errors (a bad haisosfile, an unreadable `OUTCOPY` target)
+exiting 1. What a runtime counts as its code: a builtin, the command's own
+status; a Lua script, `exit([code])`'s argument (0 by default, `true` 0 and
+`false` 1, as `os.exit` -- the stock `os.exit` stays unopened), or 1 on a load
+or runtime error, which also writes `lua: <message>` to the script's stderr
+just as the standalone interpreter does; an agent, 1 when its last command
+failed (an LLM, HTTP or parse failure, the LLM-round cap, an exception), else
+0. Each runtime decides in one place, `ExitCodeFor` in
+`src/components/libheaders/ExitCodes.h`.
+
 ## The `haisosfile` DSL
 
 A small Dockerfile-style language (parsed by `HaisosFileParser` in `src/haisos/`;

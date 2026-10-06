@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include "src/components/libheaders/DestroyOffRuntimeThreads.h"
+#include "src/components/libheaders/ExitCodes.h"
 #include "src/components/Logger/Logger.h"
 
 extern "C" {
@@ -211,8 +212,10 @@ LuaProcess* SelfFromState(lua_State* L) {
 // base, table, string, math, utf8, and coroutine. Deliberately omits `io`,
 // `os`, `package`, and `debug`, which would grant raw filesystem/process/env
 // access and native library loading, bypassing the rooted IFileSystem and the
-// OS's tool-only sandboxing. Four base-library globals are removed after
-// opening:
+// OS's tool-only sandboxing (the stock `os.exit` stays out with them: it calls
+// C exit() and would end the whole haisos host -- a script ends itself with the
+// exit() global registered in RegisterBindings instead). Four base-library
+// globals are removed after opening:
 //  - `dofile`/`loadfile` read directly from the real disk, escaping the jail;
 //  - `load` defaults to mode "bt", i.e. it accepts *binary* chunks, and Lua's
 //    bytecode loader does not validate untrusted input: a crafted binary chunk
@@ -251,11 +254,32 @@ void OpenSafeLuaLibs(lua_State* L) {
 // lua_sethook() re-arms the trap flag on every Lua frame on the stack, so the
 // hook survives the error unwinding back into an outer frame.
 void KillHookTrampoline(lua_State* L, lua_Debug* /*ar*/) {
-    if (SelfFromState(L)->IsKillRequested()) {
+    LuaProcess* self = SelfFromState(L);
+    // The exit flag latches exactly like the kill one: exit() aborts through
+    // this same hook so that a pcall wrapping it is stripped just the same.
+    if (self->IsKillRequested() || self->IsExitRequested()) {
         lua_sethook(L, &KillHookTrampoline,
                     LUA_MASKCOUNT | LUA_MASKCALL | LUA_MASKRET | LUA_MASKLINE, 1);
         luaL_error(L, "process killed");
     }
+}
+
+// The error value on top of the stack rendered as the standalone interpreter's
+// msghandler renders it (lua.c), minus the traceback it appends: a string (or
+// number, which lua_tostring converts in place, as msghandler takes it) as it
+// is; otherwise its __tostring result when that produces a string; otherwise
+// "(error object is a <type> value)".
+std::string RenderLuaError(lua_State* L) {
+    const int at = lua_gettop(L);
+    if (const char* msg = lua_tostring(L, at)) {
+        return msg;
+    }
+    // luaL_callmeta leaves the metamethod's result on top when there is one.
+    if (luaL_callmeta(L, at, "__tostring") && lua_type(L, -1) == LUA_TSTRING) {
+        return lua_tostring(L, -1);
+    }
+    lua_settop(L, at);
+    return std::string("(error object is a ") + luaL_typename(L, at) + " value)";
 }
 
 } // namespace
@@ -431,6 +455,15 @@ bool LuaProcess::IsKillRequested() const {
     return m_killed.load();
 }
 
+bool LuaProcess::IsExitRequested() const {
+    return m_exitRequested.load();
+}
+
+std::optional<int> LuaProcess::ExitCode() const {
+    std::lock_guard<std::mutex> lock(m_finishedMutex);
+    return m_exitCode;
+}
+
 void LuaProcess::WriteToDescriptor(int fd, const std::string& bytes) {
     auto descriptor = m_io->GetDescriptor(fd);
     if (!descriptor) {
@@ -553,11 +586,46 @@ int LuaProcess::LuaPrintTrampoline(lua_State* L) {
     return 0;
 }
 
+// The exit([code]) global: how a script ends itself with its own code. It
+// only touches atomics and Lua API calls (no std::string building), so no C++
+// exception can escape into Lua's frames (see LuaToolTrampoline).
+int LuaProcess::LuaExitTrampoline(lua_State* L) {
+    LuaProcess* self = SelfFromState(L);
+    lua_Integer code = 0;
+    if (lua_gettop(L) >= 1 && !lua_isnil(L, 1)) {
+        if (lua_isboolean(L, 1)) {
+            // As os.exit takes them: true is success, false failure.
+            code = lua_toboolean(L, 1) ? 0 : 1;
+        } else {
+            int isInteger = 0;
+            // lua_tointegerx refuses a float without an exact integer value,
+            // and anything that is not a number at all.
+            code = lua_tointegerx(L, 1, &isInteger);
+            if (!isInteger) {
+                return luaL_argerror(L, 1, "number or boolean expected");
+            }
+        }
+    }
+    self->m_exitCodeRequested = static_cast<int>(code);
+    self->m_exitRequested = true;
+    // Re-armed exactly as on a kill (every instruction/call/return/line), so
+    // the error raised below cannot be swallowed: a pcall around exit() strips
+    // one pcall level per caught error until the top-level lua_pcall returns.
+    lua_sethook(L, &KillHookTrampoline,
+                LUA_MASKCOUNT | LUA_MASKCALL | LUA_MASKRET | LUA_MASKLINE, 1);
+    return luaL_error(L, "exit");
+}
+
 void LuaProcess::RegisterBindings(lua_State* L) {
     *static_cast<LuaProcess**>(lua_getextraspace(L)) = this;
 
     lua_pushcfunction(L, &LuaProcess::LuaPrintTrampoline);
     lua_setglobal(L, "print");
+
+    // The sandbox's one global addition: exit(), which os.exit would have been
+    // if `os` could be opened (see OpenSafeLuaLibs).
+    lua_pushcfunction(L, &LuaProcess::LuaExitTrampoline);
+    lua_setglobal(L, "exit");
 
     if (m_toolFactory) {
         for (const auto& toolName : m_toolFactory->GetAvailableTools()) {
@@ -583,6 +651,11 @@ void LuaProcess::RunThread() {
     // not here. It also names this thread in every log line.
     RuntimeThreadScope runtimeThread("lua " + m_path + " pid=" + std::to_string(m_pid));
     LogDebug("LuaProcess '%s' RunThread starting (%zu bytes of script)", m_path.c_str(), m_scriptContent.size());
+    // How the script ended drives the exit code below: ranToEnd says the chunk
+    // returned on its own; scriptFailed a load or runtime error (not a stop and
+    // not an exit()). Both start false for a state that was never created.
+    bool ranToEnd = false;
+    bool scriptFailed = false;
     // Anything thrown here would otherwise take down the whole program and, worse,
     // leave m_finished false so every WaitToFinish() hangs. The finished-marking
     // below therefore has to run on every path out of the Lua work.
@@ -590,6 +663,7 @@ void LuaProcess::RunThread() {
     m_luaState = luaL_newstate();
     if (!m_luaState) {
         LogError("LuaProcess '%s': failed to create Lua state", m_path.c_str());
+        scriptFailed = true;
     } else {
         OpenSafeLuaLibs(m_luaState);
         RegisterBindings(m_luaState);
@@ -598,23 +672,33 @@ void LuaProcess::RunThread() {
         // Mode "t" accepts source text only. The default ("bt") would also accept
         // precompiled bytecode, which Lua's undump does not validate -- and a .lua
         // program is untrusted input, since an agent can write one via os_write_file
-        // and then launch it via os_start_process.
-        if (luaL_loadbufferx(m_luaState, m_scriptContent.data(), m_scriptContent.size(), m_path.c_str(), "t") != LUA_OK) {
-            const char* err = lua_tostring(m_luaState, -1);
-            LogError("LuaProcess '%s': failed to load script: %s", m_path.c_str(), err ? err : "unknown error");
-            WriteToDescriptor(IFileIO::kStdErr,
-                "[" + m_path + "] Error: " + std::string(err ? err : "failed to load script") + "\n");
+        // and then launch it via os_start_process. The "@" makes Lua take the
+        // chunk name as a path, so its messages read "<path>:<line>:" as the
+        // standalone interpreter's do.
+        const std::string chunkName = "@" + m_path;
+        if (luaL_loadbufferx(m_luaState, m_scriptContent.data(), m_scriptContent.size(), chunkName.c_str(), "t") != LUA_OK) {
+            const std::string rendered = RenderLuaError(m_luaState);
+            LogError("LuaProcess '%s': failed to load script: %s", m_path.c_str(), rendered.c_str());
+            // As the standalone lua prints it, without the traceback.
+            WriteToDescriptor(IFileIO::kStdErr, "lua: " + rendered + "\n");
+            scriptFailed = true;
         } else if (lua_pcall(m_luaState, 0, 0, 0) != LUA_OK) {
-            const char* err = lua_tostring(m_luaState, -1);
-            if (IsKillRequested()) {
+            if (IsExitRequested()) {
+                // Not a fault: exit() aborts the script by raising through the
+                // kill hook, so this is the expected way such a script unwinds.
+                LogInfo("LuaProcess '%s': ended by exit(%d)", m_path.c_str(), m_exitCodeRequested.load());
+            } else if (IsKillRequested()) {
                 // Not a fault: the kill hook aborts the script by raising, so this
                 // is the expected way a killed process unwinds.
                 LogInfo("LuaProcess '%s': killed by request", m_path.c_str());
             } else {
-                LogError("LuaProcess '%s': script error: %s", m_path.c_str(), err ? err : "unknown error");
-                WriteToDescriptor(IFileIO::kStdErr,
-                    "[" + m_path + "] Error: " + std::string(err ? err : "script error") + "\n");
+                const std::string rendered = RenderLuaError(m_luaState);
+                LogError("LuaProcess '%s': script error: %s", m_path.c_str(), rendered.c_str());
+                WriteToDescriptor(IFileIO::kStdErr, "lua: " + rendered + "\n");
+                scriptFailed = true;
             }
+        } else {
+            ranToEnd = true;
         }
 
         lua_close(m_luaState);
@@ -622,8 +706,10 @@ void LuaProcess::RunThread() {
     }
     } catch (const std::exception& e) {
         LogError("LuaProcess '%s': unexpected exception: %s", m_path.c_str(), e.what());
+        scriptFailed = true;
     } catch (...) {
         LogError("LuaProcess '%s': unexpected unknown exception", m_path.c_str());
+        scriptFailed = true;
     }
     if (m_luaState) {
         lua_close(m_luaState);
@@ -640,6 +726,18 @@ void LuaProcess::RunThread() {
     }
     {
         std::lock_guard<std::mutex> lock(m_finishedMutex);
+        // The Lua runtime's one ProcessEnd decision point (see ExitCodes.h): a
+        // script's own exit() is the code it asked for; a stop that caught the
+        // script still running is 143 (one finished before a late Kill() keeps
+        // its own code); otherwise a load or runtime error is 1 and a clean
+        // run 0.
+        if (m_exitRequested) {
+            m_exitCode = ExitCodeFor(ProcessEnd::Exited, m_exitCodeRequested);
+        } else if (m_killed && !ranToEnd) {
+            m_exitCode = ExitCodeFor(ProcessEnd::Stopped, 0);
+        } else {
+            m_exitCode = ExitCodeFor(ProcessEnd::Exited, scriptFailed ? 1 : 0);
+        }
         m_finished = true;
     }
     m_finishedCv.notify_all();

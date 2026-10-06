@@ -143,8 +143,133 @@ TEST(LuaProcessTest, AScriptErrorGoesToStderr) {
     EXPECT_TRUE(run.process->IsFinished());
     EXPECT_EQ(run.out->Written(), "");
     ASSERT_NE(run.err->Written().find("boom"), std::string::npos);
-    // One line: '[test_lua.lua] Error: ...' plus its newline.
+    // One line: 'lua: <path>:<line>: ...' plus its newline.
     EXPECT_EQ(run.err->Written().back(), '\n');
+}
+
+TEST(LuaProcessTest, ARuntimeErrorPrintsLuaStyleAndExitsOne) {
+    auto toolFactory = std::make_shared<TestToolFactory>();
+    // As the standalone lua prints it (without the traceback): "lua: " then
+    // the error as its msghandler renders it, then a newline.
+    auto run = RunScript(toolFactory, "\nerror(\"boom\")");
+
+    EXPECT_EQ(run.out->Written(), "");
+    EXPECT_EQ(run.err->Written(), "lua: test_lua.lua:2: boom\n");
+    ASSERT_TRUE(run.process->ExitCode().has_value());
+    EXPECT_EQ(*run.process->ExitCode(), 1);
+}
+
+TEST(LuaProcessTest, ASyntaxErrorPrintsLuaStyleAndExitsOne) {
+    auto toolFactory = std::make_shared<TestToolFactory>();
+    auto run = RunScript(toolFactory, "this is not lua");
+
+    EXPECT_EQ(run.out->Written(), "");
+    EXPECT_EQ(run.err->Written().rfind("lua: test_lua.lua:1:", 0), 0u) << run.err->Written();
+    ASSERT_TRUE(run.process->ExitCode().has_value());
+    EXPECT_EQ(*run.process->ExitCode(), 1);
+}
+
+TEST(LuaProcessTest, ANonStringErrorIsDescribed) {
+    auto toolFactory = std::make_shared<TestToolFactory>();
+    // An error value that is no string (and has no __tostring): described, as
+    // lua.c's msghandler describes it.
+    auto run = RunScript(toolFactory, "error({})");
+
+    EXPECT_EQ(run.err->Written(), "lua: (error object is a table value)\n");
+    ASSERT_TRUE(run.process->ExitCode().has_value());
+    EXPECT_EQ(*run.process->ExitCode(), 1);
+}
+
+TEST(LuaProcessTest, ExitEndsTheScriptWithItsCode) {
+    auto toolFactory = std::make_shared<TestToolFactory>();
+
+    auto run = RunScript(toolFactory, "print('a') exit(3) print('b')");
+    EXPECT_EQ(run.out->Written(), "a\n");
+    ASSERT_TRUE(run.process->ExitCode().has_value());
+    EXPECT_EQ(*run.process->ExitCode(), 3);
+
+    for (const auto [script, expected] : {
+            std::pair{"exit()", 0}, {"exit(false)", 1}, {"exit(true)", 0},
+            {"exit(256 + 7)", 7}, {"exit(-1)", 255}}) {
+        run = RunScript(toolFactory, script);
+        ASSERT_TRUE(run.process->ExitCode().has_value()) << script;
+        EXPECT_EQ(*run.process->ExitCode(), expected) << script;
+        EXPECT_EQ(run.err->Written(), "") << script;
+    }
+}
+
+TEST(LuaProcessTest, ExitWithABadArgumentIsAnOrdinaryScriptError) {
+    auto toolFactory = std::make_shared<TestToolFactory>();
+    auto run = RunScript(toolFactory, "exit('now')");
+
+    EXPECT_EQ(run.out->Written(), "");
+    EXPECT_EQ(run.err->Written().rfind("lua: test_lua.lua:1: bad argument #1", 0), 0u) << run.err->Written();
+    ASSERT_TRUE(run.process->ExitCode().has_value());
+    EXPECT_EQ(*run.process->ExitCode(), 1);
+}
+
+TEST(LuaProcessTest, ExitCannotBeCaughtByPcall) {
+    auto toolFactory = std::make_shared<TestToolFactory>();
+    // exit() aborts through the latched hook, as a kill does: the pcall strips
+    // one level and the hook raises again before any further instruction -- so
+    // neither the pcall nor the print after it survives.
+    auto run = RunScript(toolFactory, "pcall(function() exit(4) end) print('after')");
+
+    EXPECT_EQ(run.out->Written(), "");
+    EXPECT_EQ(run.err->Written(), "");
+    ASSERT_TRUE(run.process->ExitCode().has_value());
+    EXPECT_EQ(*run.process->ExitCode(), 4);
+}
+
+TEST(LuaProcessTest, AStoppedScriptExits143) {
+    auto toolFactory = std::make_shared<TestToolFactory>();
+    auto in = std::make_shared<MockFileDescriptor>();
+    in->EndInput();
+    auto out = std::make_shared<MockFileDescriptor>();
+    auto err = std::make_shared<MockFileDescriptor>();
+    StartProcessOptions options;
+    options.stdIn = in;
+    options.stdOut = out;
+    options.stdErr = err;
+    auto process = LuaProcess::Create(
+        1, 0, CreateEnvironment(), "busy_lua.lua", /*workingDirectory=*/"",
+        /*os=*/std::weak_ptr<IHaisosOS>{}, /*selfHandle=*/nullptr, "while true do end", std::vector<std::string>{}, toolFactory, options);
+
+    process->TriggerStop();
+    EXPECT_TRUE(process->WaitToFinish(2000));
+    // 143 is 128 + SIGTERM: TriggerStop is Haisos's SIGTERM (see ExitCodes.h).
+    ASSERT_TRUE(process->ExitCode().has_value());
+    EXPECT_EQ(*process->ExitCode(), 143);
+    // A stop is not a fault: nothing is reported on either stream.
+    EXPECT_EQ(out->Written(), "");
+    EXPECT_EQ(err->Written(), "");
+}
+
+TEST(LuaProcessTest, ExitCodeIsEmptyWhileRunning) {
+    auto toolFactory = std::make_shared<TestToolFactory>();
+    auto in = std::make_shared<MockFileDescriptor>();
+    in->EndInput();
+    StartProcessOptions options;
+    options.stdIn = in;
+    options.stdOut = std::make_shared<MockFileDescriptor>();
+    options.stdErr = std::make_shared<MockFileDescriptor>();
+    auto process = LuaProcess::Create(
+        1, 0, CreateEnvironment(), "busy_lua.lua", /*workingDirectory=*/"",
+        /*os=*/std::weak_ptr<IHaisosOS>{}, /*selfHandle=*/nullptr, "while true do end", std::vector<std::string>{}, toolFactory, options);
+
+    EXPECT_FALSE(process->ExitCode().has_value());
+
+    // Clean up: leave no busy script behind.
+    process->TriggerStop();
+    EXPECT_TRUE(process->WaitToFinish(2000));
+}
+
+// exit() is the sandbox's one added global; io and os stay nil.
+TEST(LuaProcessTest, IoAndOsStayNil) {
+    auto toolFactory = std::make_shared<TestToolFactory>();
+    auto run = RunScript(toolFactory, "print(tostring(io) .. '|' .. tostring(os) .. '|' .. type(exit))");
+
+    EXPECT_EQ(run.out->Written(), "nil|nil|function\n");
 }
 
 TEST(LuaProcessTest, ToolCallReturnsStringAndErrorFlag) {
@@ -248,14 +373,17 @@ TEST(LuaProcessTest, PrecompiledBytecodeIsRefused) {
     // chunk would hand a script arbitrary memory access. A chunk starting with
     // the Lua binary signature ("\x1bLua") must be rejected at load time, which
     // means the script never runs and nothing reaches its stdout -- the refusal
-    // is an error line on its stderr.
+    // is an error line on its stderr and an exit code of 1.
     auto toolFactory = std::make_shared<TestToolFactory>();
     std::string bytecode = "\x1b" "Lua" "\x54\x00\x19\x93\r\n\x1a\n";
     auto run = RunScript(toolFactory, bytecode);
 
     EXPECT_TRUE(run.process->IsFinished());
     EXPECT_EQ(run.out->Written(), "");
-    EXPECT_NE(run.err->Written().find("Error"), std::string::npos);
+    // No position in this one: the refusal fires before any frame exists.
+    EXPECT_EQ(run.err->Written(), "lua: attempt to load a binary chunk (mode is 't')\n");
+    ASSERT_TRUE(run.process->ExitCode().has_value());
+    EXPECT_EQ(*run.process->ExitCode(), 1);
 }
 
 // --- The Lua <-> JSON bridge ---

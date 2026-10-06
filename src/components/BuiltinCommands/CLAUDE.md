@@ -37,7 +37,9 @@ through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
   `ProcessFileIO` (the separate `ProcessFileIO` library
   in `src/components/HaisosOS/`), so a builtin reaches files exactly as every
   other runtime does -- `ICurrentProcess` is still the only door out.
-  `ExitStatus()` is for tests: `IProcess` has no exit status yet.
+  `ExitCode()` (`IProcess::ExitCode`) is empty while the command runs, then
+  its status modulo 256 -- or 143 when it was stopped (see "Exit codes" in the
+  root `CLAUDE.md`).
 - `IBuiltinCommand` / `BuiltinContext` (`BuiltinCommand.h`) - one command, and
   what a run of it is handed: its process, arguments, output, and the stop flag.
   Commands are stateless, so one instance serves every process running it.

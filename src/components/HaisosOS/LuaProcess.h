@@ -3,6 +3,7 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -46,6 +47,9 @@ public:
     std::shared_ptr<IEnvironment> GetEnvironment() const override;
     void TriggerStop() override;
     bool WaitToFinish(uint64_t timeoutMs) override;
+    // 0 for a script that ran to the end, the code exit(code) asked for, 1 for
+    // a load or runtime error, 143 when it was stopped (see IProcess::ExitCode).
+    std::optional<int> ExitCode() const override;
 
     // ICurrentProcess
     std::shared_ptr<IFileIO> IO() const override;
@@ -61,8 +65,10 @@ public:
     void WaitToFinish();
 
     // Used by the Lua kill-hook (a free function, since lua_Debug is not
-    // available where this class is declared).
+    // available where this class is declared). The exit flag is there too:
+    // exit() aborts through the same hook, so a pcall cannot swallow either.
     bool IsKillRequested() const;
+    bool IsExitRequested() const;
 
 private:
     LuaProcess(
@@ -90,6 +96,7 @@ private:
 
     static int LuaToolTrampoline(lua_State* L);
     static int LuaPrintTrampoline(lua_State* L);
+    static int LuaExitTrampoline(lua_State* L);
 
     uint64_t m_pid;
     uint64_t m_parentPid;
@@ -110,8 +117,15 @@ private:
     std::thread m_thread;
     std::atomic<bool> m_finished{false};
     std::atomic<bool> m_killed{false};
+    // Set by the script's own call to the exit() global: the flag is what the
+    // hook keeps raising on, the code what ExitCode() reports for it.
+    std::atomic<bool> m_exitRequested{false};
+    std::atomic<int> m_exitCodeRequested{0};
+    // Set under m_finishedMutex in the same critical section that marks the
+    // process finished, so whoever sees finished finds it already in place.
+    std::optional<int> m_exitCode;
     std::condition_variable m_finishedCv;
-    std::mutex m_finishedMutex;
+    mutable std::mutex m_finishedMutex;
     std::mutex m_joinMutex;
 };
 

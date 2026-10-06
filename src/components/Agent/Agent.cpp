@@ -252,6 +252,10 @@ bool Agent::IsFinished() const {
     return m_finished.load();
 }
 
+bool Agent::LastCommandFailed() const {
+    return m_lastCommandFailed.load();
+}
+
 void Agent::SetFinishedHook(std::function<void()> hook) {
     {
         std::lock_guard<std::mutex> lock(m_finishedHookMutex);
@@ -480,6 +484,9 @@ void Agent::RunThread() {
 
 void Agent::ProcessCommand(const std::string& command) {
     LogDebug("Agent '%s' processing command: %s", m_name.c_str(), command.c_str());
+    // Every command starts un-failed; how it ends is what the process's exit
+    // code reports (see AgentProcess::ExitCode).
+    m_lastCommandFailed = false;
 
     // The command goes in whole, byte for byte. It is delimited, not filtered:
     // it is the agent's program, a line its operator typed, or a prompt from
@@ -500,6 +507,13 @@ void Agent::ProcessCommand(const std::string& command) {
     while (true) {
         if (++rounds > MAX_LLM_ROUNDS) {
             LogWarning("Agent '%s' exceeded maximum LLM rounds (%d), breaking conversation loop", m_name.c_str(), MAX_LLM_ROUNDS);
+            // A failed command: reported as a diagnostic (it stays out of the
+            // history and the message buffer) and counted for the exit code.
+            m_lastCommandFailed = true;
+            if (m_console) {
+                m_console->WriteError("Error: the command reached the maximum of " +
+                    std::to_string(MAX_LLM_ROUNDS) + " LLM rounds");
+            }
             break;
         }
 
@@ -512,6 +526,12 @@ void Agent::ProcessCommand(const std::string& command) {
         }
 
         LLMResponse response = m_llmCommunicator->Call(localHistory, m_cachedToolDescriptions);
+
+        // An error response is the command failing, as far as the exit code is
+        // concerned -- whatever the round goes on to do.
+        if (IsErrorResponse(response)) {
+            m_lastCommandFailed = true;
+        }
 
         if (!response.message.content.empty()) {
             if (m_console) {
@@ -559,6 +579,8 @@ void Agent::ProcessCommand(const std::string& command) {
 }
 
 void Agent::OnCommandFailed(const std::string& what) {
+    // This command failed, as far as the exit code is concerned.
+    m_lastCommandFailed = true;
     // Best effort: this runs because something has already failed, and
     // nothing here may throw out of the agent's thread.
     try {

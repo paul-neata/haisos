@@ -3,6 +3,7 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -39,15 +40,14 @@ public:
     // work, so this is a request, as it is for every process.
     void TriggerStop() override;
     bool WaitToFinish(uint64_t timeoutMs) override;
+    // The command's own result modulo 256 once it has returned, or 143 when it
+    // was asked to stop first (see IProcess::ExitCode).
+    std::optional<int> ExitCode() const override;
 
     // ICurrentProcess
     std::shared_ptr<IFileIO> IO() const override;
     std::shared_ptr<IAgent> AsAgent() override;
     std::shared_ptr<IHaisosOS> OS() const override;
-
-    // Internal to this component (and its tests): the command's exit status,
-    // meaningful once the process has finished. IProcess has no exit status yet.
-    int ExitStatus() const;
 
 private:
     BuiltinProcess(
@@ -77,8 +77,10 @@ private:
     std::thread m_thread;
     std::atomic<bool> m_stopRequested{false};
     std::atomic<bool> m_finished{false};
-    std::atomic<int> m_exitStatus{0};
-    std::mutex m_finishedMutex;
+    // Set under m_finishedMutex in the same critical section that marks the
+    // process finished, so whoever sees finished finds it already in place.
+    std::optional<int> m_exitCode;
+    mutable std::mutex m_finishedMutex;
     std::condition_variable m_finishedCv;
     std::mutex m_joinMutex;
 };

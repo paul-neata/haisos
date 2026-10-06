@@ -1,5 +1,8 @@
 #pragma once
+#include <atomic>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
 #include "interfaces/IProcess.h"
 #include "AgentInputLoop.h"
@@ -45,7 +48,9 @@ public:
     //
     // TriggerStop asks the agent to stop. For an interactive process,
     // WaitToFinish also waits for the input loop, which notices the agent has
-    // closed only once the next line arrives (see AgentInputLoop).
+    // closed only once the next line arrives (see AgentInputLoop). ExitCode is
+    // empty until the process has finished; then 143 when it was stopped from
+    // outside, else 1 when the agent's last command failed, else 0.
     uint64_t GetPid() const override;
     uint64_t GetParentPid() const override;
     std::string Path() const override;
@@ -53,6 +58,7 @@ public:
     std::shared_ptr<IEnvironment> GetEnvironment() const override;
     void TriggerStop() override;
     bool WaitToFinish(uint64_t timeoutMs) override;
+    std::optional<int> ExitCode() const override;
 
     // ICurrentProcess
     std::shared_ptr<IFileIO> IO() const override;
@@ -81,6 +87,14 @@ private:
     // ReleaseAllDescriptors, which is not on IFileIO, onto the agent's end.
     std::shared_ptr<ProcessFileIO> m_io;
     std::shared_ptr<Agent> m_agent;
+    // Set by TriggerStop while the process was still running: that is a stop
+    // from outside, which the exit code reports as 143. (The input loop stops
+    // the agent directly at end of input, which does not count.)
+    std::atomic<bool> m_stopRequested{false};
+    // Computed once, the first time ExitCode is asked for on a finished
+    // process, and latched under this mutex.
+    mutable std::mutex m_exitCodeMutex;
+    mutable std::optional<int> m_exitCode;
     // Null for a non-interactive process. Declared after m_agent so it is
     // destroyed first: it holds the agent too, and waits its thread out.
     std::shared_ptr<AgentInputLoop> m_inputLoop;

@@ -18,15 +18,20 @@ fs.writeFileSync(path.join(tmpDir, 'haisosfile'),
 
 try {
     // spawnSync, not execSync: an agent's failures now go to stderr, which
-    // execSync never returns. (The exit status is part of streams--exit-codes.)
+    // execSync never returns.
     const result = spawnSync(haisosPath, ['haisosfile'], { encoding: 'utf8', timeout: 120000, cwd: tmpDir });
     if (result.error) {
         console.error("agent_start haisos test failed:", result.error.message);
         process.exit(1);
     }
     console.log(result.stdout);
-    // haisos exits 0 even when the agent itself fails, so assert on the output
-    // -- both streams now.
+    // A haisos that crashed, or exited non-zero without reporting an error,
+    // must fail too -- and every one of these runs is expected to exit 0.
+    if (result.status !== 0 || result.signal) {
+        console.error(`agent_start haisos test failed: exit status ${result.status}, signal ${result.signal}`);
+        process.exit(1);
+    }
+    // Assert on the output as well, on both streams.
     if (/Error:/.test(result.stdout) || /Error:/.test(result.stderr)) {
         console.error("agent_start haisos test failed: the agent reported an error");
         process.exit(1);

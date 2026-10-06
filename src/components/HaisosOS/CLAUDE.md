@@ -47,6 +47,18 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   script's chunk ending, in `LuaProcess::RunThread`; and an agent's
   conversation thread ending, through `Agent::SetFinishedHook`, which
   `AgentProcess::Create` sets. Every drop happens outside the table's mutex.
+- Every process reports an **exit code** (`IProcess::ExitCode()`), empty while
+  it runs and a shell-style 0-255 once finished, latched and never changing --
+  a `TriggerStop()` landing after the finish changes nothing. The meanings are a
+  shell's: the program's own code modulo 256, 143 (128 + SIGTERM) for a stop,
+  141 (128 + SIGPIPE) reserved for pipes; the constants and `ExitCodeFor` live
+  in `src/components/libheaders/ExitCodes.h`, and each runtime turns its end
+  into a code in one place, where it reports finished. A builtin reports its
+  command's status; a Lua script its `exit()` argument, 1 on an error, 143 when
+  its kill hook fired before the chunk ran out; an agent 1 when its last
+  command failed (`Agent::LastCommandFailed()`), else 0, and 143 when it was
+  stopped before finishing -- `AgentProcess::TriggerStop()` latches "stopped"
+  only while the process is still running.
 - **`ICurrentProcess` is the only door out of a process.** Everything a running
   program reaches beyond its own memory it reaches through
   `ICurrentProcess` -- files via `IO()`, everything else via `OS()` --
@@ -97,7 +109,9 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   writes its replies to slot 1 and its diagnostics (an LLM, HTTP or parse
   failure, an unknown tool, a failed command) to slot 2, through
   `ProcessAgentConsole`; a Lua script's `print` writes its line to slot 1 and a
-  load or runtime error goes to slot 2. For a `.md` program,
+  load or runtime error goes to slot 2, one line `lua: <message>` where the
+  message is rendered as the standalone interpreter's does (a position prefix
+  when there is one, a non-string error object described), without a traceback. For a `.md` program,
   `interactive` also makes the agent interactive: it gets an extra system
   prompt telling it that further messages are lines typed on the console and
   that `self_close` ends the session, and its `AgentProcess` owns an
@@ -122,7 +136,9 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   exposed as a Lua global function returning `(content, is_error)` (JSON
   results are handed back as Lua tables); `print()` writes its line plus `\n`
   to the process's stdout (descriptor 1), and a load or runtime error goes to
-  its stderr (descriptor 2) as `[<path>] Error: <message>`
+  its stderr (descriptor 2) as `lua: <path>:<line>: <message>` plus a `\n` and
+  ends the script with exit code 1 (the load refusal of precompiled bytecode
+  has no position to name, so that line is just `lua: <message>`)
 - The Lua <-> JSON bridge behind those functions (`ToJson`/`PushJson` in
   `LuaProcess.cpp`) must survive whatever a script passes or a tool returns,
   since a script is untrusted and so is any file it reads. Strings keep every
@@ -139,9 +155,14 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   `debug`) plus the file-loading globals are deliberately removed, so a script
   cannot touch the real disk, environment, or native libraries. Consequently
   **all** filesystem and process access from Lua must go through the `os_*`
-  tool globals. This is a security boundary, not an oversight -- the exact set
-  of libraries and globals is defined by the library-opening helper in
-  `LuaProcess.cpp`, which is the ground truth.
+  tool globals. The stock `os.exit` goes with `os` -- it would call C `exit()`
+  on the whole haisos process -- and the sandbox's one replacement is a global
+  `exit([code])`: it asks for the script to end (the same kill-hook machinery a
+  stop uses, so a `pcall` cannot swallow it) and the process then exits with
+  its code (no argument or `nil` 0, `true` 0, `false` 1, else an integer, as
+  `os.exit` takes them). This is a security boundary, not an oversight -- the
+  exact set of libraries and globals is defined by the library-opening helper
+  in `LuaProcess.cpp`, which is the ground truth.
 - `CreateSubOS` takes the same arguments as `IFactory::CreateHaisosOS` --
   including the `IBuiltinCommands`, right after the root filesystem, typically
   the parent's own -- because a sub-OS is an ordinary OS. What confines it is the root filesystem the caller
@@ -197,6 +218,11 @@ console, and a services layer; starts processes and spawns sub-OS instances.
 - `LuaProcess` - `ICurrentProcess` backed by an embedded Lua script, running on
   its own thread. Its `Kill()` aborts the script via a Lua instruction-count
   hook -- an interpreter really can be interrupted mid-instruction -- and
-  `TriggerStop()` simply calls it, since a script has no command queue to close
+  `TriggerStop()` simply calls it, since a script has no command queue to
+  close. The same hook serves the global `exit()`: the hook's C trampoline
+  re-arms it on every call, return and line, so neither a stop nor an `exit()`
+  can be caught and ignored by a `pcall`. The chunk is loaded as text with its
+  path for a name (`"@" + path`), so error messages come out `path:line:` as
+  the standalone interpreter's do
 - `ProcessFileIO` - the `IFileIO` behind `ICurrentProcess::IO()`: the OS's root filesystem plus this process's working directory, and its owner of the descriptor table (the process's open files by number; see the bullets above). Built as a library of its own (`ProcessFileIO` in `CMakeLists.txt`), so a runtime living outside this component -- `BuiltinProcess` -- gives its processes the same I/O without linking all of `HaisosOS`
 - `OSToolFactory` - the OS-level tool set (`os_read_file`, `os_write_file`, `os_list_directory`, `os_start_process`, `os_list_processes`), built once per process and bound to it

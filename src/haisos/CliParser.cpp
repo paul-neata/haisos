@@ -37,7 +37,12 @@ std::string FormatUsage(const char* programName) {
         "imports a host variable):\n"
         "  HAISOS_ENDPOINT    LLM API endpoint, e.g. http://localhost:11434/api/chat\n"
         "  HAISOS_MODEL       Model name\n"
-        "  HAISOS_API_KEY     API key (optional for local Ollama)\n";
+        "  HAISOS_API_KEY     API key (optional for local Ollama)\n"
+
+        "\nExit status: the exit code of the first RUN (in file order) that did not\n"
+        "exit 0 -- 127 for a RUN whose process could not be started, 143 for one\n"
+        "still running when haisos stops waiting -- or 0 when every RUN exited 0.\n"
+        "haisos's own errors (command line, parse, setup, OUTCOPY) exit 1.\n";
 }
 
 bool ParseLogLevel(const std::string& level, LogLevel& outLevel) {

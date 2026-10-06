@@ -15,9 +15,13 @@ using namespace Haisos;
 
 namespace {
 
-// 127.0.0.1, not localhost -- as in HaisosOSTest's kUnreachableEndpoint: a
-// refused connection there fails the agent's LLM call at once.
-const std::string kUnreachableEndpoint = "http://127.0.0.1:9999/api/chat";
+// 0.0.0.0, not 127.0.0.1 -- a client can never connect to it, so the attempt
+// fails at once on every platform. 127.0.0.1 (as HaisosOSTest's own
+// kUnreachableEndpoint) also fails for certain, but a refused connection to it
+// takes about 2 s on Windows; that is too slow here, where only one test
+// (AStopOfAnInteractiveAgentInterruptsItsPipedStdin) needs the LLM call to
+// fail, promptly, before it can block on the piped stdin.
+const std::string kUnreachableEndpoint = "http://0.0.0.0:9999/api/chat";
 // Generous: only bounds a hang; every process in these tests ends promptly.
 constexpr uint64_t kProcessWaitMs = 30000;
 
@@ -234,7 +238,10 @@ TEST_F(HaisosOSPipeTest, ABuiltinBlockedOnAFullPipeStopsWhenAskedTo) {
     ends.writeEnd.reset();
     options.stdOut.reset();
 
-    EXPECT_FALSE(process->WaitToFinish(200));
+    // Short: the pipe fills and the command blocks on it almost at once,
+    // in memory, with nothing to wait on but CPU scheduling -- this only
+    // confirms it has not finished yet, so it need not be generous.
+    EXPECT_FALSE(process->WaitToFinish(50));
     process->TriggerStop();
     EXPECT_TRUE(process->WaitToFinish(5000));
     EXPECT_EQ(process->ExitCode(), std::optional<int>(kExitCodeStopped));
@@ -259,10 +266,13 @@ TEST_F(HaisosOSPipeTest, AStopOfAnInteractiveAgentInterruptsItsPipedStdin) {
     auto process = m_os->StartProcess(TestEnvironment(), "/a.md", {}, "", options);
     ASSERT_NE(process, nullptr);
 
-    // The LLM call fails at once against the unreachable endpoint; the
-    // interactive agent then waits for input, and the input loop is blocked
-    // reading the silent pipe. Asking to stop must interrupt that read.
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    // The input loop starts right after Post() (AgentProcess::Create), which
+    // only queues the agent's first command rather than waiting on it, so it
+    // is blocked reading the silent pipe within a thread switch or two --
+    // long before the LLM call against the unreachable endpoint fails. This
+    // only gives it a moment to get there; asking to stop must interrupt that
+    // read regardless of whether it has already started waiting.
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
     process->TriggerStop();
     EXPECT_TRUE(process->WaitToFinish(5000));
 }

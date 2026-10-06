@@ -1,0 +1,3 @@
+add_executable(PipeService.unittests PipeServiceTest.cpp)
+target_link_libraries(PipeService.unittests PRIVATE gtest_main PipeService)
+target_compile_features(PipeService.unittests PRIVATE cxx_std_17)

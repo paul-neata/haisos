@@ -98,6 +98,13 @@ public:
     // and every other service comes from here.
     virtual std::shared_ptr<IServicesCreator> GetServicesCreator() = 0;
 
+    // The OS's own pipe service, created from its services creator when the OS
+    // is created (a sub-OS has its own); never null. Reached by a process
+    // through ICurrentProcess::OS() -- in practice through
+    // IFileIO::CreatePipe, which places both ends in the caller's descriptor
+    // table.
+    virtual std::shared_ptr<IPipeService> GetPipeService() = 0;
+
     // The environment this OS was created with. Clone() it before handing it to
     // a process or a sub-OS, so their edits do not reach back into this one.
     virtual std::shared_ptr<IEnvironment> GetOsEnvironment() const = 0;

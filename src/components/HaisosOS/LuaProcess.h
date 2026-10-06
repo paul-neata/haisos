@@ -10,6 +10,7 @@
 #include "interfaces/IProcess.h"
 #include "ProcessFileIO.h"
 #include "src/components/libheaders/CurrentProcessHandle.h"
+#include "src/components/libheaders/StopToken.h"
 #include "interfaces/IHaisosOS.h"
 
 struct lua_State;
@@ -117,6 +118,10 @@ private:
     std::thread m_thread;
     std::atomic<bool> m_finished{false};
     std::atomic<bool> m_killed{false};
+    // What wakes a pipe Read/Write blocked on this process's behalf: installed
+    // on the script's thread by RunThread, signalled by Kill. A script's exit()
+    // does not touch it: exit() ends the script by unwinding, not by blocking.
+    std::shared_ptr<StopToken> m_stopToken = StopToken::Create();
     // Set by the script's own call to the exit() global: the flag is what the
     // hook keeps raising on, the code what ExitCode() reports for it.
     std::atomic<bool> m_exitRequested{false};

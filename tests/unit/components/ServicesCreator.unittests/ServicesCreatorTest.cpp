@@ -326,3 +326,29 @@ TEST(ServicesCreatorTest, NoAgentIsCreatedOnceTheLLMServiceIsShuttingDown) {
     EXPECT_TRUE(gate->called);
     EXPECT_TRUE(gate->refused);
 }
+
+TEST(ServicesCreatorTest, CreatePipeServiceCreatesWorkingPipes) {
+    auto servicesCreator = CreateServicesCreator();
+
+    auto first = servicesCreator->CreatePipeService();
+    auto second = servicesCreator->CreatePipeService();
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    // Each call is a new, independent service.
+    EXPECT_NE(first, second);
+
+    auto ends = first->CreatePipe();
+    ASSERT_NE(ends.readEnd, nullptr);
+    ASSERT_NE(ends.writeEnd, nullptr);
+    EXPECT_EQ(first->OpenPipeCount(), 1u);
+    EXPECT_EQ(second->OpenPipeCount(), 0u);
+
+    EXPECT_EQ(ends.writeEnd->Write("x", 1), 1);
+    char buf[8] = {};
+    EXPECT_EQ(ends.readEnd->Read(buf, sizeof(buf)), 1);
+    EXPECT_EQ(buf[0], 'x');
+
+    ends.readEnd.reset();
+    ends.writeEnd.reset();
+    EXPECT_EQ(first->OpenPipeCount(), 0u);
+}

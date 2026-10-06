@@ -23,6 +23,22 @@ Header-only C++ utilities. Not a formal component.
   `DestructionThread`, one thread for the whole program, started on first use
   and drained at exit, which may wait for anything. Both a hand-off and each
   destruction there are logged.
+- `StopToken.h` - the per-runtime-thread stop token that makes a blocked pipe
+  call interruptible without polling: `StopToken` (one per process: idempotent
+  `RequestStop()`, `Current()` the token installed on this thread),
+  `StopTokenScope` (installs a token as current for the scope, restoring the
+  previous one; a null token installs nothing -- such a thread is never
+  interrupted), and `StopCallback` (registers a wake with a token for its own
+  lifetime, as C++20 `std::stop_callback`; run at once if the stop was already
+  requested). `RequestStop()` runs every callback under the token's mutex, so
+  once `~StopCallback` returns its callback is neither running nor will ever
+  run -- a callback may capture raw pointers to the waiter's state, but must
+  not call into the same token and may take only locks never held while a
+  `StopCallback` on that token is constructed or destroyed (the pipe obeys:
+  its `StopCallback` is built before the pipe's mutex is taken and destroyed
+  after it is released). No threads, no timers, no logging. Every runtime
+  thread (builtin, Lua, agent, input loop) installs its process's token, and
+  `TriggerStop` signals it.
 - `CrtInvalidParameterAsError.h` - on Windows, keeps the Microsoft C runtime
   from ending the whole program when one of its functions is handed an invalid
   parameter (a descriptor that is not open, a `strftime` conversion it does not

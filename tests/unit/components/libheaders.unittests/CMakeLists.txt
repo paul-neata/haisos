@@ -1,3 +1,3 @@
-add_executable(libheaders.unittests DestroyOffRuntimeThreadsTest.cpp)
+add_executable(libheaders.unittests DestroyOffRuntimeThreadsTest.cpp StopTokenTest.cpp)
 target_link_libraries(libheaders.unittests PRIVATE gtest_main Logger)
 target_compile_features(libheaders.unittests PRIVATE cxx_std_17)

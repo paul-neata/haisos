@@ -175,6 +175,32 @@ bool ProcessFileIO::InstallStandardStreams(std::shared_ptr<IFileDescriptor> in,
     return true;
 }
 
+std::optional<std::pair<int, int>> ProcessFileIO::CreatePipe(size_t capacity) {
+    auto os = m_os.lock();
+    if (!os) {
+        return std::nullopt;
+    }
+    auto service = os->GetPipeService();
+    if (!service) {
+        return std::nullopt;
+    }
+    // Placed in the table first: should fewer than two slots be free, ends
+    // goes away here and the pipe is closed with it, the table left as it was.
+    PipeEnds ends = service->CreatePipe(capacity);
+    // AddDescriptor takes the lowest free slot, so this gives the two lowest
+    // free slots, read end first.
+    const int readSlot = AddDescriptor(ends.readEnd);
+    if (readSlot < 0) {
+        return std::nullopt;
+    }
+    const int writeSlot = AddDescriptor(ends.writeEnd);
+    if (writeSlot < 0) {
+        CloseDescriptor(readSlot);
+        return std::nullopt;
+    }
+    return std::make_pair(readSlot, writeSlot);
+}
+
 void ProcessFileIO::ReleaseAllDescriptors() {
     std::vector<std::shared_ptr<IFileDescriptor>> released;
     {

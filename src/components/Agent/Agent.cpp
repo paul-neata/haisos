@@ -129,6 +129,10 @@ bool Agent::IsOwnThread() {
     return m_thread.get_id() == std::this_thread::get_id();
 }
 
+std::shared_ptr<StopToken> Agent::GetStopToken() const {
+    return m_stopToken;
+}
+
 Agent::~Agent() {
     LogDebug("Agent '%s': destroying", m_name.c_str());
     TriggerStop();
@@ -159,6 +163,8 @@ void Agent::TriggerStop() {
     // that keeps calling tools can be a long way off.
     m_stopRequested = true;
     m_commandQueue.Close();
+    // Wake a pipe Read/Write the agent (or its input loop) is blocked in.
+    m_stopToken->RequestStop();
 }
 
 std::shared_ptr<IAgent> Agent::GetParent() const {
@@ -404,6 +410,10 @@ void Agent::RunThread() {
     // last is then destroyed on the destruction thread, not here. It also names
     // this thread in every log line.
     RuntimeThreadScope runtimeThread("agent " + m_name);
+    // The process's stop token on its own thread, so a blocked pipe call (a
+    // ProcessAgentConsole write to a full stdout pipe, say) notices when the
+    // agent is asked to stop.
+    StopTokenScope stopTokenScope(m_stopToken);
     for (const auto& prompt : m_systemPrompts) {
         LLMMessage systemMsg;
         systemMsg.role = "system";

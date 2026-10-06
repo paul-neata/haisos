@@ -9,6 +9,7 @@
 #include <vector>
 #include "interfaces/IBuiltinCommands.h"
 #include "interfaces/IProcess.h"
+#include "src/components/libheaders/StopToken.h"
 #include "BuiltinCommand.h"
 
 namespace Haisos {
@@ -76,6 +77,9 @@ private:
 
     std::thread m_thread;
     std::atomic<bool> m_stopRequested{false};
+    // What wakes a pipe Read/Write blocked on this process's behalf: installed
+    // on the command's thread by RunThread, signalled by TriggerStop.
+    std::shared_ptr<StopToken> m_stopToken = StopToken::Create();
     std::atomic<bool> m_finished{false};
     // Set under m_finishedMutex in the same critical section that marks the
     // process finished, so whoever sees finished finds it already in place.

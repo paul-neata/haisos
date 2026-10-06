@@ -2,6 +2,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 #include "IFileDescriptor.h"
 #include "IFileSystemService.h"
@@ -102,6 +103,13 @@ public:
     // As close(): empties slot |fd|, releasing its descriptor; 0, or -1 if it was
     // empty or out of range.
     virtual int CloseDescriptor(int fd) = 0;
+
+    // As pipe(): makes a pipe through the OS's pipe service (see IPipeService)
+    // and places its read end and write end in the two lowest free slots, read end
+    // first. Returns {readSlot, writeSlot}, or nullopt -- the table left as it was
+    // -- when fewer than two slots are free or the OS is gone. capacity 0 is
+    // kDefaultPipeCapacity.
+    virtual std::optional<std::pair<int, int>> CreatePipe(size_t capacity = 0) = 0;
 
     // Deliberately NOT here, though IFileSystem has them: Mount and Unmount.
     // Composing filesystems is how an OS is built, not something a program

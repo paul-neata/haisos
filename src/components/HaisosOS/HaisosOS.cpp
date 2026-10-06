@@ -64,6 +64,7 @@ HaisosOS::HaisosOS(
     std::shared_ptr<IServicesCreator> servicesCreator,
     std::shared_ptr<INetworkService> networkService,
     std::shared_ptr<ILLMService> llmService,
+    std::shared_ptr<IPipeService> pipeService,
     std::shared_ptr<IFileSystem> rootFileSystem,
     std::shared_ptr<IBuiltinCommands> builtinCommands,
     std::shared_ptr<IPhysicalConsole> physicalConsole,
@@ -72,6 +73,7 @@ HaisosOS::HaisosOS(
     : m_servicesCreator(std::move(servicesCreator))
     , m_networkService(std::move(networkService))
     , m_llmService(std::move(llmService))
+    , m_pipeService(std::move(pipeService))
     , m_rootFileSystem(std::move(rootFileSystem))
     , m_builtinCommands(std::move(builtinCommands))
     , m_physicalConsole(std::move(physicalConsole))
@@ -454,6 +456,10 @@ std::shared_ptr<IServicesCreator> HaisosOS::GetServicesCreator() {
     return m_servicesCreator;
 }
 
+std::shared_ptr<IPipeService> HaisosOS::GetPipeService() {
+    return m_pipeService;
+}
+
 std::shared_ptr<IEnvironment> HaisosOS::GetOsEnvironment() const {
     return m_environment;
 }
@@ -494,6 +500,7 @@ std::shared_ptr<HaisosOS> HaisosOS::Create(
 
     std::shared_ptr<INetworkService> networkService = servicesCreator->CreateNetworkService();
     std::shared_ptr<ILLMService> llmService = servicesCreator->CreateLLMService(networkService, endpoint, modelName, apiKey);
+    std::shared_ptr<IPipeService> pipeService = servicesCreator->CreatePipeService();
 
     // A process's own thread can hold the last reference to its OS -- inside
     // an os_* tool call -- and the destructor waits for the processes.
@@ -502,6 +509,7 @@ std::shared_ptr<HaisosOS> HaisosOS::Create(
             std::move(servicesCreator),
             std::move(networkService),
             std::move(llmService),
+            std::move(pipeService),
             std::move(rootFileSystem),
             std::move(builtinCommands),
             std::move(physicalConsole),

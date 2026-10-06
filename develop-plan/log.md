@@ -61,3 +61,4 @@
 - 2026-10-06 20:56 UTC -- hsh--pipelines merged #37 as 0.4.19: 1H fixed, 3M 4L open, 1 tries; Windows HaisosOS timeout green on re-run
 - 2026-10-06 21:02 UTC -- start hsh--shell-builtins (0.4.20)
 - 2026-10-06 21:53 UTC -- hsh--shell-builtins: PR #38, ready
+- 2026-10-06 22:04 UTC -- hsh--shell-builtins merged #38 as 0.4.20: 2H 1L fixed, 2M 2L open, 1 tries

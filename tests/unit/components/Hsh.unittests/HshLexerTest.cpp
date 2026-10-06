@@ -155,6 +155,7 @@ TEST(HshLexerTest, Parameters) {
     ExpectLex("${x!}", {"W(P(<bad>))"});
     ExpectLex("${#x:-a}", {"W(P(<bad>))"});
     ExpectLex("${x:2:3}", {"W(P(<bad>))"});
+    ExpectLex("${#:-a}", {"W(P(#:-[L'a']))"}); // '#' with no name after it is $# itself
     ExpectLex("${x:}", {"W(P(<bad>))"}); // dash says "Missing '}': a documented deviation
     // Merging happens in operands too, at every level.
     ExpectLex("${x:-a'b'c}", {"W(P(x:-[L'a' Q'b' L'c']))"});
@@ -272,6 +273,12 @@ TEST(HshLexerTest, HereDocuments) {
         const HereDocument& hd = *tokens[2].hereDoc;
         EXPECT_TRUE(hd.terminated);
         EXPECT_EQ(DescribeWord(hd.body), "P(x) Q'\n$x\nab\n' C'echo cs' Q'\n'");
+    }
+    // A ${...} operand in a body is lexed as inside double quotes: ' is a plain character.
+    {
+        std::vector<Token> tokens = LexTokens("cat <<E\n${x:-it's}\nE\n");
+        ASSERT_TRUE(tokens[2].hereDoc != nullptr);
+        EXPECT_EQ(DescribeWord(tokens[2].hereDoc->body), "P(x:-[Q'it's']) Q'\n'");
     }
     // Several heredocs on one line are read one after the other.
     {

@@ -426,22 +426,25 @@ struct Lexer::Impl {
                 return part;
             }
             std::optional<std::string> name = ReadBracedName();
+            if (name) {
+                part.op = ParameterOp::Length;
+                part.text = *name;
+                if (Peek() != '}') {
+                    return FinishBadParameter(dquote);
+                }
+                RawGet();
+                return part;
+            }
+            // '#' followed by no name is the parameter '#' itself, with an op
+            // (${#:-x}, as dash).
+            part.text = "#";
+        } else {
+            std::optional<std::string> name = ReadBracedName();
             if (!name) {
                 return FinishBadParameter(dquote);
             }
-            part.op = ParameterOp::Length;
             part.text = *name;
-            if (Peek() != '}') {
-                return FinishBadParameter(dquote);
-            }
-            RawGet();
-            return part;
         }
-        std::optional<std::string> name = ReadBracedName();
-        if (!name) {
-            return FinishBadParameter(dquote);
-        }
-        part.text = *name;
         int d = Peek();
         if (d == '}') {
             RawGet();
@@ -828,7 +831,8 @@ struct Lexer::Impl {
                 continue;
             }
             if (c == '$') {
-                sub.ReadDollar(body.parts, WordPartKind::Quoted, false);
+                // A heredoc body is like double quotes: so are its ${...} operands.
+                sub.ReadDollar(body.parts, WordPartKind::Quoted, true);
                 continue;
             }
             if (c == '`') {

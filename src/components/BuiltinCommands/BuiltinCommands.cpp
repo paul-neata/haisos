@@ -54,12 +54,16 @@ std::shared_ptr<IProcess> BuiltinCommands::RunCommand(
         LogError("BuiltinCommands: refusing to run '%s': it has no OS to run under", builtinName.c_str());
         return nullptr;
     }
-    if (options.interactiveAgent) {
-        LogDebug("BuiltinCommands: interactiveAgent only applies to agents; ignoring it for '%s'", builtinName.c_str());
+    // Descriptors 0/1/2 are a process's standard streams; a builtin always
+    // gets them (IHaisosOS::StartProcess fills the defaults), so a null one
+    // here means the caller is not an OS.
+    if (!options.stdIn || !options.stdOut || !options.stdErr) {
+        LogError("BuiltinCommands: refusing to run '%s': it was given no standard streams", builtinName.c_str());
+        return nullptr;
     }
     LogDebug("BuiltinCommands: running '%s' as '%s' with %zu arg(s)",
         builtinName.c_str(), host.programPath.c_str(), args.size());
-    return BuiltinProcess::Create(host, std::move(environment), it->second, args, workingDirectory);
+    return BuiltinProcess::Create(host, std::move(environment), it->second, args, workingDirectory, options);
 }
 
 } // namespace Haisos

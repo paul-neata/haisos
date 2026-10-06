@@ -25,7 +25,8 @@ public:
         std::shared_ptr<IEnvironment> environment,
         std::shared_ptr<IBuiltinCommand> command,
         std::vector<std::string> args,
-        const std::string& workingDirectory);
+        const std::string& workingDirectory,
+        const StartProcessOptions& options);
     ~BuiltinProcess() override;
 
     // IProcess
@@ -70,7 +71,6 @@ private:
     // Concrete, so RunThread (and the tests) can reach the descriptor table's
     // ReleaseAllDescriptors, which is not on IFileIO.
     std::shared_ptr<ProcessFileIO> m_io;
-    std::shared_ptr<IAgentConsole> m_console;
     std::shared_ptr<IBuiltinCommand> m_command;
     std::vector<std::string> m_args;
 

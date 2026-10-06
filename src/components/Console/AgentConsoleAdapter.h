@@ -6,12 +6,13 @@
 
 namespace Haisos {
 
-// Bridges a single agent's IAgentConsole onto a shared IPhysicalConsole: writes
-// are tagged with the agent's name, and lines are read from the physical console.
+// Bridges a single agent's IAgentConsole onto a shared IPhysicalConsole: every
+// write is one line, forward to the physical console as message + "\n",
+// untagged; lines are read from it.
 class AgentConsoleAdapter : public IAgentConsole {
 public:
-    static std::shared_ptr<AgentConsoleAdapter> Create(std::shared_ptr<IPhysicalConsole> physicalConsole, const std::string& sourceName) {
-        return std::shared_ptr<AgentConsoleAdapter>(new AgentConsoleAdapter(std::move(physicalConsole), sourceName));
+    static std::shared_ptr<AgentConsoleAdapter> Create(std::shared_ptr<IPhysicalConsole> physicalConsole) {
+        return std::shared_ptr<AgentConsoleAdapter>(new AgentConsoleAdapter(std::move(physicalConsole)));
     }
     ~AgentConsoleAdapter() override;
 
@@ -19,10 +20,9 @@ public:
     std::optional<std::string> ReadLine() override;
 
 private:
-    AgentConsoleAdapter(std::shared_ptr<IPhysicalConsole> physicalConsole, const std::string& sourceName);
+    explicit AgentConsoleAdapter(std::shared_ptr<IPhysicalConsole> physicalConsole);
 
     std::shared_ptr<IPhysicalConsole> m_physicalConsole;
-    std::string m_sourceName;
 };
 
 }

@@ -5,6 +5,7 @@
 #include "AgentProcess.h"
 #include "LuaProcess.h"
 #include "src/components/Console/AgentConsoleAdapter.h"
+#include "src/components/Console/ConsoleDescriptors.h"
 #include "interfaces/IBuiltinCommands.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
 #include "src/components/Filesystem/VirtualPath.h"
@@ -74,6 +75,12 @@ HaisosOS::HaisosOS(
     , m_rootFileSystem(std::move(rootFileSystem))
     , m_builtinCommands(std::move(builtinCommands))
     , m_physicalConsole(std::move(physicalConsole))
+    // The descriptors a process sees; the console itself stays at the OS's
+    // edge (it creates sub-OSs with it) -- nothing inside a process gets it.
+    , m_consoleOutput(ConsoleOutputDescriptor::Create(m_physicalConsole))
+    , m_consoleError(ConsoleErrorDescriptor::Create(m_physicalConsole))
+    , m_consoleInput(ConsoleInputDescriptor::Create(m_physicalConsole))
+    , m_emptyInput(EmptyInputDescriptor::Create())
     , m_environment(std::move(environment))
     , m_osProcessId(osProcessId)
 {
@@ -168,13 +175,28 @@ void HaisosOS::CleanupFinishedProcesses() {
         m_processes.end());
 }
 
+StartProcessOptions HaisosOS::ResolveStandardStreams(const StartProcessOptions& options) const {
+    StartProcessOptions resolved = options;
+    if (!resolved.stdOut) {
+        resolved.stdOut = m_consoleOutput;
+    }
+    if (!resolved.stdErr) {
+        resolved.stdErr = m_consoleError;
+    }
+    if (!resolved.stdIn) {
+        resolved.stdIn = options.interactive ? m_consoleInput : m_emptyInput;
+    }
+    return resolved;
+}
+
 std::shared_ptr<ICurrentProcess> HaisosOS::StartAgentProcess(
     std::shared_ptr<IEnvironment> environment,
     const std::string& programPath,
     const std::vector<std::string>& args,
     const std::string& workingDirectory,
-    bool interactive)
+    const StartProcessOptions& options)
 {
+    const bool interactive = options.interactive;
     std::string content;
     if (!ReadWholeFile(*m_rootFileSystem, programPath, content)) {
         LogError("HaisosOS: failed to read process file: %s", programPath.c_str());
@@ -199,7 +221,7 @@ std::shared_ptr<ICurrentProcess> HaisosOS::StartAgentProcess(
     uint64_t pid = NextGloballyUniquePID();
     std::string name = GetStem(programPath) + "_" + std::to_string(pid);
 
-    auto console = AgentConsoleAdapter::Create(m_physicalConsole, name);
+    auto console = AgentConsoleAdapter::Create(m_physicalConsole);
     // The OS tool set is built per process, around the process rather than
     // around this OS: ICurrentProcess is the only door out of a process (see
     // the Security section of the root CLAUDE.md). The handle exists before the
@@ -285,7 +307,6 @@ std::shared_ptr<IProcess> HaisosOS::StartBuiltinProcess(
     host.os = weak_from_this();
     host.programPath = programPath;
     const std::string name = builtinName + "_" + std::to_string(host.pid);
-    host.console = AgentConsoleAdapter::Create(m_physicalConsole, name);
 
     auto process = m_builtinCommands->RunCommand(host, std::move(environment), builtinName, args, workingDirectory, options);
     if (!process) {
@@ -307,8 +328,11 @@ std::shared_ptr<ICurrentProcess> HaisosOS::StartLuaProcess(
     std::shared_ptr<IEnvironment> environment,
     const std::string& programPath,
     const std::vector<std::string>& args,
-    const std::string& workingDirectory)
+    const std::string& workingDirectory,
+    const StartProcessOptions& options)
 {
+    // options.stdIn/stdOut/stdErr are resolved but not yet handed to the
+    // runtime: that is streams--runtime-streams.
     std::string content;
     if (!ReadWholeFile(*m_rootFileSystem, programPath, content)) {
         LogError("HaisosOS: failed to read process file: %s", programPath.c_str());
@@ -318,7 +342,7 @@ std::shared_ptr<ICurrentProcess> HaisosOS::StartLuaProcess(
     uint64_t pid = NextGloballyUniquePID();
     std::string name = GetStem(programPath) + "_" + std::to_string(pid);
 
-    auto console = AgentConsoleAdapter::Create(m_physicalConsole, name);
+    auto console = AgentConsoleAdapter::Create(m_physicalConsole);
     // As for an agent process: the tool set is built around the process, and
     // LuaProcess::Create fills the handle in before the script's thread starts.
     auto processHandle = CurrentProcessHandle::Create();
@@ -373,22 +397,24 @@ std::shared_ptr<IProcess> HaisosOS::StartProcess(
         }
     }
 
+    // Every process gets standard streams, whichever runtime runs it: fill in
+    // the defaults for what the caller left null. The interactive choice made
+    // here is meaningful for every runtime, not just agents.
+    const StartProcessOptions resolved = ResolveStandardStreams(options);
+
     // A builtin is known by its path, not its extension: the root filesystem
     // says which paths are builtins, and a builtin need not look like a program.
     if (auto builtinName = m_rootFileSystem->IsBuiltinCommand(NormalizeVirtualPath(programPath))) {
-        return StartBuiltinProcess(std::move(environment), programPath, *builtinName, args, workingDirectory, options);
+        return StartBuiltinProcess(std::move(environment), programPath, *builtinName, args, workingDirectory, resolved);
     }
 
     std::string extension = GetExtension(programPath);
 
     if (extension == ".md") {
-        return StartAgentProcess(std::move(environment), programPath, args, workingDirectory, options.interactiveAgent);
-    }
-    if (options.interactiveAgent) {
-        LogDebug("HaisosOS: interactiveAgent only applies to .md programs; ignoring it for '%s'", programPath.c_str());
+        return StartAgentProcess(std::move(environment), programPath, args, workingDirectory, resolved);
     }
     if (extension == ".lua") {
-        return StartLuaProcess(std::move(environment), programPath, args, workingDirectory);
+        return StartLuaProcess(std::move(environment), programPath, args, workingDirectory, resolved);
     }
     LogWarning("HaisosOS: unsupported program type: %s", programPath.c_str());
     return nullptr;

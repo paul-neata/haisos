@@ -229,7 +229,7 @@ OUTCOPY /work/out.txt ./out.txt  # copy a file out to the host, once every RUN p
 RUN /agent.md                  # start an initial process (.md agent, .lua script or builtin) at '/'; may repeat
 RUN /bin/ls -l /               # a builtin, placed by BUILTIN above
 RUN /tools/setup.lua ${greeting}
-RUN -i /chat.md                # an interactive agent, fed each line typed on the console
+RUN -i /chat.md                # an interactive agent, fed each line typed on the console (any program may be run with -i)
 ```
 
 `FS <name> DEV` is a device filesystem, meant to be mounted at `/dev`: it holds
@@ -266,10 +266,12 @@ without the quotes, with nothing inside special (no escapes: `"C:\Program
 Files\x"` is taken as written). A quote elsewhere in a token is part of it.
 
 `RUN` takes an absolute program path, and the process starts in `/`. `RUN -i`
-(only in front of the path) runs a `.md` agent interactively -- see
-`StartProcessOptions::interactiveAgent` in `interfaces/IHaisosOS.h`: after its
-program, every line typed on the console is posted to it, until it closes itself
-with the `self_close` tool (noticed when the next line arrives) or input ends.
+(only in front of the path, in front of any program) sets `interactive` -- see
+`StartProcessOptions::interactive` in `interfaces/IHaisosOS.h`: the program's
+stdin is the console's input (instead of an input that ends at once), and a
+`.md` agent run so is interactive: after its program, every line typed on the
+console is posted to it, until it closes itself with the `self_close` tool
+(noticed when the next line arrives) or input ends.
 
 `CREATE`/`APPEND` content is one of `'text'` / `"text"` (up to the next quote of
 the same kind; a comment may follow), `text:<rest of line>` (taken exactly as

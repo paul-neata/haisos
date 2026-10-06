@@ -15,8 +15,10 @@
 #include "BuiltinCommand.h"
 #include "BuiltinProcess.h"
 #include "BuiltinCommandList.h"
+#include "ProcessFileIO.h"
 #include "src/components/Filesystem/BuiltinCommandFile.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
+#include "tests/mocks/MockFileDescriptor.h"
 
 #ifndef _WIN32
 #include <utime.h>
@@ -28,29 +30,67 @@ namespace {
 
 constexpr uint64_t kWaitMs = 10000;
 
-// A physical console that keeps what is written to it, with the
-// "[<process name>] " tag every process's console adds taken off again.
+// A physical console that keeps what is written to it: the raw bytes of each
+// stream separately (m_out, m_err) and of both in the order written (m_all).
 class CapturingConsole : public IPhysicalConsole {
 public:
-    void Write(const std::string& message) override {
+    void Write(const std::string& bytes) override {
         std::lock_guard<std::mutex> lock(m_mutex);
-        const auto tagEnd = message.find("] ");
-        m_lines.push_back(tagEnd == std::string::npos ? message : message.substr(tagEnd + 2));
+        m_out += bytes;
+        m_all += bytes;
+    }
+    void WriteError(const std::string& bytes) override {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_err += bytes;
+        m_all += bytes;
     }
     std::optional<std::string> ReadLine() override { return std::nullopt; }
     void Start() override {}
     void Stop() override {}
 
+    // Everything written so far, split on '\n': no empty last element for a
+    // trailing newline, a trailing partial line kept. Clears all three strings.
     std::vector<std::string> TakeLines() {
         std::lock_guard<std::mutex> lock(m_mutex);
         std::vector<std::string> lines;
-        lines.swap(m_lines);
+        std::string line;
+        for (char c : m_all) {
+            if (c == '\n') {
+                lines.push_back(line);
+                line.clear();
+            } else {
+                line += c;
+            }
+        }
+        if (!line.empty()) {
+            lines.push_back(line);
+        }
+        m_out.clear();
+        m_err.clear();
+        m_all.clear();
         return lines;
+    }
+
+    // The raw string its own stream got, taken (only that stream is cleared, so
+    // TakeOut() and TakeErr() may be asked in either order).
+    std::string TakeOut() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        std::string result;
+        result.swap(m_out);
+        return result;
+    }
+    std::string TakeErr() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        std::string result;
+        result.swap(m_err);
+        return result;
     }
 
 private:
     std::mutex m_mutex;
-    std::vector<std::string> m_lines;
+    std::string m_out;
+    std::string m_err;
+    std::string m_all;
 };
 
 #ifdef _WIN32
@@ -97,6 +137,38 @@ public:
 private:
     std::vector<BuiltinOption> m_options;
 };
+
+// A process that exists only to hold a descriptor table, so a BuiltinContext
+// can be driven directly, without starting anything.
+class FakeProcess : public ICurrentProcess {
+public:
+    explicit FakeProcess(std::shared_ptr<ProcessFileIO> io) : m_io(std::move(io)) {}
+
+    uint64_t GetPid() const override { return 1; }
+    uint64_t GetParentPid() const override { return 0; }
+    std::string Path() const override { return "/fake"; }
+    std::string StartingAgentName() const override { return std::string(); }
+    std::shared_ptr<IEnvironment> GetEnvironment() const override { return nullptr; }
+    void TriggerStop() override {}
+    bool WaitToFinish(uint64_t) override { return true; }
+
+    std::shared_ptr<IFileIO> IO() const override { return m_io; }
+    std::shared_ptr<IAgent> AsAgent() override { return nullptr; }
+    std::shared_ptr<IHaisosOS> OS() const override { return nullptr; }
+
+private:
+    std::shared_ptr<ProcessFileIO> m_io;
+};
+
+// The command object of that name from the standard set, or null.
+std::shared_ptr<IBuiltinCommand> FindStandardCommand(const std::string& name) {
+    for (auto& command : CreateStandardBuiltinCommands()) {
+        if (command->Name() == name) {
+            return command;
+        }
+    }
+    return nullptr;
+}
 
 class BuiltinCommandsTest : public ::testing::Test {
 protected:
@@ -188,6 +260,9 @@ TEST_F(BuiltinCommandsTest, RunCommandRefusesWhatItCannotRun) {
     EXPECT_EQ(builtins->RunCommand(host, environment, "nosuch", {}, "/", StartProcessOptions{}), nullptr);
     EXPECT_EQ(builtins->RunCommand(host, nullptr, "echo", {}, "/", StartProcessOptions{}), nullptr);
     EXPECT_EQ(builtins->RunCommand(BuiltinCommandHost{}, environment, "echo", {}, "/", StartProcessOptions{}), nullptr);
+    // A valid host and environment, but no standard streams given: a builtin is
+    // only ever run with its descriptors 0/1/2 filled (the OS resolves them).
+    EXPECT_EQ(builtins->RunCommand(host, environment, "echo", {}, "/", StartProcessOptions{}), nullptr);
 }
 
 TEST_F(BuiltinCommandsTest, ABuiltinProcessLooksLikeAnyOther) {
@@ -334,13 +409,18 @@ TEST_F(BuiltinCommandsTest, AProcessCanReadButNotWriteABuiltin) {
 // Every descriptor a process holds is released when its program ends, before
 // it reports finished -- here, a builtin's Run returning (of a stop).
 TEST_F(BuiltinCommandsTest, ABuiltinsDescriptorsAreReleasedWhenItsCommandReturns) {
-    BuiltinCommandHost host{os, /*pid=*/1, /*parentPid=*/1, "/wait", /*console=*/nullptr};
+    BuiltinCommandHost host{os, /*pid=*/1, /*parentPid=*/1, "/wait"};
+    StartProcessOptions options;
+    options.stdIn = std::make_shared<Mocks::MockFileDescriptor>();
+    options.stdOut = std::make_shared<Mocks::MockFileDescriptor>();
+    options.stdErr = std::make_shared<Mocks::MockFileDescriptor>();
     auto process = BuiltinProcess::Create(host, factory->CreateEnvironment(),
-        std::make_shared<WaitCommand>(), {}, "/");
+        std::make_shared<WaitCommand>(), {}, "/", options);
     ASSERT_NE(process, nullptr);
 
     auto releases = std::make_shared<std::atomic<int>>(0);
-    ASSERT_EQ(process->IO()->AddDescriptor(ReleaseCountingDescriptor::Create(releases)), 0);
+    // Slots 0, 1 and 2 hold the standard streams, so the next free slot is 3.
+    ASSERT_EQ(process->IO()->AddDescriptor(ReleaseCountingDescriptor::Create(releases)), 3);
 
     // The command is still waiting, so nothing may have been released yet.
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -727,6 +807,114 @@ TEST_F(BuiltinCommandsTest, LsReportsWhatItCannotAccess) {
     EXPECT_TRUE(Contains(lines, "ls: unrecognized option '--bogus'"));
     // Long options may be abbreviated, as with getopt_long.
     EXPECT_EQ(Run("ls", {"--rec", "/docs/sub"}), (Lines{"/docs/sub:", "b.md"}));
+}
+
+// --- stdio of a builtin ---
+
+TEST_F(BuiltinCommandsTest, ErrorsGoToStderrOnly) {
+    auto process = os->StartProcess(os->GetOsEnvironment()->Clone(), "/bin/ls", {"/nope"}, "/", StartProcessOptions{});
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kWaitMs));
+    EXPECT_EQ(console->TakeOut(), "");
+    EXPECT_EQ(console->TakeErr(), "ls: cannot access '/nope': No such file or directory\n");
+}
+
+TEST_F(BuiltinCommandsTest, OutputIsRawAndUntagged) {
+    auto process = os->StartProcess(os->GetOsEnvironment()->Clone(), "/bin/echo", {"-n", "abc"}, "/", StartProcessOptions{});
+    ASSERT_TRUE(process->WaitToFinish(kWaitMs));
+    EXPECT_EQ(console->TakeOut(), "abc");
+    process = os->StartProcess(os->GetOsEnvironment()->Clone(), "/bin/echo", {"hi"}, "/", StartProcessOptions{});
+    ASSERT_TRUE(process->WaitToFinish(kWaitMs));
+    EXPECT_EQ(console->TakeOut(), "hi\n");
+}
+
+TEST_F(BuiltinCommandsTest, NotTreatedReportsGoToStderr) {
+    auto process = os->StartProcess(os->GetOsEnvironment()->Clone(), "/bin/mkdir", {"-m", "755", "/m"}, "/", StartProcessOptions{});
+    ASSERT_TRUE(process->WaitToFinish(kWaitMs));
+    EXPECT_EQ(console->TakeOut(), "");
+    EXPECT_TRUE(console->TakeErr().find("Parameter -m is not treated by HaisosOS mkdir v. ") != std::string::npos);
+}
+
+TEST_F(BuiltinCommandsTest, GivenStdoutReceivesTheOutput) {
+    auto file = root->OpenFile("/out.txt", kFileOpenWriteCreateTruncate, kFileCreateMode);
+    ASSERT_NE(file, nullptr);
+
+    StartProcessOptions options;
+    options.stdOut = file;
+    auto process = os->StartProcess(os->GetOsEnvironment()->Clone(), "/bin/echo", {"hello"}, "/", options);
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kWaitMs));
+    file.reset();
+
+    std::string content;
+    ASSERT_TRUE(ReadWholeFile(*root, "/out.txt", content));
+    EXPECT_EQ(content, "hello\n");
+    // The console was bypassed entirely.
+    EXPECT_EQ(console->TakeOut(), "");
+}
+
+TEST_F(BuiltinCommandsTest, SameDescriptorForStdoutAndStderr) {
+    auto both = std::make_shared<Mocks::MockFileDescriptor>();
+    StartProcessOptions options;
+    options.stdOut = both;
+    options.stdErr = both;
+    auto process = os->StartProcess(os->GetOsEnvironment()->Clone(), "/bin/ls", {"/docs", "/nope"}, "/", options);
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kWaitMs));
+
+    const std::string written = both->Written();
+    EXPECT_NE(written.find("ls: cannot access '/nope'"), std::string::npos) << written;
+    EXPECT_NE(written.find("a.md"), std::string::npos) << written;
+}
+
+// --- BuiltinContext's output rule ---
+
+TEST(BuiltinContextTest, TerminalStdoutIsWrittenAtOnce) {
+    auto io = ProcessFileIO::Create({}, "/");
+    auto in = std::make_shared<Mocks::MockFileDescriptor>(/*isTerminal=*/true);
+    auto out = std::make_shared<Mocks::MockFileDescriptor>(/*isTerminal=*/true);
+    auto err = std::make_shared<Mocks::MockFileDescriptor>(/*isTerminal=*/true);
+    ASSERT_TRUE(io->InstallStandardStreams(in, out, err));
+    FakeProcess process(io);
+    auto echo = FindStandardCommand("echo");
+    ASSERT_NE(echo, nullptr);
+    std::atomic<bool> stop{false};
+    {
+        BuiltinContext context(process, *echo, {}, stop);
+        context.Out("$ ");
+        // Unbuffered: a partial line -- a prompt -- is out at once.
+        EXPECT_EQ(out->Written(), "$ ");
+        context.Error("e");
+        EXPECT_EQ(err->Written(), "echo: e\n");
+    }
+}
+
+TEST(BuiltinContextTest, OtherStdoutIsBufferedUntilFullOrEnd) {
+    auto io = ProcessFileIO::Create({}, "/");
+    auto in = std::make_shared<Mocks::MockFileDescriptor>();
+    // One descriptor as both stdOut and stdErr, so the order across the two
+    // streams can be observed.
+    auto both = std::make_shared<Mocks::MockFileDescriptor>();
+    ASSERT_TRUE(io->InstallStandardStreams(in, both, both));
+    FakeProcess process(io);
+    auto echo = FindStandardCommand("echo");
+    ASSERT_NE(echo, nullptr);
+    std::atomic<bool> stop{false};
+    {
+        BuiltinContext context(process, *echo, {}, stop);
+        context.Out("x");
+        // Not a terminal: buffered, nothing has been written yet.
+        EXPECT_EQ(both->Written(), "");
+        // An error flushes stdout first: "x" precedes the error line.
+        context.Error("e");
+        EXPECT_EQ(both->Written(), "xecho: e\n");
+        // Reaching the block size writes it out without waiting for the end.
+        context.Out(std::string(5000, 'y'));
+        EXPECT_GE(both->Written().size(), 9u + kBuiltinOutBufferSize);
+        context.Out("z");
+    }
+    // The destructor flushed what was left.
+    EXPECT_EQ(both->Written().size(), 9u + 5000u + 1u);
 }
 
 // --- option parsing ---

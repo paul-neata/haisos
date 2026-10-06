@@ -82,17 +82,25 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   the root `CLAUDE.md`). `~HaisosOS` depends on it: it drains its processes --
   asks each to stop, then waits up to 5 s for it -- and on a process's own
   thread, that wait would be for itself.
-- `StartProcessOptions` says how to run a program. Its one field for now,
-  `interactiveAgent`, applies to `.md` programs only (ignored otherwise): the
-  agent is created interactive, gets an extra system prompt telling it that
-  further messages are lines typed on the console and that `self_close` ends the
-  session, and its `AgentProcess` owns an `AgentInputLoop` reading its console.
-  The loop posts each line to the agent while `WaitToFinish(0)` says it is still
-  running; it ends when a line arrives for an agent that has closed (that line
-  is dropped), or at end of input, when it asks the agent to stop. An
-  interactive process is finished only once both the agent and the loop are.
-  `os_start_process` never asks for it: the console's input belongs to whoever
-  the haisosfile gave it to.
+- `StartProcessOptions` says how to run a program: the standard streams
+  (`stdIn`/`stdOut`/`stdErr`, the process's descriptors 0/1/2) and
+  `interactive`. `StartProcess` resolves every null stream right after its
+  refusals, one place for the defaults (`ResolveStandardStreams`): stdout the
+  OS's console output, stderr its console error (console descriptors, see the
+  Console component), stdin the console's input when `interactive` is set, else
+  an empty input whose reads end at once. The resolved options are handed to
+  the runtime: a builtin gets the three streams as slots 0/1/2 of its table
+  before its thread starts; agent and Lua runtimes are handed them but ignore
+  the descriptors for now (streams--runtime-streams). For a `.md` program,
+  `interactive` also makes the agent interactive: it gets an extra system
+  prompt telling it that further messages are lines typed on the console and
+  that `self_close` ends the session, and its `AgentProcess` owns an
+  `AgentInputLoop` reading its console. The loop posts each line to the agent
+  while `WaitToFinish(0)` says it is still running; it ends when a line
+  arrives for an agent that has closed (that line is dropped), or at end of
+  input, when it asks the agent to stop. An interactive process is finished
+  only once both the agent and the loop are. `os_start_process` never asks for
+  it: the console's input belongs to whoever the haisosfile gave it to.
 - `StartProcess` first asks the root filesystem `IsBuiltinCommand(path)`: a
   path naming a builtin runs it -- whatever its extension -- through the
   `IBuiltinCommands` the OS was created with (`StartBuiltinProcess` fills in a

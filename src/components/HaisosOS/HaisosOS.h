@@ -59,12 +59,15 @@ private:
     // Asks one process to stop and waits a bounded time for it.
     // Never called with m_processesMutex held.
     static void DrainProcess(const std::shared_ptr<IProcess>& process);
+    // A copy of options with each null stream replaced by its default (stdin:
+    // the console's input if options.interactive, else the empty input).
+    StartProcessOptions ResolveStandardStreams(const StartProcessOptions& options) const;
     std::shared_ptr<ICurrentProcess> StartAgentProcess(
         std::shared_ptr<IEnvironment> environment,
         const std::string& programPath,
         const std::vector<std::string>& args,
         const std::string& workingDirectory,
-        bool interactive);
+        const StartProcessOptions& options);
     std::shared_ptr<IProcess> StartBuiltinProcess(
         std::shared_ptr<IEnvironment> environment,
         const std::string& programPath,
@@ -76,7 +79,8 @@ private:
         std::shared_ptr<IEnvironment> environment,
         const std::string& programPath,
         const std::vector<std::string>& args,
-        const std::string& workingDirectory);
+        const std::string& workingDirectory,
+        const StartProcessOptions& options);
 
     std::shared_ptr<IServicesCreator> m_servicesCreator;
     std::shared_ptr<INetworkService> m_networkService;
@@ -86,6 +90,13 @@ private:
     // business. May be null, for an OS that runs none.
     std::shared_ptr<IBuiltinCommands> m_builtinCommands;
     std::shared_ptr<IPhysicalConsole> m_physicalConsole;
+    // The console as processes see it (see ConsoleDescriptors.h): this OS's
+    // default stdio, one set of descriptors for every process it starts --
+    // they hold no per-process state.
+    std::shared_ptr<IFileDescriptor> m_consoleOutput;
+    std::shared_ptr<IFileDescriptor> m_consoleError;
+    std::shared_ptr<IFileDescriptor> m_consoleInput;
+    std::shared_ptr<IFileDescriptor> m_emptyInput;
     std::shared_ptr<IEnvironment> m_environment;
     uint64_t m_osProcessId = 0;
 

@@ -23,7 +23,7 @@ Pause: no
 | 16 | [hsh--expansion](tasks/hsh--expansion.md) | done | 0.4.16 | 14, 15 | #34 | 1 | 2H fixed, 1M open | reviewer checked disputed cases against dash 0.5.12 |
 | 17 | [hsh--executor](tasks/hsh--executor.md) | done | 0.4.17 | 8, 16 | #35 | 1 | 1M 3L open | |
 | 18 | [hsh--redirections](tasks/hsh--redirections.md) | done | 0.4.18 | 11, 17 | #36 | 1 | 1H fixed, 5L open | |
-| 19 | [hsh--pipelines](tasks/hsh--pipelines.md) | in-progress | 0.4.19 | 18 | | | | |
+| 19 | [hsh--pipelines](tasks/hsh--pipelines.md) | in-review | 0.4.19 | 18 | #37 | 1 | | |
 | 20 | [hsh--shell-builtins](tasks/hsh--shell-builtins.md) | todo | | 19 | | | | |
 | 21 | [hsh--control-flow](tasks/hsh--control-flow.md) | todo | | 20 | | | | |
 | 22 | [hsh--interactive](tasks/hsh--interactive.md) | todo | | 12, 21 | | | | |

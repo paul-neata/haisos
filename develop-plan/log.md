@@ -52,3 +52,4 @@
 - 2026-10-06 19:04 UTC -- hsh--expansion merged #34 as 0.4.16: 2H fixed, 1M open, 1 tries; Windows HaisosOS timeout green on re-run
 - 2026-10-06 19:10 UTC -- start hsh--executor (0.4.17)
 - 2026-10-06 19:35 UTC -- hsh--executor: PR #35, ready
+- 2026-10-06 19:39 UTC -- hsh--executor merged #35 as 0.4.17: 1M 3L open, 1 tries

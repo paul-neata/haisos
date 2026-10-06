@@ -30,3 +30,4 @@
 - 2026-10-06 13:17 UTC -- builtins--unicode: PR #27, windows-failed
 - 2026-10-06 13:26 UTC -- builtins--unicode merged #27 as 0.4.9: 4L open, 1 tries; Windows flake (HaisosOS 30 s limit), green on re-run
 - 2026-10-06 13:29 UTC -- start builtins--wc (0.4.10)
+- 2026-10-06 13:52 UTC -- builtins--wc: PR #28, ready

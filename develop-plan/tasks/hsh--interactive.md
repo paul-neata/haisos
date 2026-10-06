@@ -2,8 +2,10 @@
 
 - Rock: hsh
 - Depends on: hsh--control-flow, builtins--man
-- Size: ~800 changed lines in ~12 files (about 250 of them the manual page's text)
-- Plan checked against: develop @ 0d92271
+- Size: ~870 changed lines in ~14 files (about 250 of them the manual page's
+  text; ~70 more than before, for the three preliminary fixes below and their
+  tests) -- still well under ~1100
+- Plan checked against: develop @ 36b9f6c
 - PR title: hsh: interactive mode, full manual page, end-to-end scenarios
 
 ## Goal
@@ -80,6 +82,76 @@ plain portable C++17, unless said otherwise.
 - MSVC refuses a single string literal over ~16 KB (error C2026): the page is
   several raw string literals, one per section, concatenated.
 - hsh's version becomes `1.0.0`.
+
+### Preliminary fixes (found re-checking this plan against develop @ 36b9f6c)
+
+Three small, independent bugs, each real against the current code; fix each
+before the interactive loop (the first would otherwise make the interactive
+shell hang in PS2, which the new tests exercise):
+
+1. **A heredoc body's own lexing error is wrongly `Incomplete()`.**
+   `HshLexer.cpp`, `ReadHereDocBodies`/`LexHereDocBody` (~811-958): once the
+   delimiter line has been found (`terminated = true`), `LexHereDocBody` lexes
+   the already-complete `rawBody` for `$`/`` ` ``; an error there (`${x` with
+   no closing `}`, say) is thrown by the parameter/command-substitution/
+   arithmetic readers as `ShellError(..., /*incomplete=*/true)` unconditionally
+   (e.g. HshLexer.cpp:493 `Missing '}'`), regardless of whether the body is
+   already fixed text no further line can change. In an interactive shell this
+   makes `ParseNext` treat it as "needs more input": the buffer is kept, `> `
+   keeps showing, and every further line typed is appended to the same
+   unparseable buffer -- the shell never recovers short of closing stdin. Such
+   an error is not incomplete: catch it in `ReadHereDocBodies` (or thread an
+   "allow incomplete" flag into the body's sub-lexer) and rethrow with
+   `incomplete` forced `false`, message and line unchanged.
+   - Test: `tests/unit/components/Hsh.unittests/HshInteractiveTest.cpp`,
+     `HeredocBodyErrorIsNotIncomplete`: `RunCaptured("hsh", {"-i"}, "cat <<E\n${x\nE\necho after\nexit\n")`
+     -> err contains `hsh: 2: Syntax error: Missing '}'\n` exactly once (not
+     repeated); a `$ ` prompt follows it (not stuck in `> `); out is `after\n`
+     (the next line ran); status 0.
+   - [ ] Acceptance: a heredoc body error ends the pending command and reports
+     once, even though the heredoc itself was terminated; the shell goes on.
+
+2. **`read` does not merge IFS white space around a non-white delimiter.**
+   `HshBuiltinRead.cpp` (~134-147): when the character stopping a field is
+   IFS white space, the code consumes only the following whitespace run; when
+   it is a non-white IFS character, it consumes that one character plus the
+   following whitespace run -- but never the whitespace *before* a non-white
+   character reached through a whitespace run first. So with
+   `IFS=" :"` and input `a : b`, `read x y z` gives `[a][][b]` (the space is
+   treated as its own delimiter, leaving an empty field for the colon),
+   where dash gives `[a][b][]` (the run "space, colon, space" is one
+   delimiter). Fix: after consuming a leading whitespace run, if the
+   character now at `at` is an unprotected non-white IFS character, consume
+   it too and then its own following whitespace run, before moving to the
+   next name -- the two branches collapse into one delimiter event instead of
+   two.
+   - Test: add a `ShellCase` to `TEST_F(HshShellTest, Read)` in
+     `tests/unit/components/Hsh.unittests/HshControlFlowTest.cpp`:
+     `{"IFS=' :'; read x y z; echo \"[$x][$y][$z]\"", "[a][b][]\n", "", 0, {}, "a : b\n"}`.
+   - [ ] Acceptance: `IFS=" :"` with `a : b` read into three names gives
+     `[a][b][]`, matching dash.
+
+3. **`IsChildStage` misses a `$(...)` in a redirection target.**
+   `HshShell.cpp:~768`, `Shell::IsChildStage`: checks `simple.words` and
+   `simple.assignments` for a `CommandSubstitution` but never
+   `simple.redirections`' target words. A stage such as `/bin/cat <
+   $(cat)` is then wrongly started as a child stage in pass 1 -- its own
+   redirection's `$(...)` then expands before pass 2 has run the pipeline's
+   in-shell stage(s), reading a bounded pipe nothing has written to yet:
+   `: | /bin/cat < $(cat)` deadlocks. Fix: also return `false` (run in the
+   shell) when any redirection's target word holds a `CommandSubstitution`
+   (`PartsHoldCommandSubstitution(redirection.target.parts)`, or however the
+   redirection stores its target word).
+   - Test: `tests/unit/components/Hsh.unittests/HshPipelineTest.cpp`, right
+     after `ChildStageCommandSubstitutionDoesNotDeadlock`, new
+     `ChildStageRedirectionCommandSubstitutionDoesNotDeadlock`: same
+     bounded-wait pattern (a `std::promise`/`std::future`, `wait_for(5s)`,
+     `FAIL()` on timeout rather than hanging the suite -- no fixed sleep),
+     running `Sh(": | /bin/cat < $(cat)")`; expects it to finish within 5 s
+     with out `""`, err `""`, status 0.
+   - [ ] Acceptance: a `$(...)` in a redirection target keeps its stage out of
+     pass 1, the same as one in its words; the bounded-wait test passes
+     (no hang).
 
 ### Deciding interactive (`Hsh.cpp` / `HshShell.cpp`)
 
@@ -290,6 +362,15 @@ byte with dash's:
 - `CommandStringIsNotInteractive`: `RunCaptured("hsh", {"-c", "echo $-"})`
   with a terminal-free fixture -> `\n`.
 
+### Unit: the three preliminary fixes
+
+See their own Test/Acceptance entries above: `HeredocBodyErrorIsNotIncomplete`
+(`HshInteractiveTest.cpp`), the new `Read` case in `HshControlFlowTest.cpp`,
+and `ChildStageRedirectionCommandSubstitutionDoesNotDeadlock`
+(`HshPipelineTest.cpp`). No new `HaisosOS.unittests` tests anywhere in this
+task (0): everything above runs through `Hsh.unittests` and
+`BuiltinCommands.unittests` fixtures already in place.
+
 ### Unit: the manual page
 
 - `tests/unit/components/BuiltinCommands.unittests/BuiltinCommandsTest.cpp`,
@@ -325,7 +406,12 @@ run per check:
    status 0; `RUN /bin/ls /nope` -> stdout empty, stderr contains the `ls:`
    line, status 2; `RUN /bin/hsh -c 'exit 3'` -> status 3.
 3. `CREATE /count.sh multiline END` with goal.md's script, then
-   `RUN /bin/hsh /count.sh hello` -> stdout exactly `ok 3 2\ngreeted\n`, status 0.
+   `RUN /bin/hsh /count.sh hi` -> stdout exactly `ok 3 2\ngreeted\n`, status 0.
+   (goal.md's own scenario 3 runs `/count.sh hello` against `case "$1" in
+   hi*)`, but `hello` does not match `hi*` -- dash prints `plain`, not
+   `greeted`, for that argument; the user has been asked about the
+   discrepancy. Using `hi` here is what actually exercises the `greeted`
+   branch dash takes, and is what this test checks.)
 4. `RUN -i /bin/hsh`, input `echo hi | wc -c\ncd /bin; ls | wc -l\nnosuch\nexit 4\n`
    -> stdout exactly `3\n6\n`; stderr contains `hsh: 3: nosuch: not found`
    and `$ ` exactly four times, the first at its start; status 4.
@@ -357,10 +443,11 @@ bash ./scripts/test_linux.sh L H
 
 ## Docs
 
-- `src/components/BuiltinCommands/commands/hsh/CLAUDE.md`: a section
-  "Interactive" (when, the loop, prompts, line numbers, end of input, errors
-  not ending the shell); the man page (`HshManPage.cpp`, its sections, the
-  literal-size rule); new files.
+- `src/components/BuiltinCommands/commands/hsh/CLAUDE.md`: already has a
+  short "## The interactive protocol" section (the buffer/re-parse rule) --
+  extend it, rather than adding a separate one, with when hsh is interactive,
+  prompts, line numbers, end of input, and errors not ending the shell; the
+  man page (`HshManPage.cpp`, its sections, the literal-size rule); new files.
 - `src/components/BuiltinCommands/CLAUDE.md`: `hsh` row -- 1.0.0, the whole
   description (`-c`, scripts, stdin, interactive; the language; the
   builtins) and every documented exception (as in the man page's
@@ -369,8 +456,9 @@ bash ./scripts/test_linux.sh L H
   - "Builtin Commands" table: the `hsh` row's final text -- "The Haisos
     shell, after dash: `-c`, scripts, stdin or interactive (`RUN -i
     /bin/hsh`); quoting, expansions, pipelines, redirections, heredocs,
-    lists, control flow, functions; commands found in `PATH`"; the `man` row
-    says `hsh` has a full page.
+    lists, control flow, functions; commands found in `PATH`" (the `man` row
+    already says `hsh` has a full page -- builtins--man wrote that; nothing
+    to do there).
   - "The `haisosfile` DSL": in the example block, `ENV PATH=/bin` (with a
     comment: where hsh finds commands by name) and
     `RUN -i /bin/hsh               # an interactive shell on the console`;
@@ -381,6 +469,8 @@ bash ./scripts/test_linux.sh L H
 
 ## Acceptance
 
+- [ ] The three preliminary fixes above (heredoc-body `Incomplete()`, `read`'s
+  IFS merging, `IsChildStage`'s redirection check) each pass their own test.
 - [ ] Interactive exactly when `-i`, or stdin input with stdin and stderr terminals.
 - [ ] Prompts, PS2, line numbers, error handling and the end of input match the unit tests byte for byte.
 - [ ] Input is read one byte at a time; the buffer is re-parsed from its first line each time.

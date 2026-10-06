@@ -26,7 +26,7 @@ Pause: no
 | 19 | [hsh--pipelines](tasks/hsh--pipelines.md) | done | 0.4.19 | 18 | #37 | 1 | 1H fixed, 3M 4L open | Windows HaisosOS timeout, green on re-run |
 | 20 | [hsh--shell-builtins](tasks/hsh--shell-builtins.md) | done | 0.4.20 | 19 | #38 | 1 | 2H 1L fixed, 2M 2L open | reviewer added the planned tests kimi-k3 had skipped |
 | 21 | [hsh--control-flow](tasks/hsh--control-flow.md) | done | 0.4.21 | 20 | #39 | 1 | 2H 1M fixed, 3M 4L open | reviewer fixed break-in-condition and a use-after-free |
-| 22 | [hsh--interactive](tasks/hsh--interactive.md) | todo | | 12, 21 | | | | |
+| 22 | [hsh--interactive](tasks/hsh--interactive.md) | in-progress | 0.4.22 | 12, 21 | | | | |
 | 23 | [streams--coroutine-latch](tasks/streams--coroutine-latch.md) | done | 0.4.15 | 6, 8 | #33 | 1 | 1C 2H 1M fixed, 1M 1L open | follow-up to #23/#25 findings; reviewer fixed coroutine.wrap argument handling |
 
 ## Directions
@@ -60,3 +60,4 @@ Pause: no
 - 2026-10-06 20:17 (implement) hsh--pipelines refreshed: checked against baa0799, interfaces unchanged; preliminary fix of #35's flaky StopEndsTheShellAndItsChild (poll until /spin.lua runs), and the plan's own StopEndsEveryStage polls too
 - 2026-10-06 21:02 (implement) hsh--shell-builtins refreshed: checked against e632275, interfaces unchanged; notes that :, exec, exit, false, true, wait already exist; preliminary dash fixes from #35: -o inside an option cluster, read-only check after expansion, LogWarning for a child outliving the stop grace
 - 2026-10-06 22:11 (implement) hsh--control-flow refreshed: checked against 2294d67, interfaces unchanged; preliminary fixes from #37: no deadlock on a substitution in a child pipeline stage, subshell background jobs leave the live-children list; every test named; size ~1050. #36's RedirectionScope finding left for the final review (no reachable trigger)
+- 2026-10-06 23:08 (implement) hsh--interactive refreshed: checked against 36b9f6c; preliminary fixes: heredoc-body errors after the delimiter are not Incomplete (#30), read merges IFS white space around a non-white delimiter (#39), IsChildStage checks redirection targets for $(...) (#39); scenario 3 haisos test runs /count.sh hi (goal.md question open); size ~870

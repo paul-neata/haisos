@@ -20,7 +20,7 @@ Pause: no
 | 13 | [hsh--lexer](tasks/hsh--lexer.md) | done | 0.4.12 | 9 | #30 | 1 | 2H fixed, 3M 2L open | 3M dash differences folded into later hsh plans |
 | 14 | [hsh--parser](tasks/hsh--parser.md) | done | 0.4.13 | 13 | #31 | 1 | 2H fixed, 2M 3L open | |
 | 15 | [hsh--arith-glob](tasks/hsh--arith-glob.md) | done | 0.4.14 | 13 | #32 | 1 | 1C fixed, 2M 2L open | reviewer fixed a Windows-only hang (MSVC strtoimax on "0x") |
-| 16 | [hsh--expansion](tasks/hsh--expansion.md) | in-review | 0.4.16 | 14, 15 | #34 | 1 | | |
+| 16 | [hsh--expansion](tasks/hsh--expansion.md) | done | 0.4.16 | 14, 15 | #34 | 1 | 2H fixed, 1M open | reviewer checked disputed cases against dash 0.5.12 |
 | 17 | [hsh--executor](tasks/hsh--executor.md) | todo | | 8, 16 | | | | |
 | 18 | [hsh--redirections](tasks/hsh--redirections.md) | todo | | 11, 17 | | | | |
 | 19 | [hsh--pipelines](tasks/hsh--pipelines.md) | todo | | 18 | | | | |

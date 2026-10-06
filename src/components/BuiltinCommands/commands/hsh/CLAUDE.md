@@ -166,9 +166,12 @@ There is one `Expander` method per expansion context:
   `noglob`), quote removal. Zero or more fields per word.
 - `ExpandAssignmentValue` -- an assignment's value (`x=...`, and the operand
   of `${x:=...}`): tilde at the start and after every unquoted `:`, the other
-  expansions, quote removal; no splitting, no globbing. (dash quirk: the
-  `:=`/`=` operand itself gets no tilde expansion -- `${x:=~/b}` assigns
-  `~/b` literally.)
+  expansions, quote removal; no splitting, no globbing. dash's per-operator
+  tilde quirks hold in the operands: the `:=`/`=` operand's tilde expands at
+  its very start only, and only when the whole word is an unquoted
+  assignment's value (`z=${x:=~/b}` assigns `/home/u/b`; `echo ${x:=~/b}`
+  and `z="${x:=~/b}"` leave `~/b` literal), and a `+`/`:+` operand never
+  gets a tilde.
 - `ExpandToString` -- a redirection target, a here-string, the `case`
   subject: one string, no splitting, no globbing.
 - `ExpandPattern` -- a `case` pattern: as `ExpandToString`, but every quoted

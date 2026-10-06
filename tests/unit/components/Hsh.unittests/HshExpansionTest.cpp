@@ -208,6 +208,20 @@ TEST(HshExpansionTest, Tilde) {
 
     EXPECT_EQ(assign.Expand("${x:-~}"), Fields({"/h"}));
     EXPECT_EQ(assign.Expand("\"${x:-~}\""), Fields({"~"}));
+
+    // dash's per-operator tilde rules for ${...} operands: the :=/= operand's
+    // tilde expands at its very start only, and only when the whole word is an
+    // unquoted assignment's value; the +/:+ operand never gets one.
+    Fixture ops;
+    ops.state.variables.Set("HOME", "/h");
+    EXPECT_EQ(ops.AssignmentValue("z1=${z1:=~/a}"), "/h/a");
+    EXPECT_EQ(ops.AssignmentValue("z2=${z2:=a:~}"), "a:~"); // never after ':' inside
+    EXPECT_EQ(ops.Expand("${z3:=~/a}"), Fields({"~/a"}));   // a plain word: literal
+    EXPECT_EQ(ops.AssignmentValue("z4=\"${z4:=~/a}\""), "~/a"); // quoted value: literal
+    EXPECT_EQ(ops.AssignmentValue("z=${zz:-a:~}"), "a:/h"); // -/:- keep the word's rules
+    ops.state.variables.Set("q", "1");
+    EXPECT_EQ(ops.Expand("${q:+~}"), Fields({"~"}));
+    EXPECT_EQ(ops.AssignmentValue("z=${q:+~}"), "~");
 }
 
 TEST(HshExpansionTest, SpecialParameters) {
@@ -307,6 +321,18 @@ TEST(HshExpansionTest, ParameterOps) {
         Fixture f; // no positional parameters
         EXPECT_EQ(f.Expand("${@-x}"), Fields({}));
         EXPECT_EQ(f.Expand("${*:-y}"), Fields({"y"}));
+    }
+    {
+        // When :- (=, ?) falls through to @/*'s value, the value keeps its
+        // per-parameter shape, as for "$@" itself.
+        Fixture f;
+        f.state.positional = {"a", "b"};
+        EXPECT_EQ(f.Expand("\"${@:-x y}\""), Fields({"a", "b"}));
+        EXPECT_EQ(f.Expand("${@:-x y}"), Fields({"a", "b"}));
+        EXPECT_EQ(f.Expand("\"${@=x y}\""), Fields({"a", "b"}));
+        EXPECT_EQ(f.Expand("\"${@?oops}\""), Fields({"a", "b"}));
+        f.state.variables.Set("IFS", ":");
+        EXPECT_EQ(f.Expand("\"${*:-x y}\""), Fields({"a:b"}));
     }
 }
 

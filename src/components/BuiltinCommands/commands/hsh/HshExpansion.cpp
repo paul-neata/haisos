@@ -305,13 +305,15 @@ private:
     }
 
     // The operand of a ${...}, walked where it stands (its literals splittable
-    // when the ${...} is not in double quotes; a tilde at its start expanded).
-    void WalkOperandInPlace(PendingFields& out, const std::vector<WordPart>& parts) {
+    // when the ${...} is not in double quotes). |tilde| is whether a tilde at
+    // the operand's very start expands -- dash expands it for -/:-/?/:?/#/%%'s
+    // operands (with a full assignment's after-':' rule), but never for +/:+.
+    void WalkOperandInPlace(PendingFields& out, const std::vector<WordPart>& parts, bool tilde) {
         bool savedOperand = m_inOperand;
         if (!m_inDoubleQuotes) {
             m_inOperand = true;
         }
-        WalkWordInto(out, parts, TildeAllowed());
+        WalkWordInto(out, parts, tilde);
         m_inOperand = savedOperand;
     }
 
@@ -455,9 +457,11 @@ private:
                 bool fallback = !resolved.set ||
                     (part.op == ParameterOp::UseDefault && IsNull(resolved));
                 if (fallback) {
-                    WalkOperandInPlace(out, part.parts);
+                    WalkOperandInPlace(out, part.parts, TildeAllowed());
                 } else {
-                    EmitValue(out, JoinedWithSpaces(resolved.values));
+                    // "@"/"*" keep their per-parameter shape: ${@:-x} with a b
+                    // is <a><b>, "${*:-x}" is joined by IFS's first character.
+                    EmitPositionalStyle(out, name, resolved.values);
                 }
                 return;
             }
@@ -469,8 +473,15 @@ private:
                     if (!IsValidShellName(name)) {
                         throw ShellError(name + ": bad variable name");
                     }
-                    // dash does no tilde expansion in a :=/= operand.
-                    std::string value = WalkOperandToString(part.parts, false);
+                    // dash: a tilde at the very start of a :=/= operand
+                    // expands only when the whole word is an unquoted
+                    // assignment's value (z1=${z:=~/a} is /h/a; in any other
+                    // word, or quoted, it stays literal), and never after ':'.
+                    bool tilde = m_kind == ExpansionKind::Assignment && !m_inDoubleQuotes;
+                    ExpansionKind savedKind = m_kind;
+                    m_kind = ExpansionKind::String;
+                    std::string value = WalkOperandToString(part.parts, tilde);
+                    m_kind = savedKind;
                     if (!m_state.variables.Set(name, value)) {
                         throw ShellError(name + ": is read only");
                     }
@@ -479,7 +490,7 @@ private:
                     }
                     EmitValue(out, value);
                 } else {
-                    EmitValue(out, JoinedWithSpaces(resolved.values));
+                    EmitPositionalStyle(out, name, resolved.values);
                 }
                 return;
             }
@@ -498,7 +509,7 @@ private:
                     }
                     throw ShellError(message);
                 }
-                EmitValue(out, JoinedWithSpaces(resolved.values));
+                EmitPositionalStyle(out, name, resolved.values);
                 return;
             }
             case ParameterOp::UseAlternative:
@@ -506,7 +517,8 @@ private:
                 bool alternative = resolved.set &&
                     (part.op == ParameterOp::UseAlternativeIfSet || !IsNull(resolved));
                 if (alternative) {
-                    WalkOperandInPlace(out, part.parts);
+                    // dash: no tilde expansion at all in a +/:+ operand.
+                    WalkOperandInPlace(out, part.parts, false);
                 }
                 return;
             }
@@ -521,7 +533,8 @@ private:
         }
     }
 
-    // How @ and * are emitted (op None, or after a Remove op): in double
+    // How @ and *'s value is emitted (op None; after a Remove op; or when a
+    // :-/=/? op falls through to the value): in double
     // quotes $@ is each parameter quoted, preceded by a quote mark, with a
     // hard break between consecutive ones; "$*" is the parameters joined by
     // the first character of IFS as one quoted value; unquoted, either is

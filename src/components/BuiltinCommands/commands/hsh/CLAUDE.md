@@ -29,13 +29,62 @@ task of the hsh rock and adds its files here:
   lines, removes `\`-newline continuations everywhere but single quotes,
   comments and quoted-delimiter heredoc bodies, and attaches a `HereDocument`
   to the word after `<<`/`<<-`, its body read at the newline that ends the
-  line (all pending heredocs, in order). Each token carries `begin`/`end`
+  line (all pending heredocs, in order). Inside an *unquoted*-delimiter
+  heredoc body a `\`-newline joins with the next line before the delimiter is
+  compared, just as in the rest of the source (so the joined body is stored);
+  a quoted delimiter's body matches raw lines, unchanged. Each token carries
+  `begin`/`end`
   byte offsets into the source so the parser can cut `ListItem::sourceText`
   and `FunctionDefinition::sourceText` out of it. `AsReservedWord` spells out
   which reserved word a word token spells; whether it IS one is the parser's
   business.
-- (later tasks: the parser/AST, expansion, the executor that registers the
+- `HshAst.h/.cpp` - the syntax tree. `CommandList` holds items of an
+  `AndOrList` (`Pipeline`s joined by `&&`/`||`; a `Pipeline` is `Command`s
+  joined by `|`, with `negated` for a leading `!`) plus a `background` flag
+  and the item's `sourceText` (see below). A `Command` is a `SimpleCommand`
+  (assignments, words, redirections), `BraceGroup`, `Subshell`, `IfCommand`
+  (branches + optional else), `LoopCommand` (while/until), `ForCommand`,
+  `CaseCommand` (subject + pattern/body items) or `FunctionDefinition`
+  (name, body command, and the definition's own `sourceText`). Every
+  command carries the line of its first token and its trailing
+  redirections. `DumpCommandList`/`DumpCommand` write a tree in the
+  one-line format the tests compare against.
+- `HshParser.h/.cpp` - the `Parser`, a recursive-descent parser with one
+  token of lookahead over the lexer, and dash's error messages and line
+  numbers (`Syntax error: <found> unexpected [(expecting <what>)]` plus the
+  fixed `Bad for loop variable` / `Bad function name` / `Bad fd number`; a
+  found Newline is reported on the line it ends into, as dash does).
+  `Parser::ParseNext()` returns one *complete command* at a time -- the
+  and-or lists of one line, up to its newline (heredoc bodies included) --
+  so a script's line 1 runs before line 2 is parsed, and an interactive
+  shell learns from `incomplete` that it must read more; after an error,
+  every later call returns it again. `ParseProgram()` parses the whole
+  source into one list for `eval`, `.`, the text of a command substitution,
+  and the tests.
+- (later tasks: expansion, the executor that registers the
   `hsh` builtin, the interactive loop.)
+
+## Reserved words and source text
+
+A word token is taken as a reserved word only where one may stand: at the
+start of a command (including after `!` and at the start of every list
+item), where `in` may follow `case <word>` or `for <name>`, where `do` may
+follow a `for` header, and where a case pattern list may start or end
+(`esac`). Everywhere else (`echo if then`, `for x in do done`, patterns
+after `|`, the case subject) every word is a word.
+
+`ListItem::sourceText` and `FunctionDefinition::sourceText` are cut from the
+source by token offsets, never rebuilt from the tree: from the first token's
+`begin` to the last token's `end` (so comments, blanks and the `;`/`&` that
+follows stay out), plus, when a heredoc's body follows that range, one
+newline and each such body region in order. Parsing a sourceText again gives
+the same command (checked by the tests). A background item needing the shell
+at run time is run as `hsh -c <sourceText>`.
+
+While a word is kept in the tree, every `CommandSubstitution` part in it (at
+any depth, heredoc bodies included) is checked at parse time by parsing its
+text with `ParseProgram`; an error there is the error of the whole parse, as
+dash checks substitutions when it parses them.
 
 ## How the end of a `$(...)` is found
 
@@ -70,3 +119,7 @@ delimiter line has not come yet, and a source ending in a backslash-newline.
 - `${x:}` is a `Bad substitution` (`ParameterOp::Bad`, failing at expansion)
   rather than dash's syntax error `Missing '}'`.
 - `$'...'` is not ANSI-C quoting (as dash): a plain `$` followed by the quote.
+- An error inside a `$(...)` is reported from parsing its text alone, so it
+  names `")"` (the substitution's end) where dash names what its own parser
+  happened to see: `echo $(if)` says `")" unexpected (expecting "then")`
+  where dash says `")" unexpected`.

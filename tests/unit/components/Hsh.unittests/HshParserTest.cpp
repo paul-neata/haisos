@@ -258,7 +258,9 @@ TEST(HshParserTest, CompoundCommands) {
     ExpectDump("case x in a|b) echo;; esac", "case x in a|b) [echo] ;; esac");
     ExpectDump("case $x in a|b) echo;; *) ;; esac", "case $x in a|b) [echo] ;; *) ;; esac");
     ExpectDump("case x in a) ;; b) ;; esac", "case x in a) ;; b) ;; esac");
-    ExpectDump("case x in a) ;; b) esac", "case x in a) ;; b) ;; esac"); // empty last body needs no ;;
+    ExpectDump("case x in a) ;; b) esac", "case x in a) ;; b) ;; esac"); // the last item's ;; is optional
+    ExpectDump("case x in a) echo m; esac", "case x in a) [echo m] ;; esac");
+    ExpectDump("case x in a) echo m\nesac", "case x in a) [echo m] ;; esac");
     ExpectDump("case x in esac", "case x in esac");
     ExpectDump("case in in in) echo m;; esac", "case in in in) [echo m] ;; esac");
     ExpectDump("case x in\na) echo m;;\nesac", "case x in a) [echo m] ;; esac");
@@ -372,6 +374,9 @@ TEST(HshParserTest, SyntaxErrors) {
     ExpectError("if true; then echo; fi foo", "Syntax error: word unexpected", 1, false);
     ExpectError("(echo) foo", "Syntax error: word unexpected", 1, false);
     ExpectError("echo \"abc", "Syntax error: Unterminated quoted string", 1, true);
+    // A found newline is reported on the line it ends into, as dash does.
+    ExpectError("if a; then b; fi >\n", "Syntax error: newline unexpected", 2, false);
+    ExpectError("case x in a\necho m;; esac", "Syntax error: newline unexpected (expecting \")\")", 2, false);
 }
 
 TEST(HshParserTest, SourceTextRoundTrips) {
@@ -386,6 +391,9 @@ TEST(HshParserTest, SourceTextRoundTrips) {
         "cat <<A & cat <<B\nba\nA\nbb\nB\n",
         "cat <<-E\n\tx\n\tE\n",
         "while cat <<E; do\nhdbody\nE\necho b\ndone\n",
+        "case x in a) cat <<E;; esac\nbody\nE\n",
+        "if cat <<E; then echo; fi\nB\nE\n",
+        "cat <<E | wc\nhello world\nE\n",
         "f() { echo f; } >o",
         "g()\n(echo g)",
         "{ a & b; }",

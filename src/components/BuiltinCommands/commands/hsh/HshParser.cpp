@@ -173,7 +173,10 @@ struct Parser::Impl {
         if (expected != nullptr) {
             message += " (expecting " + std::string(expected) + ")";
         }
-        int line = found.kind == TokenKind::EndOfInput ? lexer.Line() : found.line;
+        // dash reports a found newline on the line it ends into.
+        int line = found.kind == TokenKind::EndOfInput ? lexer.Line()
+                 : found.kind == TokenKind::Newline    ? found.line + 1
+                                                       : found.line;
         throw ShellError(message, line, found.kind == TokenKind::EndOfInput);
     }
 
@@ -529,9 +532,11 @@ struct Parser::Impl {
             item.body = ParseCompoundList(false);
             if (Peek().kind == TokenKind::DoubleSemicolon) {
                 Take();
-            } else if (item.body.items.empty() && Peek().kind == TokenKind::Word &&
+            } else if (Peek().kind == TokenKind::Word &&
                        AsReservedWord(Peek()) == ReservedWord::Esac) {
-                Take();  // a last item with an empty body needs no `;;`
+                // The body list ended at `esac` (after a separator, newline or
+                // with an empty body): the last item needs no `;;`, as POSIX.
+                Take();
                 closed = true;
             } else {
                 ThrowUnexpected(Peek(), true, "\";;\"");

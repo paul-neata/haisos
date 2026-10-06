@@ -274,6 +274,29 @@ TEST_F(HaisosOSPipeTest, ALuaScriptPrintingIntoAPipeWithNoReaderExits141) {
     EXPECT_TRUE(m_console->WrittenError().empty());
 }
 
+// The same from inside a coroutine: the broken pipe stops the script through
+// the latched hook, which is also armed on the thread that resumed the
+// coroutine -- so os_write_file after the resume never runs.
+TEST_F(HaisosOSPipeTest, ALuaScriptPrintingIntoAPipeWithNoReaderInsideACoroutineExits141) {
+    WriteFile(m_root, "/p.lua",
+        "coroutine.resume(coroutine.create(function() print(\"a\") end))\n"
+        "os_write_file({path = '/after.txt', content = 'x'})\n");
+    auto ends = m_os->GetPipeService()->CreatePipe();
+    ends.readEnd.reset();
+    StartProcessOptions options;
+    options.stdOut = ends.writeEnd;
+    auto process = m_os->StartProcess(TestEnvironment(), "/p.lua", {}, "", options);
+    ends.writeEnd.reset();
+    options.stdOut.reset();
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    ASSERT_TRUE(process->ExitCode().has_value());
+    EXPECT_EQ(*process->ExitCode(), kExitCodeBrokenPipe);
+    EXPECT_FALSE(EntryTypeOf(*m_root, "/after.txt").has_value());
+    EXPECT_TRUE(m_console->Written().empty());
+    EXPECT_TRUE(m_console->WrittenError().empty());
+}
+
 // The error line of a failed script goes into a pipe nobody reads: the script
 // ends 141, not 1, and the line is dropped, as a standalone lua stopped by
 // SIGPIPE would be.

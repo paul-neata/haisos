@@ -765,6 +765,42 @@ TEST(AgentTest, LastCommandFailedFollowsTheLastCommand) {
     ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
 }
 
+// A command whose every LLM response asks for another tool call never ends on
+// its own: after exactly 20 rounds the cap fails the command with a diagnostic
+// on the error stream, and no 21st call is made.
+TEST(AgentTest, ACommandReachingTheRoundCapFails) {
+    auto mockLLM = std::make_shared<MockLLMCommunicator>();
+    mockLLM->SetRepeatingToolCallResponse("get_current_date_time");
+    auto console = std::make_shared<MockAgentConsole>();
+    auto agent = Agent::Create(mockLLM, ToolFactory::Create(), console,
+        std::vector<std::string>{"You are a helpful AI assistant."},
+        "test_agent", nullptr, /*startTime=*/"", /*interactive=*/true);
+
+    auto waitUntil = [](const std::function<bool()>& pred) {
+        for (int i = 0; i < 500; ++i) {
+            if (pred()) {
+                return true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return pred();
+    };
+
+    agent->Post("never stop calling tools");
+    // The error line is written just after the flag is set, so wait for both.
+    ASSERT_TRUE(waitUntil([&] {
+        return agent->LastCommandFailed() && AnyContains(console->GetErrors(),
+            "Error: the command reached the maximum of 20 LLM rounds");
+    }));
+
+    // 20 rounds were run, each one LLM call; the cap broke the loop before a
+    // 21st.
+    EXPECT_EQ(mockLLM->GetCallCount(), 20);
+
+    agent->TriggerStop();
+    ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
+}
+
 // A response whose done reason marks a failure (the communicator's "error",
 // "parse_error", "http_error") is written as an error; an ordinary reply is a
 // message.

@@ -3,7 +3,7 @@
 - Rock: hsh
 - Depends on: hsh--redirections
 - Size: ~1000 changed lines in ~10 files (at the limit; `wait` stays here because the `&` tests need it, and both neighbouring hsh tasks are at ~1000 too)
-- Plan checked against: develop @ 0d92271
+- Plan checked against: develop @ baa0799
 - PR title: hsh: pipelines, background jobs, wait and command substitution
 
 ## Goal
@@ -83,6 +83,16 @@ plain portable C++17.
   static `Create()`.
 - hsh's version becomes `0.3.0`; the help notes gain one sentence (below).
 - New files in the two `CMakeLists.txt`.
+
+### Preliminary: fix a flaky test from PR #35
+
+`tests/unit/components/Hsh.unittests/HshShellTest.cpp`,
+`StopEndsTheShellAndItsChild` (~line 214): it waits a fixed 200 ms before
+`TriggerStop()`, so on a slow runner the stop can arrive before `/spin.lua`
+has started and the test passes (143, no child) without ever exercising the
+stop reaching the child. Replace the fixed sleep: poll `GetRunningProcesses()`
+(bounded, e.g. up to 5 s) until a process with `Path() == "/spin.lua"` is
+listed, then call `TriggerStop()`.
 
 ### `HshUnboundedPipe.h` / `.cpp` (new)
 
@@ -368,8 +378,10 @@ byte. Where a test writes `/abc.txt` it holds `one\ntwo\nthree\n`.
   `/p.lua 2>/e.txt | wc -l; cat /e.txt` -> out `1\nlua: /p.lua:2: boom\n`,
   err empty, status 0.
 - `StopEndsEveryStage`: start `/bin/hsh -c '/spin.lua | /spin.lua'` with
-  `os->StartProcess` (`/spin.lua` = `while true do end`); after 200 ms
-  `TriggerStop()`; finished within 10 s with 143; no `/spin.lua` left
+  `os->StartProcess` (`/spin.lua` = `while true do end`); poll
+  `GetRunningProcesses()` (bounded, up to 5 s) until both `/spin.lua` stages
+  are listed, then `TriggerStop()` (no fixed sleep -- same lesson as the
+  preliminary fix above); finished within 10 s with 143; no `/spin.lua` left
   running (poll up to 5 s).
 
 (A broken pipe in an in-shell stage is tested by hsh--shell-builtins, which
@@ -418,6 +430,8 @@ bash ./scripts/test_linux.sh L U
 
 ## Acceptance
 
+- [ ] `StopEndsTheShellAndItsChild` (PR #35) polls for `/spin.lua` to be
+      running before `TriggerStop()`, instead of a fixed 200 ms sleep.
 - [ ] Child stages start at once and run concurrently; in-shell stages run
       in subshells (no leaked variables, directory or descriptors).
 - [ ] The pipe rule is implemented as written; the 200000-byte tests pass.

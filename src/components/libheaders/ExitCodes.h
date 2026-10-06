@@ -17,10 +17,9 @@ enum class ProcessEnd { Exited, Stopped, BrokenPipe };
 // precedence over Stopped where both apply, since a broken pipe stops the
 // process itself.
 //
-// Seam for pipes--pipe-service: each runtime decides its ProcessEnd in one
-// place (named where it is -- e.g. LuaProcess::RunThread); that task adds the
-// BrokenPipe case there. 141 is part of the vocabulary already, but nothing
-// produces it yet.
+// Each runtime decides its ProcessEnd in one place (named where it is -- e.g.
+// LuaProcess::RunThread), with BrokenPipe checked before Stopped: a process
+// asked to stop after a broken pipe still reports 141.
 inline int ExitCodeFor(ProcessEnd end, int programCode) {
     switch (end) {
         case ProcessEnd::Stopped:    return kExitCodeStopped;

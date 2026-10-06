@@ -51,14 +51,29 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   it runs and a shell-style 0-255 once finished, latched and never changing --
   a `TriggerStop()` landing after the finish changes nothing. The meanings are a
   shell's: the program's own code modulo 256, 143 (128 + SIGTERM) for a stop,
-  141 (128 + SIGPIPE) reserved for pipes; the constants and `ExitCodeFor` live
+  141 (128 + SIGPIPE) for a write into a pipe whose reader is gone; the
+  constants and `ExitCodeFor` live
   in `src/components/libheaders/ExitCodes.h`, and each runtime turns its end
   into a code in one place, where it reports finished. A builtin reports its
   command's status; a Lua script its `exit()` argument, 1 on an error, 143 when
   its kill hook fired before the chunk ran out; an agent 1 when its last
   command failed (`Agent::LastCommandFailed()`), else 0, and 143 when it was
   stopped before finishing -- `AgentProcess::TriggerStop()` latches "stopped"
-  only while the process is still running.
+  only while the process is still running. Every runtime also implements
+  `ICurrentProcess::StopForBrokenPipe()`, called by that runtime's own output
+  path (`BuiltinContext`, Lua's `print` and error line, `ProcessAgentConsole`)
+  when a write of the program's bytes returned `kIOBrokenPipe`: the flag it
+  latches is checked **before** "stopped" at the decision point (141 wins over
+  a `TriggerStop` asked for afterwards, and, for Lua, before `exit()` and an
+  error's 1 too), and the program is then stopped the way `TriggerStop` would
+  stop it -- quietly, nothing printed. The API stops nobody: `Write` and
+  `IFileIO` only return the error, for code (a shell's heredoc, later) that
+  would rather handle it. In Lua a broken `print` does not raise from the
+  trampoline -- it has C++ locals a `longjmp` may not cross -- but re-arms the
+  kill hook to fire on the next instruction, so the unwinding runs as for a
+  kill and no `lua:` line is written; `ProcessAgentConsole` stops the agent on
+  a broken pipe from **either** descriptor, history and message buffer
+  unchanged.
 - **`ICurrentProcess` is the only door out of a process.** Everything a running
   program reaches beyond its own memory it reaches through
   `ICurrentProcess` -- files via `IO()`, everything else via `OS()` --
@@ -231,12 +246,19 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   2, each plus a `\n`. Created before the process, so it reaches it through the
   same `CurrentProcessHandle` the OS tools use, and looks the descriptor up on
   every write: a process whose table was replaced or released writes wherever
-  it says, or nowhere
+  it says, or nowhere. A write that returns `kIOBrokenPipe` -- either
+  descriptor's pipe -- calls the process's `StopForBrokenPipe()` (the agent
+  stops, exit code 141, quietly) and drops every line after
 - `LuaProcess` - `ICurrentProcess` backed by an embedded Lua script, running on
   its own thread. Its `Kill()` aborts the script via a Lua instruction-count
   hook -- an interpreter really can be interrupted mid-instruction -- and
   `TriggerStop()` simply calls it, since a script has no command queue to
-  close. The same hook serves the global `exit()`: the hook's C trampoline
+  close. `StopForBrokenPipe()` calls it too, after latching the flag that makes
+  the exit code 141 (checked first at the decision point: a broken pipe beats
+  `exit()`, a stop and an error); a `print` whose write hit the pipe never
+  raises from its trampoline but re-arms the hook to fire before the next
+  instruction, so the unwinding is the one a kill runs, with no `lua:` line.
+  The same hook serves the global `exit()`: the hook's C trampoline
   re-arms it on every call, return and line, so neither a stop nor an `exit()`
   can be caught and ignored by a `pcall`. The chunk is loaded as text with its
   path for a name (`"@" + path`), so error messages come out `path:line:` as

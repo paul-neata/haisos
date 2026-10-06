@@ -11,9 +11,9 @@ Header-only C++ utilities. Not a formal component.
   `kExitCodeStopped` (143), `kExitCodeNotStarted` (127, for the launcher to
   report -- a `RUN` that never starts has no code), and `ExitCodeFor(ProcessEnd,
   programCode)`: `Exited` takes the program's code modulo 256, `Stopped` and
-  `BrokenPipe` ignore it. `ProcessEnd` is the seam a runtime's one decision
-  point switches on, so a later broken-pipe case slots in without the runtimes
-  changing shape.
+  `BrokenPipe` ignore it. `ProcessEnd` is what a runtime's one decision point
+  switches on, `BrokenPipe` checked before `Stopped` (a stop asked for after a
+  broken pipe still reports 141).
 - `DestroyOffRuntimeThreads.h` - keeps whatever waits for a runtime thread in
   its destructor from being destroyed on one (see "Creating things" in the root
   `CLAUDE.md`). `RuntimeThreadScope` marks the thread it is declared on as a

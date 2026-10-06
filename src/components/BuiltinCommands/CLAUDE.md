@@ -38,8 +38,9 @@ through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
   in `src/components/HaisosOS/`), so a builtin reaches files exactly as every
   other runtime does -- `ICurrentProcess` is still the only door out.
   `ExitCode()` (`IProcess::ExitCode`) is empty while the command runs, then
-  its status modulo 256 -- or 143 when it was stopped (see "Exit codes" in the
-  root `CLAUDE.md`). The process also owns a `StopToken`
+  its status modulo 256 -- or 143 when it was stopped, or 141 when a write of
+  its output hit a pipe with no reader (`StopForBrokenPipe`, checked before
+  the stop; see "Exit codes" in the root `CLAUDE.md`). The process also owns a `StopToken`
   (`src/components/libheaders/StopToken.h`), installed on the command's thread
   by `RunThread` and signalled by `TriggerStop()`, so a pipe `Read`/`Write`
   the command is blocked in returns `kIOInterrupted` at once rather than
@@ -68,7 +69,12 @@ reports to slot 2. The output rule:
 
 So `ls: cannot access ...` lands on the host's stderr (through the console
 error descriptor), and `echo hi` lands raw and untagged on its stdout.
-Messages follow the GNU coreutils wording.
+Messages follow the GNU coreutils wording. A write that returns
+`kIOBrokenPipe` -- the reader of the pipe is gone, on stdout or on stderr --
+stops the builtin quietly with exit code 141, as SIGPIPE would
+(`BuiltinContext::WriteAll` calls the process's `StopForBrokenPipe()`), and
+everything after is dropped, a diagnostic included: the program is dying, so
+nothing more may go out.
 
 ## The commands
 

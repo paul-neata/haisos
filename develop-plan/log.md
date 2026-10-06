@@ -58,3 +58,4 @@
 - 2026-10-06 20:14 UTC -- hsh--redirections merged #36 as 0.4.18: 1H fixed, 5L open, 1 tries
 - 2026-10-06 20:17 UTC -- start hsh--pipelines (0.4.19)
 - 2026-10-06 20:43 UTC -- hsh--pipelines: PR #37, windows-failed
+- 2026-10-06 20:56 UTC -- hsh--pipelines merged #37 as 0.4.19: 1H fixed, 3M 4L open, 1 tries; Windows HaisosOS timeout green on re-run

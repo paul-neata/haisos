@@ -43,6 +43,12 @@ public:
     int Dup2(int oldFd, int newFd) override;
     int CloseDescriptor(int fd) override;
 
+    // Unlike the other table operations this reaches the OS: the pipe service
+    // comes from ICurrentProcess::OS(), the one door out of a process (see the
+    // Security section of the root CLAUDE.md) -- nothing in a process holds a
+    // pipe service of its own.
+    std::optional<std::pair<int, int>> CreatePipe(size_t capacity = 0) override;
+
     // Places in, out and err in slots 0, 1 and 2 of a table that has no
     // descriptor yet. Returns false, changing nothing, if any is null or the
     // table is not empty. Called by a process's Create() before its program

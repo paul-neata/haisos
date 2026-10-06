@@ -10,6 +10,7 @@
 #include <vector>
 #include "interfaces/ILLMService.h"
 #include "interfaces/ILLMCommunicator.h"
+#include "src/components/libheaders/StopToken.h"
 #include "src/components/libheaders/SynchronizedQueueEx.h"
 #include "AgentMessageBuffer.h"
 
@@ -61,6 +62,13 @@ public:
     // already ended, runs it at once on the calling thread. Exceptions from the
     // hook are caught and logged.
     void SetFinishedHook(std::function<void()> hook);
+
+    // The agent's stop token, on the concrete Agent only (not IAgent): installed
+    // on the agent's thread by RunThread so a pipe Read/Write blocked there is
+    // woken when the agent is asked to stop, and handed to the process's input
+    // loop so a blocked read of the agent's stdin pipe ends it too. Signalled
+    // by TriggerStop() (and so by self_close).
+    std::shared_ptr<StopToken> GetStopToken() const;
 
 private:
     Agent(
@@ -128,6 +136,11 @@ private:
     // a stop asked for while a round is in flight takes effect at the next
     // point where stopping is safe rather than only at the next command.
     std::atomic<bool> m_stopRequested{false};
+    // Signalled by TriggerStop along with the flag, so a pipe call blocked on
+    // this agent's thread (or its process's input loop) is woken at once --
+    // an agent asked to stop no longer waits out a full pipe; what could not
+    // be written is dropped.
+    std::shared_ptr<StopToken> m_stopToken = StopToken::Create();
     std::condition_variable m_finishedCv;
     std::mutex m_finishedMutex;
     std::mutex m_joinMutex;

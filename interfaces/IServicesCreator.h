@@ -4,6 +4,7 @@
 #include "ILLMService.h"
 #include "INetworkService.h"
 #include "IFileSystemService.h"
+#include "IPipeService.h"
 
 namespace Haisos {
 
@@ -20,6 +21,8 @@ public:
     virtual std::shared_ptr<IServicesCreator> Clone() const = 0;
 
     virtual std::shared_ptr<IFileSystemService> CreateFileSystemService() = 0;
+    // Each call is a new, independent service; an OS creates one for itself.
+    virtual std::shared_ptr<IPipeService> CreatePipeService() = 0;
     virtual std::shared_ptr<INetworkService> CreateNetworkService() = 0;
     virtual std::shared_ptr<ILLMService> CreateLLMService(
         std::shared_ptr<INetworkService> networkService,

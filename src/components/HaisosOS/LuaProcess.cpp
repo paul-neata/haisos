@@ -444,6 +444,9 @@ bool LuaProcess::WaitToFinish(uint64_t timeoutMs) {
 
 void LuaProcess::Kill() {
     m_killed = true;
+    // Wake a pipe Read/Write the script is blocked in, so a stuck pipeline
+    // cannot outlast the kill hook.
+    m_stopToken->RequestStop();
 }
 
 bool LuaProcess::IsOwnThread() {
@@ -660,6 +663,9 @@ void LuaProcess::RunThread() {
     // whatever it lets go of last is then destroyed on the destruction thread,
     // not here. It also names this thread in every log line.
     RuntimeThreadScope runtimeThread("lua " + m_path + " pid=" + std::to_string(m_pid));
+    // The process's stop token on its own thread, so a blocked pipe call
+    // notices when the process is asked to stop.
+    StopTokenScope stopTokenScope(m_stopToken);
     LogDebug("LuaProcess '%s' RunThread starting (%zu bytes of script)", m_path.c_str(), m_scriptContent.size());
     // How the script ended drives the exit code below: ranToEnd says the chunk
     // returned on its own; scriptFailed a load or runtime error (not a stop and

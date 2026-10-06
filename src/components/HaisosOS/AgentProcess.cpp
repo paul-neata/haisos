@@ -60,7 +60,9 @@ std::shared_ptr<AgentProcess> AgentProcess::Create(
     // own reference to the descriptor, so the table being released at the
     // conversation's end never pulls it out from under a blocked read.
     if (options.interactive) {
-        process->m_inputLoop = AgentInputLoop::Create(process->m_agent, options.stdIn);
+        // The agent's stop token too: a read of the process's stdin pipe then
+        // ends as soon as the agent closes itself or is asked to stop.
+        process->m_inputLoop = AgentInputLoop::Create(process->m_agent, options.stdIn, process->m_agent->GetStopToken());
         if (!process->m_inputLoop) {
             // AgentInputLoop::Create has already said why.
             return nullptr;

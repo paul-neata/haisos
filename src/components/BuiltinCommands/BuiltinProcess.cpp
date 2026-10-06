@@ -88,6 +88,9 @@ void BuiltinProcess::RunThread() {
     // destroyed on the destruction thread, not here. It also names this thread
     // in every log line.
     RuntimeThreadScope runtimeThread("builtin " + m_path + " pid=" + std::to_string(m_pid));
+    // The process's stop token on its own thread, so a blocked pipe call
+    // notices when the process is asked to stop.
+    StopTokenScope stopTokenScope(m_stopToken);
     const std::string name = m_command->Name();
     int status = 1;
     try {
@@ -144,6 +147,8 @@ std::shared_ptr<IEnvironment> BuiltinProcess::GetEnvironment() const {
 
 void BuiltinProcess::TriggerStop() {
     m_stopRequested = true;
+    // Wake a pipe Read/Write the command is blocked in.
+    m_stopToken->RequestStop();
 }
 
 bool BuiltinProcess::WaitToFinish(uint64_t timeoutMs) {

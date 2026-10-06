@@ -40,6 +40,7 @@ public:
         std::shared_ptr<IEnvironment> environment) override;
     std::shared_ptr<IFileSystem> GetRootFileSystem() override;
     std::shared_ptr<IServicesCreator> GetServicesCreator() override;
+    std::shared_ptr<IPipeService> GetPipeService() override;
     std::shared_ptr<IEnvironment> GetOsEnvironment() const override;
     uint64_t GetOSProcessID() const override;
 
@@ -48,6 +49,7 @@ private:
         std::shared_ptr<IServicesCreator> servicesCreator,
         std::shared_ptr<INetworkService> networkService,
         std::shared_ptr<ILLMService> llmService,
+        std::shared_ptr<IPipeService> pipeService,
         std::shared_ptr<IFileSystem> rootFileSystem,
         std::shared_ptr<IBuiltinCommands> builtinCommands,
         std::shared_ptr<IPhysicalConsole> physicalConsole,
@@ -85,6 +87,7 @@ private:
     std::shared_ptr<IServicesCreator> m_servicesCreator;
     std::shared_ptr<INetworkService> m_networkService;
     std::shared_ptr<ILLMService> m_llmService;
+    std::shared_ptr<IPipeService> m_pipeService;
     std::shared_ptr<IFileSystem> m_rootFileSystem;
     // Deliberately not exposed: what runs this OS's builtins is its own
     // business. May be null, for an OS that runs none.

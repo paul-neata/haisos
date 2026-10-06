@@ -44,3 +44,4 @@
 - 2026-10-06 16:07 UTC -- start hsh--arith-glob (0.4.14)
 - 2026-10-06 16:27 UTC -- hsh--arith-glob: PR #32, windows-failed
 - 2026-10-06 16:38 UTC -- hsh--arith-glob merged #32 as 0.4.14: 1C fixed (Windows hang), 2M 2L open, 1 tries
+- 2026-10-06 16:59 UTC -- questions answered; start streams--coroutine-latch (0.4.15) per direction

@@ -27,10 +27,10 @@ Pause: no
 | 20 | [hsh--shell-builtins](tasks/hsh--shell-builtins.md) | todo | | 19 | | | | |
 | 21 | [hsh--control-flow](tasks/hsh--control-flow.md) | todo | | 20 | | | | |
 | 22 | [hsh--interactive](tasks/hsh--interactive.md) | todo | | 12, 21 | | | | |
-| 23 | [streams--coroutine-latch](tasks/streams--coroutine-latch.md) | todo | | 6, 8 | | | | follow-up to #23/#25 findings; run before hsh--expansion |
+| 23 | [streams--coroutine-latch](tasks/streams--coroutine-latch.md) | in-progress | 0.4.15 | 6, 8 | | | | follow-up to #23/#25 findings; run before hsh--expansion |
 
 ## Directions
-- (plan, 2026-10-06) Run streams--coroutine-latch (#23) next, before hsh--expansion.
+- (plan, 2026-10-06) Run streams--coroutine-latch (#23) next, before hsh--expansion. -> done: started it next, as 0.4.15
 
 ## Questions
 - (implement, 2026-10-06) streams--exit-codes (#23) left a medium: `exit()` inside a Lua coroutine re-arms the stop hook only on the coroutine's thread, so after `coroutine.resume` catches it the script runs up to ~1000 more instructions, tool calls included (LuaProcess.cpp:614; fix: also re-arm on `self->m_luaState` in LuaExitTrampoline, test `coroutine.resume(coroutine.create(function() exit(2) end)) print('after')` prints nothing, exits 2). Plus no test for the LLM-round-cap failure (Agent.cpp:507). Add a small follow-up task now, or leave both for the final-review fixes? Until answered: left for the final review. Update after pipes--broken-pipe (#25): the same gap now also hits `print` in a coroutine (LuaProcess.cpp:619, LuaPrintTrampoline) -- one fix covers both: re-arm on `self->m_luaState` in both trampolines, plus a coroutine test for each. -> answered: a small follow-up task now, streams--coroutine-latch (#23), run next. It also arms the hook on resumers of nested coroutines (wrapped coroutine.resume/wrap) and adds the round-cap test.
@@ -51,3 +51,4 @@ Pause: no
 - 2026-10-06 14:39 (implement) hsh--lexer refreshed: checked against 1209878, no content changes needed
 - 2026-10-06 15:22 (implement) hsh--parser refreshed: checked against a8381c6; preliminary fixes from #30's review: Lexer move ops / unused ctor removed, heredoc \<newline> joining before an unquoted delimiter (dash), with tests
 - 2026-10-06 16:07 (implement) hsh--arith-glob refreshed: checked against 4f49203, no content changes needed
+- 2026-10-06 16:59 (implement) streams--coroutine-latch run before hsh--expansion, per the plan direction; its plan is current (checked against 7e857e9). The 5 dash follow-ups from #30-#32 still go into hsh--expansion's re-check

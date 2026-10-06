@@ -1,5 +1,6 @@
 #include "BuiltinCommand.h"
 #include <algorithm>
+#include <cstdio>
 
 namespace Haisos {
 
@@ -51,9 +52,13 @@ void BuiltinContext::Error(const std::string& message) {
     WriteAll(m_err.get(), m_name + ": " + message + "\n");
 }
 
-void BuiltinContext::TryHelp() {
+void BuiltinContext::ErrorText(const std::string& text) {
     Flush();
-    WriteAll(m_err.get(), "Try '" + m_name + " --help' for more information.\n");
+    WriteAll(m_err.get(), text);
+}
+
+void BuiltinContext::TryHelp() {
+    ErrorText("Try '" + m_name + " --help' for more information.\n");
 }
 
 void BuiltinContext::ReportNotTreated(const ParsedBuiltinArgs& parsed) {
@@ -307,6 +312,112 @@ std::string BuiltinHelpText(const IBuiltinCommand& command) {
     }
     text += "\nNot treated arguments: " + (notTreatedList.empty() ? std::string("none") : notTreatedList) + "\n";
     return text;
+}
+
+std::string IBuiltinCommand::ManPage() const {
+    return BuiltinHelpText(*this);
+}
+
+namespace {
+
+// A byte a shell would read specially in a bare word (control bytes below
+// 0x20 and 0x7F included).
+bool ShellEscapeSpecial(unsigned char c) {
+    if (c < 0x20 || c == 0x7f) {
+        return true;
+    }
+    switch (c) {
+        case ' ': case '!': case '"': case '$': case '&': case '\'': case '(': case ')':
+        case '*': case ';': case '<': case '=': case '>': case '?': case '[': case '\\':
+        case '^': case '`': case '|':
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool IsControl(unsigned char c) {
+    return c < 0x20 || c == 0x7f;
+}
+
+bool ShellEscapeNeedsQuoting(const std::string& name) {
+    if (name.empty()) {
+        return true;
+    }
+    if (name[0] == '#' || name[0] == '~') {
+        return true;
+    }
+    if (name == "{" || name == "}") {
+        return true;
+    }
+    return std::any_of(name.begin(), name.end(),
+        [](char c) { return ShellEscapeSpecial(static_cast<unsigned char>(c)); });
+}
+
+// The $'...' body of one control byte: \a \b \t \n \v \f \r for 7..13, else
+// the octal escape GNU writes (\001, \033, \177).
+void AppendControlEscape(unsigned char c, std::string& out) {
+    switch (c) {
+        case 7: out += "\\a"; return;
+        case 8: out += "\\b"; return;
+        case 9: out += "\\t"; return;
+        case 10: out += "\\n"; return;
+        case 11: out += "\\v"; return;
+        case 12: out += "\\f"; return;
+        case 13: out += "\\r"; return;
+        default: {
+            char octal[8];
+            std::snprintf(octal, sizeof(octal), "\\%03o", c);
+            out += octal;
+        }
+    }
+}
+
+} // namespace
+
+std::string ShellEscapeQuoted(const std::string& name, bool always) {
+    if (!ShellEscapeNeedsQuoting(name)) {
+        return always ? "'" + name + "'" : name;
+    }
+    const bool hasControl = std::any_of(name.begin(), name.end(),
+        [](char c) { return IsControl(static_cast<unsigned char>(c)); });
+    const bool hasQuote = name.find('\'') != std::string::npos;
+    if (!hasControl && !hasQuote) {
+        return "'" + name + "'";
+    }
+    // With a ' but nothing else a double-quoted shell string would read
+    // specially, double quotes do ("it's" -> '"it's"').
+    if (!hasControl && name.find_first_of("!\"$&()*;<=>?[\\^`|") == std::string::npos) {
+        return "\"" + name + "\"";
+    }
+    // The general form: '...', each ' written '\'', each run of control bytes
+    // taken out of the quotes and written as $'\n' style escapes.
+    std::string out = "'";
+    size_t i = 0;
+    while (i < name.size()) {
+        const unsigned char c = static_cast<unsigned char>(name[i]);
+        if (IsControl(c)) {
+            out += "'$'";
+            while (i < name.size() && IsControl(static_cast<unsigned char>(name[i]))) {
+                AppendControlEscape(static_cast<unsigned char>(name[i]), out);
+                ++i;
+            }
+            out += "'";
+            if (i < name.size()) {
+                out += "'";
+            }
+        } else if (c == '\'') {
+            out += "'\\''";
+            ++i;
+        } else {
+            out += name[i];
+            ++i;
+        }
+    }
+    if (!IsControl(static_cast<unsigned char>(name.back()))) {
+        out += "'";
+    }
+    return out;
 }
 
 std::optional<ParsedBuiltinArgs> BeginBuiltin(

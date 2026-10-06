@@ -3,11 +3,11 @@ add_library(BuiltinCommands STATIC
     BuiltinCommands.cpp
     BuiltinConfigurator.cpp
     BuiltinProcess.cpp
-    commands/Cat.cpp
-    commands/Echo.cpp
-    commands/Ls.cpp
-    commands/Mkdir.cpp
-    commands/Pwd.cpp
+    commands/cat/Cat.cpp
+    commands/echo/Echo.cpp
+    commands/ls/Ls.cpp
+    commands/mkdir/Mkdir.cpp
+    commands/pwd/Pwd.cpp
 )
 target_include_directories(BuiltinCommands PUBLIC
     ${CMAKE_SOURCE_DIR}/interfaces

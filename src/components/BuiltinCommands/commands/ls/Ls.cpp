@@ -75,6 +75,12 @@ struct LsSettings {
     bool groupDirectoriesFirst = false;
     bool slash = false;
     bool literal = false;
+    // Set by any option that chooses a layout (-C -x -m -l ...): without one,
+    // the layout follows where stdout goes.
+    bool formatGiven = false;
+    // GNU's -q default: control bytes become '?' on a terminal; off one they
+    // are written raw.
+    bool hideControlChars = false;
     bool showOwner = true;
     bool showGroup = true;
     LsFormat format = LsFormat::Columns;
@@ -94,49 +100,6 @@ struct LsEntry {
 };
 
 // --- Formatting pieces ---
-
-// GNU ls's shell-escape quoting, as it prints to a terminal: a name holding
-// anything a shell would read specially is shown in quotes.
-bool NeedsQuoting(const std::string& name) {
-    if (name.empty()) {
-        return true;
-    }
-    if (name[0] == '~' || name[0] == '#') {
-        return true;
-    }
-    for (unsigned char c : name) {
-        if (c < 0x20 || c == 0x7f) {
-            return true;
-        }
-        switch (c) {
-            case ' ': case '!': case '"': case '$': case '&': case '\'': case '(': case ')':
-            case '*': case ';': case '<': case '=': case '>': case '?': case '[': case '\\':
-            case ']': case '^': case '`': case '{': case '|': case '}':
-                return true;
-            default:
-                break;
-        }
-    }
-    return false;
-}
-
-std::string Quote(const std::string& name) {
-    std::string visible;
-    for (unsigned char c : name) {
-        visible += (c < 0x20 || c == 0x7f) ? '?' : static_cast<char>(c);
-    }
-    if (visible.find('\'') == std::string::npos) {
-        return "'" + visible + "'";
-    }
-    if (visible.find_first_of("\"$`\\!") == std::string::npos) {
-        return "\"" + visible + "\"";
-    }
-    std::string quoted = "'";
-    for (char c : visible) {
-        quoted += (c == '\'') ? std::string("'\\''") : std::string(1, c);
-    }
-    return quoted + "'";
-}
 
 // GNU's -h: powers of 1024, rounded up, one decimal below 10 ("1.5K", "12K").
 std::string HumanSize(uint64_t bytes) {
@@ -305,7 +268,7 @@ bool ParseWidth(const std::string& text, size_t& width) {
 class LsCommand : public IBuiltinCommand {
 public:
     std::string Name() const override { return "ls"; }
-    std::string Version() const override { return "1.2.1"; }
+    std::string Version() const override { return "1.3.0"; }
 
     const std::vector<BuiltinOption>& Options() const override {
         using A = BuiltinArgument;
@@ -453,7 +416,7 @@ private:
                 case kAlmostAll: settings.almostAll = true; settings.all = false; break;
                 case kIgnoreBackups: settings.ignoreBackups = true; break;
                 case kCtime: settings.time = LsTime::Change; break;
-                case kColumns: settings.format = LsFormat::Columns; break;
+                case kColumns: settings.format = LsFormat::Columns; settings.formatGiven = true; break;
                 case kDirectory: settings.directory = true; break;
                 case kAllUnsorted: settings.all = true; settings.almostAll = false; settings.sort = LsSort::None; settings.sortGiven = true; break;
                 case kFileType: settings.slash = true; break;
@@ -464,17 +427,18 @@ private:
                     else if (value == "single-column") settings.format = LsFormat::OnePerLine;
                     else if (value == "vertical") settings.format = LsFormat::Columns;
                     else return invalid(value, "format");
+                    settings.formatGiven = true;
                     break;
-                case kFullTime: settings.format = LsFormat::Long; settings.timeStyle = "full-iso"; break;
-                case kLongNoOwner: settings.format = LsFormat::Long; settings.showOwner = false; break;
+                case kFullTime: settings.format = LsFormat::Long; settings.formatGiven = true; settings.timeStyle = "full-iso"; break;
+                case kLongNoOwner: settings.format = LsFormat::Long; settings.formatGiven = true; settings.showOwner = false; break;
                 case kGroupDirectoriesFirst: settings.groupDirectoriesFirst = true; break;
                 case kNoGroup: settings.showGroup = false; break;
                 case kHuman: settings.human = true; break;
                 case kKibibytes: break; // already the unit
-                case kLong: settings.format = LsFormat::Long; break;
-                case kCommas: settings.format = LsFormat::Commas; break;
+                case kLong: settings.format = LsFormat::Long; settings.formatGiven = true; break;
+                case kCommas: settings.format = LsFormat::Commas; settings.formatGiven = true; break;
                 case kLiteral: settings.literal = true; break;
-                case kLongNoGroup: settings.format = LsFormat::Long; settings.showGroup = false; break;
+                case kLongNoGroup: settings.format = LsFormat::Long; settings.formatGiven = true; settings.showGroup = false; break;
                 case kSlash: settings.slash = true; break;
                 case kReverse: settings.reverse = true; break;
                 case kRecursive: settings.recursive = true; break;
@@ -516,12 +480,30 @@ private:
                         return false;
                     }
                     break;
-                case kAcross: settings.format = LsFormat::Across; break;
+                case kAcross: settings.format = LsFormat::Across; settings.formatGiven = true; break;
                 case kSortByExtension: settings.sort = LsSort::Extension; settings.sortGiven = true; break;
-                case kOnePerLine: settings.format = LsFormat::OnePerLine; break;
+                case kOnePerLine:
+                    settings.formatGiven = true;
+                    // GNU: "-1 has no effect after -l" -- -l1 and -1l are both
+                    // long listings.
+                    if (settings.format != LsFormat::Long) {
+                        settings.format = LsFormat::OnePerLine;
+                    }
+                    break;
                 default: break;
             }
         }
+        // What GNU ls does when stdout is not a terminal (a pipe, a file, a
+        // device): one name per line unless a layout was asked for, and names
+        // literal -- nothing quoted. On a terminal, control bytes show as '?'.
+        const bool terminal = context.OutIsTerminal();
+        if (!settings.formatGiven && !terminal) {
+            settings.format = LsFormat::OnePerLine;
+        }
+        if (!terminal) {
+            settings.literal = true;
+        }
+        settings.hideControlChars = terminal;
         // As GNU ls: -u or -c without a long listing and without a sort order
         // of its own sorts by that time.
         if (settings.time != LsTime::Modification && settings.format != LsFormat::Long && !settings.sortGiven) {
@@ -644,8 +626,23 @@ private:
         bool anyQuoted = false;
         for (const auto& entry : entries) {
             ShownName name;
-            name.quoted = !settings.literal && NeedsQuoting(entry.name);
-            name.text = name.quoted ? Quote(entry.name) : entry.name;
+            if (!settings.literal) {
+                // On a terminal, shell-escape quoting just as GNU ls does it.
+                name.text = ShellEscapeQuoted(entry.name);
+                name.quoted = name.text != entry.name;
+            } else {
+                // Literal: the name as is, except that on a terminal (GNU's -q
+                // default) a control byte shows as '?'.
+                name.text = entry.name;
+                if (settings.hideControlChars) {
+                    for (auto& c : name.text) {
+                        const unsigned char byte = static_cast<unsigned char>(c);
+                        if (byte < 0x20 || byte == 0x7f) {
+                            c = '?';
+                        }
+                    }
+                }
+            }
             if (settings.slash && entry.status.type == DirectoryEntryType::Dir) {
                 name.text += '/';
             }

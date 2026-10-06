@@ -5,9 +5,10 @@
 
 namespace Haisos {
 
-// One factory per builtin command, each defined in its own file under
-// commands/. Only the registry (BuiltinCommands) and tests need this list; a
-// command itself needs only BuiltinCommand.h.
+// One factory per builtin command, each defined in a directory of its own,
+// commands/<name>/ -- ready for a builtin made of several files. Only the
+// registry (BuiltinCommands) and tests need this list; a command itself needs
+// only BuiltinCommand.h.
 std::shared_ptr<IBuiltinCommand> CreateCatCommand();
 std::shared_ptr<IBuiltinCommand> CreateEchoCommand();
 std::shared_ptr<IBuiltinCommand> CreateLsCommand();

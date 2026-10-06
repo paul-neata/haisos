@@ -1,12 +1,10 @@
 #include <gtest/gtest.h>
-#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <regex>
 #include <string>
@@ -16,6 +14,7 @@
 #include "BuiltinCommand.h"
 #include "BuiltinProcess.h"
 #include "BuiltinCommandList.h"
+#include "BuiltinCommandsFixture.h"
 #include "ProcessFileIO.h"
 #include "src/components/Filesystem/BuiltinCommandFile.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
@@ -29,77 +28,6 @@
 using namespace Haisos;
 
 namespace {
-
-constexpr uint64_t kWaitMs = 10000;
-
-// A physical console that keeps what is written to it: the raw bytes of each
-// stream separately (m_out, m_err) and of both in the order written (m_all).
-class CapturingConsole : public IPhysicalConsole {
-public:
-    void Write(const std::string& bytes) override {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_out += bytes;
-        m_all += bytes;
-    }
-    void WriteError(const std::string& bytes) override {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_err += bytes;
-        m_all += bytes;
-    }
-    std::optional<std::string> ReadLine() override { return std::nullopt; }
-    void Start() override {}
-    void Stop() override {}
-
-    // Everything written so far, split on '\n': no empty last element for a
-    // trailing newline, a trailing partial line kept. Clears all three strings.
-    std::vector<std::string> TakeLines() {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        std::vector<std::string> lines;
-        std::string line;
-        for (char c : m_all) {
-            if (c == '\n') {
-                lines.push_back(line);
-                line.clear();
-            } else {
-                line += c;
-            }
-        }
-        if (!line.empty()) {
-            lines.push_back(line);
-        }
-        m_out.clear();
-        m_err.clear();
-        m_all.clear();
-        return lines;
-    }
-
-    // The raw string its own stream got, taken (only that stream is cleared, so
-    // TakeOut() and TakeErr() may be asked in either order).
-    std::string TakeOut() {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        std::string result;
-        result.swap(m_out);
-        return result;
-    }
-    std::string TakeErr() {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        std::string result;
-        result.swap(m_err);
-        return result;
-    }
-
-private:
-    std::mutex m_mutex;
-    std::string m_out;
-    std::string m_err;
-    std::string m_all;
-};
-
-#ifdef _WIN32
-constexpr int kDirMode = _S_IREAD | _S_IWRITE;
-#else
-constexpr int kDirMode = S_IRWXU;
-#endif
 
 // A descriptor that counts its own destructions, so a test can see exactly
 // when a process's table lets a file go. Reads end at once; writes take
@@ -177,77 +105,6 @@ std::shared_ptr<IBuiltinCommand> FindStandardCommand(const std::string& name) {
     return nullptr;
 }
 
-class BuiltinCommandsTest : public ::testing::Test {
-protected:
-    void SetUp() override {
-        root = factory->CreateServicesCreator()->CreateFileSystemService()->CreateEmptyInMemFileSystem();
-        ASSERT_EQ(root->CreateDirectory("/bin", kDirMode), 0);
-        auto configurator = factory->CreateBuiltinConfigurator();
-        for (const auto& name : builtins->GetCommands()) {
-            std::string error;
-            ASSERT_TRUE(configurator->AddBuiltinCommand(root, "/bin/" + name, name, &error)) << error;
-        }
-        WriteFile("/notes.txt", "one\ntwo\n\n\n\tthree\n");
-        WriteFile("/.hidden", "h");
-        ASSERT_EQ(root->CreateDirectory("/docs", kDirMode), 0);
-        WriteFile("/docs/a.md", "alpha");
-        ASSERT_EQ(root->CreateDirectory("/docs/sub", kDirMode), 0);
-        WriteFile("/docs/sub/b.md", "bravo!");
-
-        auto environment = factory->CreateEnvironment();
-        os = factory->CreateHaisosOS(factory->CreateServicesCreator(), console, root, builtins, environment);
-        ASSERT_NE(os, nullptr);
-    }
-
-    void WriteFile(const std::string& path, const std::string& content) {
-        auto file = root->OpenFile(path, kFileOpenWriteCreateTruncate, kFileCreateMode);
-        ASSERT_NE(file, nullptr) << path;
-        file->Write(content.data(), content.size());
-    }
-
-    // Runs /bin/<command> with args from workingDirectory, waits for it, and
-    // returns what it printed; its exit code goes to *status.
-    std::vector<std::string> Run(const std::string& command, const std::vector<std::string>& args,
-                                 int* status = nullptr, const std::string& workingDirectory = "/") {
-        auto process = os->StartProcess(os->GetOsEnvironment()->Clone(), "/bin/" + command, args, workingDirectory, StartProcessOptions{});
-        EXPECT_NE(process, nullptr) << command;
-        if (!process) {
-            return {};
-        }
-        EXPECT_TRUE(process->WaitToFinish(kWaitMs)) << command;
-        if (status) {
-            // The exit code is set before the process reports finished, so
-            // after the wait it is always there.
-            EXPECT_TRUE(process->ExitCode().has_value()) << command;
-            *status = process->ExitCode().value_or(-1);
-        }
-        return console->TakeLines();
-    }
-
-    static bool Contains(const std::vector<std::string>& lines, const std::string& text) {
-        return std::any_of(lines.begin(), lines.end(),
-            [&text](const std::string& line) { return line.find(text) != std::string::npos; });
-    }
-
-    std::shared_ptr<IFactory> factory = CreateFactory();
-    std::shared_ptr<IBuiltinCommands> builtins = factory->CreateBuiltinCommands();
-    std::shared_ptr<CapturingConsole> console = std::make_shared<CapturingConsole>();
-    std::shared_ptr<IFileSystem> root;
-    std::shared_ptr<IHaisosOS> os;
-};
-
-using Lines = std::vector<std::string>;
-
-// ls -l lines with their time column ("Sep 25 13:22" or "Sep 25  2025")
-// replaced by "<time>", for comparing what does not depend on the clock.
-Lines WithoutTimes(Lines lines) {
-    static const std::regex kTime("[A-Z][a-z]{2} [ 123][0-9] ([0-9]{2}:[0-9]{2}| [0-9]{4}) ");
-    for (auto& line : lines) {
-        line = std::regex_replace(line, kTime, "<time> ", std::regex_constants::format_first_only);
-    }
-    return lines;
-}
-
 } // namespace
 
 // --- IBuiltinCommands ---
@@ -314,6 +171,13 @@ TEST_F(BuiltinCommandsTest, EveryBuiltinsHelpHasTheSameShape) {
         if (!anyNotTreated) {
             EXPECT_EQ(last, "Not treated arguments: none");
         }
+    }
+}
+
+TEST_F(BuiltinCommandsTest, EveryBuiltinsManPageIsItsHelp) {
+    for (const auto& command : CreateStandardBuiltinCommands()) {
+        EXPECT_EQ(command->ManPage(), BuiltinHelpText(*command)) << command->Name();
+        EXPECT_EQ(command->ManPage().back(), '\n') << command->Name();
     }
 }
 
@@ -552,6 +416,37 @@ TEST_F(BuiltinCommandsTest, CatReadsABuiltinsNote) {
     EXPECT_EQ(Run("cat", {"/bin/cat"}), (Lines{BuiltinCommandFileContent("cat")}));
 }
 
+TEST_F(BuiltinCommandsTest, CatReadsStandardInputWithoutFile) {
+    const Captured captured = RunCaptured("cat", {}, "piped\nlines\n");
+    EXPECT_EQ(captured.out, "piped\nlines\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+}
+
+TEST_F(BuiltinCommandsTest, CatReadsStandardInputForDash) {
+    // A second '-' reads on from where the first stopped: at the end of the
+    // input, so it adds nothing.
+    const Captured captured = RunCaptured("cat", {"-", "/docs/a.md", "-"}, "x\n");
+    EXPECT_EQ(captured.out, "x\nalpha");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+}
+
+TEST_F(BuiltinCommandsTest, CatNumbersAcrossStdinAndFiles) {
+    const Captured captured = RunCaptured("cat", {"-n", "-", "/notes.txt"}, "in\n");
+    EXPECT_EQ(captured.out, "     1\tin\n     2\tone\n     3\ttwo\n     4\t\n     5\t\n     6\t\tthree\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+}
+
+// With no input given, stdin ends at once, as /dev/null's does: nothing out.
+TEST_F(BuiltinCommandsTest, CatWithNoInputPrintsNothing) {
+    const Captured captured = RunCaptured("cat", {});
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+}
+
 TEST_F(BuiltinCommandsTest, CatReportsWhatItCannotRead) {
     int status = 0;
     auto lines = Run("cat", {"/missing", "/docs", "/docs/a.md"}, &status);
@@ -559,10 +454,6 @@ TEST_F(BuiltinCommandsTest, CatReportsWhatItCannotRead) {
     EXPECT_TRUE(Contains(lines, "cat: /missing: No such file or directory"));
     EXPECT_TRUE(Contains(lines, "cat: /docs: Is a directory"));
     EXPECT_TRUE(Contains(lines, "alpha"));
-
-    lines = Run("cat", {}, &status);
-    EXPECT_EQ(status, 1);
-    EXPECT_TRUE(Contains(lines, "standard input is not supported"));
 }
 
 // --- mkdir ---
@@ -612,9 +503,11 @@ TEST_F(BuiltinCommandsTest, MkdirReportsFailures) {
 
 TEST_F(BuiltinCommandsTest, LsListsInColumnsByDefault) {
     EXPECT_EQ(Run("ls", {}), (Lines{"bin  docs  notes.txt"}));
-    EXPECT_EQ(Run("ls", {"/bin"}), (Lines{"cat  echo  ls  mkdir  pwd"}));
-    EXPECT_EQ(Run("ls", {"-1", "/bin"}), (Lines{"cat", "echo", "ls", "mkdir", "pwd"}));
-    EXPECT_EQ(Run("ls", {"-r", "/bin"}), (Lines{"pwd  mkdir  ls  echo  cat"}));
+    // /five, not /bin: its listing does not change as builtins are added.
+    MakeFiveNames();
+    EXPECT_EQ(Run("ls", {"/five"}), (Lines{"cat  echo  ls  mkdir  pwd"}));
+    EXPECT_EQ(Run("ls", {"-1", "/five"}), (Lines{"cat", "echo", "ls", "mkdir", "pwd"}));
+    EXPECT_EQ(Run("ls", {"-r", "/five"}), (Lines{"pwd  mkdir  ls  echo  cat"}));
 }
 
 TEST_F(BuiltinCommandsTest, LsWrapsColumnsTopToBottomAt80Characters) {
@@ -768,17 +661,18 @@ TEST_F(BuiltinCommandsTest, LsSortOrders) {
     int status = 0;
     auto lines = Run("ls", {"--sort=version", "-1", "/docs/sub"}, &status);
     EXPECT_EQ(status, 0);
-    EXPECT_EQ(lines, (Lines{"Parameter --sort=version is not treated by HaisosOS ls v. 1.2.1", "b.md"}));
+    EXPECT_EQ(lines, (Lines{"Parameter --sort=version is not treated by HaisosOS ls v. 1.3.0", "b.md"}));
 }
 
 TEST_F(BuiltinCommandsTest, LsLayouts) {
-    EXPECT_EQ(Run("ls", {"-m", "/bin"}), (Lines{"cat, echo, ls, mkdir, pwd"}));
-    EXPECT_EQ(Run("ls", {"-m", "-w", "12", "/bin"}), (Lines{"cat, echo,", "ls, mkdir,", "pwd"}));
-    EXPECT_EQ(Run("ls", {"-x", "-w", "16", "/bin"}), (Lines{"cat    echo  ls", "mkdir  pwd"}));
+    MakeFiveNames();
+    EXPECT_EQ(Run("ls", {"-m", "/five"}), (Lines{"cat, echo, ls, mkdir, pwd"}));
+    EXPECT_EQ(Run("ls", {"-m", "-w", "12", "/five"}), (Lines{"cat, echo,", "ls, mkdir,", "pwd"}));
+    EXPECT_EQ(Run("ls", {"-x", "-w", "16", "/five"}), (Lines{"cat    echo  ls", "mkdir  pwd"}));
     // A line must stay shorter than the width: at 16 the three columns (16
     // characters) do not fit, at 17 they do.
-    EXPECT_EQ(Run("ls", {"-C", "-w", "16", "/bin"}), (Lines{"cat   mkdir", "echo  pwd", "ls"}));
-    EXPECT_EQ(Run("ls", {"-C", "-w", "17", "/bin"}), (Lines{"cat   ls     pwd", "echo  mkdir"}));
+    EXPECT_EQ(Run("ls", {"-C", "-w", "16", "/five"}), (Lines{"cat   mkdir", "echo  pwd", "ls"}));
+    EXPECT_EQ(Run("ls", {"-C", "-w", "17", "/five"}), (Lines{"cat   ls     pwd", "echo  mkdir"}));
     EXPECT_EQ(Run("ls", {"-p", "/docs"}), (Lines{"a.md  sub/"}));
     EXPECT_EQ(Run("ls", {"-s", "/docs/sub"}), (Lines{"total 1", "1 b.md"}));
 }
@@ -792,6 +686,61 @@ TEST_F(BuiltinCommandsTest, LsQuotesNamesAsTheRealOneDoes) {
     EXPECT_EQ(Run("ls", {"/q"}), (Lines{"\"it's\"   plain  'with space'"}));
     EXPECT_EQ(Run("ls", {"-1", "/q"}), (Lines{"\"it's\"", "plain", "'with space'"}));
     EXPECT_EQ(Run("ls", {"-N", "/q"}), (Lines{"it's  plain  with space"}));
+}
+
+TEST_F(BuiltinCommandsTest, LsOnATerminalQuotesAsGnuShellEscape) {
+    ASSERT_EQ(root->CreateDirectory("/q2", kDirMode), 0);
+    for (const char* name : {"nl\ny", "a]b", "a{b", "{", "a=b", "#h", "a#", "tab\tt"}) {
+        WriteFile(std::string("/q2/") + name, "");
+    }
+    // Sorted by bytes: '#' 0x23 < 'a' < 'n' < 't' < '{'; ']' and '{' elsewhere
+    // need no quoting, '#' only as the first byte.
+    EXPECT_EQ(Run("ls", {"-1", "/q2"}), (Lines{
+        "'#h'", "a#", "'a=b'", "a]b", "a{b", "'nl'$'\\n''y'", "'tab'$'\\t''t'", "'{'"}));
+    // -N on a terminal: literal names, control bytes shown as '?' (GNU's -q
+    // default on a terminal).
+    EXPECT_EQ(Run("ls", {"-N", "-1", "/q2"}), (Lines{
+        "#h", "a#", "a=b", "a]b", "a{b", "nl?y", "tab?t", "{"}));
+}
+
+// GNU ls off a terminal (a pipe, a file, a device): one name per line unless
+// a layout is asked for, and names literal, quoted never -- a control byte
+// goes out raw.
+TEST_F(BuiltinCommandsTest, LsIntoAPipeListsOneNamePerLine) {
+    MakeFiveNames();
+    Captured captured = RunCaptured("ls", {"/five"});
+    EXPECT_EQ(captured.out, "cat\necho\nls\nmkdir\npwd\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+    // A layout given wins over the one-per-line default.
+    EXPECT_EQ(RunCaptured("ls", {"-C", "/five"}).out, "cat  echo  ls  mkdir  pwd\n");
+    EXPECT_EQ(RunCaptured("ls", {"-x", "-w", "16", "/five"}).out, "cat    echo  ls\nmkdir  pwd\n");
+    EXPECT_EQ(RunCaptured("ls", {"-m", "/five"}).out, "cat, echo, ls, mkdir, pwd\n");
+    EXPECT_EQ(RunCaptured("ls", {"-r", "/five"}).out, "pwd\nmkdir\nls\necho\ncat\n");
+}
+
+TEST_F(BuiltinCommandsTest, LsIntoAPipeDoesNotQuote) {
+    ASSERT_EQ(root->CreateDirectory("/q", kDirMode), 0);
+    WriteFile("/q/plain", "");
+    WriteFile("/q/with space", "");
+    WriteFile("/q/it's", "");
+    WriteFile("/q/ctl\x01x", "");
+    EXPECT_EQ(RunCaptured("ls", {"/q"}).out, "ctl\x01x\nit's\nplain\nwith space\n");
+    // Off a terminal nothing is quoted, so nothing is shifted.
+    EXPECT_EQ(RunCaptured("ls", {"-C", "/q"}).out, "ctl\x01x  it's  plain  with space\n");
+    // The long listing is the same one, with literal names.
+    EXPECT_EQ(WithoutTimes(SplitLines(RunCaptured("ls", {"-l", "/q"}).out)), (Lines{
+        "total 0",
+        "-rwxrwxrwx 1 haisos haisos 0 <time> ctl\x01x",
+        "-rwxrwxrwx 1 haisos haisos 0 <time> it's",
+        "-rwxrwxrwx 1 haisos haisos 0 <time> plain",
+        "-rwxrwxrwx 1 haisos haisos 0 <time> with space"}));
+}
+
+// GNU: "-1 has no effect after -l" -- and none before it either.
+TEST_F(BuiltinCommandsTest, LsOnePerLineAfterLongKeepsLong) {
+    EXPECT_EQ(WithoutTimes(Run("ls", {"-l1", "/docs"})), WithoutTimes(Run("ls", {"-l", "/docs"})));
+    EXPECT_EQ(WithoutTimes(Run("ls", {"-1l", "/docs"})), WithoutTimes(Run("ls", {"-l", "/docs"})));
 }
 
 TEST_F(BuiltinCommandsTest, LsOfSeveralOperandsListsFilesFirstThenEachDirectory) {
@@ -1081,4 +1030,44 @@ TEST(BuiltinArgsTest, ParsesClustersLongOptionsArgumentsAndOperands) {
     EXPECT_EQ(ParseBuiltinArgs({"-"}, options).operands, (std::vector<std::string>{"-"}));
     EXPECT_EQ(ParseBuiltinArgs({"--he"}, options).options[0].id, kBuiltinOptionHelp);
 
+}
+
+// The quoting GNU's shell-escape styles give (checked against GNU ls 9.4
+// --quoting-style=shell-escape), byte for byte.
+TEST(BuiltinArgsTest, ShellEscapeQuotedFollowsGnu) {
+    // No shell would read anything in these specially: left as they are.
+    EXPECT_EQ(ShellEscapeQuoted("plain"), "plain");
+    EXPECT_EQ(ShellEscapeQuoted("a]b"), "a]b");
+    EXPECT_EQ(ShellEscapeQuoted("a{b"), "a{b");
+    EXPECT_EQ(ShellEscapeQuoted("a#"), "a#");
+    EXPECT_EQ(ShellEscapeQuoted("a~"), "a~");
+    EXPECT_EQ(ShellEscapeQuoted("x%y"), "x%y");
+    EXPECT_EQ(ShellEscapeQuoted("a,b-c.d/e:f@g_h"), "a,b-c.d/e:f@g_h");
+
+    // Quoted, no ' and no control byte: 'name'.
+    EXPECT_EQ(ShellEscapeQuoted(""), "''");
+    EXPECT_EQ(ShellEscapeQuoted("with space"), "'with space'");
+    EXPECT_EQ(ShellEscapeQuoted("#h"), "'#h'");
+    EXPECT_EQ(ShellEscapeQuoted("~x"), "'~x'");
+    EXPECT_EQ(ShellEscapeQuoted("{"), "'{'");
+    EXPECT_EQ(ShellEscapeQuoted("}"), "'}'");
+    EXPECT_EQ(ShellEscapeQuoted("a=b"), "'a=b'");
+
+    // A ' but nothing else double quotes would read specially: "name".
+    EXPECT_EQ(ShellEscapeQuoted("it's"), "\"it's\"");
+    EXPECT_EQ(ShellEscapeQuoted("it's x"), "\"it's x\"");
+
+    // Otherwise: '...', each ' written '\'', each run of control bytes out of
+    // the quotes as $'...' escapes.
+    EXPECT_EQ(ShellEscapeQuoted("it's $x"), "'it'\\''s $x'");
+    EXPECT_EQ(ShellEscapeQuoted("nl\ny"), "'nl'$'\\n''y'");
+    EXPECT_EQ(ShellEscapeQuoted("\nb"), "''$'\\n''b'");
+    EXPECT_EQ(ShellEscapeQuoted("a\x01\x02\x62"), "'a'$'\\001\\002''b'");
+    EXPECT_EQ(ShellEscapeQuoted("x\x7fy"), "'x'$'\\177''y'");
+    EXPECT_EQ(ShellEscapeQuoted("tab\tt"), "'tab'$'\\t''t'");
+    EXPECT_EQ(ShellEscapeQuoted("a\x01"), "'a'$'\\001'");
+
+    // always: quoted even when nothing asks for it.
+    EXPECT_EQ(ShellEscapeQuoted("plain", true), "'plain'");
+    EXPECT_EQ(ShellEscapeQuoted("it's", true), "\"it's\"");
 }

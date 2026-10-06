@@ -14,7 +14,7 @@ Pause: no
 | 7 | [pipes--pipe-service](tasks/pipes--pipe-service.md) | done | 0.4.6 | 6 | #24 | 1 | 2M 2L open | Windows test time fixed on the host |
 | 8 | [pipes--broken-pipe](tasks/pipes--broken-pipe.md) | done | 0.4.7 | 7 | #25 | 1 | 1M 2L open | |
 | 9 | [builtins--directories](tasks/builtins--directories.md) | done | 0.4.8 | 4 | #26 | 1 | 3L open | |
-| 10 | [builtins--unicode](tasks/builtins--unicode.md) | in-progress | 0.4.9 | - | | | | |
+| 10 | [builtins--unicode](tasks/builtins--unicode.md) | in-review | 0.4.9 | - | #27 | 1 | | |
 | 11 | [builtins--wc](tasks/builtins--wc.md) | todo | | 9, 10 | | | | |
 | 12 | [builtins--man](tasks/builtins--man.md) | todo | | 6, 9, 11 | | | | |
 | 13 | [hsh--lexer](tasks/hsh--lexer.md) | todo | | 9 | | | | |

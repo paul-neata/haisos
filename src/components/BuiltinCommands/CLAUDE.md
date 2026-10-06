@@ -48,6 +48,9 @@ through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
 - `IBuiltinCommand` / `BuiltinContext` (`BuiltinCommand.h`) - one command, and
   what a run of it is handed: its process, arguments, output, and the stop flag.
   Commands are stateless, so one instance serves every process running it.
+  `IBuiltinCommand::ManPage()` is the builtin's manual page, as `man <name>`
+  prints it; by default exactly its `--help` text (`BuiltinHelpText`), so the
+  two print the same -- a builtin with more to say overrides it.
 - `ParseBuiltinArgs` - a GNU `getopt_long`-style parser shared by the commands:
   clustered short options, unambiguous long-option prefixes, options mixed with
   operands, `--`. `--help`/`--version` are recognized for every command.
@@ -69,12 +72,24 @@ reports to slot 2. The output rule:
 
 So `ls: cannot access ...` lands on the host's stderr (through the console
 error descriptor), and `echo hi` lands raw and untagged on its stdout.
-Messages follow the GNU coreutils wording. A write that returns
+Messages follow the GNU coreutils wording. `ErrorText` writes bytes to stderr
+exactly as given -- no `<name>: ` prefix, no newline -- for the lines GNU
+tools print without their name; `Error`, `TryHelp` and the not-treated
+reports are built on it. `OutIsTerminal()` is whether descriptor 1 is a
+terminal (false when the slot is empty): what ls uses to pick its defaults,
+as GNU ls picks them from `isatty(STDOUT_FILENO)`. A write that returns
 `kIOBrokenPipe` -- the reader of the pipe is gone, on stdout or on stderr --
 stops the builtin quietly with exit code 141, as SIGPIPE would
 (`BuiltinContext::WriteAll` calls the process's `StopForBrokenPipe()`), and
 everything after is dropped, a diagnostic included: the program is dying, so
 nothing more may go out.
+
+A name is quoted for printing in one place, `ShellEscapeQuoted`
+(`BuiltinCommand.h`): GNU's shell-escape quoting, byte for byte -- the name
+as is when no shell would read it specially, `'name'`, `"it's"`, or the
+`'...'$'\n''...'` form for control bytes (`\a \b \t \n \v \f \r`, octal
+`\NNN` for the rest); `always` quotes even a plain name. ls (on a terminal),
+and every other builtin that prints names, uses it.
 
 ## The commands
 
@@ -90,9 +105,9 @@ that table, so the help can never disagree with what is parsed.
 
 | Command | Version | Treated | Documented exceptions |
 |---------|---------|---------|-----------------------|
-| `cat` | 1.1.0 | every option of GNU cat | no stdin: at least one FILE, and not `-` |
+| `cat` | 1.2.0 | every option of GNU cat; with no FILE, or a FILE of `-`, the standard input is read | -- |
 | `echo` | 1.1.0 | `-n -e -E`, the `-e` escapes; `--help`/`--version` only as the sole argument, as GNU echo | -- |
-| `ls` | 1.2.1 | `-a -A -B -c -C -d -f -g -G -h -k -l -m -N -o -p -r -R -s -S -t -u -U -w -x -X -1`, `--file-type --format --full-time --group-directories-first --sort --time --time-style` | owner and group are `haisos`, permissions `rwxrwxrwx` (no users or permissions yet), so a device shows as `crwxrwxrwx`, with its major and minor numbers in the size column as GNU ls shows them; columns are padded with spaces, not tabs; the width is 80 unless `-w` says otherwise; `--sort=version/width` and `--time=birth` are reported as not treated; on Windows, a `--time-style=+FORMAT` conversion the Microsoft C runtime lacks (`%k`, `%P`, ...) prints as written, as glibc prints one it does not know |
+| `ls` | 1.3.0 | `-a -A -B -c -C -d -f -g -G -h -k -l -m -N -o -p -r -R -s -S -t -u -U -w -x -X -1`, `--file-type --format --full-time --group-directories-first --sort --time --time-style`; off a terminal (stdout a pipe, a file, a device), one name per line unless `-C`/`-x`/`-m`/`-l` asks for a layout, and names literal with control characters written raw -- GNU's own defaults when stdout is not a terminal; `-1` after `-l` keeps the long listing | owner and group are `haisos`, permissions `rwxrwxrwx` (no users or permissions yet), so a device shows as `crwxrwxrwx`, with its major and minor numbers in the size column as GNU ls shows them; columns are padded with spaces, not tabs; the width is 80 unless `-w` says otherwise; `--sort=version/width` and `--time=birth` are reported as not treated; on Windows, a `--time-style=+FORMAT` conversion the Microsoft C runtime lacks (`%k`, `%P`, ...) prints as written, as glibc prints one it does not know |
 | `mkdir` | 1.1.0 | `-p -v` | `-m`/`--mode`, `-Z`/`--context` not treated (no permissions or security contexts) |
 | `pwd` | 1.1.0 | `-L -P` (the same: no symlinks) | -- |
 
@@ -100,16 +115,24 @@ that table, so the help can never disagree with what is parsed.
 kept shorter than the width), `-l` with a `total` line in 1K blocks, link
 counts, owner, group, right-aligned sizes and the locale time style (`Mon dd
 HH:MM` for the last six months, `Mon dd  YYYY` otherwise, or `--time-style`),
-shell-escape quoting of names (`'with space'`, `"it's"`) with unquoted names
-shifted by one to line up, and the sort orders. Sizes, blocks, link counts and
-times come from `IFileIO::Stat`.
+quoting of names exactly as GNU's shell-escape style gives it
+(`ShellEscapeQuoted`: `'with space'`, `"it's"`, control bytes out of the
+quotes as `$'\001'`, as in `'ctl'$'\001''x'`; `]` and `{` elsewhere in a name
+are not quoted) with unquoted names shifted by one to line up, and the sort
+orders. Sizes, blocks, link counts and times come from `IFileIO::Stat`.
 
 ## Adding a builtin
 
-Write `commands/<Name>.cpp` implementing `IBuiltinCommand` (it needs only
-`BuiltinCommand.h`), declare its factory in `BuiltinCommandList.h`, add it to
-`CreateStandardBuiltinCommands()`, and list the source in `CMakeLists.txt`.
+Write `commands/<name>/<Name>.cpp` implementing `IBuiltinCommand` (it needs
+only `BuiltinCommand.h`; a builtin made of several files puts them all in
+that directory), list each source in `CMakeLists.txt`, declare its factory in
+`BuiltinCommandList.h`, and add it to `CreateStandardBuiltinCommands()`.
+Override `ManPage()` only if it has more to say than its `--help` text.
+Tests go in `tests/unit/components/BuiltinCommands.unittests/<Name>Test.cpp`,
+on the fixture in `BuiltinCommandsFixture.h` (its `RunCaptured` runs a
+builtin with its standard streams connected to in-memory files, giving stdout
+and stderr byte for byte); add the file to that directory's `CMakeLists.txt`.
 That is all: `GetCommands()` then reports it, and since `haisos --init`
 builds its template from `GetCommands()`, the generated haisosfile shows a
 `# BUILTIN rootfs <name> /bin/<name>` line for it automatically. Add it to the
-table above and give it tests in `tests/unit/components/BuiltinCommands.unittests/`.
+table above and to the root `CLAUDE.md` table.

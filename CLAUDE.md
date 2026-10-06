@@ -28,7 +28,7 @@ haisos/
 ├── src/
 │   ├── components/        - Component implementations (each has its own CLAUDE.md)
 │   │   ├── Agent/
-│   │   ├── BuiltinCommands/ - The builtin commands (echo, cat, ls, mkdir, pwd) and what places them on filesystems
+│   │   ├── BuiltinCommands/ - The builtin commands (echo, cat, ls, mkdir, pwd; each in commands/<name>/) and what places them on filesystems
 │   │   ├── Console/
 │   │   ├── Environment/
 │   │   ├── Factory/
@@ -578,9 +578,9 @@ use a builtin with what it already knows about the real command:
 
 | Builtin | Description |
 |---------|-------------|
-| `cat` | Concatenates files (`-A -b -e -E -n -s -t -T -u -v`); no stdin |
+| `cat` | Concatenates files and standard input (`-A -b -e -E -n -s -t -T -u -v`) |
 | `echo` | Prints its arguments (`-n -e -E`) |
-| `ls` | Lists directories as GNU ls prints them to a terminal: columns, `-l` with `total`/links/owner/group/size/time, sorting, time styles, quoting |
+| `ls` | Lists directories as GNU ls prints them to a terminal: columns, `-l` with `total`/links/owner/group/size/time, sorting, time styles, quoting; to a pipe or file, one name per line, unquoted |
 | `mkdir` | Creates directories (`-p -v`) |
 | `pwd` | Prints the working directory (`-L -P`) |
 

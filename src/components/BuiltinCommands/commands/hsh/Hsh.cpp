@@ -28,7 +28,7 @@ enum {
 class HshCommand : public IBuiltinCommand {
 public:
     std::string Name() const override { return "hsh"; }
-    std::string Version() const override { return "0.1.0"; }
+    std::string Version() const override { return "0.2.0"; }
 
     const std::vector<BuiltinOption>& Options() const override {
         static const std::vector<BuiltinOption> options = {

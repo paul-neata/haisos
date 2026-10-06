@@ -8,7 +8,9 @@
 #include "src/components/libheaders/ExitCodes.h"
 #include "BuiltinCommand.h"
 #include "commands/hsh/HshBuiltins.h"
+#include "commands/hsh/HshDescriptors.h"
 #include "commands/hsh/HshParser.h"
+#include "commands/hsh/HshRedirection.h"
 #include "interfaces/IHaisosOS.h"
 #include "interfaces/IProcess.h"
 
@@ -207,11 +209,23 @@ struct ShellAssignmentRestore {
 
 int Shell::ExecuteSimpleCommand(const SimpleCommand& command) {
     m_currentLine = command.line;
-    if (!command.redirections.empty()) {
-        return NotYet("redirections");  // hsh--redirections
-    }
     const uint64_t substitutions = m_substitutionCount;
     const std::vector<std::string> fields = m_expander.ExpandWords(command.words);
+
+    // The redirections change the shell's own descriptor table for the length
+    // of the command and are undone afterwards, unless a builtin (exec with no
+    // command) asks to keep them. A failure: the command does not run and its
+    // prefix assignments are not made; fatal for a special builtin, as dash.
+    RedirectionScope scope(*this);
+    if (const std::optional<std::string> error = scope.Apply(command.redirections)) {
+        if (!fields.empty()) {
+            if (const ShellBuiltin* builtin = FindShellBuiltin(fields[0]); builtin && builtin->special) {
+                Fail(*error);
+            }
+        }
+        Report(*error);
+        return 2;
+    }
 
     if (fields.empty()) {
         // Assignments alone (x=1): applied to the shell. The command's status
@@ -238,6 +252,11 @@ int Shell::ExecuteSimpleCommand(const SimpleCommand& command) {
             }
         }
         const int status = builtin->run(*this, fields);
+        if (m_keepRedirections) {
+            // exec with no command: the redirections stay.
+            scope.Keep();
+            m_keepRedirections = false;
+        }
         for (auto it = restore.rbegin(); it != restore.rend(); ++it) {
             if (it->value) {
                 m_state.variables.Set(it->name, *it->value);
@@ -335,6 +354,10 @@ void Shell::ThrowIfStopRequested() {
     }
 }
 
+void Shell::KeepRedirections() {
+    m_keepRedirections = true;
+}
+
 Shell::CommandLookup Shell::LookUpCommand(const std::string& name) {
     CommandLookup lookup;
     FileStatus status;
@@ -399,9 +422,15 @@ std::shared_ptr<IProcess> Shell::StartChild(const std::string& path, const std::
         return nullptr;
     }
     StartProcessOptions options;
+    // A closed (empty) slot goes to the child as a ClosedDescriptor, never as
+    // null: StartProcessOptions reads null as "use the console", which a
+    // closed descriptor must not become.
     options.stdIn = IO().GetDescriptor(IFileIO::kStdIn);
     options.stdOut = IO().GetDescriptor(IFileIO::kStdOut);
     options.stdErr = IO().GetDescriptor(IFileIO::kStdErr);
+    if (!options.stdIn) options.stdIn = ClosedDescriptor::Create();
+    if (!options.stdOut) options.stdOut = ClosedDescriptor::Create();
+    if (!options.stdErr) options.stdErr = ClosedDescriptor::Create();
     options.interactive = false;
     std::shared_ptr<IProcess> child = os->StartProcess(
         ChildEnvironment(assignments), path, args, IO().GetCurrentDirectory(), options);

@@ -69,6 +69,9 @@ public:
     [[noreturn]] void Fail(const std::string& message);
     // Throws ShellStopped once the shell has been asked to stop.
     void ThrowIfStopRequested();
+    // Called by `exec` with no command: the simple command running it keeps
+    // its redirections instead of restoring the descriptor table afterwards.
+    void KeepRedirections();
 
     // --- Children ---
     struct CommandLookup {
@@ -115,6 +118,7 @@ private:
     std::vector<std::shared_ptr<IProcess>> m_liveChildren;  // started, not yet waited for
     int m_subshellDepth = 0;                  // hsh--pipelines; 0 here
     bool m_brokenPipe = false;
+    bool m_keepRedirections = false;          // set by exec with no command
 };
 
 } // namespace Haisos::Hsh

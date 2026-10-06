@@ -8,6 +8,28 @@ namespace Haisos::Hsh {
 
 namespace {
 
+// As BracketEnd (HshPattern.cpp), but npos the moment an unescaped '/' is met
+// before the closing ']': a component's bracket expression never spans a '/',
+// though a plain-string bracket (MatchPattern's caller-shared scan, used by
+// case patterns) may. SplitComponents alone uses this scan.
+size_t ComponentBracketEnd(const std::string& pattern, size_t open) {
+    constexpr size_t kNpos = std::string::npos;
+    size_t i = open + 1;
+    if (i < pattern.size() && pattern[i] == '!') ++i;
+    if (i < pattern.size() && pattern[i] == ']') ++i; // a ']' first is a member
+    while (i < pattern.size()) {
+        if (pattern[i] == '\\' && i + 1 < pattern.size()) { i += 2; continue; }
+        if (pattern[i] == '[' && i + 1 < pattern.size() && pattern[i + 1] == ':') {
+            size_t j = pattern.find(":]", i + 2);
+            if (j != kNpos) { i = j + 2; continue; }
+        }
+        if (pattern[i] == '/') return kNpos;
+        if (pattern[i] == ']') return i + 1; // one past the ']'
+        ++i;
+    }
+    return kNpos;
+}
+
 // The components of |pattern|, split at each unescaped '/' (a bracket
 // expression never spans a '/'). Escapes stay in the component text -- each
 // component is MatchPattern syntax of its own.
@@ -20,8 +42,8 @@ std::vector<std::string> SplitComponents(const std::string& pattern) {
             current += c;
             current += pattern[i + 1];
             i += 2;
-        } else if (c == '[' && PatternBracketEnd(pattern, i) != std::string_view::npos) {
-            size_t end = PatternBracketEnd(pattern, i);
+        } else if (c == '[' && ComponentBracketEnd(pattern, i) != std::string::npos) {
+            size_t end = ComponentBracketEnd(pattern, i);
             current.append(pattern, i, end - i);
             i = end;
         } else if (c == '/') {

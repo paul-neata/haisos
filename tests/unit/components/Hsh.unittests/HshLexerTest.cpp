@@ -508,6 +508,18 @@ TEST(HshLexerTest, HereDocLineContinuation) {
         EXPECT_EQ(hd->body.parts[0].text, "aE\n");
         EXPECT_EQ(tokens[4].line, 5);
     }
+    // Two backslashes before the newline: an even count pairs off into literal
+    // backslashes and does NOT join, so the next line ends the body raw.
+    {
+        std::vector<Token> tokens = LexTokens("cat <<E\na\\\\\nE\nnext\n");
+        std::shared_ptr<HereDocument> hd = tokens[2].hereDoc;
+        ASSERT_TRUE(hd != nullptr);
+        EXPECT_EQ(hd->rawBody, "a\\\\\n");
+        EXPECT_TRUE(hd->terminated);
+        EXPECT_EQ(tokens[3].kind, TokenKind::Newline);
+        EXPECT_EQ(tokens[4].kind, TokenKind::Word); // "next" is a command now
+        EXPECT_EQ(tokens[4].line, 4);
+    }
     // Quoted delimiter: raw-line matching, no continuation handling.
     {
         std::vector<Token> tokens = LexTokens("cat <<'E'\na\\\nE\nnext\n");

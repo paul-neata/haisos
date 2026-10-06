@@ -19,8 +19,11 @@ using namespace Haisos;
 namespace {
 
 const std::string kTestRoot = (std::filesystem::temp_directory_path() / "haisos_os_test_root").u8string();
-const std::string kUnreachableEndpoint = "http://localhost:9999/api/chat";
-// Generous: every LLM call fails fast against the unreachable endpoint, so this
+// 127.0.0.1, not localhost: on Windows a refused connection takes about 2 s,
+// and localhost tries ::1 first, then 127.0.0.1 -- twice that, for every agent
+// test, which put this executable over the test runner's 30 s limit.
+const std::string kUnreachableEndpoint = "http://127.0.0.1:9999/api/chat";
+// Generous: every LLM call fails soon against the unreachable endpoint, so this
 // only bounds a hang.
 constexpr uint64_t kProcessWaitMs = 30000;
 // The file read_held.lua reads, which a GatedFileSystem root holds the open of.

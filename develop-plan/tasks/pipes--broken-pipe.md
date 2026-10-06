@@ -3,7 +3,7 @@
 - Rock: pipes
 - Depends on: pipes--pipe-service
 - Size: ~350 changed lines in ~14 files (code ~150, tests ~170, docs ~30)
-- Plan checked against: develop @ 0d92271, plus the plans fd--process-table, streams--console-and-start, streams--runtime-streams, streams--exit-codes, pipes--pipe-service
+- Plan checked against: develop @ faf4c9e
 - PR title: Stop a program quietly with exit code 141 on a broken pipe
 
 ## Goal
@@ -205,16 +205,18 @@ Add to the `HaisosOSPipeTest` fixture:
 
 - `ALuaScriptPrintingIntoAPipeWithNoReaderExits141` -- `/p.lua`:
   `print("a")` then `os_write_file({path = '/after.txt', content = 'x'})`;
-  `stdOut` = a write end whose read end was released before the start;
+  `stdOut` = a write end whose read end was released before the start; wait
+  for the process to finish (`WaitToFinish`) before reading anything else:
   `ExitCode()` is 141; `/after.txt` does not exist on the root (the script
   stopped at once); the console captured nothing on stderr.
 - `ALuaErrorLineIntoAPipeWithNoReaderExits141` -- `/e.lua`: `error("boom")`;
-  `stdErr` = such a write end: `ExitCode()` 141 (not 1), nothing captured.
+  `stdErr` = such a write end: wait for the process to finish, then
+  `ExitCode()` 141 (not 1), nothing captured.
 - `AnAgentWritingIntoAPipeWithNoReaderExits141` -- `/a.md` ("Say hello.");
   `stdErr` = such a write end, stdout default; the unreachable endpoint makes
   the agent write its `Error: HTTP request failed ...` diagnostic to stderr;
-  the process finishes with `ExitCode()` 141 and nothing on the captured
-  stderr or stdout.
+  wait for the process to finish, then: `ExitCode()` 141 and nothing on the
+  captured stderr or stdout.
 Run: `bash ./scripts/test_linux.sh L U HaisosOS`
 
 ### `tests/unit/components/BuiltinCommands.unittests/BuiltinCommandsTest.cpp`
@@ -226,7 +228,8 @@ Run: `bash ./scripts/test_linux.sh L U HaisosOS`
   stderr.
 - `BuiltinCommandsTest.ABrokenStderrAlsoExits141Quietly` -- `ls /nope` with
   `stdOut` and `stdErr` = the same write end of a pipe whose read end is
-  released: 141 (not 2), nothing captured.
+  released; wait for the process to finish, then: 141 (not 2), nothing
+  captured.
 - `BuiltinContextTest.ABrokenStdoutStopsTheProcessOnceAndDropsTheRest` --
   (with the existing `BuiltinContextTest` cases and their `FakeProcess`) a
   terminal `MockFileDescriptor` as stdout with `SetWriteResult(kIOBrokenPipe)`:

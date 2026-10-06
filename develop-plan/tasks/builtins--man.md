@@ -3,7 +3,7 @@
 - Rock: builtins
 - Depends on: builtins--directories, builtins--wc (its page is used in the tests), and streams--exit-codes (the haisos test checks the exit code; earlier in the playbook)
 - Size: ~450 changed lines in ~10 files
-- Plan checked against: develop @ 0d92271
+- Plan checked against: develop @ 2e744cf
 - PR title: Add the man builtin, showing every builtin's manual page
 
 ## Goal
@@ -297,8 +297,10 @@ rows (it passes no argument to them).
 ### `tests/haisos/builtins.haisostest/builtins.haisostest.js`
 
 Add `BUILTIN rootfs man /bin/man` (and keep wc's) to the generated
-haisosfile. Add a runner variant on `spawnSync` that returns
-`{stdout, stderr, status}` without throwing on a non-zero exit. Checks:
+haisosfile. streams--exit-codes already added an inline `spawnSync` call for
+the `ls /nope` case (reads `.status`/`.stdout`/`.stderr` without throwing);
+reuse that same pattern for `man nosuch`, factoring it into a small helper if
+convenient. Checks:
 `RUN /bin/man wc` stdout equals `RUN /bin/wc --help` stdout (both non-empty);
 `RUN /bin/man nosuch`: stderr contains `No manual entry for nosuch`, stdout
 has no such line, `status` is 16.

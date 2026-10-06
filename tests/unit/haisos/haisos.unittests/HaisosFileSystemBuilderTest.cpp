@@ -308,23 +308,15 @@ TEST_F(HaisosFileSystemBuilderTest, APhysicalDirectoryMayBeAbsoluteOrClimbAboveT
 }
 
 #ifndef _WIN32
-// A PHYSICAL directory is jailed there -- IFactory::CreatePhysicalFileSystem
-// -- rather than made a SubFileSystem of the full filesystem, whose
-// confinement goes by the path as written: a link inside the directory
-// leading out of it would take a process anywhere on the disk.
-TEST_F(HaisosFileSystemBuilderTest, ALinkInsideAPhysicalDirectoryCannotLeadOutOfIt) {
+// A link inside a PHYSICAL directory is followed wherever it leads, out of
+// the directory included: whoever declares the filesystem vouches for it.
+TEST_F(HaisosFileSystemBuilderTest, ALinkInsideAPhysicalDirectoryIsFollowed) {
     std::filesystem::create_directory_symlink("..", kTestDir + "/sub/up");
     std::string error;
     auto fs = Build(*factory, "FS data PHYSICAL ./sub\n", error);
     ASSERT_NE(fs, nullptr) << error;
     EXPECT_EQ(ReadAll(*fs, "/marker.txt"), "sub");
-    FileStatus status;
-    EXPECT_NE(fs->Stat("/up/marker.txt", status), 0);
-
-    // What a SubFileSystem of the full filesystem would have let through.
-    auto sub = CreateServicesCreator()->CreateFileSystemService()->CreateSubFileSystem(
-        factory->CreateFullPhysicalFileSystem(), kTestDir + "/sub");
-    EXPECT_EQ(sub->Stat("/up/marker.txt", status), 0);
+    EXPECT_EQ(ReadAll(*fs, "/up/marker.txt"), "root");
 }
 
 // On Linux the full physical filesystem is the disk from its root.

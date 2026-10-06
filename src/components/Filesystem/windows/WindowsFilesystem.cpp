@@ -16,12 +16,6 @@
 #include "src/components/libheaders/CrtInvalidParameterAsError.h"
 #include "src/components/libheaders/WideText.h"
 
-// The tag of a symbolic link WSL makes on a Windows drive (in winnt.h only
-// since the Windows 10 SDKs).
-#ifndef IO_REPARSE_TAG_LX_SYMLINK
-#define IO_REPARSE_TAG_LX_SYMLINK 0xA000001DL
-#endif
-
 namespace Haisos {
 
 // Every C runtime call below runs with a CrtInvalidParameterAsError in scope.
@@ -163,31 +157,6 @@ std::vector<DirectoryEntry> FileSystem::LocalReadDirectory(const std::string& pa
 
     ::FindClose(hFind);
     return entries;
-}
-
-bool FileSystem::IsLink(const std::string& hostPath) {
-    NoCriticalErrorDialogs noDialogs;
-    std::wstring wide;
-    if (!ToWidePath(hostPath, wide)) {
-        return false;
-    }
-    const DWORD attributes = ::GetFileAttributesW(wide.c_str());
-    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0) {
-        return false;
-    }
-    // Many a reparse point is no link -- a OneDrive placeholder, a
-    // deduplicated file -- so its tag decides. FindFirstFileW reports it,
-    // and matches the name alone: a name reaching here holds no wildcard
-    // (see IsPlainHostName).
-    WIN32_FIND_DATAW fd;
-    HANDLE hFind = ::FindFirstFileW(wide.c_str(), &fd);
-    if (hFind == INVALID_HANDLE_VALUE) {
-        return false;
-    }
-    ::FindClose(hFind);
-    return fd.dwReserved0 == IO_REPARSE_TAG_SYMLINK ||
-        fd.dwReserved0 == IO_REPARSE_TAG_MOUNT_POINT ||
-        fd.dwReserved0 == IO_REPARSE_TAG_LX_SYMLINK;
 }
 
 bool FileSystem::IsDevicePath(const std::string& hostPath) {

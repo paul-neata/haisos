@@ -89,7 +89,7 @@ bool LocateHaisosFile(const std::string& filePath, HaisosFileLocation& out, std:
     return true;
 }
 
-// Reads the haisosfile through a physical filesystem jailed at its own
+// Reads the haisosfile through a physical filesystem rooted at its own
 // directory, capping the read at 10 MB. The same directory is where ROOT and
 // `FS ... PHYSICAL` are later resolved from, so content and root can't come
 // from different places.

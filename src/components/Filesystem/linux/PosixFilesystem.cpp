@@ -113,11 +113,6 @@ int FileSystem::LocalStat(const std::string& path, FileStatus& out) {
     return 0;
 }
 
-bool FileSystem::IsLink(const std::string& hostPath) {
-    struct stat st;
-    return ::lstat(hostPath.c_str(), &st) == 0 && S_ISLNK(st.st_mode);
-}
-
 // A POSIX host has no device names: /dev/null is a path like any other, and
 // a physical filesystem reaches it only if it lies within its root.
 bool FileSystem::IsDevicePath(const std::string& /*hostPath*/) {

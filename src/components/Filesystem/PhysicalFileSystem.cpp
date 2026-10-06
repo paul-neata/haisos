@@ -8,20 +8,11 @@
 
 #ifdef _WIN32
 #include "windows/WindowsFullPhysicalFileSystem.h"
-#else
-#include <fcntl.h>
 #endif
 
 namespace Haisos {
 
 namespace {
-
-// Added to every open: see LocalOpenFile.
-#ifdef _WIN32
-constexpr int kOpenNoFollow = 0;
-#else
-constexpr int kOpenNoFollow = O_NOFOLLOW;
-#endif
 
 // A UTF-8 string as a path, and back. std::filesystem reads a narrow string
 // in the ANSI code page on Windows, where most names do not fit.
@@ -86,50 +77,7 @@ bool PhysicalFileSystem::HostPathOf(const std::vector<std::string>& segments, st
     return true;
 }
 
-bool PhysicalFileSystem::IsWithin(const std::string& canonical) const {
-    if (m_rootPath.empty()) {
-        return false;
-    }
-    // Within the root means the root itself, or the root followed by a
-    // separator and more. A root that already ends in a separator -- the top
-    // of a disk, "/" or "C:\" -- brings its own, so any path starting with it
-    // is within it.
-    const char separator = static_cast<char>(std::filesystem::path::preferred_separator);
-    const bool rootEndsInSeparator = m_rootPath.back() == '/' || m_rootPath.back() == separator;
-    return canonical.size() >= m_rootPath.size() &&
-        canonical.compare(0, m_rootPath.size(), m_rootPath) == 0 &&
-        (rootEndsInSeparator || canonical.size() == m_rootPath.size() || canonical[m_rootPath.size()] == separator);
-}
-
-bool PhysicalFileSystem::CanonicalWithin(
-    const std::filesystem::path& hostPath, const std::string& pathname, std::string& resolved) const
-{
-    // weakly_canonical resolves every symbolic link on the way that leads
-    // somewhere, then appends what does not exist as it is.
-    const std::string canonical = Utf8FromPath(std::filesystem::weakly_canonical(hostPath));
-    if (!IsWithin(canonical)) {
-        LogWarning("PhysicalFileSystem: path escapes root (%s): %s", m_rootPath.c_str(), pathname.c_str());
-        return false;
-    }
-
-    // So a link still at the end is one that leads nowhere, and the check
-    // above has not seen where it points. open() with O_CREAT would follow it
-    // and create its target, wherever that is -- outside the root, possibly.
-    if (FileSystem::IsLink(canonical)) {
-        LogWarning("PhysicalFileSystem: path ends in a dangling symbolic link (%s): %s", m_rootPath.c_str(), pathname.c_str());
-        return false;
-    }
-
-    resolved = canonical;
-    return true;
-}
-
-bool PhysicalFileSystem::ResolveOnHost(const std::string& pathname, LastComponent last, std::string& resolved) const {
-    // Checked, then used: something else on the host that swaps a directory
-    // on the path for a link between this check and the operation could still
-    // lead the operation outside the root. Only the last component is guarded
-    // against that (O_NOFOLLOW, in LocalOpenFile); nothing inside Haisos can
-    // create a link, so it takes an outside actor.
+bool PhysicalFileSystem::ResolveOnHost(const std::string& pathname, Top top, std::string& resolved) const {
     NoCriticalErrorDialogs noDialogs;
 
     // Split exactly as the mounts and builtins over this filesystem split it,
@@ -159,24 +107,13 @@ bool PhysicalFileSystem::ResolveOnHost(const std::string& pathname, LastComponen
             LogWarning("PhysicalFileSystem: refusing a path the host takes for a device (%s): %s", m_rootPath.c_str(), pathname.c_str());
             return false;
         }
-        if (last == LastComponent::Follow) {
-            return CanonicalWithin(hostPath, pathname, resolved);
-        }
-
-        // Only the directory holding the last component is resolved; the last
-        // component is appended as it is. The top of the filesystem (and a
-        // drive's root) has no such name, and is never removed or created --
-        // nor a link: Stat asks, for every path.
-        const std::filesystem::path name = hostPath.filename();
-        if (segments.empty() || name.empty()) {
+        // The top of the filesystem (and a drive's root) is never removed or
+        // created.
+        if (top == Top::Refused && (segments.empty() || hostPath.filename().empty())) {
             LogDebug("PhysicalFileSystem: refusing to act on the root itself (%s): %s", m_rootPath.c_str(), pathname.c_str());
             return false;
         }
-        std::string parent;
-        if (!CanonicalWithin(hostPath.parent_path(), pathname, parent)) {
-            return false;
-        }
-        resolved = Utf8FromPath(PathFromUtf8(parent) / name);
+        resolved = Utf8FromPath(hostPath);
         return true;
     } catch (const std::exception& e) {
         LogDebug("PhysicalFileSystem: invalid path (%s): %s", e.what(), pathname.c_str());
@@ -184,31 +121,20 @@ bool PhysicalFileSystem::ResolveOnHost(const std::string& pathname, LastComponen
     }
 }
 
-bool PhysicalFileSystem::IsSymbolicLink(const std::string& pathname) const {
-    std::string entry;
-    if (!ResolveOnHost(pathname, LastComponent::Keep, entry)) {
-        return false;
-    }
-    return FileSystem::IsLink(entry);
-}
-
-// Every open adds O_NOFOLLOW (on POSIX): ResolveOnHost has already refused a
-// path ending in a link, so this only matters should one appear there after
-// the check -- open() then fails rather than follow it.
 int PhysicalFileSystem::LocalOpenFile(const std::string& pathname, int flags) {
     std::string resolved;
-    if (!ResolveOnHost(pathname, LastComponent::Follow, resolved)) {
+    if (!ResolveOnHost(pathname, Top::Allowed, resolved)) {
         return -1;
     }
-    return m_inner->LocalOpenFile(resolved, flags | kOpenNoFollow);
+    return m_inner->LocalOpenFile(resolved, flags);
 }
 
 int PhysicalFileSystem::LocalOpenFile(const std::string& pathname, int flags, int mode) {
     std::string resolved;
-    if (!ResolveOnHost(pathname, LastComponent::Follow, resolved)) {
+    if (!ResolveOnHost(pathname, Top::Allowed, resolved)) {
         return -1;
     }
-    return m_inner->LocalOpenFile(resolved, flags | kOpenNoFollow, mode);
+    return m_inner->LocalOpenFile(resolved, flags, mode);
 }
 
 int PhysicalFileSystem::LocalCloseFile(int fd) {
@@ -224,31 +150,27 @@ ssize_t PhysicalFileSystem::LocalWriteFile(int fd, const void* buf, size_t count
 }
 
 int PhysicalFileSystem::LocalCreateDirectory(const std::string& pathname, int mode) {
-    // As mkdir() does: a link already at the path, even a dangling one, means
-    // the path exists, and nothing is created through it.
+    // mkdir()
     std::string resolved;
-    if (!ResolveOnHost(pathname, LastComponent::Keep, resolved)) {
+    if (!ResolveOnHost(pathname, Top::Refused, resolved)) {
         return -1;
     }
     return m_inner->LocalCreateDirectory(resolved, mode);
 }
 
 int PhysicalFileSystem::LocalRemoveDirectory(const std::string& pathname) {
-    // As rmdir() does: never through a link at the path. rmdir() fails on
-    // one on POSIX; on Windows it removes a directory link or a junction
-    // itself -- never the directory it points at, either way.
+    // rmdir()
     std::string resolved;
-    if (!ResolveOnHost(pathname, LastComponent::Keep, resolved)) {
+    if (!ResolveOnHost(pathname, Top::Refused, resolved)) {
         return -1;
     }
     return m_inner->LocalRemoveDirectory(resolved);
 }
 
 int PhysicalFileSystem::LocalRemoveFile(const std::string& pathname) {
-    // As unlink() does: a link at the path is removed itself, never the file
-    // it points at -- which may lie anywhere.
+    // unlink()
     std::string resolved;
-    if (!ResolveOnHost(pathname, LastComponent::Keep, resolved)) {
+    if (!ResolveOnHost(pathname, Top::Refused, resolved)) {
         return -1;
     }
     return m_inner->LocalRemoveFile(resolved);
@@ -256,7 +178,7 @@ int PhysicalFileSystem::LocalRemoveFile(const std::string& pathname) {
 
 std::vector<DirectoryEntry> PhysicalFileSystem::LocalReadDirectory(const std::string& path) {
     std::string resolved;
-    if (!ResolveOnHost(path, LastComponent::Follow, resolved)) {
+    if (!ResolveOnHost(path, Top::Allowed, resolved)) {
         return {};
     }
     return m_inner->LocalReadDirectory(resolved);
@@ -264,16 +186,10 @@ std::vector<DirectoryEntry> PhysicalFileSystem::LocalReadDirectory(const std::st
 
 int PhysicalFileSystem::LocalStat(const std::string& path, FileStatus& out) {
     std::string resolved;
-    if (!ResolveOnHost(path, LastComponent::Follow, resolved)) {
+    if (!ResolveOnHost(path, Top::Allowed, resolved)) {
         return -1;
     }
-    if (m_inner->LocalStat(resolved, out) != 0) {
-        return -1;
-    }
-    // Everything else describes what the path leads to, as stat() does; this
-    // is what lstat() would add. Set either way, so no earlier value lingers.
-    out.symbolicLink = IsSymbolicLink(path);
-    return 0;
+    return m_inner->LocalStat(resolved, out) == 0 ? 0 : -1;
 }
 
 std::string PhysicalFileSystem::AbsolutePathFor(const std::string& path) const {

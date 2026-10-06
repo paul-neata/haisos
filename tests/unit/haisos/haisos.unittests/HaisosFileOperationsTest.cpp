@@ -346,19 +346,16 @@ TEST_F(HaisosFileOperationsTest, TheInitTemplatesBuiltinsAllApplyOnceUncommented
 }
 
 #ifndef _WIN32
-// DELETE behaves like `rm -rf`: a symbolic link inside the tree is removed
-// itself, never descended into. Stat and ReadDirectory follow links, so a link
-// to a directory looked like that directory: `DELETE /work` holding
-// work/link -> ../important once emptied and removed important/, a sibling of
-// the tree being deleted, and then failed on the link.
-TEST_F(HaisosFileOperationsTest, DeleteRemovesALinkNotWhatItPointsAt) {
+// DELETE follows a link to a directory, as Stat and ReadDirectory do: the
+// directory it points at is emptied, wherever it lies, and then the link
+// itself is removed -- the accepted consequence of following links anywhere.
+TEST_F(HaisosFileOperationsTest, DeleteFollowsALinkToADirectory) {
     const std::string hostRoot = kHostDir + "/root";
     std::filesystem::create_directories(hostRoot + "/important");
     std::filesystem::create_directories(hostRoot + "/work/sub");
     std::ofstream(hostRoot + "/important/keep.txt") << "precious";
     std::ofstream(hostRoot + "/work/sub/file.txt") << "doomed";
     std::filesystem::create_directory_symlink("../important", hostRoot + "/work/link");
-    std::filesystem::create_symlink("../important/keep.txt", hostRoot + "/work/sub/file_link");
     std::filesystem::create_symlink(hostRoot + "/nowhere", hostRoot + "/work/dangling");
     root = factory->CreatePhysicalFileSystem(hostRoot);
 
@@ -367,11 +364,11 @@ TEST_F(HaisosFileOperationsTest, DeleteRemovesALinkNotWhatItPointsAt) {
 
     EXPECT_FALSE(std::filesystem::exists(std::filesystem::symlink_status(hostRoot + "/work")));
     EXPECT_TRUE(std::filesystem::is_directory(hostRoot + "/important"));
-    EXPECT_EQ(ReadHost(hostRoot + "/important/keep.txt"), "precious");
+    EXPECT_TRUE(std::filesystem::is_empty(hostRoot + "/important"));
 }
 
-// A link named by DELETE itself goes the same way: the link, not its target.
-TEST_F(HaisosFileOperationsTest, DeleteOfALinkRemovesTheLinkOnly) {
+// A link to a directory named by DELETE itself goes the same way.
+TEST_F(HaisosFileOperationsTest, DeleteOfALinkToADirectoryEmptiesItsTarget) {
     const std::string hostRoot = kHostDir + "/root";
     std::filesystem::create_directories(hostRoot + "/important");
     std::ofstream(hostRoot + "/important/keep.txt") << "precious";
@@ -382,6 +379,22 @@ TEST_F(HaisosFileOperationsTest, DeleteOfALinkRemovesTheLinkOnly) {
     ASSERT_TRUE(Apply("DELETE /shortcut\n", error)) << error;
 
     EXPECT_FALSE(std::filesystem::exists(std::filesystem::symlink_status(hostRoot + "/shortcut")));
-    EXPECT_EQ(ReadHost(hostRoot + "/important/keep.txt"), "precious");
+    EXPECT_TRUE(std::filesystem::is_directory(hostRoot + "/important"));
+    EXPECT_TRUE(std::filesystem::is_empty(hostRoot + "/important"));
+}
+
+// A link to a file is removed itself, as unlink() does: the file stays.
+TEST_F(HaisosFileOperationsTest, DeleteOfALinkToAFileRemovesTheLinkOnly) {
+    const std::string hostRoot = kHostDir + "/root";
+    std::filesystem::create_directories(hostRoot);
+    std::ofstream(hostRoot + "/keep.txt") << "precious";
+    std::filesystem::create_symlink("keep.txt", hostRoot + "/file_link");
+    root = factory->CreatePhysicalFileSystem(hostRoot);
+
+    std::string error;
+    ASSERT_TRUE(Apply("DELETE /file_link\n", error)) << error;
+
+    EXPECT_FALSE(std::filesystem::exists(std::filesystem::symlink_status(hostRoot + "/file_link")));
+    EXPECT_EQ(ReadHost(hostRoot + "/keep.txt"), "precious");
 }
 #endif

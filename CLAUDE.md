@@ -223,7 +223,7 @@ CREATE /notes/b.md multiline END
 # a heading -- content, not a comment
 END
 COPY ./input.txt /work/in.txt  # copy a host file into the OS
-DELETE /work/stale             # remove a file, or a directory and everything in it (as rm -rf: links are removed, not followed)
+DELETE /work/stale             # remove a file, or a directory and everything in it (a link to a directory is followed: its target is emptied, the link removed)
 OUTCOPY /work/out.txt ./out.txt  # copy a file out to the host, once every RUN process has finished
 
 RUN /agent.md                  # start an initial process (.md agent, .lua script or builtin) at '/'; may repeat
@@ -255,9 +255,9 @@ it, `\` included. On Windows `\` and `/` both separate, in any mix: `/c/x`,
 `//server/share/x`) is a UNC path, and `/` alone is the full filesystem, every
 drive in it; a drive-relative `c:x` and a `/tmp` that names no drive are
 refused. Each directory is taken with `IFactory::CreatePhysicalFileSystem`,
-jailed there -- not as a `SubFileSystem` of the full filesystem, which confines
-paths only as written, so a symbolic link inside would lead anywhere on the
-disk. `COPY`/`OUTCOPY` host paths, and the haisosfile path on the command line,
+rooted there (a `..` cannot climb above it), and symbolic links inside it are
+followed wherever they lead, as the host follows them -- whoever declares the
+filesystem vouches for the links in it. `COPY`/`OUTCOPY` host paths, and the haisosfile path on the command line,
 follow the same rules (`src/components/Filesystem/PhysicalPath.h`).
 
 Any token -- a path, a `RUN` argument -- may be quoted, `'...'` or `"..."`, to
@@ -379,6 +379,12 @@ will need is in place: when adding a tool, a runtime, or anything else a process
 can call, route it through `ICurrentProcess` rather than giving it its own
 handle on the OS.
 
+A physical filesystem is only as narrow as the links inside it: symbolic links
+(and junctions) on the disk are followed wherever they lead, out of its
+directory included. Nothing in Haisos creates a link, and no builtin, tool or
+directive may create one on a physical filesystem unless a confinement of
+links comes back with it.
+
 How it is wired: `OSToolFactory` and every `os_*` tool are built **per process**,
 around a `CurrentProcessHandle` (`src/components/libheaders/`) rather than
 around an `IHaisosOS`. The handle exists before the process does -- an agent
@@ -445,7 +451,7 @@ under "Objects released last on their own threads".
 | **Logger** | `src/components/Logger/` | Thread-safe logging with configurable receivers |
 | **HTTPClient** | `src/components/HTTPClient/` | Platform-specific HTTP implementation (Curl/WinHTTP/Fetch) |
 | **Factory** | `src/components/Factory/` | Creates the root concepts: physical console, disk-backed filesystems (a directory, or the host's whole disk), the services layer, and the OS itself |
-| **Filesystem** | `src/components/Filesystem/` | Composable `IFileSystem` implementations: an unrooted passthrough, a `PhysicalFileSystem` jailed to a real disk path, the Windows-only `WindowsFullPhysicalFileSystem` (every drive under `/`, as `/c/...`), plus in-memory, read-only, sub-path and mounted/overlay ones |
+| **Filesystem** | `src/components/Filesystem/` | Composable `IFileSystem` implementations: an unrooted passthrough, a `PhysicalFileSystem` rooted at a real disk path, the Windows-only `WindowsFullPhysicalFileSystem` (every drive under `/`, as `/c/...`), plus in-memory, read-only, sub-path and mounted/overlay ones |
 | **ServicesCreator** | `src/components/ServicesCreator/` | Factory-of-services built on `IFactory`; creates `IFileSystemService`/`INetworkService`/`ILLMService`, passing each the services it depends on |
 | **NetworkService** | `src/components/NetworkService/` | Service-layer wrapper over network access (creates `IHTTPClient`) |
 | **FileSystemService** | `src/components/FileSystemService/` | Stateless factory that composes filesystems (read-only / in-memory / sub / mount); holds no filesystem of its own |

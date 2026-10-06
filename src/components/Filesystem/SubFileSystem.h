@@ -8,7 +8,7 @@ namespace Haisos {
 
 // A filesystem confined to a sub-path of an existing IFileSystem, addressed
 // through the IFileSystem abstraction itself (no real disk access) -- unlike
-// PhysicalFileSystem, which jails a real disk directory. Paths are resolved
+// PhysicalFileSystem, which is rooted at a real disk directory. Paths are resolved
 // lexically against this filesystem's own virtual root, so escaping the sub-path
 // (e.g. via "..") is structurally impossible: every resolved path is always
 // at or below basePath within root.

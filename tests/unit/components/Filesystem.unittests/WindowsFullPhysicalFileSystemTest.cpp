@@ -142,10 +142,8 @@ TEST_F(WindowsFullPhysicalFileSystemTest, TheRootAndADriveAreDirectories) {
     FileStatus status;
     ASSERT_EQ(m_fs->Stat("/", status), 0);
     EXPECT_EQ(status.type, DirectoryEntryType::Dir);
-    EXPECT_FALSE(status.symbolicLink);
     ASSERT_EQ(m_fs->Stat("/" + std::string(1, m_drive), status), 0);
     EXPECT_EQ(status.type, DirectoryEntryType::Dir);
-    EXPECT_FALSE(status.symbolicLink);
     ASSERT_EQ(m_fs->Stat(m_full + "/f.txt", status), 0);
     EXPECT_EQ(status.type, DirectoryEntryType::File);
     EXPECT_EQ(status.size, 11u);

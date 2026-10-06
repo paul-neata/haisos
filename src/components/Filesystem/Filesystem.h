@@ -32,12 +32,6 @@ public:
         return NormalizeVirtualPath(path, "/");
     }
 
-    // Whether the host path |hostPath| is itself a link, not followed: a
-    // symbolic link, or on Windows also a junction or a symbolic link made
-    // by WSL -- which Windows cannot follow, and std::filesystem does not
-    // report as links. False if there is nothing at |hostPath|.
-    static bool IsLink(const std::string& hostPath);
-
     // Whether the host takes |hostPath| for a device rather than a file: on
     // Windows, one ending in a legacy device name (NUL, CON, COM1, ...), as
     // GetFullPathNameW says -- the very conversion CreateFileW makes. Which

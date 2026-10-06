@@ -151,24 +151,20 @@ bool CopyFileBetween(IFileSystem& from, const std::string& fromPath, IFileSystem
     return true;
 }
 
-// Removes what is at normalizedPath the way `rm -rf` does: a file, a symbolic
-// link, or a directory after everything beneath it. A link is removed itself
-// and never descended into. Stat and ReadDirectory both follow links, so a
-// link to a directory looks like that directory -- and descending into it once
-// deleted whatever it pointed at, wherever that was, before failing on the link.
+// Removes what is at normalizedPath the way `rm -rf` would if it followed
+// links to directories: a file, or a directory after everything beneath it.
+// Stat and ReadDirectory both follow links, so a link to a directory is
+// descended into -- whatever it points at is emptied, wherever it lies -- and
+// then the link itself is removed; a link to a file is removed itself.
 bool RemoveTree(IFileSystem& fs, const std::string& normalizedPath, std::string& outReason) {
     FileStatus status;
     // What cannot be stat'ed at all -- a link that leads nowhere, say -- is
     // removed as the file it is.
     const bool isDirectory = fs.Stat(normalizedPath, status) == 0 &&
-        status.type == DirectoryEntryType::Dir && !status.symbolicLink;
+        status.type == DirectoryEntryType::Dir;
     if (!isDirectory) {
-        if (fs.RemoveFile(normalizedPath) == 0) {
-            return true;
-        }
-        // On Windows a link to a directory is removed with rmdir, which takes
-        // the link away and leaves the directory it points at alone.
-        if (status.symbolicLink && fs.RemoveDirectory(normalizedPath) == 0) {
+        // On Windows a dangling link to a directory is removed with rmdir.
+        if (fs.RemoveFile(normalizedPath) == 0 || fs.RemoveDirectory(normalizedPath) == 0) {
             return true;
         }
         outReason = "cannot remove file " + normalizedPath;
@@ -182,7 +178,9 @@ bool RemoveTree(IFileSystem& fs, const std::string& normalizedPath, std::string&
             return false;
         }
     }
-    if (fs.RemoveDirectory(normalizedPath) != 0) {
+    // On POSIX a link to a directory is not removed by rmdir(), but by
+    // unlink().
+    if (fs.RemoveDirectory(normalizedPath) != 0 && fs.RemoveFile(normalizedPath) != 0) {
         outReason = "cannot remove directory " + normalizedPath;
         return false;
     }
@@ -190,7 +188,7 @@ bool RemoveTree(IFileSystem& fs, const std::string& normalizedPath, std::string&
 }
 
 // A host file, as the directory holding it (reached through a physical
-// filesystem jailed there) and its name within it.
+// filesystem rooted there) and its name within it.
 struct HostFile {
     std::string directory;       // a host path, in UTF-8
     std::string nameInDirectory; // "/<name>"

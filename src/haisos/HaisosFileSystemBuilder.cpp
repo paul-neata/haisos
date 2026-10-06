@@ -12,10 +12,10 @@ namespace {
 // of the host's full physical filesystem, as a filesystem of its own. It may be
 // written in any form CreatePhysicalFileSystem takes -- /c/x, c:\x or c:/x on
 // Windows -- and a relative one is taken from the haisosfile's directory. It
-// is jailed at the directory (CreatePhysicalFileSystem), not a SubFileSystem of
-// the full one: a symbolic link inside it then stays inside, where a
-// SubFileSystem, confining paths only as written, would follow it anywhere on
-// the disk. A directory that is not there is an error here, rather than a
+// is a filesystem of its own (CreatePhysicalFileSystem), not a SubFileSystem
+// of the full one: on Windows a UNC directory (\\server\share\x, or a
+// relative path under a \\wsl.localhost\... current directory) is on no
+// drive, so the full filesystem does not hold it. A directory that is not there is an error here, rather than a
 // process failing to start later. |directive| names the line, for errors.
 std::shared_ptr<IFileSystem> TakePhysicalDirectory(
     IFactory& factory,

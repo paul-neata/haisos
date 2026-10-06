@@ -7,6 +7,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -162,17 +163,13 @@ TEST_F(PhysicalFileSystemTest, RemoveFileRemovesAFileButNotADirectory) {
 #ifndef _WIN32
 // --- Symbolic links already on the disk ---
 //
-// Nothing done through a PhysicalFileSystem can create a link, but the
-// directory it is jailed to may hold some. The jail used to canonicalize with
-// weakly_canonical alone, which cannot resolve a link that leads nowhere: a
-// path ending in a dangling link passed the check unresolved, and open() with
-// O_CREAT then created the link's target, wherever it pointed. Removal
-// resolved the last component through links as well, so removing a link
-// removed what it pointed at.
+// Links already on the disk are followed wherever they lead, as the host
+// follows them -- out of the root included. Nothing done through a
+// PhysicalFileSystem creates one.
 
 namespace {
 
-// A root to jail a filesystem to, next to a directory outside it, both in a
+// A root for a filesystem, next to a directory outside it, both in a
 // directory of their own under the system's temporary directory.
 class PhysicalFileSystemLinkTest : public ::testing::Test {
 protected:
@@ -202,48 +199,67 @@ protected:
 
 } // namespace
 
-TEST_F(PhysicalFileSystemLinkTest, NothingIsCreatedThroughADanglingLinkToOutsideTheRoot) {
+namespace {
+
+std::string ReadWhole(IFileSystem& fs, const std::string& path) {
+    const int fd = fs.OpenFile(path, O_RDONLY);
+    if (fd < 0) {
+        return "<cannot open>";
+    }
+    std::string content;
+    char buf[256];
+    ssize_t n;
+    while ((n = fs.ReadFile(fd, buf, sizeof(buf))) > 0) {
+        content.append(buf, static_cast<size_t>(n));
+    }
+    fs.CloseFile(fd);
+    return content;
+}
+
+std::string ReadHostFile(const std::filesystem::path& path) {
+    std::ifstream in(path);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+} // namespace
+
+// As open() does on Linux: a dangling link opened with O_CREAT creates its
+// target, wherever it points.
+TEST_F(PhysicalFileSystemLinkTest, ADanglingLinkIsFollowedWhenCreating) {
     std::filesystem::create_symlink(Outside() / "created.txt", Root() / "notes.txt");
     auto fs = PhysicalFileSystem::Create(Root().string());
 
-    EXPECT_EQ(fs->OpenFile("/notes.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR), -1);
-    EXPECT_EQ(fs->OpenFile("notes.txt", O_WRONLY | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR), -1);
-    // A ".." cannot hide the link from the check either.
-    EXPECT_EQ(fs->OpenFile("/missing/../notes.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR), -1);
-    EXPECT_FALSE(std::filesystem::exists(Outside() / "created.txt"));
-    // The link itself is left as it was.
+    const int fd = fs->OpenFile("/notes.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    ASSERT_GE(fd, 0);
+    EXPECT_EQ(fs->WriteFile(fd, "hi", 2), 2);
+    fs->CloseFile(fd);
+    EXPECT_EQ(ReadHostFile(Outside() / "created.txt"), "hi");
     EXPECT_TRUE(std::filesystem::is_symlink(std::filesystem::symlink_status(Root() / "notes.txt")));
 }
 
-// Where a dangling link points cannot be known without following it, so one
-// pointing inside the root is refused all the same.
-TEST_F(PhysicalFileSystemLinkTest, ADanglingLinkPointingInsideIsRefusedToo) {
-    std::filesystem::create_symlink(Root() / "nothing.txt", Root() / "inner.txt");
-    auto fs = PhysicalFileSystem::Create(Root().string());
-
-    EXPECT_EQ(fs->OpenFile("inner.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR), -1);
-    EXPECT_FALSE(std::filesystem::exists(Root() / "nothing.txt"));
-}
-
-TEST_F(PhysicalFileSystemLinkTest, NoDirectoryIsCreatedThroughADanglingLink) {
-    std::filesystem::create_symlink(Outside() / "newdir", Root() / "dir");
-    auto fs = PhysicalFileSystem::Create(Root().string());
-
-    EXPECT_EQ(fs->CreateDirectory("dir", S_IRWXU), -1);
-    EXPECT_EQ(fs->CreateDirectory("dir/sub", S_IRWXU), -1);
-    EXPECT_FALSE(std::filesystem::exists(Outside() / "newdir"));
-}
-
-TEST_F(PhysicalFileSystemLinkTest, ALinkToOutsideTheRootCannotBeReadEvenBehindDotDot) {
+TEST_F(PhysicalFileSystemLinkTest, ALinkToOutsideTheRootIsFollowed) {
     WriteHostFile(Outside() / "secret.txt", "secret");
     std::filesystem::create_symlink(Outside() / "secret.txt", Root() / "secret_link");
+    std::filesystem::create_directory_symlink(Outside(), Root() / "out");
     auto fs = PhysicalFileSystem::Create(Root().string());
 
-    EXPECT_EQ(fs->OpenFile("secret_link", O_RDONLY), -1);
-    // weakly_canonical stops at the first component that does not exist and
-    // only normalizes the rest, so "missing/../secret_link" once came out as
-    // the unresolved link.
-    EXPECT_EQ(fs->OpenFile("missing/../secret_link", O_RDONLY), -1);
+    EXPECT_EQ(ReadWhole(*fs, "secret_link"), "secret");
+
+    bool listed = false;
+    for (const auto& entry : fs->ReadDirectory("/out")) {
+        listed = listed || entry.name == "secret.txt";
+    }
+    EXPECT_TRUE(listed);
+
+    const int fd = fs->OpenFile("/out/new.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    ASSERT_GE(fd, 0);
+    EXPECT_EQ(fs->WriteFile(fd, "new", 3), 3);
+    fs->CloseFile(fd);
+    EXPECT_EQ(ReadHostFile(Outside() / "new.txt"), "new");
+
+    FileStatus status;
+    ASSERT_EQ(fs->Stat("/out", status), 0);
+    EXPECT_EQ(status.type, DirectoryEntryType::Dir);
 }
 
 TEST_F(PhysicalFileSystemLinkTest, ALinkWithinTheRootIsFollowed) {
@@ -284,23 +300,6 @@ TEST_F(PhysicalFileSystemLinkTest, RemoveDirectoryNeverRemovesThroughALink) {
 
     EXPECT_EQ(fs->RemoveDirectory("dir_link"), -1);
     EXPECT_TRUE(std::filesystem::is_directory(Root() / "empty_dir"));
-}
-
-TEST_F(PhysicalFileSystemLinkTest, StatSaysWhetherAPathIsALink) {
-    std::filesystem::create_directories(Root() / "dir");
-    WriteHostFile(Root() / "file.txt", "x");
-    std::filesystem::create_symlink(Root() / "dir", Root() / "dir_link");
-    auto fs = PhysicalFileSystem::Create(Root().string());
-
-    FileStatus status;
-    ASSERT_EQ(fs->Stat("dir_link", status), 0);
-    // Everything else is the target's, as stat() says.
-    EXPECT_EQ(status.type, DirectoryEntryType::Dir);
-    EXPECT_TRUE(status.symbolicLink);
-    ASSERT_EQ(fs->Stat("dir", status), 0);
-    EXPECT_FALSE(status.symbolicLink);
-    ASSERT_EQ(fs->Stat("file.txt", status), 0);
-    EXPECT_FALSE(status.symbolicLink);
 }
 
 TEST_F(PhysicalFileSystemLinkTest, TheRootItselfCanBeNeitherRemovedNorCreated) {
@@ -486,10 +485,10 @@ TEST_F(PhysicalFileSystemNameTest, TheHostSaysWhichNamesAreDevices) {
     }
 }
 
-// A junction is a link: Stat says so, removing it removes the junction only,
-// and one leading out of the root is not followed. (mklink /J needs no
-// privilege, unlike a symbolic link.)
-TEST_F(PhysicalFileSystemNameTest, AJunctionIsALink) {
+// A junction is followed wherever it leads, out of the root included, and
+// removing it removes the junction only. (mklink /J needs no privilege,
+// unlike a symbolic link.)
+TEST_F(PhysicalFileSystemNameTest, AJunctionIsFollowed) {
     std::filesystem::create_directories(m_root / "outside");
     std::ofstream(m_root / "outside" / "secret.txt") << "secret";
     std::filesystem::create_directories(m_root / "jail");
@@ -500,15 +499,12 @@ TEST_F(PhysicalFileSystemNameTest, AJunctionIsALink) {
     }
 
     auto fs = PhysicalFileSystem::Create((m_root / "jail").u8string());
-    EXPECT_FALSE(Opens(*fs, "/out/secret.txt"));
+    EXPECT_TRUE(Opens(*fs, "/out/secret.txt"));
 
     auto whole = PhysicalFileSystem::Create(Root());
     FileStatus status;
     ASSERT_EQ(whole->Stat("/jail/out", status), 0);
-    EXPECT_TRUE(status.symbolicLink);
     EXPECT_EQ(status.type, DirectoryEntryType::Dir);
-    ASSERT_EQ(whole->Stat("/outside", status), 0);
-    EXPECT_FALSE(status.symbolicLink);
 
     EXPECT_EQ(whole->RemoveDirectory("/jail/out"), 0);
     EXPECT_FALSE(std::filesystem::exists(std::filesystem::symlink_status(m_root / "jail" / "out")));

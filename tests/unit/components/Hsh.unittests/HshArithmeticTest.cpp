@@ -116,7 +116,7 @@ TEST(HshArithmeticTest, Errors) {
         ExpectArithError(expression, variables,
             "arithmetic expression: expecting primary: \"" + expression + "\"");
 
-    for (const std::string& expression : {"a b c", "08", "1.5", "x[1]", "3=4", "1,2", " 0x "})
+    for (const std::string& expression : {"a b c", "08", "1.5", "x[1]", "3=4", "1,2", " 0x ", "0x", "0xg"})
         ExpectArithError(expression, variables,
             "arithmetic expression: expecting EOF: \"" + expression + "\"");
 

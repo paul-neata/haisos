@@ -80,9 +80,18 @@ std::vector<Token> Tokenize(const std::string& expression) {
         char c = expression[i];
         if (IsBlank(c)) { ++i; continue; }
         if (std::isdigit(static_cast<unsigned char>(c)) != 0) {
+            const char* start = expression.c_str() + i;
             char* end = nullptr;
-            intmax_t value = std::strtoimax(expression.c_str() + i, &end, 0);
-            i = static_cast<size_t>(end - expression.c_str());
+            intmax_t value = std::strtoimax(start, &end, 0);
+            // "0x" with no hex digit after it: glibc reads the "0" and stops
+            // at the 'x', but the MSVC runtime reads nothing (end == start),
+            // which would never move on. Read the "0" here, as glibc does.
+            if (end <= start) {
+                value = 0;
+                i += 1;
+            } else {
+                i = static_cast<size_t>(end - expression.c_str());
+            }
             tokens.push_back(Token{TokenKind::Number, value, {}});
             continue;
         }

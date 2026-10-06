@@ -43,7 +43,8 @@ haisos/
 │   │   ├── NetworkService/
 │   │   ├── PipeService/
 │   │   ├── ServicesCreator/
-│   │   └── ToolFactory/
+│   │   ├── ToolFactory/
+│   │   └── Unicode/
 │   ├── tools/             - Tool implementations (each has its own CLAUDE.md)
 │   │   ├── get_current_date_time/
 │   │   ├── agent_start/
@@ -484,6 +485,7 @@ under "Objects released last on their own threads".
 | **Agent** | `src/components/Agent/` | Manages LLM conversations with parent/child agent relationships; supports subagents via agent tools |
 | **LLMCommunicator** | `src/components/LLMCommunicator/` | Handles LLM API communication, request/response formatting, and tool call parsing (HTTP is handled by HTTPClient) |
 | **ToolFactory** | `src/components/ToolFactory/` | Creates tool instances by name, including context-aware tools like `agent_start` |
+| **Unicode** | `src/components/Unicode/` | UTF-8 decoding, character classes and display widths -- a compact, locale-free stand-in for glibc's, for builtins (`wc`) |
 | **Environment** | `src/components/Environment/` | An OS's or a process's environment: variables, secrets (nameable but not readable), and LLM identifiers; `Clone()`d rather than shared |
 | **Console** | `src/components/Console/` | Async physical console output and line input, plus adapters giving agents a view onto it (or onto memory only) |
 | **Logger** | `src/components/Logger/` | Thread-safe logging with configurable receivers |

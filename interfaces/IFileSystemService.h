@@ -5,10 +5,7 @@
 #include <vector>
 #include <cstddef>
 #include <cstdint>
-
-#ifdef _WIN32
-using ssize_t = std::ptrdiff_t;
-#endif
+#include "IFileDescriptor.h"
 
 namespace Haisos {
 
@@ -110,20 +107,12 @@ class IFileSystem {
 public:
     virtual ~IFileSystem() = default;
 
-    // OpenFile is the IFileSystem counterpart of the C open() function.
-    virtual int OpenFile(const std::string& pathname, int flags) = 0;
+    // OpenFile is the IFileSystem counterpart of the C open() function: the open
+    // file, or null on failure. Closed when its last holder releases it.
+    virtual std::shared_ptr<IFileDescriptor> OpenFile(const std::string& pathname, int flags) = 0;
 
     // OpenFile is the IFileSystem counterpart of the C open() function (with mode).
-    virtual int OpenFile(const std::string& pathname, int flags, int mode) = 0;
-
-    // CloseFile is the IFileSystem counterpart of the C close() function.
-    virtual int CloseFile(int fd) = 0;
-
-    // ReadFile is the IFileSystem counterpart of the C read() function.
-    virtual ssize_t ReadFile(int fd, void* buf, size_t count) = 0;
-
-    // WriteFile is the IFileSystem counterpart of the C write() function.
-    virtual ssize_t WriteFile(int fd, const void* buf, size_t count) = 0;
+    virtual std::shared_ptr<IFileDescriptor> OpenFile(const std::string& pathname, int flags, int mode) = 0;
 
     // CreateDirectory is the IFileSystem counterpart of the C mkdir() function.
     virtual int CreateDirectory(const std::string& pathname, int mode) = 0;
@@ -148,7 +137,7 @@ public:
 
     // Removes the mount at exactly |mountedPath|. Unmounting a path that is not
     // a mount point does nothing. Files still open on the unmounted filesystem
-    // keep working until they are closed.
+    // keep working until their descriptors are released.
     virtual void Unmount(const std::string& mountedPath) = 0;
 
     // ReadDirectory returns the entries in the directory |path|: "." and ".."

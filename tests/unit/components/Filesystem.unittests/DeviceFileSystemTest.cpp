@@ -78,16 +78,14 @@ TEST(DeviceFileSystemTest, NullDiscardsWritesAndReadsAsEndOfFile) {
     auto fs = DeviceFileSystem::Create();
     // As "> /dev/null" and ">> /dev/null" open it.
     for (int flags : {kFileOpenWriteCreateTruncate, kFileOpenWriteCreateAppend}) {
-        const int fd = fs->OpenFile("/null", flags, kFileCreateMode);
-        ASSERT_GE(fd, 0);
-        EXPECT_EQ(fs->WriteFile(fd, "discarded", 9), 9);
-        EXPECT_EQ(fs->CloseFile(fd), 0);
+        auto file = fs->OpenFile("/null", flags, kFileCreateMode);
+        ASSERT_NE(file, nullptr);
+        EXPECT_EQ(file->Write("discarded", 9), 9);
     }
-    const int fd = fs->OpenFile("/null", kFileOpenReadOnly);
-    ASSERT_GE(fd, 0);
+    auto file = fs->OpenFile("/null", kFileOpenReadOnly);
+    ASSERT_NE(file, nullptr);
     char buffer[16];
-    EXPECT_EQ(fs->ReadFile(fd, buffer, sizeof(buffer)), 0);
-    EXPECT_EQ(fs->CloseFile(fd), 0);
+    EXPECT_EQ(file->Read(buffer, sizeof(buffer)), 0);
 
     std::string content = "x";
     ASSERT_TRUE(ReadWholeFile(*fs, "/null", content));
@@ -96,26 +94,20 @@ TEST(DeviceFileSystemTest, NullDiscardsWritesAndReadsAsEndOfFile) {
 
 TEST(DeviceFileSystemTest, ZeroDiscardsWritesAndReadsEndlessZeroBytes) {
     auto fs = DeviceFileSystem::Create();
-    const int fd = fs->OpenFile("/zero", kFileReadWriteBit);
-    ASSERT_GE(fd, 0);
-    EXPECT_EQ(fs->WriteFile(fd, "discarded", 9), 9);
+    auto file = fs->OpenFile("/zero", kFileReadWriteBit);
+    ASSERT_NE(file, nullptr);
+    EXPECT_EQ(file->Write("discarded", 9), 9);
     for (int i = 0; i < 3; ++i) {
         std::vector<char> buffer(4096, 'x');
-        ASSERT_EQ(fs->ReadFile(fd, buffer.data(), buffer.size()), 4096);
+        ASSERT_EQ(file->Read(buffer.data(), buffer.size()), 4096);
         EXPECT_EQ(buffer, std::vector<char>(4096, '\0'));
     }
-    EXPECT_EQ(fs->CloseFile(fd), 0);
-    // Closed, it reads and writes no more.
-    char c = 'x';
-    EXPECT_EQ(fs->ReadFile(fd, &c, 1), -1);
-    EXPECT_EQ(fs->WriteFile(fd, &c, 1), -1);
-    EXPECT_EQ(fs->CloseFile(fd), -1);
 }
 
 TEST(DeviceFileSystemTest, NothingCanBeCreatedOrRemoved) {
     auto fs = DeviceFileSystem::Create();
-    EXPECT_EQ(fs->OpenFile("/new", kFileOpenWriteCreateTruncate, kFileCreateMode), -1);
-    EXPECT_EQ(fs->OpenFile("/", kFileOpenReadOnly), -1);
+    EXPECT_EQ(fs->OpenFile("/new", kFileOpenWriteCreateTruncate, kFileCreateMode), nullptr);
+    EXPECT_EQ(fs->OpenFile("/", kFileOpenReadOnly), nullptr);
     EXPECT_EQ(fs->CreateDirectory("/dir", kDirMode), -1);
     EXPECT_EQ(fs->RemoveFile("/null"), -1);
     EXPECT_EQ(fs->RemoveDirectory("/"), -1);
@@ -130,19 +122,17 @@ TEST(DeviceFileSystemTest, WorksMountedAtDev) {
     EXPECT_EQ(Names(root->ReadDirectory("/dev")), (Names_t{".", "..", "null", "zero"}));
     EXPECT_EQ(EntryTypeOf(*root, "/dev/null"), std::optional<char>(DirectoryEntryType::CharDevice));
 
-    const int out = root->OpenFile("/dev/null", kFileOpenWriteCreateTruncate, kFileCreateMode);
-    ASSERT_GE(out, 0);
-    EXPECT_EQ(root->WriteFile(out, "abc", 3), 3);
-    EXPECT_EQ(root->CloseFile(out), 0);
+    auto out = root->OpenFile("/dev/null", kFileOpenWriteCreateTruncate, kFileCreateMode);
+    ASSERT_NE(out, nullptr);
+    EXPECT_EQ(out->Write("abc", 3), 3);
 
-    const int in = root->OpenFile("/dev/zero", kFileOpenReadOnly);
-    ASSERT_GE(in, 0);
+    auto in = root->OpenFile("/dev/zero", kFileOpenReadOnly);
+    ASSERT_NE(in, nullptr);
     char buffer[8] = {1, 1, 1, 1, 1, 1, 1, 1};
-    EXPECT_EQ(root->ReadFile(in, buffer, sizeof(buffer)), 8);
+    EXPECT_EQ(in->Read(buffer, sizeof(buffer)), 8);
     EXPECT_EQ(std::string(buffer, 8), std::string(8, '\0'));
-    EXPECT_EQ(root->CloseFile(in), 0);
 
-    EXPECT_EQ(root->OpenFile("/dev/new", kFileOpenWriteCreateTruncate, kFileCreateMode), -1);
+    EXPECT_EQ(root->OpenFile("/dev/new", kFileOpenWriteCreateTruncate, kFileCreateMode), nullptr);
     EXPECT_EQ(root->CreateDirectory("/dev/dir", kDirMode), -1);
     EXPECT_EQ(root->RemoveFile("/dev/zero"), -1);
 }
@@ -153,9 +143,9 @@ TEST(DotEntriesTest, EveryDirectoryListsDotAndDotDotFirstOnce) {
     auto mem = InMemoryFileSystem::Create();
     ASSERT_EQ(mem->CreateDirectory("/a", kDirMode), 0);
     ASSERT_EQ(mem->CreateDirectory("/a/b", kDirMode), 0);
-    const int fd = mem->OpenFile("/a/file", kFileOpenWriteCreateTruncate, kFileCreateMode);
-    ASSERT_GE(fd, 0);
-    mem->CloseFile(fd);
+    auto file = mem->OpenFile("/a/file", kFileOpenWriteCreateTruncate, kFileCreateMode);
+    ASSERT_NE(file, nullptr);
+    file.reset();
 
     EXPECT_EQ(Names(mem->ReadDirectory("/")), (Names_t{".", "..", "a"}));
     auto inA = Names(mem->ReadDirectory("/a"));

@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include "interfaces/IFileDescriptor.h"
+#include "interfaces/IFileIO.h"
 #include "interfaces/IFileSystemService.h"
 #include "VirtualPath.h"
 
@@ -78,14 +80,44 @@ inline std::optional<char> EntryTypeOf(FileAccess& fs, const std::string& absolu
     return status.type;
 }
 
-// Reads the whole file at |path|, up to a 10 MB cap. Returns false on any
-// failure. |fs| is anything offering the IFileSystem file operations: an
-// IFileSystem (which may be rooted/jailed, and understands absolute paths
-// only) or a process's IFileIO (which also resolves a relative path against
-// where that process currently is).
-template <typename FileAccess>
-inline bool ReadWholeFile(FileAccess& fs, const std::string& path, std::string& outContent) {
-    int fd = fs.OpenFile(path, kFileOpenReadOnly);
+// Reads |file| to its end, up to the same 10 MB cap as ReadWholeFile below.
+// False on a read error.
+inline bool ReadWholeDescriptor(IFileDescriptor& file, std::string& outContent) {
+    constexpr size_t kMaxSize = 10 * 1024 * 1024;
+    constexpr size_t kChunkSize = 64 * 1024;
+    std::string content;
+    char buf[kChunkSize];
+    while (content.size() < kMaxSize) {
+        ssize_t n = file.Read(buf, sizeof(buf));
+        if (n < 0) {
+            return false;
+        }
+        if (n == 0) {
+            break;
+        }
+        content.append(buf, static_cast<size_t>(n));
+    }
+    outContent = std::move(content);
+    return true;
+}
+
+// Reads the whole file at |path| on an IFileSystem (which may be
+// rooted/jailed, and understands absolute paths only), up to a 10 MB cap.
+// Returns false on any failure.
+inline bool ReadWholeFile(IFileSystem& fs, const std::string& path, std::string& outContent) {
+    auto file = fs.OpenFile(path, kFileOpenReadOnly);
+    if (!file) {
+        return false;
+    }
+    return ReadWholeDescriptor(*file, outContent);
+}
+
+// Reads the whole file at |path| through a process's IFileIO, which also
+// resolves a relative path against where that process currently is. Up to a
+// 10 MB cap; false on any failure. fd--process-table turns this body into the
+// same two lines as the IFileSystem overload reads through a descriptor.
+inline bool ReadWholeFile(IFileIO& io, const std::string& path, std::string& outContent) {
+    int fd = io.OpenFile(path, kFileOpenReadOnly);
     if (fd < 0) {
         return false;
     }
@@ -95,9 +127,9 @@ inline bool ReadWholeFile(FileAccess& fs, const std::string& path, std::string& 
     std::string content;
     char buf[kChunkSize];
     while (content.size() < kMaxSize) {
-        ssize_t n = fs.ReadFile(fd, buf, sizeof(buf));
+        ssize_t n = io.ReadFile(fd, buf, sizeof(buf));
         if (n < 0) {
-            fs.CloseFile(fd);
+            io.CloseFile(fd);
             return false;
         }
         if (n == 0) {
@@ -105,7 +137,7 @@ inline bool ReadWholeFile(FileAccess& fs, const std::string& path, std::string& 
         }
         content.append(buf, static_cast<size_t>(n));
     }
-    fs.CloseFile(fd);
+    io.CloseFile(fd);
     outContent = std::move(content);
     return true;
 }

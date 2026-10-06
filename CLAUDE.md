@@ -59,7 +59,7 @@ haisos/
 │   │   ├── os_start_process/
 │   │   └── os_list_processes/
 │   └── haisos/            - Entry point, CLI parser, haisosfile parser, root-filesystem builder, file-directive executor, agent traffic log (--log-agent-to-file / -L), and the re-creatable log file behind both file logs
-├── interfaces/             - Service-based interfaces (IFactory.h [IPhysicalConsole], IBuiltinCommands.h [IBuiltinConfigurator, BuiltinCommandHost], IServicesCreator.h, IHaisosOS.h, IProcess.h, IEnvironment.h [LLMIdentifier], ILLMService.h [IAgent, ITool, IToolFactory, IAgentConsole], INetworkService.h [IHTTPClient], IFileSystemService.h [IFileSystem], IProcess.h [ICurrentProcess], ILLMCommunicator.h)
+├── interfaces/             - Service-based interfaces (IFactory.h [IPhysicalConsole], IBuiltinCommands.h [IBuiltinConfigurator, BuiltinCommandHost], IServicesCreator.h, IHaisosOS.h, IProcess.h, IEnvironment.h [LLMIdentifier], ILLMService.h [IAgent, ITool, IToolFactory, IAgentConsole], INetworkService.h [IHTTPClient], IFileSystemService.h [IFileSystem], IProcess.h [ICurrentProcess], ILLMCommunicator.h, IFileDescriptor.h [IFileDescriptor, IOResult kIO*])
 ├── tests/                 - All tests
 │   ├── mocks/             - Mock classes for testing
 │   ├── unit/              - Unit tests (Google Test)

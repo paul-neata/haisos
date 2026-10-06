@@ -19,6 +19,37 @@ bool IsAtOrUnder(const std::string& path, const std::string& directory) {
         path[directory.size()] == '/';
 }
 
+// The open file of a builtin command: its note text, read from a position.
+// Read-only; a write always fails. Holding a copy of the text, it keeps
+// reading even after the builtin itself was removed.
+class BuiltinCommandFileDescriptor final : public IFileDescriptor {
+public:
+    static std::shared_ptr<BuiltinCommandFileDescriptor> Create(std::string content) {
+        return std::shared_ptr<BuiltinCommandFileDescriptor>(new BuiltinCommandFileDescriptor(std::move(content)));
+    }
+
+    ssize_t Read(void* buf, size_t count) override {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const size_t toCopy = std::min(count, m_content.size() - m_position);
+        std::memcpy(buf, m_content.data() + m_position, toCopy);
+        m_position += toCopy;
+        return static_cast<ssize_t>(toCopy);
+    }
+
+    ssize_t Write(const void* /*buf*/, size_t /*count*/) override {
+        return kIOError;
+    }
+
+    bool IsTerminal() const override { return false; }
+
+private:
+    explicit BuiltinCommandFileDescriptor(std::string content) : m_content(std::move(content)) {}
+
+    std::mutex m_mutex;
+    const std::string m_content;
+    size_t m_position = 0;
+};
+
 } // namespace
 
 void MountableFileSystem::Mount(const std::string& whereToMount, std::shared_ptr<IFileSystem> toBeMounted) {
@@ -29,105 +60,43 @@ void MountableFileSystem::Unmount(const std::string& mountedPath) {
     m_mounts.Unmount(AbsolutePathFor(mountedPath));
 }
 
-int MountableFileSystem::OpenFile(const std::string& pathname, int flags) {
+std::shared_ptr<IFileDescriptor> MountableFileSystem::OpenFile(const std::string& pathname, int flags) {
     const std::string absolute = AbsolutePathFor(pathname);
-    int builtinFd = -1;
-    if (OpenOwnBuiltin(absolute, flags, builtinFd)) {
-        return builtinFd;
+    std::shared_ptr<IFileDescriptor> builtinFile;
+    if (OpenOwnBuiltin(absolute, flags, builtinFile)) {
+        return builtinFile;
     }
     auto route = m_mounts.Resolve(absolute);
     if (route.filesystem) {
-        return m_mounts.RegisterFd(route.filesystem, route.filesystem->OpenFile(route.innerPath, flags));
+        return route.filesystem->OpenFile(route.innerPath, flags);
     }
     return LocalOpenFile(pathname, flags);
 }
 
-int MountableFileSystem::OpenFile(const std::string& pathname, int flags, int mode) {
+std::shared_ptr<IFileDescriptor> MountableFileSystem::OpenFile(const std::string& pathname, int flags, int mode) {
     const std::string absolute = AbsolutePathFor(pathname);
-    int builtinFd = -1;
-    if (OpenOwnBuiltin(absolute, flags, builtinFd)) {
-        return builtinFd;
+    std::shared_ptr<IFileDescriptor> builtinFile;
+    if (OpenOwnBuiltin(absolute, flags, builtinFile)) {
+        return builtinFile;
     }
     auto route = m_mounts.Resolve(absolute);
     if (route.filesystem) {
-        return m_mounts.RegisterFd(route.filesystem, route.filesystem->OpenFile(route.innerPath, flags, mode));
+        return route.filesystem->OpenFile(route.innerPath, flags, mode);
     }
     return LocalOpenFile(pathname, flags, mode);
 }
 
-bool MountableFileSystem::OpenOwnBuiltin(const std::string& absolute, int flags, int& outFd) {
+bool MountableFileSystem::OpenOwnBuiltin(const std::string& absolute, int flags, std::shared_ptr<IFileDescriptor>& outFile) {
     // A builtin of this filesystem's own shadows whatever is beneath it, a
     // mount included. It is read-only: its text is all there is to it.
     auto builtin = OwnBuiltinAt(absolute);
     if (!builtin) {
         return false;
     }
-    if (RequestsWriteAccess(flags)) {
-        outFd = -1;
-        return true;
+    if (!RequestsWriteAccess(flags)) {
+        outFile = BuiltinCommandFileDescriptor::Create(BuiltinCommandFileContent(*builtin));
     }
-    outFd = MountPoints::AllocateSyntheticFd();
-    std::lock_guard<std::mutex> lock(m_builtinsMutex);
-    m_builtinFiles[outFd] = BuiltinFileHandle{BuiltinCommandFileContent(*builtin), 0};
     return true;
-}
-
-int MountableFileSystem::CloseFile(int fd) {
-    if (MountPoints::IsSynthetic(fd)) {
-        {
-            std::lock_guard<std::mutex> lock(m_builtinsMutex);
-            if (m_builtinFiles.erase(fd) > 0) {
-                return 0;
-            }
-        }
-        IFileSystem* filesystem = nullptr;
-        int innerFd = -1;
-        if (m_mounts.LookupFd(fd, filesystem, innerFd)) {
-            const int result = filesystem->CloseFile(innerFd);
-            m_mounts.ReleaseFd(fd);
-            return result;
-        }
-    }
-    return LocalCloseFile(fd);
-}
-
-ssize_t MountableFileSystem::ReadFile(int fd, void* buf, size_t count) {
-    if (MountPoints::IsSynthetic(fd)) {
-        {
-            std::lock_guard<std::mutex> lock(m_builtinsMutex);
-            auto it = m_builtinFiles.find(fd);
-            if (it != m_builtinFiles.end()) {
-                BuiltinFileHandle& handle = it->second;
-                const size_t toCopy = std::min(count, handle.content.size() - handle.position);
-                std::memcpy(buf, handle.content.data() + handle.position, toCopy);
-                handle.position += toCopy;
-                return static_cast<ssize_t>(toCopy);
-            }
-        }
-        IFileSystem* filesystem = nullptr;
-        int innerFd = -1;
-        if (m_mounts.LookupFd(fd, filesystem, innerFd)) {
-            return filesystem->ReadFile(innerFd, buf, count);
-        }
-    }
-    return LocalReadFile(fd, buf, count);
-}
-
-ssize_t MountableFileSystem::WriteFile(int fd, const void* buf, size_t count) {
-    if (MountPoints::IsSynthetic(fd)) {
-        {
-            std::lock_guard<std::mutex> lock(m_builtinsMutex);
-            if (m_builtinFiles.count(fd) > 0) {
-                return -1;
-            }
-        }
-        IFileSystem* filesystem = nullptr;
-        int innerFd = -1;
-        if (m_mounts.LookupFd(fd, filesystem, innerFd)) {
-            return filesystem->WriteFile(innerFd, buf, count);
-        }
-    }
-    return LocalWriteFile(fd, buf, count);
 }
 
 int MountableFileSystem::CreateDirectory(const std::string& pathname, int mode) {

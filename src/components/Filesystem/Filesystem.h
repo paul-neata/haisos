@@ -5,6 +5,28 @@
 
 namespace Haisos {
 
+// An open file of the host's disk: a wrapper over the host's own descriptor,
+// closing it when released. It is only ever made by FileSystem::LocalOpenFile.
+class HostFileDescriptor final : public IFileDescriptor {
+public:
+    static std::shared_ptr<HostFileDescriptor> Create(int hostFd) {
+        return std::shared_ptr<HostFileDescriptor>(new HostFileDescriptor(hostFd));
+    }
+    // Closes the host fd; logs a warning naming it if that fails.
+    ~HostFileDescriptor() override;
+
+    ssize_t Read(void* buf, size_t count) override;
+    ssize_t Write(const void* buf, size_t count) override;
+    // Always false: only console descriptors are terminals, whatever the host
+    // fd is.
+    bool IsTerminal() const override { return false; }
+
+private:
+    explicit HostFileDescriptor(int hostFd) : m_hostFd(hostFd) {}
+
+    const int m_hostFd;
+};
+
 // The host's own file calls, on host paths, unrooted: whatever path it is
 // handed is where it goes. Paths and names are UTF-8 on every platform; on
 // Windows they reach the host through its UTF-16 ("W") calls, so any name
@@ -17,11 +39,8 @@ public:
     }
     ~FileSystem() override = default;
 
-    int LocalOpenFile(const std::string& pathname, int flags) override;
-    int LocalOpenFile(const std::string& pathname, int flags, int mode) override;
-    int LocalCloseFile(int fd) override;
-    ssize_t LocalReadFile(int fd, void* buf, size_t count) override;
-    ssize_t LocalWriteFile(int fd, const void* buf, size_t count) override;
+    std::shared_ptr<IFileDescriptor> LocalOpenFile(const std::string& pathname, int flags) override;
+    std::shared_ptr<IFileDescriptor> LocalOpenFile(const std::string& pathname, int flags, int mode) override;
 
     int LocalCreateDirectory(const std::string& pathname, int mode) override;
     int LocalRemoveDirectory(const std::string& pathname) override;

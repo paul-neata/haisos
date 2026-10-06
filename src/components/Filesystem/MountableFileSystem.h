@@ -3,15 +3,13 @@
 #include <mutex>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include "MountPoints.h"
 #include "interfaces/IFileSystemService.h"
 
 namespace Haisos {
 
 // Implements IFileSystem's mount routing once, so every filesystem supports
-// Mount/Unmount identically instead of six classes each re-deriving it (and
-// each re-deriving the file-descriptor translation a mount needs).
+// Mount/Unmount identically instead of six classes each re-deriving it.
 //
 // A subclass implements the Local* operations, which see only the paths this
 // filesystem itself owns: anything at or under a mount point has already been
@@ -21,11 +19,8 @@ public:
     void Mount(const std::string& whereToMount, std::shared_ptr<IFileSystem> toBeMounted) final;
     void Unmount(const std::string& mountedPath) final;
 
-    int OpenFile(const std::string& pathname, int flags) final;
-    int OpenFile(const std::string& pathname, int flags, int mode) final;
-    int CloseFile(int fd) final;
-    ssize_t ReadFile(int fd, void* buf, size_t count) final;
-    ssize_t WriteFile(int fd, const void* buf, size_t count) final;
+    std::shared_ptr<IFileDescriptor> OpenFile(const std::string& pathname, int flags) final;
+    std::shared_ptr<IFileDescriptor> OpenFile(const std::string& pathname, int flags, int mode) final;
     int CreateDirectory(const std::string& pathname, int mode) final;
     int RemoveDirectory(const std::string& pathname) final;
     int RemoveFile(const std::string& pathname) final;
@@ -43,11 +38,8 @@ protected:
     // what a path means.
     virtual std::string AbsolutePathFor(const std::string& path) const = 0;
 
-    virtual int LocalOpenFile(const std::string& pathname, int flags) = 0;
-    virtual int LocalOpenFile(const std::string& pathname, int flags, int mode) = 0;
-    virtual int LocalCloseFile(int fd) = 0;
-    virtual ssize_t LocalReadFile(int fd, void* buf, size_t count) = 0;
-    virtual ssize_t LocalWriteFile(int fd, const void* buf, size_t count) = 0;
+    virtual std::shared_ptr<IFileDescriptor> LocalOpenFile(const std::string& pathname, int flags) = 0;
+    virtual std::shared_ptr<IFileDescriptor> LocalOpenFile(const std::string& pathname, int flags, int mode) = 0;
     virtual int LocalCreateDirectory(const std::string& pathname, int mode) = 0;
     virtual int LocalRemoveDirectory(const std::string& pathname) = 0;
     virtual int LocalRemoveFile(const std::string& pathname) = 0;
@@ -66,16 +58,10 @@ protected:
     virtual bool LocalCanHoldBuiltinCommands() const { return true; }
 
 private:
-    // An open builtin command file: its text, and how far it has been read.
-    struct BuiltinFileHandle {
-        std::string content;
-        size_t position = 0;
-    };
-
     // If one of this filesystem's own builtins is at |absolute|, opens it --
-    // read-only, so asking to write fails with outFd = -1 -- and returns true;
-    // otherwise returns false and the path is someone else's to open.
-    bool OpenOwnBuiltin(const std::string& absolute, int flags, int& outFd);
+    // read-only, so asking to write fails with a null outFile -- and returns
+    // true; otherwise returns false and the path is someone else's to open.
+    bool OpenOwnBuiltin(const std::string& absolute, int flags, std::shared_ptr<IFileDescriptor>& outFile);
     // The builtin this filesystem itself placed at |absolute|, if any.
     std::optional<std::string> OwnBuiltinAt(const std::string& absolute) const;
     // Whether any of this filesystem's own builtins is at or below |absolute|,
@@ -100,9 +86,6 @@ private:
     // Absolute path -> builtin, for the builtins placed on this filesystem
     // itself (not those seen through a mount or an underlying one).
     std::map<std::string, Builtin> m_builtins;
-    // Keyed by synthetic fds (MountPoints::AllocateSyntheticFd), which no real
-    // or mounted descriptor can share.
-    std::unordered_map<int, BuiltinFileHandle> m_builtinFiles;
 };
 
 }

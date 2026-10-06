@@ -78,10 +78,9 @@ protected:
     }
 
     void WriteFile(const std::string& path, const std::string& content) {
-        const int fd = root->OpenFile(path, kFileOpenWriteCreateTruncate, kFileCreateMode);
-        ASSERT_GE(fd, 0) << path;
-        root->WriteFile(fd, content.data(), content.size());
-        root->CloseFile(fd);
+        auto file = root->OpenFile(path, kFileOpenWriteCreateTruncate, kFileCreateMode);
+        ASSERT_NE(file, nullptr) << path;
+        file->Write(content.data(), content.size());
     }
 
     // Runs /bin/<command> with args from workingDirectory, waits for it, and
@@ -284,7 +283,7 @@ TEST_F(BuiltinCommandsTest, AProcessCanReadButNotWriteABuiltin) {
     std::string content;
     ASSERT_TRUE(ReadWholeFile(*io, "/bin/ls", content));
     EXPECT_EQ(content, BuiltinCommandFileContent("ls"));
-    EXPECT_LT(io->OpenFile("/bin/ls", kFileOpenWriteCreateTruncate, kFileCreateMode), 0);
+    EXPECT_LT(io->OpenFile("/bin/ls", kFileOpenWriteCreateTruncate, kFileCreateMode), 0);  // IFileIO keeps int fds in this task
     EXPECT_NE(io->RemoveFile("/bin/ls"), 0);
     EXPECT_NE(io->RemoveDirectory("/bin"), 0);
 }

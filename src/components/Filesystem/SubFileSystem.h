@@ -17,11 +17,8 @@ public:
     static std::shared_ptr<SubFileSystem> Create(std::shared_ptr<IFileSystem> root, const std::string& basePath);
     ~SubFileSystem() override;
 
-    int LocalOpenFile(const std::string& pathname, int flags) override;
-    int LocalOpenFile(const std::string& pathname, int flags, int mode) override;
-    int LocalCloseFile(int fd) override;
-    ssize_t LocalReadFile(int fd, void* buf, size_t count) override;
-    ssize_t LocalWriteFile(int fd, const void* buf, size_t count) override;
+    std::shared_ptr<IFileDescriptor> LocalOpenFile(const std::string& pathname, int flags) override;
+    std::shared_ptr<IFileDescriptor> LocalOpenFile(const std::string& pathname, int flags, int mode) override;
 
     int LocalCreateDirectory(const std::string& pathname, int mode) override;
     int LocalRemoveDirectory(const std::string& pathname) override;

@@ -11,19 +11,20 @@
 #undef RemoveDirectory
 #undef GetCurrentDirectory
 #include <cstring>
+#include <climits>
 #include <string>
 #include <algorithm>
+#include "src/components/Logger/Logger.h"
 #include "src/components/libheaders/CrtInvalidParameterAsError.h"
 #include "src/components/libheaders/WideText.h"
 
 namespace Haisos {
 
 // Every C runtime call below runs with a CrtInvalidParameterAsError in scope.
-// A descriptor is an int any caller may hand in, and the CRT meets one that
-// is not open -- or a count it will not take -- by ending the whole program
-// through its invalid parameter handler, where close() and read() on POSIX
-// just fail. In scope, the call fails with -1 as the IFileSystem contract
-// says, and only the caller hears of it.
+// The CRT meets a descriptor that is not open -- or a count it will not take --
+// by ending the whole program through its invalid parameter handler, where
+// close() and read() on POSIX just fail. In scope, the call fails with -1 as
+// the IFileDescriptor contract says, and only the caller hears of it.
 //
 // Paths arrive as UTF-8 and reach Windows as UTF-16, through the "W" calls:
 // the narrow ones read a path in the ANSI code page, where a name such as
@@ -42,6 +43,30 @@ bool ToWidePath(const std::string& pathname, std::wstring& wide) {
 
 } // namespace
 
+HostFileDescriptor::~HostFileDescriptor() {
+    CrtInvalidParameterAsError crtErrors;
+    if (::_close(m_hostFd) != 0) {
+        LogWarning("HostFileDescriptor: closing host fd %d failed (errno %d)", m_hostFd, errno);
+    }
+}
+
+ssize_t HostFileDescriptor::Read(void* buf, size_t count) {
+    NoCriticalErrorDialogs noDialogs;
+    CrtInvalidParameterAsError crtErrors;
+    // A short read is allowed; a silently truncated count is not.
+    const size_t capped = (std::min)(count, static_cast<size_t>(INT_MAX));
+    const int n = ::_read(m_hostFd, buf, static_cast<unsigned int>(capped));
+    return n < 0 ? kIOError : n;
+}
+
+ssize_t HostFileDescriptor::Write(const void* buf, size_t count) {
+    NoCriticalErrorDialogs noDialogs;
+    CrtInvalidParameterAsError crtErrors;
+    const size_t capped = (std::min)(count, static_cast<size_t>(INT_MAX));
+    const int n = ::_write(m_hostFd, buf, static_cast<unsigned int>(capped));
+    return n < 0 ? kIOError : n;
+}
+
 NoCriticalErrorDialogs::NoCriticalErrorDialogs()
     : m_previousMode(::GetThreadErrorMode())
 {
@@ -52,35 +77,26 @@ NoCriticalErrorDialogs::~NoCriticalErrorDialogs() {
     ::SetThreadErrorMode(m_previousMode, nullptr);
 }
 
-int FileSystem::LocalOpenFile(const std::string& pathname, int flags) {
+std::shared_ptr<IFileDescriptor> FileSystem::LocalOpenFile(const std::string& pathname, int flags) {
     NoCriticalErrorDialogs noDialogs;
     CrtInvalidParameterAsError crtErrors;
     std::wstring wide;
-    return ToWidePath(pathname, wide) ? ::_wopen(wide.c_str(), flags) : -1;
+    if (!ToWidePath(pathname, wide)) {
+        return nullptr;
+    }
+    const int fd = ::_wopen(wide.c_str(), flags);
+    return fd < 0 ? nullptr : HostFileDescriptor::Create(fd);
 }
 
-int FileSystem::LocalOpenFile(const std::string& pathname, int flags, int mode) {
+std::shared_ptr<IFileDescriptor> FileSystem::LocalOpenFile(const std::string& pathname, int flags, int mode) {
     NoCriticalErrorDialogs noDialogs;
     CrtInvalidParameterAsError crtErrors;
     std::wstring wide;
-    return ToWidePath(pathname, wide) ? ::_wopen(wide.c_str(), flags, mode) : -1;
-}
-
-int FileSystem::LocalCloseFile(int fd) {
-    CrtInvalidParameterAsError crtErrors;
-    return ::_close(fd);
-}
-
-ssize_t FileSystem::LocalReadFile(int fd, void* buf, size_t count) {
-    NoCriticalErrorDialogs noDialogs;
-    CrtInvalidParameterAsError crtErrors;
-    return ::_read(fd, buf, static_cast<unsigned int>(count));
-}
-
-ssize_t FileSystem::LocalWriteFile(int fd, const void* buf, size_t count) {
-    NoCriticalErrorDialogs noDialogs;
-    CrtInvalidParameterAsError crtErrors;
-    return ::_write(fd, buf, static_cast<unsigned int>(count));
+    if (!ToWidePath(pathname, wide)) {
+        return nullptr;
+    }
+    const int fd = ::_wopen(wide.c_str(), flags, mode);
+    return fd < 0 ? nullptr : HostFileDescriptor::Create(fd);
 }
 
 int FileSystem::LocalCreateDirectory(const std::string& pathname, int /*mode*/) {

@@ -45,9 +45,12 @@ public:
     virtual std::string ResolvePath(const std::string& path) const = 0;
 
     // --- The IFileSystem operations, on resolved paths ---
-    // Each is the counterpart of the IFileSystem method of the same name (see
-    // IFileSystem for what |flags| and |mode| mean, and for the file-descriptor
-    // contract); the only difference is that a relative path is allowed here.
+    // Unlike IFileSystem, whose OpenFile returns the IFileDescriptor itself,
+    // OpenFile/ReadFile/WriteFile/CloseFile here work through numbers of the
+    // process's own (never 0, 1 or 2), each standing for an IFileDescriptor the
+    // process holds. Otherwise each is the counterpart of the IFileSystem
+    // method of the same name (see IFileSystem for what |flags| and |mode|
+    // mean); the only difference is that a relative path is allowed here.
     // A failure to reach the OS at all is reported the same way as any other
     // failure: a negative result, or an empty listing.
     virtual int OpenFile(const std::string& pathname, int flags) = 0;

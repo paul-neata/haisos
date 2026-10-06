@@ -55,29 +55,85 @@ int ProcessFileIO::ChangeDirectory(const std::string& path) {
     return 0;
 }
 
+namespace {
+
+// Interim, until fd--process-table: put |file| into the process's number map
+// at the lowest number >= 3 not taken, and return that number.
+int AddOpenFile(std::map<int, std::shared_ptr<IFileDescriptor>>& openFiles,
+                std::mutex& mutex, std::shared_ptr<IFileDescriptor> file) {
+    std::lock_guard<std::mutex> lock(mutex);
+    int number = 3;
+    while (openFiles.count(number) > 0) {
+        ++number;
+    }
+    openFiles[number] = std::move(file);
+    return number;
+}
+
+} // namespace
+
 int ProcessFileIO::OpenFile(const std::string& pathname, int flags) {
     auto fs = RootFileSystem();
-    return fs ? fs->OpenFile(ResolvePath(pathname), flags) : -1;
+    if (!fs) {
+        return -1;
+    }
+    auto file = fs->OpenFile(ResolvePath(pathname), flags);
+    return file ? AddOpenFile(m_openFiles, m_openFilesMutex, std::move(file)) : -1;
 }
 
 int ProcessFileIO::OpenFile(const std::string& pathname, int flags, int mode) {
     auto fs = RootFileSystem();
-    return fs ? fs->OpenFile(ResolvePath(pathname), flags, mode) : -1;
+    if (!fs) {
+        return -1;
+    }
+    auto file = fs->OpenFile(ResolvePath(pathname), flags, mode);
+    return file ? AddOpenFile(m_openFiles, m_openFilesMutex, std::move(file)) : -1;
 }
 
+// Interim, until fd--process-table: the three below look the descriptor up by
+// its number and act on the object itself -- the OS is not needed any more,
+// since a descriptor works on its own. The shared_ptr is taken out under the
+// mutex and used after it is released, so a CloseFile racing a ReadFile does
+// not tear the descriptor down beneath it.
 int ProcessFileIO::CloseFile(int fd) {
-    auto fs = RootFileSystem();
-    return fs ? fs->CloseFile(fd) : -1;
+    std::shared_ptr<IFileDescriptor> file;
+    {
+        std::lock_guard<std::mutex> lock(m_openFilesMutex);
+        auto it = m_openFiles.find(fd);
+        if (it == m_openFiles.end()) {
+            return -1;
+        }
+        file = std::move(it->second);
+        m_openFiles.erase(it);
+    }
+    file.reset();
+    return 0;
 }
 
 ssize_t ProcessFileIO::ReadFile(int fd, void* buf, size_t count) {
-    auto fs = RootFileSystem();
-    return fs ? fs->ReadFile(fd, buf, count) : -1;
+    std::shared_ptr<IFileDescriptor> file;
+    {
+        std::lock_guard<std::mutex> lock(m_openFilesMutex);
+        auto it = m_openFiles.find(fd);
+        if (it == m_openFiles.end()) {
+            return -1;
+        }
+        file = it->second;
+    }
+    return file->Read(buf, count);
 }
 
 ssize_t ProcessFileIO::WriteFile(int fd, const void* buf, size_t count) {
-    auto fs = RootFileSystem();
-    return fs ? fs->WriteFile(fd, buf, count) : -1;
+    std::shared_ptr<IFileDescriptor> file;
+    {
+        std::lock_guard<std::mutex> lock(m_openFilesMutex);
+        auto it = m_openFiles.find(fd);
+        if (it == m_openFiles.end()) {
+            return -1;
+        }
+        file = it->second;
+    }
+    return file->Write(buf, count);
 }
 
 int ProcessFileIO::CreateDirectory(const std::string& pathname, int mode) {

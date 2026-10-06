@@ -23,10 +23,9 @@ constexpr int kDirMode = S_IRWXU;
 const std::string kPhysicalRoot = (std::filesystem::temp_directory_path() / "haisos_stat_test").u8string();
 
 void Write(IFileSystem& fs, const std::string& path, const std::string& content) {
-    const int fd = fs.OpenFile(path, kFileOpenWriteCreateTruncate, kFileCreateMode);
-    ASSERT_GE(fd, 0) << path;
-    ASSERT_EQ(fs.WriteFile(fd, content.data(), content.size()), static_cast<ssize_t>(content.size()));
-    fs.CloseFile(fd);
+    auto file = fs.OpenFile(path, kFileOpenWriteCreateTruncate, kFileCreateMode);
+    ASSERT_NE(file, nullptr) << path;
+    ASSERT_EQ(file->Write(content.data(), content.size()), static_cast<ssize_t>(content.size()));
 }
 
 // Seconds either side of now that a freshly written file's time may fall in.

@@ -9,20 +9,19 @@
 
 namespace Haisos {
 
+class InMemoryFileDescriptor;
+
 // An empty, in-memory, read/write IFileSystem. Files are held as plain byte
 // buffers keyed by normalized path; there is no backing real disk. Intended
 // for scratch/temporary filesystems and as a mount target (see
 // IFileSystemService::CreateComposedFileSystem).
-class InMemoryFileSystem : public MountableFileSystem {
+class InMemoryFileSystem : public MountableFileSystem, public std::enable_shared_from_this<InMemoryFileSystem> {
 public:
     static std::shared_ptr<InMemoryFileSystem> Create();
     ~InMemoryFileSystem() override;
 
-    int LocalOpenFile(const std::string& pathname, int flags) override;
-    int LocalOpenFile(const std::string& pathname, int flags, int mode) override;
-    int LocalCloseFile(int fd) override;
-    ssize_t LocalReadFile(int fd, void* buf, size_t count) override;
-    ssize_t LocalWriteFile(int fd, const void* buf, size_t count) override;
+    std::shared_ptr<IFileDescriptor> LocalOpenFile(const std::string& pathname, int flags) override;
+    std::shared_ptr<IFileDescriptor> LocalOpenFile(const std::string& pathname, int flags, int mode) override;
 
     int LocalCreateDirectory(const std::string& pathname, int mode) override;
     int LocalRemoveDirectory(const std::string& pathname) override;
@@ -34,6 +33,8 @@ public:
 
 private:
     InMemoryFileSystem();
+
+    friend class InMemoryFileDescriptor;
 
     struct Node {
         bool isDirectory = false;
@@ -57,15 +58,17 @@ private:
     // Marks a directory's entry list as changed now. Must be called with
     // m_mutex held.
     void TouchDirectory(const std::string& normalizedPath);
-    struct OpenHandle {
-        std::string path;
-        size_t position = 0;
-    };
+
+    // The read/write of a descriptor opened on |normalizedPath|, at its shared
+    // |position|. WriteAt with |append| writes at the current end of the file
+    // before every write, as O_APPEND does on POSIX. A node that is gone
+    // (removed) gives kIOError. Both take m_mutex; the descriptor's position
+    // is only ever touched inside them, under it.
+    ssize_t ReadAt(const std::string& normalizedPath, size_t& position, void* buf, size_t count);
+    ssize_t WriteAt(const std::string& normalizedPath, size_t& position, bool append, const void* buf, size_t count);
 
     mutable std::mutex m_mutex;
     std::unordered_map<std::string, Node> m_nodes;
-    std::unordered_map<int, OpenHandle> m_openHandles;
-    int m_nextFd = 3;
 };
 
 }

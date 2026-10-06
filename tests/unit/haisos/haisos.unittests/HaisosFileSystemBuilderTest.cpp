@@ -40,12 +40,7 @@ protected:
 };
 
 bool FileExists(IFileSystem& fs, const std::string& path) {
-    int fd = fs.OpenFile(path, kReadOnly);
-    if (fd < 0) {
-        return false;
-    }
-    fs.CloseFile(fd);
-    return true;
+    return fs.OpenFile(path, kReadOnly) != nullptr;
 }
 
 } // namespace

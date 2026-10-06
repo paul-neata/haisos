@@ -20,7 +20,7 @@ Pause: no
 | 13 | [hsh--lexer](tasks/hsh--lexer.md) | done | 0.4.12 | 9 | #30 | 1 | 2H fixed, 3M 2L open | 3M dash differences folded into later hsh plans |
 | 14 | [hsh--parser](tasks/hsh--parser.md) | done | 0.4.13 | 13 | #31 | 1 | 2H fixed, 2M 3L open | |
 | 15 | [hsh--arith-glob](tasks/hsh--arith-glob.md) | done | 0.4.14 | 13 | #32 | 1 | 1C fixed, 2M 2L open | reviewer fixed a Windows-only hang (MSVC strtoimax on "0x") |
-| 16 | [hsh--expansion](tasks/hsh--expansion.md) | todo | | 14, 15 | | | | |
+| 16 | [hsh--expansion](tasks/hsh--expansion.md) | in-progress | 0.4.16 | 14, 15 | | | | |
 | 17 | [hsh--executor](tasks/hsh--executor.md) | todo | | 8, 16 | | | | |
 | 18 | [hsh--redirections](tasks/hsh--redirections.md) | todo | | 11, 17 | | | | |
 | 19 | [hsh--pipelines](tasks/hsh--pipelines.md) | todo | | 18 | | | | |
@@ -52,3 +52,4 @@ Pause: no
 - 2026-10-06 15:22 (implement) hsh--parser refreshed: checked against a8381c6; preliminary fixes from #30's review: Lexer move ops / unused ctor removed, heredoc \<newline> joining before an unquoted delimiter (dash), with tests
 - 2026-10-06 16:07 (implement) hsh--arith-glob refreshed: checked against 4f49203, no content changes needed
 - 2026-10-06 16:59 (implement) streams--coroutine-latch run before hsh--expansion, per the plan direction; its plan is current (checked against 7e857e9). The 5 dash follow-ups from #30-#32 still go into hsh--expansion's re-check
+- 2026-10-06 17:31 (implement) hsh--expansion refreshed: checked against 608b6cc; preliminary dash fixes folded in -- pattern-operand `'` quoting (#30), the missing 'Source text'/'AST dump' docs (#31), arithmetic assignment lookup order (#32); size ~1090. Two more (#31 heredoc odd-backslash join, #32 glob bracket never spans '/') moved to hsh--redirections' re-check to keep this task under ~1100 lines

@@ -2,8 +2,8 @@
 
 - Rock: hsh
 - Depends on: hsh--parser, hsh--arith-glob
-- Size: ~1000 changed lines in ~8 files (pattern matching, globbing and arithmetic were split out into hsh--arith-glob)
-- Plan checked against: develop @ 0d92271
+- Size: ~1090 changed lines in ~9 files (pattern matching, globbing and arithmetic were split out into hsh--arith-glob; includes three small preliminary fixes to hsh--lexer/hsh--parser/hsh--arith-glob, each with its own test)
+- Plan checked against: develop @ 608b6cc
 - PR title: hsh: shell variables and POSIX word expansion
 
 ## Goal
@@ -65,6 +65,42 @@ written.
 
 All in namespace `Haisos::Hsh`, in `src/components/BuiltinCommands/commands/hsh/`;
 plain portable C++17.
+
+### Preliminary fixes (to hsh--lexer, hsh--parser, hsh--arith-glob)
+
+hsh copies dash, so these are fixes toward the plan already agreed (`goal.md`),
+not scope changes. Each is small and gets its own test in the already-existing
+test file named (no `CMakeLists.txt` change needed for these three: the files
+are already in `Hsh.unittests`).
+
+1. **A pattern operand's own quotes, even inside double quotes** --
+   `HshLexer.cpp`, `ReadOperand` (~line 522, called from `ReadBracedParameter`
+   for the `#`/`##`/`%`/`%%` operand too): a `'` there must start real quoting
+   (`ReadSingleQuoted`) even when `dquote` is true, as dash does for a pattern
+   operand specifically -- today it is appended literally, tagged `Quoted`,
+   which is not the same thing. `ReadOperand` needs to know it is reading a
+   `#`/`##`/`%`/`%%` operand (a new bool parameter threaded from
+   `ReadBracedParameter`). Test: `HshLexerTest.cpp`, the word for
+   `"${x#'a'}"` has the `a` as a `Quoted` part, not a literal `'a'`; folded
+   into `HshExpansionTest.ParameterOps` too: `x=abc; echo "${x#'a'}"` -> `bc`.
+2. **Two doc sections `HshAst.h` already points to** -- `HshAst.h:73,128,133`
+   name a "Source text" section in `HshParser.h` and an "AST dump" section in
+   `commands/hsh/CLAUDE.md`; neither exists. Add "Source text" to
+   `HshParser.h` (how `ListItem::sourceText`/`FunctionDefinition::sourceText`
+   are cut from the lexer's token offsets -- already described in the CLAUDE.md
+   section "Reserved words and source text"; this is the matching reference
+   from the header) and "AST dump" to the CLAUDE.md (the one-line format
+   `DumpCommandList`/`DumpCommand` write, documented nowhere today though
+   `HshParserTest.cpp` already compares against it byte for byte). Documentation
+   only, no behaviour change: no new test, since the existing dump-comparison
+   tests already cover the format being written down.
+3. **Arithmetic assignment reads the variable at the right time** --
+   `HshArithmetic.cpp`, `ParseAssign` (~line 184): as dash, a plain `=` never
+   reads the variable's old value; a compound operator (`+=`, ...) reads it
+   only after the right-hand side has been evaluated, so a side effect in the
+   right-hand side is seen by the read. Test: `HshArithmeticTest.cpp`,
+   `x=abc; $((x=3))` gives `3` (today's left-to-right evaluation would try to
+   read non-numeric `abc`), `x=5; $((x += (x=2)))` gives `4`.
 
 ### `HshVariables.h` and `HshVariables.cpp` (new)
 
@@ -426,6 +462,7 @@ break), and `IExpansionHost` (the executor implements it with the process's
 
 ## Acceptance
 
+- [ ] The three preliminary fixes behave exactly as dash, per their tests.
 - [ ] Every type and function above exists with exactly these names, fields
       and signatures, in namespace `Haisos::Hsh`.
 - [ ] Expansion reads files only through `IExpansionHost` (no `IFileIO`,

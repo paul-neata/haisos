@@ -47,3 +47,4 @@
 - 2026-10-06 16:59 UTC -- questions answered; start streams--coroutine-latch (0.4.15) per direction
 - 2026-10-06 17:10 UTC -- streams--coroutine-latch: PR #33, ready
 - 2026-10-06 17:25 UTC -- streams--coroutine-latch merged #33 as 0.4.15: 1C 2H 1M fixed, 1M 1L open, 1 tries
+- 2026-10-06 17:31 UTC -- start hsh--expansion (0.4.16)

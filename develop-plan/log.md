@@ -55,3 +55,4 @@
 - 2026-10-06 19:39 UTC -- hsh--executor merged #35 as 0.4.17: 1M 3L open, 1 tries
 - 2026-10-06 19:45 UTC -- start hsh--redirections (0.4.18)
 - 2026-10-06 20:05 UTC -- hsh--redirections: PR #36, ready
+- 2026-10-06 20:14 UTC -- hsh--redirections merged #36 as 0.4.18: 1H fixed, 5L open, 1 tries

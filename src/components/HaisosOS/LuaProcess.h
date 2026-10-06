@@ -56,6 +56,10 @@ public:
     std::shared_ptr<IFileIO> IO() const override;
     std::shared_ptr<IAgent> AsAgent() override;
     std::shared_ptr<IHaisosOS> OS() const override;
+    // The script's own output paths (print and the error line) call this when a
+    // write hit a pipe with no reader: the script stops through the kill-hook
+    // machinery, quietly, with exit code 141 -- as SIGPIPE would have it.
+    void StopForBrokenPipe() override;
 
     // Internal to this component. Kill aborts the script through the Lua
     // instruction-count hook -- a Lua interpreter, unlike an agent, really can
@@ -118,6 +122,9 @@ private:
     std::thread m_thread;
     std::atomic<bool> m_finished{false};
     std::atomic<bool> m_killed{false};
+    // Set by StopForBrokenPipe, from the script's own thread as it writes: an
+    // output pipe lost its reader. Decides 141, checked before everything else.
+    std::atomic<bool> m_brokenPipe{false};
     // What wakes a pipe Read/Write blocked on this process's behalf: installed
     // on the script's thread by RunThread, signalled by Kill. A script's exit()
     // does not touch it: exit() ends the script by unwinding, not by blocking.

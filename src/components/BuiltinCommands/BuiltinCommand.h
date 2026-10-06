@@ -133,9 +133,9 @@ public:
 private:
     // The one place a builtin's bytes reach a descriptor: loops over partial
     // writes until every byte is out; a null descriptor or a negative result
-    // stops the loop and returns false.
-    // Seam for pipes--pipe-service: a kIOBrokenPipe result here is where that
-    // task makes the command stop quietly with exit code 141.
+    // stops the loop and returns false. A kIOBrokenPipe result -- the reader of
+    // the pipe is gone -- stops the process quietly with exit code 141, as
+    // SIGPIPE would, on stdout and stderr alike; everything after is dropped.
     bool WriteAll(IFileDescriptor* descriptor, const std::string& bytes);
 
     ICurrentProcess& m_process;
@@ -151,6 +151,10 @@ private:
     std::string m_outBuffer;
     // Once a write to stdout has failed, later stdout output is dropped.
     bool m_outFailed = false;
+    // Once a write has hit a pipe with no reader, StopForBrokenPipe has been
+    // called and the program is dying quietly: every later write, stderr's
+    // included, is dropped.
+    bool m_brokenPipe = false;
     std::vector<std::string> m_reportedNotTreated;
 };
 

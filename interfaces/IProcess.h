@@ -94,6 +94,17 @@ public:
     // not an agent.
     virtual std::shared_ptr<IAgent> AsAgent() = 0;
 
+    // Called by this process's own runtime when a write its program made to one
+    // of its descriptors returned kIOBrokenPipe: the program stops as TriggerStop
+    // would, quietly -- nothing is printed -- and the process's exit code is 141
+    // (ProcessEnd::BrokenPipe), whatever else happens afterwards: a later
+    // TriggerStop does not make it 143. Idempotent. On the inside view because only
+    // a process decides this about itself, as a Linux program gets SIGPIPE for its
+    // own write. Code that would rather handle the error (a shell writing a
+    // heredoc) just gets kIOBrokenPipe from IFileDescriptor::Write and carries on:
+    // nothing in IFileIO or the pipe calls this.
+    virtual void StopForBrokenPipe() = 0;
+
     // The OS this process is part of, and everything it may reach outside
     // itself beyond its own files (see the note above this class).
     //

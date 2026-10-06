@@ -21,6 +21,11 @@ void ProcessAgentConsole::WriteError(const std::string& message) {
 }
 
 void ProcessAgentConsole::WriteLineToDescriptor(int fd, const std::string& message) {
+    if (m_brokenPipe) {
+        // The agent is already dying quietly for an earlier broken pipe:
+        // nothing more is written.
+        return;
+    }
     // This shared_ptr may be the last reference to the process, on the agent's
     // own thread: safe because AgentProcess uses the DestroyOffRuntimeThreads
     // deleter and the agent's thread runs in a RuntimeThreadScope.
@@ -41,8 +46,14 @@ void ProcessAgentConsole::WriteLineToDescriptor(int fd, const std::string& messa
     size_t written = 0;
     while (written < bytes.size()) {
         const ssize_t n = descriptor->Write(bytes.data() + written, bytes.size() - written);
-        // Seam for pipes--pipe-service: a kIOBrokenPipe here is where that
-        // task makes the agent stop quietly (exit 141).
+        if (n == kIOBrokenPipe) {
+            // The pipe's reader is gone: the agent stops quietly, exit code
+            // 141, as a program stopped by SIGPIPE does. Releasing this
+            // shared_ptr to the process here is safe for the reason above.
+            m_brokenPipe = true;
+            process->StopForBrokenPipe();
+            return;
+        }
         if (n < 0) {
             return;
         }

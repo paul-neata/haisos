@@ -249,6 +249,70 @@ TEST_F(HaisosOSPipeTest, ABuiltinBlockedOnAFullPipeStopsWhenAskedTo) {
     EXPECT_EQ(ReadToEndOfFile(ends.readEnd.get()), std::string(kDefaultPipeCapacity, 'x'));
 }
 
+// A Lua print into a pipe whose reader is gone stops the script quietly with
+// 141 -- before the instruction that follows the print, as SIGPIPE would.
+TEST_F(HaisosOSPipeTest, ALuaScriptPrintingIntoAPipeWithNoReaderExits141) {
+    WriteFile(m_root, "/p.lua",
+        "print(\"a\")\n"
+        "os_write_file({path = '/after.txt', content = 'x'})\n");
+    auto ends = m_os->GetPipeService()->CreatePipe();
+    // The read end released before the start: nobody can ever read this pipe.
+    ends.readEnd.reset();
+    StartProcessOptions options;
+    options.stdOut = ends.writeEnd;
+    auto process = m_os->StartProcess(TestEnvironment(), "/p.lua", {}, "", options);
+    ends.writeEnd.reset();
+    options.stdOut.reset();
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    ASSERT_TRUE(process->ExitCode().has_value());
+    EXPECT_EQ(*process->ExitCode(), kExitCodeBrokenPipe);
+    // The script stopped at once: os_write_file never ran, and nothing was
+    // printed about any of it.
+    EXPECT_FALSE(EntryTypeOf(*m_root, "/after.txt").has_value());
+    EXPECT_TRUE(m_console->Written().empty());
+    EXPECT_TRUE(m_console->WrittenError().empty());
+}
+
+// The error line of a failed script goes into a pipe nobody reads: the script
+// ends 141, not 1, and the line is dropped, as a standalone lua stopped by
+// SIGPIPE would be.
+TEST_F(HaisosOSPipeTest, ALuaErrorLineIntoAPipeWithNoReaderExits141) {
+    WriteFile(m_root, "/e.lua", "error(\"boom\")\n");
+    auto ends = m_os->GetPipeService()->CreatePipe();
+    ends.readEnd.reset();
+    StartProcessOptions options;
+    options.stdErr = ends.writeEnd;
+    auto process = m_os->StartProcess(TestEnvironment(), "/e.lua", {}, "", options);
+    ends.writeEnd.reset();
+    options.stdErr.reset();
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    ASSERT_TRUE(process->ExitCode().has_value());
+    EXPECT_EQ(*process->ExitCode(), kExitCodeBrokenPipe);
+    EXPECT_TRUE(m_console->Written().empty());
+    EXPECT_TRUE(m_console->WrittenError().empty());
+}
+
+// An agent's diagnostic into a pipe whose reader is gone stops it quietly with
+// 141. The unreachable endpoint makes it write "Error: HTTP request failed..."
+// to its stderr -- straight into the readerless pipe.
+TEST_F(HaisosOSPipeTest, AnAgentWritingIntoAPipeWithNoReaderExits141) {
+    auto ends = m_os->GetPipeService()->CreatePipe();
+    ends.readEnd.reset();
+    StartProcessOptions options;
+    options.stdErr = ends.writeEnd;
+    auto process = m_os->StartProcess(TestEnvironment(), "/a.md", {}, "", options);
+    ends.writeEnd.reset();
+    options.stdErr.reset();
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    ASSERT_TRUE(process->ExitCode().has_value());
+    EXPECT_EQ(*process->ExitCode(), kExitCodeBrokenPipe);
+    EXPECT_TRUE(m_console->Written().empty());
+    EXPECT_TRUE(m_console->WrittenError().empty());
+}
+
 TEST_F(HaisosOSPipeTest, AStopOfAnInteractiveAgentInterruptsItsPipedStdin) {
     auto ends = m_os->GetPipeService()->CreatePipe();
     // Released on every path: left open, a failed assertion would leave the

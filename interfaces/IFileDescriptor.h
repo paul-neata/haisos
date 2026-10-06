@@ -28,9 +28,10 @@ constexpr ssize_t kIOInterrupted = -3;  // the calling process was asked to stop
 // EBADF would.
 //
 // Only a pipe, console input or console output may block in Read or Write --
-// none exist yet, so nothing here blocks. kIOBrokenPipe and kIOInterrupted are
-// reserved for pipes (the pipes--pipe-service task); no filesystem descriptor
-// returns them.
+// of these, only the console descriptors exist so far (ConsoleDescriptors.h in
+// the Console component), and only console input blocks. kIOBrokenPipe and
+// kIOInterrupted are reserved for pipes (the pipes--pipe-service task); no
+// filesystem descriptor returns them.
 //
 // A descriptor keeps working after its file's filesystem is unmounted, and
 // after the last outside reference to that filesystem is gone, until the

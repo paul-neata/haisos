@@ -61,6 +61,28 @@ task of the hsh rock and adds its files here:
   every later call returns it again. `ParseProgram()` parses the whole
   source into one list for `eval`, `.`, the text of a command substitution,
   and the tests.
+- `HshPattern.h/.cpp` - the one shell-pattern matcher (`MatchPattern`), to be
+  shared by pathname expansion, `case` and `${x#p}`/`${x%p}` (`RemovePattern`):
+  `*`, `?`, bracket expressions with `!` negation (never `^`: `[^a]` is the
+  set of `^` and `a`, as dash), ranges and ASCII `[:class:]`, and `\c`
+  escapes, over bytes. The classic two-index loop with backtracking to the
+  last `*` -- no recursion, no regex, no `fnmatch`.
+- `HshGlob.h/.cpp` - pathname expansion (`ExpandPathname`): walks the
+  pattern's components, reading directories only through `IPathnameSource`
+  (the executor implements it over the process's `IFileIO`, so globbing goes
+  through `ICurrentProcess` like every other file access; nothing here
+  touches `IFileIO` or the host). Results sorted byte by byte; names starting
+  with `.` only from a component with a literal leading `.` (`.*` also finds
+  `.` and `..`); nothing found is an empty result, and the caller then keeps
+  the word as it was.
+- `HshArithmetic.h/.cpp` - `$((...))` evaluation (`EvaluateArithmetic`), as
+  dash: `intmax_t` with wrapping two's-complement arithmetic (computed in
+  `uintmax_t` -- no UB), shift counts modulo 64, `INTMAX_MIN / -1` giving
+  `INTMAX_MIN` where dash crashes, dash's operators and precedence only (no
+  `++`, `**` or `,`), assignments stored decimally through
+  `IArithmeticVariables`, short-circuit of `&&`, `||` and `?:` (the branch not
+  taken is parsed but never looked up, assigned or divided), and dash's error
+  messages byte for byte, thrown as `ShellError`.
 - (later tasks: expansion, the executor that registers the
   `hsh` builtin, the interactive loop.)
 

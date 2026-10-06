@@ -14,6 +14,9 @@ add_library(BuiltinCommands STATIC
     commands/hsh/HshLexer.cpp
     commands/hsh/HshAst.cpp
     commands/hsh/HshParser.cpp
+    commands/hsh/HshPattern.cpp
+    commands/hsh/HshGlob.cpp
+    commands/hsh/HshArithmetic.cpp
 )
 target_include_directories(BuiltinCommands PUBLIC
     ${CMAKE_SOURCE_DIR}/interfaces

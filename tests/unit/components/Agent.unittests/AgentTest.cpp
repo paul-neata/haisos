@@ -158,19 +158,23 @@ const LLMMessage* ToolResultFor(const std::vector<LLMMessage>& messages, const s
     return nullptr;
 }
 
-// A console that fails to write the line reporting an unknown tool, and records
+// A console that fails to report the line about an unknown tool, and records
 // everything else: the one way left to make a command fail between a response
-// asking for tools and the results going into the history.
+// asking for tools and the results going into the history. The unknown-tool
+// line is a diagnostic, so it now goes through WriteError.
 class ConsoleFailingOnUnknownTool : public IAgentConsole {
 public:
     void Write(const std::string& message) override {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_messages.push_back(message);
+    }
+    void WriteError(const std::string& message) override {
         if (message.find("Unknown tool") != std::string::npos) {
             throw std::runtime_error("the console is gone");
         }
         std::lock_guard<std::mutex> lock(m_mutex);
         m_messages.push_back(message);
     }
-    std::optional<std::string> ReadLine() override { return std::nullopt; }
 
     std::vector<std::string> GetMessages() const {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -697,10 +701,13 @@ TEST(AgentTest, AFailedCommandIsReportedAndAnInteractiveAgentGoesOn) {
 
     // The second command was still answered.
     EXPECT_EQ(mockLLM->GetCallCount(), 2);
+    // The failure is a diagnostic: the error stream, not the replies.
+    const auto errors = console->GetErrors();
+    ASSERT_EQ(errors.size(), 1u);
+    EXPECT_EQ(errors[0], "Error: the command failed: simulated failure");
     const auto messages = console->GetMessages();
-    ASSERT_EQ(messages.size(), 2u);
-    EXPECT_EQ(messages[0], "Error: the command failed: simulated failure");
-    EXPECT_EQ(messages[1], "answered");
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_EQ(messages[0], "answered");
     EXPECT_NE(agent->GetConsoleOutput().find("[test_agent] Error: the command failed: simulated failure"), std::string::npos);
 }
 
@@ -715,7 +722,42 @@ TEST(AgentTest, AFailedCommandEndsANonInteractiveAgentVisibly) {
     agent->Post("the only command");
     ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
 
-    EXPECT_TRUE(AnyContains(console->GetMessages(), "Error: the command failed: simulated failure"));
+    EXPECT_TRUE(AnyContains(console->GetErrors(), "Error: the command failed: simulated failure"));
+}
+
+// A response whose done reason marks a failure (the communicator's "error",
+// "parse_error", "http_error") is written as an error; an ordinary reply is a
+// message.
+TEST(AgentTest, AnErrorResponseIsWrittenAsAnError) {
+    {
+        auto mockLLM = std::make_shared<MockLLMCommunicator>();
+        mockLLM->SetMessageResponse("Error: x");
+        mockLLM->SetDoneReason("http_error");
+        auto console = std::make_shared<MockAgentConsole>();
+        auto agent = Agent::Create(mockLLM, ToolFactory::Create(), console,
+            std::vector<std::string>{"You are a helpful AI assistant."},
+            "test_agent", nullptr, /*startTime=*/"", /*interactive=*/false);
+
+        agent->Post("go");
+        ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
+
+        EXPECT_EQ(console->GetErrors(), std::vector<std::string>{"Error: x"});
+        EXPECT_TRUE(console->GetMessages().empty());
+    }
+    {
+        auto mockLLM = std::make_shared<MockLLMCommunicator>();
+        mockLLM->SetMessageResponse("a reply");
+        auto console = std::make_shared<MockAgentConsole>();
+        auto agent = Agent::Create(mockLLM, ToolFactory::Create(), console,
+            std::vector<std::string>{"You are a helpful AI assistant."},
+            "test_agent", nullptr, /*startTime=*/"", /*interactive=*/false);
+
+        agent->Post("go");
+        ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
+
+        EXPECT_EQ(console->GetMessages(), std::vector<std::string>{"a reply"});
+        EXPECT_TRUE(console->GetErrors().empty());
+    }
 }
 
 // A command cut short after a response asking for tools, but before their

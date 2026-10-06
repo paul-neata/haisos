@@ -269,9 +269,11 @@ Files\x"` is taken as written). A quote elsewhere in a token is part of it.
 (only in front of the path, in front of any program) sets `interactive` -- see
 `StartProcessOptions::interactive` in `interfaces/IHaisosOS.h`: the program's
 stdin is the console's input (instead of an input that ends at once), and a
-`.md` agent run so is interactive: after its program, every line typed on the
-console is posted to it, until it closes itself with the `self_close` tool
-(noticed when the next line arrives) or input ends.
+`.md` agent run so is interactive: after its program, every line read from its
+stdin -- the console's input here, though another descriptor can feed it when
+the process is started through `StartProcessOptions` -- is posted to it, until
+it closes itself with the `self_close` tool (noticed when the next line
+arrives) or input ends.
 
 `CREATE`/`APPEND` content is one of `'text'` / `"text"` (up to the next quote of
 the same kind; a comment may follow), `text:<rest of line>` (taken exactly as

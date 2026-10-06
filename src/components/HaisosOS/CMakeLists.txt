@@ -7,7 +7,7 @@ target_include_directories(ProcessFileIO PUBLIC
 )
 target_compile_features(ProcessFileIO PUBLIC cxx_std_17)
 
-add_library(HaisosOS STATIC HaisosOS.cpp AgentProcess.cpp AgentInputLoop.cpp OSToolFactory.cpp LuaProcess.cpp)
+add_library(HaisosOS STATIC HaisosOS.cpp AgentProcess.cpp AgentInputLoop.cpp OSToolFactory.cpp LuaProcess.cpp ProcessAgentConsole.cpp)
 target_include_directories(HaisosOS PUBLIC
     ${CMAKE_SOURCE_DIR}/interfaces
     ${CMAKE_SOURCE_DIR}/src/components/HaisosOS

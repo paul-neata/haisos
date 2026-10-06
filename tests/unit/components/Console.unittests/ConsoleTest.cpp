@@ -133,14 +133,15 @@ TEST(ConsoleTest, IsNotALogReceiver) {
     console->Stop();
 }
 
-TEST(AgentConsoleAdapterTest, ReadsLinesFromThePhysicalConsoleUntagged) {
+TEST(AgentConsoleAdapterTest, WriteErrorGoesToTheHostsStderr) {
     auto physical = std::make_shared<RecordingPhysicalConsole>();
-    physical->SetInput({"typed", ""});
     auto adapter = AgentConsoleAdapter::Create(physical);
 
-    EXPECT_EQ(adapter->ReadLine(), std::optional<std::string>("typed"));
-    EXPECT_EQ(adapter->ReadLine(), std::optional<std::string>(""));
-    EXPECT_EQ(adapter->ReadLine(), std::nullopt);
+    adapter->WriteError("e");
+
+    ASSERT_EQ(physical->GetErrorCalls().size(), 1u);
+    EXPECT_EQ(physical->GetErrorCalls()[0], "e\n");
+    EXPECT_TRUE(physical->GetOutCalls().empty());
 }
 
 TEST(ConsoleDescriptorTest, OutputWritesExactlyTheBytes) {
@@ -218,6 +219,9 @@ TEST(ConsoleDescriptorTest, NullConsoleDiscardsAndEnds) {
     EXPECT_EQ(in->Read(buf, sizeof(buf)), 0);
 }
 
-TEST(InMemoryAgentConsoleTest, HasNothingToRead) {
-    EXPECT_EQ(InMemoryAgentConsole::Create()->ReadLine(), std::nullopt);
+TEST(InMemoryAgentConsoleTest, AccumulatesWritesAndErrors) {
+    auto console = InMemoryAgentConsole::Create();
+    console->Write("said");
+    console->WriteError("failed");
+    EXPECT_EQ(console->GetContents(), "said\nfailed\n");
 }

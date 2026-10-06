@@ -1,10 +1,10 @@
 #include <gtest/gtest.h>
+#include <atomic>
 #include <chrono>
 #include <thread>
 #include "AgentInputLoop.h"
-#include "src/components/libheaders/SynchronizedQueue.h"
 #include "tests/mocks/MockAgent.h"
-#include "tests/mocks/MockAgentConsole.h"
+#include "tests/mocks/MockFileDescriptor.h"
 
 using namespace Haisos;
 using namespace Haisos::Mocks;
@@ -13,22 +13,19 @@ namespace {
 
 constexpr uint64_t kWaitMs = 5000;
 
-// A console whose ReadLine blocks until the test hands it a line (or end of
-// input, as nullopt), like a user who has not typed anything yet.
-class BlockingConsole : public IAgentConsole {
+// An input that counts its reads, so a test can tell whether any happened at
+// all. Everything else is MockFileDescriptor's: Feed() hands out bytes (as a
+// user typing a line would), EndInput() ends them.
+class CountingInput : public MockFileDescriptor {
 public:
-    void Write(const std::string&) override {}
-    std::optional<std::string> ReadLine() override {
-        std::optional<std::string> line;
-        if (!m_lines.Pop(line)) {
-            return std::nullopt;
-        }
-        return line;
+    ssize_t Read(void* buf, size_t count) override {
+        ++m_readCalls;
+        return MockFileDescriptor::Read(buf, count);
     }
-    void Type(std::optional<std::string> line) { m_lines.Post(std::move(line)); }
+    int ReadCalls() const { return m_readCalls.load(); }
 
 private:
-    SynchronizedQueue<std::optional<std::string>> m_lines;
+    std::atomic<int> m_readCalls{0};
 };
 
 template <typename Predicate>
@@ -45,26 +42,28 @@ bool WaitUntil(Predicate predicate) {
 
 } // namespace
 
-TEST(AgentInputLoopTest, CreateRefusesAMissingAgentOrConsole) {
-    EXPECT_EQ(AgentInputLoop::Create(nullptr, std::make_shared<MockAgentConsole>()), nullptr);
+TEST(AgentInputLoopTest, CreateRefusesAMissingAgentOrInput) {
+    EXPECT_EQ(AgentInputLoop::Create(nullptr, std::make_shared<MockFileDescriptor>()), nullptr);
     EXPECT_EQ(AgentInputLoop::Create(std::make_shared<MockAgent>(), nullptr), nullptr);
 }
 
 TEST(AgentInputLoopTest, ANotStartedLoopHasNotFinishedAndReadsNothing) {
     auto agent = std::make_shared<MockAgent>();
-    auto console = std::make_shared<MockAgentConsole>();
-    auto loop = AgentInputLoop::Create(agent, console);
+    auto input = std::make_shared<CountingInput>();
+    input->Feed("never read\n");
+    auto loop = AgentInputLoop::Create(agent, input);
     ASSERT_NE(loop, nullptr);
 
     EXPECT_FALSE(loop->WaitToFinish(0));
-    EXPECT_EQ(console->GetReadLineCalls(), 0);
+    EXPECT_EQ(input->ReadCalls(), 0);
 }
 
 TEST(AgentInputLoopTest, PostsEveryLineThenStopsTheAgentAtEndOfInput) {
     auto agent = std::make_shared<MockAgent>();
-    auto console = std::make_shared<MockAgentConsole>();
-    console->SetInputLines({"first", "", "second"});
-    auto loop = AgentInputLoop::Create(agent, console);
+    auto input = std::make_shared<MockFileDescriptor>();
+    input->Feed("first\n\nsecond\n");
+    input->EndInput();
+    auto loop = AgentInputLoop::Create(agent, input);
     loop->Start();
 
     ASSERT_TRUE(loop->WaitToFinish(kWaitMs));
@@ -74,26 +73,50 @@ TEST(AgentInputLoopTest, PostsEveryLineThenStopsTheAgentAtEndOfInput) {
     EXPECT_TRUE(agent->WasStopTriggered());
 }
 
-TEST(AgentInputLoopTest, DoesNotReadForAnAgentThatHasAlreadyClosed) {
+TEST(AgentInputLoopTest, PostsALastLineWithoutNewline) {
     auto agent = std::make_shared<MockAgent>();
-    agent->SetFinished(true);
-    auto console = std::make_shared<MockAgentConsole>();
-    console->SetInputLines({"never read"});
-    auto loop = AgentInputLoop::Create(agent, console);
+    auto input = std::make_shared<MockFileDescriptor>();
+    input->Feed("a\nb");
+    input->EndInput();
+    auto loop = AgentInputLoop::Create(agent, input);
     loop->Start();
 
     ASSERT_TRUE(loop->WaitToFinish(kWaitMs));
-    EXPECT_EQ(console->GetReadLineCalls(), 0);
+    EXPECT_EQ(agent->GetCommands(), (std::vector<std::string>{"a", "b"}));
+}
+
+TEST(AgentInputLoopTest, StripsCarriageReturns) {
+    auto agent = std::make_shared<MockAgent>();
+    auto input = std::make_shared<MockFileDescriptor>();
+    input->Feed("x\r\n");
+    input->EndInput();
+    auto loop = AgentInputLoop::Create(agent, input);
+    loop->Start();
+
+    ASSERT_TRUE(loop->WaitToFinish(kWaitMs));
+    EXPECT_EQ(agent->GetCommands(), (std::vector<std::string>{"x"}));
+}
+
+TEST(AgentInputLoopTest, DoesNotReadForAnAgentThatHasAlreadyClosed) {
+    auto agent = std::make_shared<MockAgent>();
+    agent->SetFinished(true);
+    auto input = std::make_shared<CountingInput>();
+    input->Feed("never read\n");
+    auto loop = AgentInputLoop::Create(agent, input);
+    loop->Start();
+
+    ASSERT_TRUE(loop->WaitToFinish(kWaitMs));
+    EXPECT_EQ(input->ReadCalls(), 0);
     EXPECT_TRUE(agent->GetCommands().empty());
 }
 
 TEST(AgentInputLoopTest, ALineTypedAfterTheAgentClosedEndsTheLoopWithoutBeingPosted) {
     auto agent = std::make_shared<MockAgent>();
-    auto console = std::make_shared<BlockingConsole>();
-    auto loop = AgentInputLoop::Create(agent, console);
+    auto input = std::make_shared<MockFileDescriptor>();
+    auto loop = AgentInputLoop::Create(agent, input);
     loop->Start();
 
-    console->Type(std::string("hello"));
+    input->Feed("hello\n");
     ASSERT_TRUE(WaitUntil([&] { return agent->GetCommands().size() == 1; }));
 
     // The agent closes itself (self_close) while the loop waits for a line:
@@ -101,7 +124,7 @@ TEST(AgentInputLoopTest, ALineTypedAfterTheAgentClosedEndsTheLoopWithoutBeingPos
     agent->SetFinished(true);
     EXPECT_FALSE(loop->WaitToFinish(50));
 
-    console->Type(std::string("too late"));
+    input->Feed("too late\n");
     ASSERT_TRUE(loop->WaitToFinish(kWaitMs));
     EXPECT_EQ(agent->GetCommands(), (std::vector<std::string>{"hello"}));
     // It closed by itself; there was nothing to ask it.

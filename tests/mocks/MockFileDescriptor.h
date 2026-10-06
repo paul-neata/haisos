@@ -30,12 +30,11 @@ public:
 
     ssize_t Write(const void* buf, size_t count) override {
         std::lock_guard<std::mutex> lock(m_mutex);
+        ++m_writeCalls;
         if (m_forcedWriteResult) {
             return *m_forcedWriteResult;
         }
         m_written.append(static_cast<const char*>(buf), count);
-        ++m_writeCalls;
-        ++m_writtenCalls;
         return static_cast<ssize_t>(count);
     }
 
@@ -84,7 +83,6 @@ private:
     std::condition_variable m_inputCv;
     std::string m_written;
     int m_writeCalls = 0;   // every Write call, failed ones included
-    int m_writtenCalls = 0; // calls that took bytes
     std::string m_input;
     bool m_inputEnded = false;
     std::optional<ssize_t> m_forcedWriteResult;

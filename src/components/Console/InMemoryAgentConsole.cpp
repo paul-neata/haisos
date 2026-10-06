@@ -8,8 +8,9 @@ void InMemoryAgentConsole::Write(const std::string& message) {
     m_contents.push_back('\n');
 }
 
-std::optional<std::string> InMemoryAgentConsole::ReadLine() {
-    return std::nullopt;
+void InMemoryAgentConsole::WriteError(const std::string& message) {
+    // In memory there is no second stream to keep diagnostics apart on.
+    Write(message);
 }
 
 std::string InMemoryAgentConsole::GetContents() const {

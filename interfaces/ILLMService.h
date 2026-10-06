@@ -93,19 +93,21 @@ public:
 };
 
 // A single agent's console. Deliberately minimal: an agent appends its own
-// output, and an interactive one is fed the lines its user types. Whether that
-// is the real console, memory, or nothing is decided by whoever creates it
-// (see IFactory).
+// output, and reports its own diagnostics. Whether that lands on the real
+// console, a process's descriptors, memory, or nothing is decided by whoever
+// creates it (see IFactory). Input is not here: an interactive process's agent
+// is fed from the process's stdin, by its input loop (see AgentInputLoop).
 class IAgentConsole {
 public:
     virtual ~IAgentConsole() = default;
+    // What the agent says: the text of one assistant message. How it is laid
+    // out is the console's business (a process's console writes it plus '\n'
+    // to the process's stdout).
     virtual void Write(const std::string& message) = 0;
-
-    // Blocks until the next line of input arrives and returns it, without its
-    // line ending; nullopt once no more input will ever arrive (see
-    // IPhysicalConsole::ReadLine). A console with nowhere to read from returns
-    // nullopt straight away.
-    virtual std::optional<std::string> ReadLine() = 0;
+    // A diagnostic about the agent's own running, not something it said: an
+    // LLM, HTTP or parse failure, an unknown tool, a failed command. A
+    // process's console writes it plus '\n' to the process's stderr.
+    virtual void WriteError(const std::string& message) = 0;
 };
 
 class ILLMService {

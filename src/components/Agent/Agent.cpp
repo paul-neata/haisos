@@ -39,6 +39,14 @@ std::string ToolCallName(const nlohmann::json& toolCall) {
     return StringField(toolCall, "name");
 }
 
+// Whether a response reports a failure rather than an answer: the three done
+// reasons the LLMCommunicator sets when the LLM reported an error, its reply
+// did not parse, or the HTTP round trip failed. The content of such a response
+// is the "Error: ..." text, a diagnostic -- not something the agent said.
+bool IsErrorResponse(const LLMResponse& response) {
+    return response.done_reason == "error" || response.done_reason == "parse_error" || response.done_reason == "http_error";
+}
+
 // A tool's result as it goes into the history.
 LLMMessage ToolResultMessage(const std::string& toolName, const std::string& content,
                              const std::string& toolCallId, bool isError) {
@@ -374,7 +382,8 @@ std::vector<std::tuple<std::string, std::string, std::string, bool>> Agent::Exec
         } else {
             LogWarning("Agent '%s' - Unknown tool: %s", m_name.c_str(), toolName.c_str());
             if (m_console) {
-                m_console->Write("Error: Unknown tool - " + toolName);
+                // A diagnostic about the agent's own running, not a reply.
+                m_console->WriteError("Error: Unknown tool - " + toolName);
             }
             m_messageBuffer.Append("[" + m_name + "] Error: Unknown tool - " + toolName + "\n");
             toolResults.emplace_back(toolName, "Error: Unknown tool - " + toolName, toolCallId, true);
@@ -506,7 +515,14 @@ void Agent::ProcessCommand(const std::string& command) {
 
         if (!response.message.content.empty()) {
             if (m_console) {
-                m_console->Write(response.message.content);
+                // An error response's content is the failure text, to be shown
+                // as a diagnostic; anything else is what the agent said. The
+                // history and the message buffer below keep it either way.
+                if (IsErrorResponse(response)) {
+                    m_console->WriteError(response.message.content);
+                } else {
+                    m_console->Write(response.message.content);
+                }
             }
             m_messageBuffer.Append("[" + m_name + "] " + response.message.content + "\n");
         }
@@ -558,7 +574,8 @@ void Agent::OnCommandFailed(const std::string& what) {
         const std::string line = "Error: the command failed: " + what;
         m_messageBuffer.Append("[" + m_name + "] " + line + "\n");
         if (m_console) {
-            m_console->Write(line);
+            // A diagnostic about the agent's own running, not a reply.
+            m_console->WriteError(line);
         }
         if (m_interactive) {
             LogInfo("Agent '%s' - carrying on with its next command", m_name.c_str());

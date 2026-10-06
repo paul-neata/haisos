@@ -211,7 +211,21 @@ TEST_F(HshShellTest, StopEndsTheShellAndItsChild) {
     auto process = os->StartProcess(os->GetOsEnvironment()->Clone(), "/bin/hsh",
         {"-c", "/spin.lua"}, "/", StartProcessOptions{});
     ASSERT_NE(process, nullptr);
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    // Wait until the child has actually started (bounded to 5 s): a fixed
+    // sleep can end before /spin.lua exists on a slow runner, and the test
+    // would then pass without a stop ever reaching the child.
+    bool childRunning = false;
+    for (int attempts = 0; attempts < 50 && !childRunning; ++attempts) {
+        for (const auto& p : os->GetRunningProcesses()) {
+            if (p->Path() == "/spin.lua") {
+                childRunning = true;
+            }
+        }
+        if (!childRunning) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+    ASSERT_TRUE(childRunning);
     process->TriggerStop();
     EXPECT_TRUE(process->WaitToFinish(10000));
     EXPECT_EQ(process->ExitCode().value_or(-1), 143);

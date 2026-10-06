@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
@@ -73,6 +74,47 @@ public:
     // its redirections instead of restoring the descriptor table afterwards.
     void KeepRedirections();
 
+    // --- Pipelines, subshells, background jobs ---
+    // Whether |command|, as a pipeline stage, is started as a child at once: a
+    // SimpleCommand with at least one word whose first word is plain literal
+    // text (LiteralText) naming neither a shell builtin nor (hsh--control-flow)
+    // a function. Every other stage runs inside the shell, in a subshell.
+    bool IsChildStage(const Command& command) const;
+    // Runs |command| with its standard input and output replaced by |in| and
+    // |out| -- in a subshell (RunSubshell), slots 0 and 1 set with
+    // PlaceDescriptor -- and either waits (returns its status) or, when
+    // |started| is given and the command turns out to be a program, starts it
+    // without waiting: *started is the child and the status is 0.
+    int RunStage(const Command& command, std::shared_ptr<IFileDescriptor> in,
+                 std::shared_ptr<IFileDescriptor> out, std::shared_ptr<IProcess>* started);
+    // Runs |body| as a subshell: inside a SubshellScope, with `exit`
+    // (ShellExit) and fatal errors (ShellError: reported as at the top level,
+    // status 2) ending only the subshell. ShellStopped passes through.
+    // Returns the subshell's status, & 0xFF.
+    int RunSubshell(const std::function<int()>& body);
+    bool InSubshell() const;  // a SubshellScope is live (the depth is counted)
+
+    // One background job: every process the background list started, and the
+    // pid $! shows -- the last stage's.
+    struct Job {
+        std::vector<std::shared_ptr<IProcess>> processes;
+        uint64_t pid = 0;
+    };
+    // The jobs started with `&` and not yet waited for, oldest first (bounded:
+    // past 1024 the finished ones are dropped, oldest first). What `wait`
+    // waits on.
+    std::vector<Job>& Jobs();
+
+    // The script a background child hsh runs for |item|: BackgroundPrelude(),
+    // then item.sourceText, then "\n".
+    std::string BackgroundScript(const ListItem& item) const;
+    // What the child must know of this shell beyond its environment: nothing
+    // in text yet (an empty prelude; the options that are on among e u f x C a
+    // reach the child as an invocation argument, since there is no `set`
+    // builtin yet). hsh--control-flow appends the sourceText of every function
+    // defined.
+    std::string BackgroundPrelude() const;
+
     // --- Children ---
     struct CommandLookup {
         enum class Result { Found, NotFound, NotRunnable };
@@ -103,11 +145,24 @@ public:
     CommandSubstitutionResult RunCommandSubstitution(const std::string& source, int line) override;
 
 private:
-    // A construct this task does not run yet ("redirections is not supported
-    // yet", status 2). Each later task removes its uses; hsh--control-flow
+    // A construct this task does not run yet ("if is not supported yet",
+    // status 2). Each later task removes its uses; hsh--control-flow
     // removes the helper.
     int NotYet(const std::string& what);
     void WriteDescriptor(int fd, const std::string& bytes);
+
+    // A `&` list item: as a nowait pipeline when its and-or list is one
+    // pipeline of child stages only, else as a child hsh running its text.
+    int StartBackground(const ListItem& item);
+    int StartBackgroundPipeline(const Pipeline& pipeline);
+    int StartBackgroundShell(const ListItem& item);
+    // Adds a job (and sets $! to its pid), dropping finished jobs oldest
+    // first once the list is past its bound.
+    void RecordJob(Job job);
+    // ExecutePipeline for two or more commands.
+    int ExecutePipelinedStages(const Pipeline& pipeline);
+
+    friend class SubshellScope;  // it saves m_state, m_jobs and the depth
 
     BuiltinContext& m_context;
     Invocation m_invocation;
@@ -116,9 +171,13 @@ private:
     int m_currentLine = 0;
     uint64_t m_substitutionCount = 0;         // RunCommandSubstitution calls, for bare assignments
     std::vector<std::shared_ptr<IProcess>> m_liveChildren;  // started, not yet waited for
-    int m_subshellDepth = 0;                  // hsh--pipelines; 0 here
+    int m_subshellDepth = 0;                  // counted by SubshellScope
     bool m_brokenPipe = false;
     bool m_keepRedirections = false;          // set by exec with no command
+    std::vector<Job> m_jobs;                  // background jobs, oldest first
+    // Set for a pipeline stage that may start a child without waiting for it
+    // (RunStage); null normally.
+    std::shared_ptr<IProcess>* m_startInsteadOfWait = nullptr;
 };
 
 } // namespace Haisos::Hsh

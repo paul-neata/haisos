@@ -28,7 +28,7 @@ enum {
 class HshCommand : public IBuiltinCommand {
 public:
     std::string Name() const override { return "hsh"; }
-    std::string Version() const override { return "0.2.0"; }
+    std::string Version() const override { return "0.3.0"; }
 
     const std::vector<BuiltinOption>& Options() const override {
         static const std::vector<BuiltinOption> options = {
@@ -65,7 +65,8 @@ public:
         };
         help.notes =
             "Commands not built into hsh are looked up in PATH and started as Haisos processes (builtins, .md agents, .lua scripts).\n"
-            "--help and --version only as the first argument; $0 is \"hsh\" unless a script or -c command_name names it; +X turns option X off.\n";
+            "--help and --version only as the first argument; $0 is \"hsh\" unless a script or -c command_name names it; +X turns option X off.\n"
+            "A background (&) builtin, function or compound command runs in a child hsh, which sees only exported variables.\n";
         help.basedOn = "dash";
         return help;
     }

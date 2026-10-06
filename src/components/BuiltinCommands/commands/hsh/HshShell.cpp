@@ -11,6 +11,8 @@
 #include "commands/hsh/HshDescriptors.h"
 #include "commands/hsh/HshParser.h"
 #include "commands/hsh/HshRedirection.h"
+#include "commands/hsh/HshSubshell.h"
+#include "commands/hsh/HshUnboundedPipe.h"
 #include "interfaces/IHaisosOS.h"
 #include "interfaces/IProcess.h"
 
@@ -24,6 +26,8 @@ constexpr uint64_t kWaitSliceMs = 50;
 constexpr uint64_t kStopGraceMs = 5000;
 // What PATH is when the environment brought none (dash's default).
 constexpr const char* kDefaultPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+// How many background jobs the shell keeps; past that, finished ones are dropped.
+constexpr size_t kMaxJobs = 1024;
 
 } // namespace
 
@@ -145,7 +149,7 @@ int Shell::ExecuteList(const CommandList& list) {
             if (!item.andOr.pipelines.empty()) {
                 m_currentLine = item.andOr.pipelines.back().line;
             }
-            status = NotYet("&");  // hsh--pipelines
+            status = StartBackground(item);
             continue;
         }
         status = ExecuteAndOr(item.andOr);
@@ -168,7 +172,7 @@ int Shell::ExecutePipeline(const Pipeline& pipeline) {
     int status;
     if (pipeline.commands.size() > 1) {
         m_currentLine = pipeline.line;
-        status = NotYet("pipelines");  // hsh--pipelines
+        status = ExecutePipelinedStages(pipeline);
     } else {
         status = ExecuteCommand(*pipeline.commands[0]);
     }
@@ -177,6 +181,110 @@ int Shell::ExecutePipeline(const Pipeline& pipeline) {
     }
     m_state.lastExitStatus = status;
     return status;
+}
+
+// The two ends of one pipe between two stages, held by the shell alone as
+// shared_ptrs: a real pipe's ends, out of their slots, or an unbounded pipe's.
+struct StagePipe {
+    std::shared_ptr<IFileDescriptor> readEnd;
+    std::shared_ptr<IFileDescriptor> writeEnd;
+};
+
+// Makes the pipe between stage |i| and stage |i + 1|; nullopt when a real
+// pipe could not be made ("Pipe call failed"). The pipe is unbounded when its
+// reader (stage |i + 1|) runs inside the shell and an earlier or this stage
+// does too; otherwise it is a real, bounded pipe -- with the deadlock rule
+// explained at ExecutePipelinedStages.
+static std::optional<StagePipe> CreateStagePipe(IFileIO& io, bool unbounded) {
+    if (unbounded) {
+        UnboundedPipeEnds ends = CreateUnboundedPipe();
+        return StagePipe{std::move(ends.readEnd), std::move(ends.writeEnd)};
+    }
+    const auto slots = io.CreatePipe();
+    if (!slots) {
+        return std::nullopt;
+    }
+    StagePipe pipe{io.GetDescriptor(slots->first), io.GetDescriptor(slots->second)};
+    io.CloseDescriptor(slots->first);
+    io.CloseDescriptor(slots->second);
+    return pipe;
+}
+
+int Shell::ExecutePipelinedStages(const Pipeline& pipeline) {
+    const size_t count = pipeline.commands.size();
+    // Which stages are programs, to be started at once so they run at the
+    // same time; the others run inside the shell, one at a time, each in a
+    // subshell.
+    std::vector<bool> childStage(count);
+    for (size_t i = 0; i < count; ++i) {
+        childStage[i] = IsChildStage(*pipeline.commands[i]);
+    }
+
+    // The pipes. Why this cannot deadlock: the stages inside the shell run
+    // one at a time, in order (pass 2), after every child stage has been
+    // started (pass 1). A bounded pipe is used only where its reader is
+    // either a running child or the first in-shell stage (which runs at
+    // once), so every bounded pipe has a reader that is running or about to
+    // run, and the writers that would have to wait for a later in-shell stage
+    // write into unbounded pipes, which never block.
+    std::vector<StagePipe> pipes(count - 1);
+    bool inShellBefore = false;
+    for (size_t i = 0; i + 1 < count; ++i) {
+        inShellBefore = inShellBefore || !childStage[i];
+        auto pipe = CreateStagePipe(IO(), !childStage[i + 1] && inShellBefore);
+        if (!pipe) {
+            Report("Pipe call failed");  // dash's wording; nothing started
+            return 2;
+        }
+        pipes[i] = std::move(*pipe);
+    }
+
+    auto inFor = [&](size_t i) -> std::shared_ptr<IFileDescriptor> {
+        return i == 0 ? IO().GetDescriptor(IFileIO::kStdIn) : pipes[i - 1].readEnd;
+    };
+    auto outFor = [&](size_t i) -> std::shared_ptr<IFileDescriptor> {
+        return i + 1 == count ? IO().GetDescriptor(IFileIO::kStdOut) : pipes[i].writeEnd;
+    };
+    // Once a stage has been started or has run, the shell drops its own
+    // references to the ends it handed over, so a reader sees end of file
+    // once its writers are gone.
+    auto releaseFor = [&](size_t i) {
+        if (i > 0) {
+            pipes[i - 1].readEnd.reset();
+        }
+        if (i + 1 < count) {
+            pipes[i].writeEnd.reset();
+        }
+    };
+
+    // Pass 1: start every child stage, in order.
+    std::vector<std::shared_ptr<IProcess>> stageChild(count);
+    std::vector<int> stageStatus(count, 0);
+    for (size_t i = 0; i < count; ++i) {
+        if (!childStage[i]) {
+            continue;
+        }
+        stageStatus[i] = RunStage(*pipeline.commands[i], inFor(i), outFor(i), &stageChild[i]);
+        releaseFor(i);
+    }
+    // Pass 2: run every in-shell stage, in order, each in a subshell.
+    for (size_t i = 0; i < count; ++i) {
+        if (childStage[i]) {
+            continue;
+        }
+        stageStatus[i] = RunStage(*pipeline.commands[i], inFor(i), outFor(i), nullptr);
+        releaseFor(i);
+    }
+    // Pass 3: wait for every child stage, in order.
+    for (size_t i = 0; i < count; ++i) {
+        if (stageChild[i]) {
+            stageStatus[i] = WaitForChild(stageChild[i]);
+        }
+    }
+    // The pipeline's status is the last stage's: its child's exit code, or
+    // the in-shell status (a child stage that could not start has the 127/126
+    // of its report).
+    return stageStatus[count - 1];
 }
 
 int Shell::ExecuteCommand(const Command& command) {
@@ -294,6 +402,11 @@ int Shell::ExecuteSimpleCommand(const SimpleCommand& command) {
         Report(fields[0] + ": Permission denied");
         return 126;
     }
+    if (m_startInsteadOfWait) {
+        // A pipeline stage: started, not waited for (RunStage).
+        *m_startInsteadOfWait = child;
+        return 0;
+    }
     return WaitForChild(child);
 }
 
@@ -322,11 +435,14 @@ void Shell::WriteDescriptor(int fd, const std::string& bytes) {
         const ssize_t result = descriptor->Write(bytes.data() + written, bytes.size() - written);
         if (result == kIOBrokenPipe) {
             // The shell ends like a program killed by SIGPIPE. At the top level
-            // the process itself records the broken pipe (exit code 141);
-            // hsh--pipelines adds the subshell case.
-            if (m_subshellDepth == 0) {
-                Process().StopForBrokenPipe();
+            // the process itself records the broken pipe (exit code 141); in a
+            // subshell only the subshell dies of it, as a forked dash subshell
+            // would, and the shell goes on (the flag and the stop are the
+            // top-level output's, not the subshell's).
+            if (m_subshellDepth > 0) {
+                throw ShellExit{kExitCodeBrokenPipe};
             }
+            Process().StopForBrokenPipe();
             m_brokenPipe = true;
             throw ShellStopped{};
         }
@@ -356,6 +472,203 @@ void Shell::ThrowIfStopRequested() {
 
 void Shell::KeepRedirections() {
     m_keepRedirections = true;
+}
+
+bool Shell::IsChildStage(const Command& command) const {
+    if (command.kind != CommandKind::Simple) {
+        return false;
+    }
+    const SimpleCommand& simple = static_cast<const SimpleCommand&>(command);
+    if (simple.words.empty()) {
+        return false;
+    }
+    const std::optional<std::string> name = LiteralText(simple.words[0]);
+    if (!name) {
+        return false;  // what the word expands to decides at run time
+    }
+    // A shell builtin runs inside the shell; hsh--control-flow also excludes
+    // its functions here.
+    return !FindShellBuiltin(*name);
+}
+
+int Shell::RunStage(const Command& command, std::shared_ptr<IFileDescriptor> in,
+                    std::shared_ptr<IFileDescriptor> out, std::shared_ptr<IProcess>* started) {
+    return RunSubshell([&]() -> int {
+        PlaceDescriptor(IO(), IFileIO::kStdIn, std::move(in));
+        PlaceDescriptor(IO(), IFileIO::kStdOut, std::move(out));
+        m_startInsteadOfWait = started;
+        int status;
+        try {
+            status = ExecuteCommand(command);
+        } catch (...) {
+            m_startInsteadOfWait = nullptr;
+            throw;
+        }
+        m_startInsteadOfWait = nullptr;
+        return status;
+    });
+}
+
+int Shell::RunSubshell(const std::function<int()>& body) {
+    try {
+        const SubshellScope scope(*this);
+        return body() & 0xFF;
+    } catch (const ShellExit& e) {
+        return e.status & 0xFF;
+    } catch (const ShellError& e) {
+        // A fatal error is reported as at the top level and ends only the
+        // subshell, with status 2.
+        WriteErr(FormatShellError(m_state.arg0, e.Line() ? e.Line() : m_currentLine, e.what()));
+        return 2;
+    }
+    // A ShellStopped passes through: it ends the whole shell.
+}
+
+bool Shell::InSubshell() const {
+    return m_subshellDepth > 0;
+}
+
+std::vector<Shell::Job>& Shell::Jobs() {
+    return m_jobs;
+}
+
+int Shell::StartBackground(const ListItem& item) {
+    // Started without waiting, as a pipeline of children when it can be: one
+    // and-or list of one pipeline whose every stage is a program.
+    if (item.andOr.pipelines.size() == 1) {
+        const Pipeline& pipeline = item.andOr.pipelines[0];
+        bool allChildren = true;
+        for (const CommandPtr& command : pipeline.commands) {
+            if (!IsChildStage(*command)) {
+                allChildren = false;
+                break;
+            }
+        }
+        if (allChildren) {
+            return StartBackgroundPipeline(pipeline);
+        }
+    }
+    return StartBackgroundShell(item);
+}
+
+int Shell::StartBackgroundPipeline(const Pipeline& pipeline) {
+    const size_t count = pipeline.commands.size();
+    // Every stage is a child, so every pipe is a real one: its reader is a
+    // running child (see ExecutePipelinedStages for the deadlock rule).
+    std::vector<StagePipe> pipes(count - 1);
+    for (size_t i = 0; i + 1 < count; ++i) {
+        auto pipe = CreateStagePipe(IO(), false);
+        if (!pipe) {
+            Report("Pipe call failed");
+            return 2;
+        }
+        pipes[i] = std::move(*pipe);
+    }
+    Job job;
+    int stageStatus = 0;
+    for (size_t i = 0; i < count; ++i) {
+        // An asynchronous list's stdin is /dev/null when there is no job
+        // control (a NullInputDescriptor), before its own redirections.
+        std::shared_ptr<IFileDescriptor> in =
+            i == 0 ? std::static_pointer_cast<IFileDescriptor>(NullInputDescriptor::Create())
+                   : pipes[i - 1].readEnd;
+        std::shared_ptr<IFileDescriptor> out =
+            i + 1 == count ? IO().GetDescriptor(IFileIO::kStdOut) : pipes[i].writeEnd;
+        std::shared_ptr<IProcess> child;
+        stageStatus = RunStage(*pipeline.commands[i], std::move(in), std::move(out), &child);
+        if (i > 0) {
+            pipes[i - 1].readEnd.reset();
+        }
+        if (i + 1 < count) {
+            pipes[i].writeEnd.reset();
+        }
+        if (child) {
+            job.processes.push_back(child);
+            job.pid = child->GetPid();
+        }
+    }
+    if (job.processes.empty()) {
+        return stageStatus;  // nothing started (a stage's report said why)
+    }
+    RecordJob(std::move(job));
+    return 0;
+}
+
+int Shell::StartBackgroundShell(const ListItem& item) {
+    // The and-or list needs the shell itself (a builtin, &&/||, and from
+    // hsh--control-flow, compound commands and functions): a child hsh runs
+    // its text, as dash forks a subshell for it. It starts at the path this
+    // shell was started from (no PATH lookup), with $0 and the positional
+    // parameters passed on, the exported variables as its environment (an
+    // unexported one does not reach it, where a forked subshell would see it
+    // -- a documented exception), the shell's working directory and its
+    // stdout/stderr, and the options that are on among e u f x C a as an
+    // invocation argument. Its stdin is empty (a NullInputDescriptor: POSIX,
+    // an asynchronous list without job control); a redirection in its own
+    // text then gives it one, inside the child.
+    std::vector<std::string> args;
+    // The letters of the options that are on among e u f x C a, in
+    // OptionLetters' order; no argument when none is on.
+    std::string letters;
+    if (m_state.options.nounset) letters += 'u';
+    if (m_state.options.allexport) letters += 'a';
+    if (m_state.options.noclobber) letters += 'C';
+    if (m_state.options.xtrace) letters += 'x';
+    if (m_state.options.noglob) letters += 'f';
+    if (m_state.options.errexit) letters += 'e';
+    if (!letters.empty()) {
+        args.push_back("-" + letters);
+    }
+    args.push_back("-c");
+    args.push_back(BackgroundScript(item));
+    args.push_back(m_state.arg0);
+    args.insert(args.end(), m_state.positional.begin(), m_state.positional.end());
+
+    const std::shared_ptr<IFileDescriptor> keepIn = IO().GetDescriptor(IFileIO::kStdIn);
+    PlaceDescriptor(IO(), IFileIO::kStdIn, NullInputDescriptor::Create());
+    std::shared_ptr<IProcess> child = StartChild(Process().Path(), args, {});
+    PlaceDescriptor(IO(), IFileIO::kStdIn, keepIn);
+    if (!child) {
+        // dash's message when it cannot fork.
+        Report("fork: Resource temporarily unavailable");
+        return 2;
+    }
+    Job job;
+    job.processes.push_back(child);
+    job.pid = child->GetPid();
+    RecordJob(std::move(job));
+    return 0;
+}
+
+void Shell::RecordJob(Job job) {
+    m_state.lastBackgroundPid = job.pid;
+    m_jobs.push_back(std::move(job));
+    if (m_jobs.size() <= kMaxJobs) {
+        return;
+    }
+    // Past the bound: drop the finished jobs, oldest first; their processes
+    // leave m_liveChildren with them.
+    for (auto it = m_jobs.begin(); it != m_jobs.end() && m_jobs.size() > kMaxJobs;) {
+        const bool finished = std::all_of(it->processes.begin(), it->processes.end(),
+            [](const std::shared_ptr<IProcess>& process) { return process->WaitToFinish(0); });
+        if (!finished) {
+            ++it;
+            continue;
+        }
+        for (const std::shared_ptr<IProcess>& process : it->processes) {
+            m_liveChildren.erase(std::remove(m_liveChildren.begin(), m_liveChildren.end(), process),
+                m_liveChildren.end());
+        }
+        it = m_jobs.erase(it);
+    }
+}
+
+std::string Shell::BackgroundScript(const ListItem& item) const {
+    return BackgroundPrelude() + item.sourceText + "\n";
+}
+
+std::string Shell::BackgroundPrelude() const {
+    return "";
 }
 
 Shell::CommandLookup Shell::LookUpCommand(const std::string& name) {
@@ -483,9 +796,41 @@ bool Shell::Exists(const std::string& path) {
     return IO().Stat(path, status) == 0;
 }
 
-CommandSubstitutionResult Shell::RunCommandSubstitution(const std::string&, int) {
+CommandSubstitutionResult Shell::RunCommandSubstitution(const std::string& source, int line) {
     ++m_substitutionCount;
-    Fail("command substitution is not supported yet");  // hsh--pipelines
+    // The parser already checked this text when it parsed the word holding it,
+    // so an error here is rare; report it and give the substitution status 2.
+    ParseResult parsed = ParseProgram(source, {line, false, "end of file"});
+    if (parsed.status == ParseResult::Status::Error) {
+        WriteErr(FormatShellError(m_state.arg0, parsed.errorLine, parsed.errorMessage));
+        return {"", 2};
+    }
+    // An unbounded pipe: the reader (this shell, below) runs only after the
+    // writer (the subshell), so a bounded one would deadlock past 64 KiB.
+    UnboundedPipeEnds pipe = CreateUnboundedPipe();
+    const int status = RunSubshell([&]() -> int {
+        PlaceDescriptor(IO(), IFileIO::kStdOut, pipe.writeEnd);
+        pipe.writeEnd.reset();
+        // The scope puts slot 1 back when the subshell ends, which releases
+        // the write end unless a background child of the subshell still holds
+        // it -- then the read below waits for that child, as dash waits for
+        // end of file.
+        return ExecuteList(parsed.commands);
+    });
+    // Read to end of file.
+    std::string output;
+    char buffer[4096];
+    for (;;) {
+        const ssize_t count = pipe.readEnd->Read(buffer, sizeof(buffer));
+        if (count == kIOInterrupted) {
+            throw ShellStopped{};
+        }
+        if (count <= 0) {
+            break;
+        }
+        output.append(buffer, static_cast<size_t>(count));
+    }
+    return {output, status};
 }
 
 int Shell::NotYet(const std::string& what) {

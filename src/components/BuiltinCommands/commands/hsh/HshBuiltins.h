@@ -25,6 +25,7 @@ int BuiltinExec(Shell& shell, const std::vector<std::string>& args);
 int BuiltinExit(Shell& shell, const std::vector<std::string>& args);
 int BuiltinFalse(Shell& shell, const std::vector<std::string>& args);
 int BuiltinTrue(Shell& shell, const std::vector<std::string>& args);
+int BuiltinWait(Shell& shell, const std::vector<std::string>& args);  // HshBuiltinWait.cpp
 
 // Every builtin hsh has, sorted by name (byte order). Later tasks add rows.
 const std::vector<ShellBuiltin>& ShellBuiltins();

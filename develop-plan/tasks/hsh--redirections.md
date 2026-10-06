@@ -2,8 +2,8 @@
 
 - Rock: hsh
 - Depends on: hsh--executor, builtins--wc (the tests use `wc`)
-- Size: ~700 changed lines in ~10 files
-- Plan checked against: develop @ 0d92271
+- Size: ~770 changed lines in ~10 files
+- Plan checked against: develop @ 64378f3
 - PR title: hsh: every redirection, heredocs, here-strings and exec
 
 ## Goal
@@ -75,6 +75,58 @@ What earlier tasks provide (as if on develop; the code wins on names):
 
 All in namespace `Haisos::Hsh`, `src/components/BuiltinCommands/commands/hsh/`,
 plain portable C++17.
+
+### Preliminary fixes (review findings on earlier hsh PRs; hsh copies dash)
+
+Two small, independent bugs found reviewing earlier hsh PRs, fixed first
+(neither touches redirections, but both are correctness bugs in code this
+task's acceptance scenario and tests lean on: pathname expansion and heredoc
+bodies).
+
+- **PR #31, `HshLexer.cpp`, `Lexer::ReadHereDocBodies`** (~line 885): the
+  join test looks only at the one byte before the body line's trailing `\n`
+  (`raw[raw.size() - 2] == '\\'`), so it joins with the next line whenever
+  *any* number of backslashes precedes the newline. dash joins only on an
+  *odd* count: the last backslash is the line's continuation marker, and
+  backslashes pair off before it into literal `\`s that stay in the body
+  (`a\` before a newline joins; `a\\` -- two backslashes -- does not, and
+  both backslashes stay in the body as written). Fix: before testing
+  `raw.back() == '\n'`, count the run of consecutive `\` immediately
+  preceding it and join (erase the last `\` and `\n`, as now, then keep
+  reading) only when that count is odd; an even count (zero included) stops
+  the loop with the line, backslashes and all, kept in `rawBody`.
+  Test (`HshLexerTest.cpp`, alongside the existing `HereDocLineContinuation`
+  case for a single backslash): `cat <<E` / `a\\` (two backslashes, nothing
+  else) / `E` -- an unquoted delimiter -- gives `hd->rawBody == "a\\\\\n"`
+  (both backslashes kept) and the heredoc terminated by the literal `E` line
+  that follows, not joined into `a\\`'s line.
+  - [ ] The heredoc join test counts trailing backslashes and joins only on
+        an odd count, with a passing test for an even count not joining.
+
+- **PR #32, `HshGlob.cpp`, `SplitComponents`** (~line 14): it treats `[...]`
+  as a single, unsplit component whenever `PatternBracketEnd` finds a
+  closing `]`, and `PatternBracketEnd`/`BracketEnd` (`HshPattern.cpp`) scan
+  past an unescaped `/` on the way to that `]` -- so `[a/b]` is read as one
+  bracket expression (matching a single `/`, `a` or `b`) that spans the `/`,
+  though `PatternBracketEnd`'s own doc comment already says "a bracket
+  never spans a '/'". `PatternBracketEnd`/`BracketEnd` must stay as they are
+  (shared with `MatchPattern`, used on plain strings too -- a `case`
+  pattern's bracket may legitimately hold a `/`, since no path splitting is
+  involved there). Fix *inside `SplitComponents`*: give it its own bracket
+  scan (a copy of `BracketEnd`'s loop, not a change to the shared one) that
+  returns `npos` as soon as it meets an unescaped `/` before the closing
+  `]`; `SplitComponents` then falls through to its literal-character case
+  for the `[`, and the `/` inside splits the pattern normally, as for any
+  other unbracketed `/`.
+  Test (`HshGlobTest.cpp`): `ExpandPathname("[a/b]", WorkingDirSource())` (a
+  source whose `.` holds a file literally named `a`, per the existing
+  `WorkingDirSource()` fixture) returns empty -- it no longer matches `a` --
+  while `ExpandPathname("[ab]", WorkingDirSource())` (no `/` in the bracket)
+  is unaffected and still matches `a` and `b`.
+  - [ ] `SplitComponents` never lets a bracket expression span a `/`
+        (its own scan, `PatternBracketEnd`/`BracketEnd` untouched), with a
+        passing test for `[a/b]` and one confirming an ordinary bracket
+        without `/` is unaffected.
 
 ### Rules that bite (restated)
 
@@ -151,7 +203,11 @@ private:
      succeeds); exactly one digit `m` -> `io.GetDescriptor(m)` null ->
      `<m>: Bad file descriptor`; `m == n` -> nothing; else `Dup2(m, n)`.
      Anything else -> `Fail("Syntax error: Bad fd number")` (an expanded
-     target such as `>&$x` with `x=a`; dash exits).
+     target such as `>&$x` with `x=a`; dash exits). Parse `t` with
+     `strtol`/`strtoimax` and check its `endptr` consumed the whole,
+     non-empty string -- a redirection fd is always a single digit (as
+     dash), but a naive `atoi`/first-char check would silently accept
+     `"3x"` as 3 and only `strtol`'s endptr catches it.
    - `HereDoc` `<<`, `<<-`: `text = Expansion().ExpandHereDocument(*redirection.hereDoc)`.
    - `HereString` `<<<`: `text = ExpandToString(target) + "\n"`.
    - For both: `auto slots = io.CreatePipe(std::max<size_t>(text.size(), 1))`;

@@ -8,7 +8,7 @@ Pause: no
 | 1 | [links--follow-anywhere](tasks/links--follow-anywhere.md) | obsolete | | - | | | | implemented directly on develop in 76079bd |
 | 2 | [fd--descriptor-objects](tasks/fd--descriptor-objects.md) | done | 0.4.1 | - | #19 | 1 | 1C fixed, 1M 2L open | Windows min-macro fixed by the reviewer |
 | 3 | [fd--process-table](tasks/fd--process-table.md) | done | 0.4.2 | 2 | #20 | 1 | 1H fixed, 1M 1L open | reviewer fixed a racy test |
-| 4 | [streams--console-and-start](tasks/streams--console-and-start.md) | in-progress | 0.4.3 | 3 | | | | |
+| 4 | [streams--console-and-start](tasks/streams--console-and-start.md) | in-review | 0.4.3 | 3 | #21 | 1 | | |
 | 5 | [streams--runtime-streams](tasks/streams--runtime-streams.md) | todo | | 4 | | | | |
 | 6 | [streams--exit-codes](tasks/streams--exit-codes.md) | todo | | 5 | | | | |
 | 7 | [pipes--pipe-service](tasks/pipes--pipe-service.md) | todo | | 6 | | | | |

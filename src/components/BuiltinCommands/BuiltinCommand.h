@@ -114,8 +114,15 @@ public:
     void Out(const std::string& text);
     // Standard error: one diagnostic line, "<name>: " prepended.
     void Error(const std::string& message);
+    // Standard error, text exactly as given: no "<name>: " prefix, no newline
+    // added. For the lines GNU tools print without their name ("Valid
+    // arguments are:", man-db's "No manual entry for x").
+    void ErrorText(const std::string& text);
     // The usual tail of a usage error: "Try '<name> --help' for more information."
     void TryHelp();
+    // Whether standard output (descriptor 1) is a terminal: false when the
+    // slot is empty.
+    bool OutIsTerminal() const { return m_outIsTerminal; }
     // Says, once per spelling, that each not-treated option given was not
     // acted on: "Parameter --author is not treated by HaisosOS ls v. 1.1.0".
     void ReportNotTreated(const ParsedBuiltinArgs& parsed);
@@ -170,6 +177,11 @@ public:
     // are added by the parser and need not be listed).
     virtual const std::vector<BuiltinOption>& Options() const = 0;
     virtual BuiltinHelp Help() const = 0;
+    // The builtin's manual page, as `man <name>` prints it: plain text, ending
+    // in a newline. By default exactly its --help text (BuiltinHelpText), so
+    // `man <name>` and `<name> --help` print the same; a builtin with more to
+    // say (hsh) overrides it.
+    virtual std::string ManPage() const;
     // Runs the command to completion and returns its exit status, 0 meaning
     // success, as the real command's would.
     virtual int Run(BuiltinContext& context) = 0;
@@ -200,6 +212,23 @@ std::string BuiltinVersionText(const IBuiltinCommand& command);
 // Only what Haisos handles is described; the last line lists the rest, or
 // says "none".
 std::string BuiltinHelpText(const IBuiltinCommand& command);
+
+// A name as GNU tools print it in shell-escape quoting: as it is when no
+// shell would read anything in it specially, else quoted. |always| quotes
+// even a name that needs none (GNU's quoteaf, used for "cannot open 'x'"),
+// otherwise only when needed (GNU's quotef and ls on a terminal).
+// A name needs quoting when it is empty; or its first byte is '#' or '~'; or
+// it is exactly "{" or "}"; or it holds a byte below 0x20, 0x7F, or one of
+//   space ! " $ & ' ( ) * ; < = > ? [ \ ^ ` |
+// Bytes 0x80 and above are kept as they are: valid UTF-8 is printable, and an
+// invalid byte, which GNU would write as \NNN, is kept too.
+// Quoted as GNU's shell-escape style does: 'name' when it holds neither a
+// control byte nor a '; "name" when a ' but no other byte a double-quoted
+// shell string would treat specially ("it's" -> '"it's"'); otherwise the
+// name in '...' with each ' written '\'' and each run of control bytes
+// written out of the quotes as $'\a' style escapes ("\177" for bytes without
+// a letter escape) -- 'nl'$'\n''y', 'a'$'\001\002''b', 'a'$'\001'.
+std::string ShellEscapeQuoted(const std::string& name, bool always = false);
 
 // The start every getopt-style command shares: parses the arguments against
 // command.Options(), and handles --help, --version, usage errors (reported,

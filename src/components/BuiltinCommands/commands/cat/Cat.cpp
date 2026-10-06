@@ -105,7 +105,7 @@ private:
 class CatCommand : public IBuiltinCommand {
 public:
     std::string Name() const override { return "cat"; }
-    std::string Version() const override { return "1.1.0"; }
+    std::string Version() const override { return "1.2.0"; }
 
     const std::vector<BuiltinOption>& Options() const override {
         static const std::vector<BuiltinOption> options = {
@@ -127,7 +127,7 @@ public:
         return BuiltinHelp{
             "concatenate files and print on the standard output",
             {"cat [OPTION]... [FILE]..."},
-            "No standard input: at least one FILE, and not -.\n"};
+            ""};
     }
 
     int Run(BuiltinContext& context) override {
@@ -153,24 +153,22 @@ public:
             }
         }
 
-        if (parsed->operands.empty()) {
-            context.Error("reading standard input is not supported: HaisosOS has no stdin yet");
-            context.TryHelp();
-            return 1;
-        }
-
         CatFormatter formatter(settings);
+        std::vector<std::string> operands = parsed->operands;
+        // As GNU cat: no FILE is one FILE '-', the standard input.
+        if (operands.empty()) {
+            operands.push_back("-");
+        }
         int status = 0;
-        for (const auto& file : parsed->operands) {
+        for (const auto& file : operands) {
             if (context.StopRequested()) {
                 return 1;
             }
-            if (file == "-") {
-                context.Error("-: reading standard input is not supported: HaisosOS has no stdin yet");
-                status = 1;
-                continue;
+            const int result = file == "-" ? CatStdIn(context, formatter) : CatFile(context, file, formatter);
+            if (result < 0) {
+                return 1;
             }
-            if (!CatFile(context, file, formatter)) {
+            if (result == 0) {
                 status = 1;
             }
         }
@@ -178,44 +176,63 @@ public:
     }
 
 private:
-    static bool CatFile(BuiltinContext& context, const std::string& file, CatFormatter& formatter) {
+    // Returns 1 on success, 0 on a failure the command reports and survives
+    // (another operand may still be read), -1 when the command must stop at
+    // once, quietly (stopped).
+    static int CatFile(BuiltinContext& context, const std::string& file, CatFormatter& formatter) {
         IFileIO& io = context.IO();
         auto type = EntryTypeOf(io, io.ResolvePath(file));
         if (!type) {
             context.Error(file + ": No such file or directory");
-            return false;
+            return 0;
         }
         if (*type == DirectoryEntryType::Dir) {
             context.Error(file + ": Is a directory");
-            return false;
+            return 0;
         }
         const auto handle = io.OpenFile(file, kFileOpenReadOnly);
         if (!handle) {
             context.Error(file + ": Permission denied");
-            return false;
+            return 0;
         }
+        return CatBytes(context, file, *handle, formatter);
+    }
+
+    // '-' is the standard input, descriptor 0 -- read through the same
+    // formatter, so numbering and squeezing carry across files and stdin, and
+    // a second '-' reads on from where the first stopped.
+    static int CatStdIn(BuiltinContext& context, CatFormatter& formatter) {
+        const auto input = context.IO().GetDescriptor(IFileIO::kStdIn);
+        if (!input) {
+            context.Error("-: Bad file descriptor");
+            return 0;
+        }
+        return CatBytes(context, "-", *input, formatter);
+    }
+
+    static int CatBytes(BuiltinContext& context, const std::string& shownName,
+                        IFileDescriptor& input, CatFormatter& formatter) {
         char buffer[64 * 1024];
-        bool ok = true;
         while (true) {
             if (context.StopRequested()) {
-                ok = false;
-                break;
+                return -1;
             }
-            const ssize_t n = handle->Read(buffer, sizeof(buffer));
+            const ssize_t n = input.Read(buffer, sizeof(buffer));
             if (n == 0) {
-                break;
+                return 1;
+            }
+            if (n == kIOInterrupted) {
+                // Stopped: quiet, as a signal-stopped program is.
+                return -1;
             }
             if (n < 0) {
-                context.Error(file + ": Input/output error");
-                ok = false;
-                break;
+                context.Error(shownName + ": Input/output error");
+                return 0;
             }
             std::string out;
             formatter.Append(buffer, static_cast<size_t>(n), out);
             context.Out(out);
         }
-        // The descriptor is released at end of scope; the table needs no Close.
-        return ok;
     }
 };
 

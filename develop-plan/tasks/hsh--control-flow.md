@@ -2,8 +2,10 @@
 
 - Rock: hsh
 - Depends on: hsh--shell-builtins
-- Size: ~1000 changed lines in ~10 files
-- Plan checked against: develop @ 0d92271
+- Size: ~1050 changed lines in ~11 files (grown by the two preliminary fixes
+  below; finding 3 (`RedirectionScope`'s double-`Apply`) goes to the final
+  whole-develop review instead, not this task)
+- Plan checked against: develop @ 2294d67
 - PR title: hsh: control flow, functions, dot scripts, eval, read and -e
 
 ## Goal
@@ -77,6 +79,65 @@ plain portable C++17.
   `hsh -c` (hsh--pipelines), which sees only exported variables (documented).
 - hsh's version becomes `0.5.0`.
 - New files in the two `CMakeLists.txt`.
+
+### Preliminary fixes (do these first; three review findings against PRs #36/#37)
+
+Small, independent of the rest; fix and test each before starting the control
+flow below -- loops and functions are what will actually exercise them.
+
+1. **A child stage's `$(...)` can deadlock on an earlier in-shell stage**
+   (`HshShell.cpp`, `ExecutePipelinedStages`/`RunStage`, around the pass-1/
+   pass-2 split, and `IsChildStage`). `IsChildStage` only looks at the first
+   word's `LiteralText`; it does not notice a `CommandSubstitution` anywhere
+   in the command's words. So `: | /bin/echo $(cat)` makes stage 1 (`/bin/echo
+   $(cat)`) a child stage: `RunStage` places its stdin (the real, bounded pipe
+   from stage 0, `:`) and calls `ExecuteCommand`, which expands `$(cat)` --
+   in pass 1, before stage 0 has run in pass 2 -- so `cat` blocks reading a
+   pipe nothing has written to yet, and pass 2 (which would run `:` and close
+   the write end) never gets to start: a deadlock. Fix `IsChildStage` to also
+   return false for a `SimpleCommand` holding a `CommandSubstitution`
+   anywhere in its words (a small recursive walk of the `Word`/`WordPart`
+   tree, `DoubleQuoted` included) -- add it next to the "exclude functions"
+   change `IsChildStage` gets below, in the same function. (Re-expanding it
+   only once earlier stages could have run is the other option the review
+   named; excluding it from child-stage status is the smaller change and
+   leaves the pass-1/pass-2 ordering untouched.)
+   - Test (`HshPipelineTest.cpp`, existing file): a new case running
+     `: | /bin/echo $(cat)` off a background thread (`std::async`) with a
+     bounded wait (`wait_for(std::chrono::seconds(5))`; fail the test with a
+     clear message, not hang, if it is not done by then) -- expect it to
+     finish, printing an empty line. Name it
+     `ChildStageCommandSubstitutionDoesNotDeadlock`.
+   - [ ] Acceptance: `ChildStageCommandSubstitutionDoesNotDeadlock` passes
+     inside its bounded wait (it would hang past it before the fix).
+
+2. **A subshell's background job leaks its processes into `m_liveChildren`**
+   (`HshSubshell.cpp`, `SubshellScope`). A `Job` started inside a subshell
+   (`( /bin/true & )`, or later `f() { ...; } &` called from one) is recorded
+   in the subshell's own `m_jobs` (saved/restored like everything else) and
+   its processes are added to `Shell::m_liveChildren` (`StartChild`), which
+   `SubshellScope` does not save or restore. `~SubshellScope` puts the outer,
+   pre-subshell `m_jobs` back, dropping that job -- and with it the only way
+   `wait` could ever reach those processes -- while they stay in
+   `m_liveChildren` for the life of the shell: `( /bin/true & )` run
+   repeatedly grows it without bound. Fix `SubshellScope`'s destructor to
+   remove from `m_shell.m_liveChildren` (or wait for) every process of a job
+   that is about to be dropped -- every job present in the subshell's
+   `m_jobs` but not in the saved, pre-subshell list -- symmetric with how it
+   already restores everything else a subshell must not leak.
+   - Test (new case in `HshShellTest.cpp`, or a new `HshSubshellTest.cpp` if
+     the implementer prefers a file of its own): run `( /bin/true & )` three
+     times through `Sh` (no loop needed to reach this) and check, through
+     whatever the fix exposes for tests (a small test-only accessor on
+     `Shell` is fine, e.g. a count of `m_liveChildren`), that the count after
+     the third does not exceed the count after the first. Name it
+     `SubshellBackgroundJobDoesNotLeakLiveChildren`.
+   - [ ] Acceptance: `SubshellBackgroundJobDoesNotLeakLiveChildren` passes;
+     the live-child count does not grow run over run.
+
+(A third finding -- `RedirectionScope::Save` in `HshRedirection.cpp` dedups
+across the whole scope, not per `Apply` -- goes to the final whole-develop
+review instead of this task.)
 
 ### `HshShell.h` / `.cpp` -- control flow
 
@@ -240,9 +301,16 @@ Rows: `.` (special), `break` (special), `continue` (special), `eval`
 
 ## Tests
 
+No fixed sleeps anywhere (the three preliminary tests above included): wait on
+`wait`/a bounded `wait_for`, or poll with a bound, never a bare
+`std::this_thread::sleep_for` hoping a race resolves -- a regression must fail
+the test, not hang it. No new `HaisosOS.unittests` tests (0): every test below
+and above is in `Hsh.unittests`.
+
 `tests/unit/components/Hsh.unittests/HshControlFlowTest.cpp` (new; add to
 `add_executable`), `TEST_F(HshShellTest, ...)`, tables through `Sh`, byte for
-byte (multi-line scripts written with `\n` in the C++ string):
+byte (multi-line scripts written with `\n` in the C++ string); every test is
+named below -- implement each one, do not skip any for time:
 
 - `GroupsAndSubshells`: `{ echo a; echo b; } > /g.txt; cat /g.txt` ->
   `a\nb\n`; `x=1; (x=2; cd /docs; echo $x); echo $x; pwd` -> `2\n1\n/\n`;

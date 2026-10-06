@@ -66,8 +66,8 @@ TEST(BuiltinFileTest, ReadingABuiltinGivesItsNote) {
 
 TEST(BuiltinFileTest, ABuiltinCannotBeWrittenCreatedOverOrRemoved) {
     auto fs = WithEchoInBin();
-    EXPECT_LT(fs->OpenFile("/bin/echo", kFileOpenWriteCreateTruncate, kFileCreateMode), 0);
-    EXPECT_LT(fs->OpenFile("/bin/echo", kFileOpenWriteCreateAppend), 0);
+    EXPECT_EQ(fs->OpenFile("/bin/echo", kFileOpenWriteCreateTruncate, kFileCreateMode), nullptr);
+    EXPECT_EQ(fs->OpenFile("/bin/echo", kFileOpenWriteCreateAppend), nullptr);
     EXPECT_NE(fs->CreateDirectory("/bin/echo", kDirMode), 0);
     EXPECT_NE(fs->RemoveFile("/bin/echo"), 0);
     // Still there, and still the builtin.
@@ -76,10 +76,9 @@ TEST(BuiltinFileTest, ABuiltinCannotBeWrittenCreatedOverOrRemoved) {
 
 TEST(BuiltinFileTest, AReadDescriptorOfABuiltinCannotBeWrittenThrough) {
     auto fs = WithEchoInBin();
-    const int fd = fs->OpenFile("/bin/echo", kFileOpenReadOnly);
-    ASSERT_GE(fd, 0);
-    EXPECT_LT(fs->WriteFile(fd, "x", 1), 0);
-    EXPECT_EQ(fs->CloseFile(fd), 0);
+    auto file = fs->OpenFile("/bin/echo", kFileOpenReadOnly);
+    ASSERT_NE(file, nullptr);
+    EXPECT_EQ(file->Write("x", 1), kIOError);
 }
 
 TEST(BuiltinFileTest, TheDirectoryOfABuiltinAndThoseAboveItCannotBeRemoved) {
@@ -122,7 +121,7 @@ TEST(BuiltinFileTest, ASubViewSeesTheBuiltinsUnderItsBase) {
     EXPECT_EQ(ReadAll(*view, "/echo"), BuiltinCommandFileContent("echo"));
     // Protection is the inner filesystem's, and holds through the view.
     EXPECT_NE(view->RemoveFile("/echo"), 0);
-    EXPECT_LT(view->OpenFile("/echo", kFileOpenWriteCreateTruncate, kFileCreateMode), 0);
+    EXPECT_EQ(view->OpenFile("/echo", kFileOpenWriteCreateTruncate, kFileCreateMode), nullptr);
 }
 
 TEST(BuiltinFileTest, AComposedFilesystemSeesBothItsMainsAndItsMountsBuiltins) {
@@ -177,37 +176,34 @@ TEST(BuiltinFileTest, APhysicalDirectoryHoldingOnlyABuiltinIsStillPinned) {
     std::filesystem::remove_all(root);
 }
 
-TEST(BuiltinFileTest, DescriptorsOfStackedFilesystemsNeverCollide) {
+TEST(BuiltinFileTest, DescriptorsOfStackedFilesystemsReadTheirOwnFiles) {
     // A read-only view of a filesystem with a mount of its own, itself given a
-    // mount: descriptors from the inner and the outer mount tables must not
-    // collide, or the outer would claim the inner's descriptor as its own.
+    // mount: a mounted filesystem's descriptor is passed up untouched, so each
+    // descriptor reads the file it was opened on.
     auto inner = InMemoryFileSystem::Create();
     auto innerMounted = InMemoryFileSystem::Create();
-    int fd = innerMounted->OpenFile("/a.txt", kFileOpenWriteCreateTruncate, kFileCreateMode);
-    ASSERT_GE(fd, 0);
-    innerMounted->WriteFile(fd, "inner", 5);
-    innerMounted->CloseFile(fd);
+    auto file = innerMounted->OpenFile("/a.txt", kFileOpenWriteCreateTruncate, kFileCreateMode);
+    ASSERT_NE(file, nullptr);
+    file->Write("inner", 5);
+    file.reset();
     inner->Mount("/in", innerMounted);
 
     auto outer = ReadOnlyFileSystem::Create(inner);
     auto outerMounted = InMemoryFileSystem::Create();
-    fd = outerMounted->OpenFile("/b.txt", kFileOpenWriteCreateTruncate, kFileCreateMode);
-    ASSERT_GE(fd, 0);
-    outerMounted->WriteFile(fd, "outer", 5);
-    outerMounted->CloseFile(fd);
+    file = outerMounted->OpenFile("/b.txt", kFileOpenWriteCreateTruncate, kFileCreateMode);
+    ASSERT_NE(file, nullptr);
+    file->Write("outer", 5);
+    file.reset();
     outer->Mount("/out", outerMounted);
 
-    const int innerFd = outer->OpenFile("/in/a.txt", kFileOpenReadOnly);
-    const int outerFd = outer->OpenFile("/out/b.txt", kFileOpenReadOnly);
-    ASSERT_GE(innerFd, 0);
-    ASSERT_GE(outerFd, 0);
-    EXPECT_NE(innerFd, outerFd);
+    auto innerFile = outer->OpenFile("/in/a.txt", kFileOpenReadOnly);
+    auto outerFile = outer->OpenFile("/out/b.txt", kFileOpenReadOnly);
+    ASSERT_NE(innerFile, nullptr);
+    ASSERT_NE(outerFile, nullptr);
 
     char buffer[8] = {};
-    ASSERT_EQ(outer->ReadFile(innerFd, buffer, sizeof(buffer)), 5);
+    ASSERT_EQ(innerFile->Read(buffer, sizeof(buffer)), 5);
     EXPECT_EQ(std::string(buffer, 5), "inner");
-    ASSERT_EQ(outer->ReadFile(outerFd, buffer, sizeof(buffer)), 5);
+    ASSERT_EQ(outerFile->Read(buffer, sizeof(buffer)), 5);
     EXPECT_EQ(std::string(buffer, 5), "outer");
-    outer->CloseFile(innerFd);
-    outer->CloseFile(outerFd);
 }

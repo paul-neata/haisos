@@ -62,10 +62,10 @@ bool EnsureParentDirectories(IFileSystem& fs, const std::string& normalizedPath,
     return EnsureDirectories(fs, VirtualParentOf(normalizedPath), outReason);
 }
 
-bool WriteAll(IFileSystem& fs, int fd, const char* data, size_t size) {
+bool WriteAll(IFileDescriptor& file, const char* data, size_t size) {
     size_t written = 0;
     while (written < size) {
-        ssize_t n = fs.WriteFile(fd, data + written, size - written);
+        ssize_t n = file.Write(data + written, size - written);
         if (n <= 0) {
             return false;
         }
@@ -82,14 +82,12 @@ bool WriteContent(IFileSystem& fs, const std::string& normalizedPath, const std:
     if (!EnsureParentDirectories(fs, normalizedPath, outReason)) {
         return false;
     }
-    int fd = fs.OpenFile(normalizedPath, append ? kFileOpenWriteCreateAppend : kFileOpenWriteCreateTruncate, kFileCreateMode);
-    if (fd < 0) {
+    auto file = fs.OpenFile(normalizedPath, append ? kFileOpenWriteCreateAppend : kFileOpenWriteCreateTruncate, kFileCreateMode);
+    if (!file) {
         outReason = "cannot open it for writing";
         return false;
     }
-    const bool ok = WriteAll(fs, fd, content.data(), content.size());
-    const bool closed = fs.CloseFile(fd) == 0;
-    if (!ok || !closed) {
+    if (!WriteAll(*file, content.data(), content.size())) {
         outReason = "writing to it failed";
         return false;
     }
@@ -118,14 +116,13 @@ bool CopyFileBetween(IFileSystem& from, const std::string& fromPath, IFileSystem
         return false;
     }
 
-    int in = from.OpenFile(fromPath, kFileOpenReadOnly);
-    if (in < 0) {
+    auto in = from.OpenFile(fromPath, kFileOpenReadOnly);
+    if (!in) {
         outReason = "cannot open the source for reading";
         return false;
     }
-    int out = to.OpenFile(toPath, kFileOpenWriteCreateTruncate, kFileCreateMode);
-    if (out < 0) {
-        from.CloseFile(in);
+    auto out = to.OpenFile(toPath, kFileOpenWriteCreateTruncate, kFileCreateMode);
+    if (!out) {
         outReason = "cannot open the destination for writing";
         return false;
     }
@@ -133,18 +130,20 @@ bool CopyFileBetween(IFileSystem& from, const std::string& fromPath, IFileSystem
     std::vector<char> buffer(kCopyChunkSize);
     bool ok = true;
     while (true) {
-        ssize_t n = from.ReadFile(in, buffer.data(), buffer.size());
+        ssize_t n = in->Read(buffer.data(), buffer.size());
         if (n == 0) {
             break;
         }
-        if (n < 0 || !WriteAll(to, out, buffer.data(), static_cast<size_t>(n))) {
+        if (n < 0 || !WriteAll(*out, buffer.data(), static_cast<size_t>(n))) {
             ok = false;
             break;
         }
     }
-    from.CloseFile(in);
-    const bool closed = to.CloseFile(out) == 0;
-    if (!ok || !closed) {
+    // Closing reports nothing any more: a host close failure is logged by
+    // HostFileDescriptor.
+    in.reset();
+    out.reset();
+    if (!ok) {
         outReason = "copying the data failed";
         return false;
     }

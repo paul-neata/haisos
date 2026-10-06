@@ -83,17 +83,14 @@ public:
         m_cv.notify_all();
     }
 
-    int OpenFile(const std::string& pathname, int flags) override {
+    std::shared_ptr<IFileDescriptor> OpenFile(const std::string& pathname, int flags) override {
         HoldIfGated(pathname);
         return m_inner->OpenFile(pathname, flags);
     }
-    int OpenFile(const std::string& pathname, int flags, int mode) override {
+    std::shared_ptr<IFileDescriptor> OpenFile(const std::string& pathname, int flags, int mode) override {
         HoldIfGated(pathname);
         return m_inner->OpenFile(pathname, flags, mode);
     }
-    int CloseFile(int fd) override { return m_inner->CloseFile(fd); }
-    ssize_t ReadFile(int fd, void* buf, size_t count) override { return m_inner->ReadFile(fd, buf, count); }
-    ssize_t WriteFile(int fd, const void* buf, size_t count) override { return m_inner->WriteFile(fd, buf, count); }
     int CreateDirectory(const std::string& pathname, int mode) override { return m_inner->CreateDirectory(pathname, mode); }
     int RemoveDirectory(const std::string& pathname) override { return m_inner->RemoveDirectory(pathname); }
     int RemoveFile(const std::string& pathname) override { return m_inner->RemoveFile(pathname); }

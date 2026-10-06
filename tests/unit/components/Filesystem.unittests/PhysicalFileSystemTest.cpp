@@ -73,17 +73,17 @@ protected:
 TEST_F(PhysicalFileSystemTest, WriteAndReadWithinRootSucceeds) {
     auto fs = PhysicalFileSystem::Create(kRootDir);
 
-    int fd = fs->OpenFile("inside.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-    ASSERT_GE(fd, 0);
+    auto file = fs->OpenFile("inside.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    ASSERT_NE(file, nullptr);
     const char* data = "hello";
-    EXPECT_EQ(fs->WriteFile(fd, data, std::strlen(data)), static_cast<ssize_t>(std::strlen(data)));
-    fs->CloseFile(fd);
+    EXPECT_EQ(file->Write(data, std::strlen(data)), static_cast<ssize_t>(std::strlen(data)));
+    file.reset();
 
-    fd = fs->OpenFile("inside.txt", O_RDONLY);
-    ASSERT_GE(fd, 0);
+    file = fs->OpenFile("inside.txt", O_RDONLY);
+    ASSERT_NE(file, nullptr);
     char buf[16] = {};
-    ssize_t n = fs->ReadFile(fd, buf, sizeof(buf) - 1);
-    fs->CloseFile(fd);
+    ssize_t n = file->Read(buf, sizeof(buf) - 1);
+    file.reset();
     EXPECT_EQ(std::string(buf, static_cast<size_t>(n)), "hello");
 }
 
@@ -94,10 +94,10 @@ TEST_F(PhysicalFileSystemTest, WriteAndReadWithinRootSucceeds) {
 TEST_F(PhysicalFileSystemTest, AnAbsolutePathIsTakenWithinTheRoot) {
     auto fs = PhysicalFileSystem::Create(kRootDir);
 
-    int fd = fs->OpenFile("/inside.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-    ASSERT_GE(fd, 0);
-    EXPECT_EQ(fs->WriteFile(fd, "x", 1), 1);
-    fs->CloseFile(fd);
+    auto file = fs->OpenFile("/inside.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    ASSERT_NE(file, nullptr);
+    EXPECT_EQ(file->Write("x", 1), 1);
+    file.reset();
     EXPECT_TRUE(std::filesystem::exists(kRootDir + "/inside.txt"));
 
     FileStatus status;
@@ -124,16 +124,16 @@ TEST_F(PhysicalFileSystemTest, ARootAtTheTopOfTheDiskHoldsEveryPath) {
 TEST_F(PhysicalFileSystemTest, TraversalOutsideRootIsRejected) {
     auto fs = PhysicalFileSystem::Create(kRootDir);
 
-    int fd = fs->OpenFile("../outside.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-    EXPECT_EQ(fd, -1);
+    auto file = fs->OpenFile("../outside.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    EXPECT_EQ(file, nullptr);
 }
 
 TEST_F(PhysicalFileSystemTest, ReadDirectoryListsCreatedFile) {
     auto fs = PhysicalFileSystem::Create(kRootDir);
 
-    int fd = fs->OpenFile("inside.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-    ASSERT_GE(fd, 0);
-    fs->CloseFile(fd);
+    auto file = fs->OpenFile("inside.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    ASSERT_NE(file, nullptr);
+    file.reset();
 
     auto entries = fs->ReadDirectory(".");
     bool found = false;
@@ -148,12 +148,12 @@ TEST_F(PhysicalFileSystemTest, ReadDirectoryListsCreatedFile) {
 TEST_F(PhysicalFileSystemTest, RemoveFileRemovesAFileButNotADirectory) {
     auto fs = PhysicalFileSystem::Create(kRootDir);
 
-    int fd = fs->OpenFile("inside.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-    ASSERT_GE(fd, 0);
-    fs->CloseFile(fd);
+    auto file = fs->OpenFile("inside.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    ASSERT_NE(file, nullptr);
+    file.reset();
 
     EXPECT_EQ(fs->RemoveFile("inside.txt"), 0);
-    EXPECT_LT(fs->OpenFile("inside.txt", O_RDONLY), 0);
+    EXPECT_EQ(fs->OpenFile("inside.txt", O_RDONLY), nullptr);
     EXPECT_LT(fs->RemoveFile("inside.txt"), 0);
     EXPECT_LT(fs->RemoveFile("../outside.txt"), 0);
 }
@@ -202,17 +202,16 @@ protected:
 namespace {
 
 std::string ReadWhole(IFileSystem& fs, const std::string& path) {
-    const int fd = fs.OpenFile(path, O_RDONLY);
-    if (fd < 0) {
+    auto file = fs.OpenFile(path, O_RDONLY);
+    if (!file) {
         return "<cannot open>";
     }
     std::string content;
     char buf[256];
     ssize_t n;
-    while ((n = fs.ReadFile(fd, buf, sizeof(buf))) > 0) {
+    while ((n = file->Read(buf, sizeof(buf))) > 0) {
         content.append(buf, static_cast<size_t>(n));
     }
-    fs.CloseFile(fd);
     return content;
 }
 
@@ -229,10 +228,10 @@ TEST_F(PhysicalFileSystemLinkTest, ADanglingLinkIsFollowedWhenCreating) {
     std::filesystem::create_symlink(Outside() / "created.txt", Root() / "notes.txt");
     auto fs = PhysicalFileSystem::Create(Root().string());
 
-    const int fd = fs->OpenFile("/notes.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-    ASSERT_GE(fd, 0);
-    EXPECT_EQ(fs->WriteFile(fd, "hi", 2), 2);
-    fs->CloseFile(fd);
+    auto file = fs->OpenFile("/notes.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    ASSERT_NE(file, nullptr);
+    EXPECT_EQ(file->Write("hi", 2), 2);
+    file.reset();
     EXPECT_EQ(ReadHostFile(Outside() / "created.txt"), "hi");
     EXPECT_TRUE(std::filesystem::is_symlink(std::filesystem::symlink_status(Root() / "notes.txt")));
 }
@@ -251,10 +250,10 @@ TEST_F(PhysicalFileSystemLinkTest, ALinkToOutsideTheRootIsFollowed) {
     }
     EXPECT_TRUE(listed);
 
-    const int fd = fs->OpenFile("/out/new.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-    ASSERT_GE(fd, 0);
-    EXPECT_EQ(fs->WriteFile(fd, "new", 3), 3);
-    fs->CloseFile(fd);
+    auto file = fs->OpenFile("/out/new.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    ASSERT_NE(file, nullptr);
+    EXPECT_EQ(file->Write("new", 3), 3);
+    file.reset();
     EXPECT_EQ(ReadHostFile(Outside() / "new.txt"), "new");
 
     FileStatus status;
@@ -267,11 +266,11 @@ TEST_F(PhysicalFileSystemLinkTest, ALinkWithinTheRootIsFollowed) {
     std::filesystem::create_symlink(Root() / "target.txt", Root() / "link.txt");
     auto fs = PhysicalFileSystem::Create(Root().string());
 
-    int fd = fs->OpenFile("link.txt", O_RDONLY);
-    ASSERT_GE(fd, 0);
+    auto file = fs->OpenFile("link.txt", O_RDONLY);
+    ASSERT_NE(file, nullptr);
     char buf[16] = {};
-    ssize_t n = fs->ReadFile(fd, buf, sizeof(buf) - 1);
-    fs->CloseFile(fd);
+    ssize_t n = file->Read(buf, sizeof(buf) - 1);
+    file.reset();
     EXPECT_EQ(std::string(buf, static_cast<size_t>(n)), "inside");
 }
 
@@ -338,21 +337,11 @@ protected:
     std::string Root() const { return m_root.u8string(); }
 
     static bool Opens(IFileSystem& fs, const std::string& path) {
-        const int fd = fs.OpenFile(path, O_RDONLY);
-        if (fd < 0) {
-            return false;
-        }
-        fs.CloseFile(fd);
-        return true;
+        return fs.OpenFile(path, O_RDONLY) != nullptr;
     }
 
     static bool Creates(IFileSystem& fs, const std::string& path) {
-        const int fd = fs.OpenFile(path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-        if (fd < 0) {
-            return false;
-        }
-        fs.CloseFile(fd);
-        return true;
+        return fs.OpenFile(path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR) != nullptr;
     }
 
     std::filesystem::path m_root;

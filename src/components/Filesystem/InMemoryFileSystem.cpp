@@ -24,6 +24,55 @@ std::string LastSegment(const std::string& normalizedPath) {
 
 } // namespace
 
+// An open in-memory file: the filesystem's node, read and written through
+// InMemoryFileSystem::ReadAt/WriteAt. Holding a shared_ptr on the filesystem,
+// it keeps working after the filesystem is unmounted or the last outside
+// reference to it is gone. The access mode it was opened with is enforced on
+// every call: Write on a read-only descriptor and Read on a write-only one
+// fail with kIOError, as EBADF would.
+class InMemoryFileDescriptor final : public IFileDescriptor {
+public:
+    static std::shared_ptr<InMemoryFileDescriptor> Create(
+        std::shared_ptr<InMemoryFileSystem> fs, std::string normalizedPath, int flags) {
+        return std::shared_ptr<InMemoryFileDescriptor>(
+            new InMemoryFileDescriptor(std::move(fs), std::move(normalizedPath), flags));
+    }
+
+    ssize_t Read(void* buf, size_t count) override {
+        if (!m_readable) {
+            return kIOError;
+        }
+        return m_fs->ReadAt(m_path, m_position, buf, count);
+    }
+
+    ssize_t Write(const void* buf, size_t count) override {
+        if (!m_writable) {
+            return kIOError;
+        }
+        return m_fs->WriteAt(m_path, m_position, m_append, buf, count);
+    }
+
+    bool IsTerminal() const override { return false; }
+
+private:
+    InMemoryFileDescriptor(std::shared_ptr<InMemoryFileSystem> fs, std::string normalizedPath, int flags)
+        : m_fs(std::move(fs))
+        , m_path(std::move(normalizedPath))
+        , m_writable((flags & (kFileWriteOnlyBit | kFileReadWriteBit)) != 0)
+        , m_readable((flags & kFileWriteOnlyBit) == 0)
+        , m_append((flags & kFileAppendBit) != 0)
+    {
+    }
+
+    std::shared_ptr<InMemoryFileSystem> m_fs;
+    const std::string m_path;
+    // Touched only inside ReadAt/WriteAt, under the filesystem's mutex.
+    size_t m_position = 0;
+    const bool m_writable;
+    const bool m_readable;
+    const bool m_append;
+};
+
 std::shared_ptr<InMemoryFileSystem> InMemoryFileSystem::Create() {
     return std::shared_ptr<InMemoryFileSystem>(new InMemoryFileSystem());
 }
@@ -41,27 +90,27 @@ void InMemoryFileSystem::TouchDirectory(const std::string& normalizedPath) {
 
 InMemoryFileSystem::~InMemoryFileSystem() = default;
 
-int InMemoryFileSystem::LocalOpenFile(const std::string& pathname, int flags) {
+std::shared_ptr<IFileDescriptor> InMemoryFileSystem::LocalOpenFile(const std::string& pathname, int flags) {
     return LocalOpenFile(pathname, flags, 0);
 }
 
-int InMemoryFileSystem::LocalOpenFile(const std::string& pathname, int flags, int /*mode*/) {
+std::shared_ptr<IFileDescriptor> InMemoryFileSystem::LocalOpenFile(const std::string& pathname, int flags, int /*mode*/) {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::string normalized = NormalizeVirtualPath(pathname);
 
     auto it = m_nodes.find(normalized);
     bool exists = it != m_nodes.end();
     if (exists && it->second.isDirectory) {
-        return -1;
+        return nullptr;
     }
 
     if (!exists) {
         if ((flags & kFileCreateBit) == 0) {
-            return -1;
+            return nullptr;
         }
         auto parentIt = m_nodes.find(ParentOf(normalized));
         if (parentIt == m_nodes.end() || !parentIt->second.isDirectory) {
-            return -1;
+            return nullptr;
         }
         it = m_nodes.emplace(normalized, Node::Make(false)).first;
         TouchDirectory(ParentOf(normalized));
@@ -70,29 +119,20 @@ int InMemoryFileSystem::LocalOpenFile(const std::string& pathname, int flags, in
         it->second.Modified();
     }
 
-    int fd = m_nextFd++;
-    size_t startPos = (flags & kFileAppendBit) ? it->second.data.size() : 0;
-    m_openHandles[fd] = OpenHandle{normalized, startPos};
-    return fd;
+    // The position starts at 0, with append taken into account or not at every
+    // write instead; reads of an O_RDWR|O_APPEND descriptor start at 0, as on
+    // Linux.
+    return InMemoryFileDescriptor::Create(shared_from_this(), normalized, flags);
 }
 
-int InMemoryFileSystem::LocalCloseFile(int fd) {
+ssize_t InMemoryFileSystem::ReadAt(const std::string& normalizedPath, size_t& position, void* buf, size_t count) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    return m_openHandles.erase(fd) > 0 ? 0 : -1;
-}
-
-ssize_t InMemoryFileSystem::LocalReadFile(int fd, void* buf, size_t count) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto handleIt = m_openHandles.find(fd);
-    if (handleIt == m_openHandles.end()) {
-        return -1;
-    }
-    auto nodeIt = m_nodes.find(handleIt->second.path);
+    auto nodeIt = m_nodes.find(normalizedPath);
     if (nodeIt == m_nodes.end()) {
-        return -1;
+        return kIOError;
     }
     const auto& data = nodeIt->second.data;
-    size_t& pos = handleIt->second.position;
+    size_t& pos = position;
     if (pos >= data.size()) {
         return 0;
     }
@@ -103,20 +143,22 @@ ssize_t InMemoryFileSystem::LocalReadFile(int fd, void* buf, size_t count) {
     return static_cast<ssize_t>(toCopy);
 }
 
-ssize_t InMemoryFileSystem::LocalWriteFile(int fd, const void* buf, size_t count) {
+ssize_t InMemoryFileSystem::WriteAt(const std::string& normalizedPath, size_t& position, bool append, const void* buf, size_t count) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    auto handleIt = m_openHandles.find(fd);
-    if (handleIt == m_openHandles.end()) {
-        return -1;
-    }
-    auto nodeIt = m_nodes.find(handleIt->second.path);
+    auto nodeIt = m_nodes.find(normalizedPath);
     if (nodeIt == m_nodes.end()) {
-        return -1;
+        return kIOError;
     }
     auto& data = nodeIt->second.data;
-    size_t& pos = handleIt->second.position;
+    size_t& pos = position;
+    // As O_APPEND demands: the write goes to the end of the file as it is now,
+    // not as it was when the file was opened -- two ">> log" writers no longer
+    // overwrite each other.
+    if (append) {
+        pos = data.size();
+    }
     if (count > SIZE_MAX - pos) {
-        return -1; // pos + count would overflow
+        return kIOError; // pos + count would overflow
     }
     if (pos + count > data.size()) {
         data.resize(pos + count);

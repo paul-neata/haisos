@@ -11,30 +11,20 @@ std::shared_ptr<ReadOnlyFileSystem> ReadOnlyFileSystem::Create(std::shared_ptr<I
 ReadOnlyFileSystem::ReadOnlyFileSystem(std::shared_ptr<IFileSystem> inner) : m_inner(std::move(inner)) {}
 ReadOnlyFileSystem::~ReadOnlyFileSystem() = default;
 
-int ReadOnlyFileSystem::LocalOpenFile(const std::string& pathname, int flags) {
+std::shared_ptr<IFileDescriptor> ReadOnlyFileSystem::LocalOpenFile(const std::string& pathname, int flags) {
     if (RequestsWriteAccess(flags)) {
-        return -1;
+        return nullptr;
     }
+    // The inner filesystem's descriptor is passed up untouched: it was opened
+    // read-only, so it refuses a write by itself.
     return m_inner->OpenFile(NormalizeVirtualPath(pathname), flags);
 }
 
-int ReadOnlyFileSystem::LocalOpenFile(const std::string& pathname, int flags, int mode) {
+std::shared_ptr<IFileDescriptor> ReadOnlyFileSystem::LocalOpenFile(const std::string& pathname, int flags, int mode) {
     if (RequestsWriteAccess(flags)) {
-        return -1;
+        return nullptr;
     }
     return m_inner->OpenFile(NormalizeVirtualPath(pathname), flags, mode);
-}
-
-int ReadOnlyFileSystem::LocalCloseFile(int fd) {
-    return m_inner->CloseFile(fd);
-}
-
-ssize_t ReadOnlyFileSystem::LocalReadFile(int fd, void* buf, size_t count) {
-    return m_inner->ReadFile(fd, buf, count);
-}
-
-ssize_t ReadOnlyFileSystem::LocalWriteFile(int /*fd*/, const void* /*buf*/, size_t /*count*/) {
-    return -1;
 }
 
 int ReadOnlyFileSystem::LocalCreateDirectory(const std::string& /*pathname*/, int /*mode*/) {

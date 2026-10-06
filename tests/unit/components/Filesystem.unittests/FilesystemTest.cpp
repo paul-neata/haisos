@@ -67,21 +67,15 @@ protected:
 TEST_F(FilesystemTest, OpenFileCreatesNewFile) {
     auto fs = FileSystem::Create();
     fs->CreateDirectory(kTestDir, S_IRWXU);
-    int fd = fs->OpenFile(kTestFile, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
-    EXPECT_GE(fd, 0);
-    EXPECT_EQ(fs->CloseFile(fd), 0);
+    auto file = fs->OpenFile(kTestFile, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
+    EXPECT_NE(file, nullptr);
+    file.reset();
     EXPECT_EQ(::access(kTestFile.c_str(), F_OK), 0);
 }
 
 TEST_F(FilesystemTest, OpenFileNonExistentReturnsError) {
     auto fs = FileSystem::Create();
-    int fd = fs->OpenFile(kTestFile, O_RDONLY);
-    EXPECT_LT(fd, 0);
-}
-
-TEST_F(FilesystemTest, CloseFileInvalidFdReturnsError) {
-    auto fs = FileSystem::Create();
-    EXPECT_LT(fs->CloseFile(-1), 0);
+    EXPECT_EQ(fs->OpenFile(kTestFile, O_RDONLY), nullptr);
 }
 
 TEST_F(FilesystemTest, WriteFileAndReadFile) {
@@ -89,67 +83,40 @@ TEST_F(FilesystemTest, WriteFileAndReadFile) {
     fs->CreateDirectory(kTestDir, S_IRWXU);
 
     // Write
-    int fdw = fs->OpenFile(kTestFile, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
-    ASSERT_GE(fdw, 0);
+    auto fileW = fs->OpenFile(kTestFile, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
+    ASSERT_NE(fileW, nullptr);
     std::string data = "Hello, Filesystem!";
-    EXPECT_EQ(fs->WriteFile(fdw, data.data(), data.size()), static_cast<ssize_t>(data.size()));
-    EXPECT_EQ(fs->CloseFile(fdw), 0);
+    EXPECT_EQ(fileW->Write(data.data(), data.size()), static_cast<ssize_t>(data.size()));
+    fileW.reset();
 
     // Read
-    int fdr = fs->OpenFile(kTestFile, O_RDONLY);
-    ASSERT_GE(fdr, 0);
+    auto fileR = fs->OpenFile(kTestFile, O_RDONLY);
+    ASSERT_NE(fileR, nullptr);
     std::string buf(data.size(), '\0');
-    EXPECT_EQ(fs->ReadFile(fdr, buf.data(), buf.size()), static_cast<ssize_t>(data.size()));
+    EXPECT_EQ(fileR->Read(buf.data(), buf.size()), static_cast<ssize_t>(data.size()));
     EXPECT_EQ(buf, data);
 
     // Read partial
-    EXPECT_EQ(fs->CloseFile(fdr), 0);
-    fdr = fs->OpenFile(kTestFile, O_RDONLY);
-    ASSERT_GE(fdr, 0);
+    fileR = fs->OpenFile(kTestFile, O_RDONLY);
+    ASSERT_NE(fileR, nullptr);
     std::string small(5, '\0');
-    EXPECT_EQ(fs->ReadFile(fdr, small.data(), small.size()), 5);
+    EXPECT_EQ(fileR->Read(small.data(), small.size()), 5);
     EXPECT_EQ(small, "Hello");
-    fs->CloseFile(fdr);
 }
 
 TEST_F(FilesystemTest, ReadFilePastEnd) {
     auto fs = FileSystem::Create();
     fs->CreateDirectory(kTestDir, S_IRWXU);
-    int fd = fs->OpenFile(kTestFile, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
-    ASSERT_GE(fd, 0);
+    auto file = fs->OpenFile(kTestFile, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
+    ASSERT_NE(file, nullptr);
     std::string data = "abc";
-    fs->WriteFile(fd, data.data(), data.size());
-    fs->CloseFile(fd);
+    file->Write(data.data(), data.size());
+    file.reset();
 
-    fd = fs->OpenFile(kTestFile, O_RDONLY);
-    ASSERT_GE(fd, 0);
+    file = fs->OpenFile(kTestFile, O_RDONLY);
+    ASSERT_NE(file, nullptr);
     std::string buf(100, '\0');
-    EXPECT_EQ(fs->ReadFile(fd, buf.data(), buf.size()), 3);
-    fs->CloseFile(fd);
-}
-
-TEST_F(FilesystemTest, ReadFileReturnsErrorOnInvalidFd) {
-    auto fs = FileSystem::Create();
-    char buf[4] = {};
-    EXPECT_LT(fs->ReadFile(-1, buf, sizeof(buf)), 0);
-}
-
-// A descriptor that is not open is refused like any other bad one. The
-// Microsoft C runtime would end the whole program over it, were its invalid
-// parameter handler not told otherwise (see CrtInvalidParameterAsError).
-TEST_F(FilesystemTest, ADescriptorThatIsNotOpenIsRefused) {
-    auto fs = FileSystem::Create();
-    const int notOpen = 9999;
-    char buf[4] = {};
-    EXPECT_LT(fs->ReadFile(notOpen, buf, sizeof(buf)), 0);
-    EXPECT_LT(fs->WriteFile(notOpen, buf, sizeof(buf)), 0);
-    EXPECT_LT(fs->CloseFile(notOpen), 0);
-}
-
-TEST_F(FilesystemTest, WriteFileReturnsErrorOnInvalidFd) {
-    auto fs = FileSystem::Create();
-    std::string data = "test";
-    EXPECT_LT(fs->WriteFile(-1, data.data(), data.size()), 0);
+    EXPECT_EQ(file->Read(buf.data(), buf.size()), 3);
 }
 
 TEST_F(FilesystemTest, CreateDirectoryAndRemoveDirectory) {
@@ -178,8 +145,7 @@ TEST_F(FilesystemTest, ReadDirectoryListsEntries) {
     auto fs = FileSystem::Create();
 
     fs->CreateDirectory(kTestDir, S_IRWXU);
-    int fd = fs->OpenFile(kTestFile, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
-    fs->CloseFile(fd);
+    fs->OpenFile(kTestFile, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
 
     auto entries = fs->ReadDirectory(kTestDir);
 

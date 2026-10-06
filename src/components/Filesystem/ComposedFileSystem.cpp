@@ -26,24 +26,12 @@ std::string ComposedFileSystem::AbsolutePathFor(const std::string& path) const {
     return NormalizeVirtualPath(path);
 }
 
-int ComposedFileSystem::LocalOpenFile(const std::string& pathname, int flags) {
+std::shared_ptr<IFileDescriptor> ComposedFileSystem::LocalOpenFile(const std::string& pathname, int flags) {
     return m_main->OpenFile(AbsolutePathFor(pathname), flags);
 }
 
-int ComposedFileSystem::LocalOpenFile(const std::string& pathname, int flags, int mode) {
+std::shared_ptr<IFileDescriptor> ComposedFileSystem::LocalOpenFile(const std::string& pathname, int flags, int mode) {
     return m_main->OpenFile(AbsolutePathFor(pathname), flags, mode);
-}
-
-int ComposedFileSystem::LocalCloseFile(int fd) {
-    return m_main->CloseFile(fd);
-}
-
-ssize_t ComposedFileSystem::LocalReadFile(int fd, void* buf, size_t count) {
-    return m_main->ReadFile(fd, buf, count);
-}
-
-ssize_t ComposedFileSystem::LocalWriteFile(int fd, const void* buf, size_t count) {
-    return m_main->WriteFile(fd, buf, count);
 }
 
 int ComposedFileSystem::LocalCreateDirectory(const std::string& pathname, int mode) {

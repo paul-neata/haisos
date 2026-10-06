@@ -121,32 +121,20 @@ bool PhysicalFileSystem::ResolveOnHost(const std::string& pathname, Top top, std
     }
 }
 
-int PhysicalFileSystem::LocalOpenFile(const std::string& pathname, int flags) {
+std::shared_ptr<IFileDescriptor> PhysicalFileSystem::LocalOpenFile(const std::string& pathname, int flags) {
     std::string resolved;
     if (!ResolveOnHost(pathname, Top::Allowed, resolved)) {
-        return -1;
+        return nullptr;
     }
     return m_inner->LocalOpenFile(resolved, flags);
 }
 
-int PhysicalFileSystem::LocalOpenFile(const std::string& pathname, int flags, int mode) {
+std::shared_ptr<IFileDescriptor> PhysicalFileSystem::LocalOpenFile(const std::string& pathname, int flags, int mode) {
     std::string resolved;
     if (!ResolveOnHost(pathname, Top::Allowed, resolved)) {
-        return -1;
+        return nullptr;
     }
     return m_inner->LocalOpenFile(resolved, flags, mode);
-}
-
-int PhysicalFileSystem::LocalCloseFile(int fd) {
-    return m_inner->LocalCloseFile(fd);
-}
-
-ssize_t PhysicalFileSystem::LocalReadFile(int fd, void* buf, size_t count) {
-    return m_inner->LocalReadFile(fd, buf, count);
-}
-
-ssize_t PhysicalFileSystem::LocalWriteFile(int fd, const void* buf, size_t count) {
-    return m_inner->LocalWriteFile(fd, buf, count);
 }
 
 int PhysicalFileSystem::LocalCreateDirectory(const std::string& pathname, int mode) {

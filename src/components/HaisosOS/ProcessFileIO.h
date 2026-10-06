@@ -1,4 +1,5 @@
 #pragma once
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -48,6 +49,12 @@ private:
     // Guarded: the process's own thread and whoever inspects it run concurrently.
     mutable std::mutex m_workingDirectoryMutex;
     std::string m_workingDirectory;
+
+    // Interim, until fd--process-table: the process's open files by number.
+    // Numbers start at 3, so 0, 1 and 2 never name a file; the lowest free one
+    // is used.
+    mutable std::mutex m_openFilesMutex;
+    std::map<int, std::shared_ptr<IFileDescriptor>> m_openFiles;
 };
 
 }

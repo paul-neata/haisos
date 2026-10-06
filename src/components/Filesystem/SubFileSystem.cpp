@@ -23,24 +23,12 @@ std::string SubFileSystem::ResolveInRoot(const std::string& path) const {
     return (normalized == "/") ? m_basePath : (m_basePath + normalized);
 }
 
-int SubFileSystem::LocalOpenFile(const std::string& pathname, int flags) {
+std::shared_ptr<IFileDescriptor> SubFileSystem::LocalOpenFile(const std::string& pathname, int flags) {
     return m_root->OpenFile(ResolveInRoot(pathname), flags);
 }
 
-int SubFileSystem::LocalOpenFile(const std::string& pathname, int flags, int mode) {
+std::shared_ptr<IFileDescriptor> SubFileSystem::LocalOpenFile(const std::string& pathname, int flags, int mode) {
     return m_root->OpenFile(ResolveInRoot(pathname), flags, mode);
-}
-
-int SubFileSystem::LocalCloseFile(int fd) {
-    return m_root->CloseFile(fd);
-}
-
-ssize_t SubFileSystem::LocalReadFile(int fd, void* buf, size_t count) {
-    return m_root->ReadFile(fd, buf, count);
-}
-
-ssize_t SubFileSystem::LocalWriteFile(int fd, const void* buf, size_t count) {
-    return m_root->WriteFile(fd, buf, count);
 }
 
 int SubFileSystem::LocalCreateDirectory(const std::string& pathname, int mode) {

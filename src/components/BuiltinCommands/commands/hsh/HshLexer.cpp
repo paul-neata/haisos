@@ -877,6 +877,36 @@ struct Lexer::Impl {
                     }
                     raw.erase(0, i);
                 }
+                if (!hd->quoted) {
+                    // A backslash-newline inside an unquoted heredoc body is a
+                    // line continuation: join the lines before the delimiter
+                    // comparison, as dash does (a quoted delimiter's body keeps
+                    // raw lines).
+                    while (raw.size() >= 2 && raw[raw.size() - 2] == '\\' &&
+                           raw.back() == '\n' && pos < src->size()) {
+                        raw.erase(raw.size() - 2);
+                        lineStart = pos;
+                        while (pos < src->size() && (*src)[pos] != '\n') {
+                            ++pos;
+                        }
+                        std::string next = src->substr(lineStart, pos - lineStart);
+                        if (pos < src->size()) {
+                            ++pos;
+                            ++line;
+                            lastCharEnd = pos;
+                            lastContinuationAtEnd = false;
+                            next += '\n';
+                        }
+                        if (hd->stripTabs) {
+                            size_t i = 0;
+                            while (i < next.size() && next[i] == '\t') {
+                                ++i;
+                            }
+                            next.erase(0, i);
+                        }
+                        raw += next;
+                    }
+                }
                 std::string cmp = raw;
                 if (!cmp.empty() && cmp.back() == '\n') {
                     cmp.pop_back();
@@ -1098,9 +1128,9 @@ Lexer::Lexer(std::string source, LexerOptions options)
     : m_impl(std::make_unique<Impl>(std::make_shared<const std::string>(std::move(source)),
                                     0, options.firstLine, options.interactive)) {}
 
-Lexer::Lexer(std::shared_ptr<const std::string> source, size_t start, int startLine,
-             const LexerOptions& options)
-    : m_impl(std::make_unique<Impl>(std::move(source), start, startLine, options.interactive)) {}
+Lexer::Lexer(Lexer&& other) noexcept = default;
+
+Lexer& Lexer::operator=(Lexer&& other) noexcept = default;
 
 Lexer::~Lexer() = default;
 

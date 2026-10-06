@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "HshShellFixture.h"
+#include "commands/hsh/HshShell.h"
 #include "tests/mocks/MockFileDescriptor.h"
 
 namespace Haisos {
@@ -249,6 +250,21 @@ TEST_F(HshShellTest, StopEndsTheShellAndItsChild) {
         }
     }
     EXPECT_TRUE(childGone);
+}
+
+TEST_F(HshShellTest, SubshellBackgroundJobDoesNotLeakLiveChildren) {
+    // A background job started inside a subshell is dropped with the
+    // subshell's job list; its processes must leave m_liveChildren with it,
+    // or each run of `( true & )` would keep one live child forever. (`true`,
+    // a shell builtin: its background run is a child hsh, a real process.)
+    const long before = Hsh::Shell::LiveChildCountForTest();
+    Sh("( true & )");
+    const long afterFirst = Hsh::Shell::LiveChildCountForTest();
+    Sh("( true & )");
+    Sh("( true & )");
+    const long afterThird = Hsh::Shell::LiveChildCountForTest();
+    EXPECT_EQ(afterFirst, before);
+    EXPECT_LE(afterThird, afterFirst);
 }
 
 TEST_F(HshShellTest, BrokenPipeOnItsOwnStderr) {

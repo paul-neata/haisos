@@ -118,9 +118,10 @@ task of the hsh rock and adds its files here:
   reader runs only after the writer (two in-shell pipeline stages, `$(...)`).
 - `HshSubshell.h/.cpp` - `SubshellScope`, an in-process subshell's save and
   restore of everything it may change: see "Pipelines, subshells, jobs".
-- `HshBuiltins.h/.cpp` - the shell's own builtins (`:`, `[`, `cd`, `exec`,
-  `exit`, `export`, `false`, `readonly`, `set`, `shift`, `test`, `true`,
-  `unset`, `wait`): a sorted table of name, special/regular, function. Also
+- `HshBuiltins.h/.cpp` - the shell's own builtins (`.`, `:`, `[`, `break`,
+  `cd`, `continue`, `eval`, `exec`, `exit`, `export`, `false`, `read`,
+  `readonly`, `return`, `set`, `shift`, `test`, `true`, `unset`, `wait`): a
+  sorted table of name, special/regular, function. Also
   `HshVersion`, for `set`'s not-treated reports inside the shell, where a
   `BuiltinContext`'s version is not at hand.
 - `HshBuiltinExec.cpp` - `exec`: with no command its redirections stay; with
@@ -131,9 +132,18 @@ task of the hsh rock and adds its files here:
   OLDPWD defaults, CDPATH, and dash's print rules (`cd -`, a non-empty CDPATH
   entry that found it).
 - `HshBuiltinVariables.cpp` - `export`, `readonly`, `unset`, `shift`: the
-  sorted `-p` listings, name/value operands, `-f`/`-v`, dash's messages.
+  sorted `-p` listings, name/value operands, `-f`/`-v` (a function or a
+  variable), dash's messages.
 - `HshBuiltinSet.cpp` - `set`: the sorted variable listing, option clusters
   and `-o` names, positional parameters, and the `set -o`/`set +o` tables.
+- `HshBuiltinFlow.cpp` - the control-flow builtins: `break`/`continue`
+  (a `LoopControl` unwinds to the loops), `return` (a `FunctionReturn`
+  unwinds to the calling function or dot script), `.` and `eval` (the text
+  parsed one complete command at a time and run in this shell): see
+  "Control flow" below.
+- `HshBuiltinRead.cpp` - `read`: one input line (a byte at a time, so a pipe
+  is never over-read), backslash processing unless `-r`, `-p` prompting when
+  stdin is a terminal, and dash's IFS splitting into the named variables.
 - `HshBuiltinTest.cpp` - `test` and `[` (one builtin, two names): dash's
   POSIX reductions and expression descent byte for byte (see "test" below).
 - `HshQuote.h/.cpp` - `ShellSingleQuote`: dash's single_quote -- a value as
@@ -144,7 +154,7 @@ task of the hsh rock and adds its files here:
 - `Hsh.cpp` - the `hsh` builtin itself: the option table (every dash option,
   treated or marked for the not-treated report), the dash-based `--help`
   (`BuiltinHelp::basedOn`), `ParseInvocation`, and `Shell` on the context.
-- (later tasks: control flow, the interactive loop.)
+- (later task: the interactive loop.)
 
 ## AST dump
 
@@ -330,8 +340,8 @@ prints `cd: PWD: is read only` and goes on -- a documented deviation). `export`,
 `shift` (`HshBuiltinVariables.cpp`; special but `cd`-style errors aside) are
 dash's exportcmd/readonlycmd/unsetcmd/shiftcmd byte for byte: the sorted
 `-p` listings (`export name`, `export name='value'`, `ShellSingleQuote`),
-`name=value` operands, bare names only flagging, unset's `-f`/`[-v]` (there
-are no functions yet, so `-f` is always a success), `Illegal option -x`,
+`name=value` operands, bare names only flagging, unset's `-f`/`[-v]` (a function or a
+variable goes), `Illegal option -x`,
 `bad variable name`, `is read only`, `Illegal number: <n>` and `can't
 shift that many`. `set` (`HshBuiltinSet.cpp`; special) is setcmd: no
 arguments lists every set variable sorted and single-quoted (flagged-but-
@@ -344,9 +354,87 @@ reported not-treated when set or cleared, through the shell's own stderr
 so the reports obey redirections). `test` and `[` are one builtin,
 `HshBuiltinTest.cpp` -- see "test" below.
 
-What is not implemented yet reports `<what> is not supported yet` with status
-2 through the `NotYet` helper: every compound command and function definitions
-(hsh--control-flow, which also removes the helper).
+What runs besides simple commands -- compounds, functions, `break`/
+`continue`/`return`, `.`/`eval`, `read`, and `-e` (errexit) -- is in "Control
+flow" below.
+
+## Control flow
+
+Every compound command runs in the shell itself. `ExecuteCommand` dispatches
+on the kind: a brace group `{ ...; }` is `ExecuteList` on its items, a
+subshell `( ... )` is `RunSubshell` (an in-process subshell, not a child
+process: dash forks; here the state comes back through `SubshellScope` --
+see "Pipelines, subshells, jobs"), and `if`/`while`/`until`/`for`/`case` have
+their executors (`ExecuteIf`, `ExecuteLoop`, `ExecuteFor`, `ExecuteCase`). A
+compound's own redirections wrap the whole compound in one `RedirectionScope`
+-- `{ a; b; } >f` opens `f` once -- and a failed one reports and gives status
+2 without the body running. `if` runs each condition in a tested context and
+the taken branch's list (or the else part, or status 0 with neither);
+`while`/`until` test their condition list per iteration; `for` assigns its
+variable (through `AssignVariable`: a read-only loop variable is fatal) each
+word of `in ...` expanded, or the positional parameters without `in`;
+`case` expands its subject once and tries each item's patterns in order
+(`MatchPattern` over `ExpandPattern`, so quoting in a pattern is literal),
+running the first matching body.
+
+`break [n]`/`continue [n]` throw a `LoopControl{isBreak, levels}` that the
+loops catch: each loop decrements and rethrows while `levels` stays above 1,
+`break` leaving the loop, `continue` starting the next
+iteration (a body so ended has status 0, theirs; one thrown by the condition, `while break; do`, acts on that loop alike). `n` past the running loops just ends them all
+(`std::min(levels, LoopDepth())`); outside a loop both return 0, as dash. A
+function call (`CallFunction`) runs the definition's body command with its
+own positional parameters (`$0` unchanged, the call's fields becoming
+`$1...`, put back afterwards) and remembers prefix assignments made for the
+call, putting them back like a regular builtin's; `return [n]` throws
+`FunctionReturn{status}` (default `$?`), which `CallFunction` turns into the
+call's status. Both stop at a subshell boundary: `RunSubshell` catches a
+`LoopControl` (the subshell ends, status 0 -- the outer loop is untouched)
+and a `FunctionReturn` (the subshell ends with its status), since a forked
+dash subshell could not reach the outer loop or caller either. The
+unwinding types live next to `ShellExit`/`ShellStopped` in `HshShell.h`.
+
+Functions are the shell's `m_functions`, a name -> `CommandPtr` map filled
+when a `FunctionDefinition` executes (the node is copied in, its
+`sourceText` included: `BackgroundPrelude` writes every function's source
+into the child hsh running a background list, so `f &` finds `f` there).
+Lookup is POSIX's: special builtin first, then a function, then a regular
+builtin, then `PATH` -- so a function overrides a regular builtin (`cd() {
+...; }`) but not `exit`. `unset -f name` removes one.
+
+`-e` (errexit) ends a non-interactive shell with `ShellExit{status}` when a
+failing command is the last pipeline of an and-or list run to its end, the
+pipeline is not negated, and no tested context surrounds it. A tested
+context -- every `&&`/`||` operand but the last pipeline, every negated
+pipeline, every condition (`if`, `while`, `until`) -- is a
+`Shell::TestedContext` on the executor's call stack, counted by
+`m_errexitSuppressed`, which is why a function called in a tested context
+inherits it (dash's rule) while its own untested commands stay fatal.
+`SubshellScope` saves and restores the suppression with the rest.
+
+`.` (`BuiltinDot`, a special builtin) opens its file (a name with a `/` as
+given, another searched in `PATH`; not found/cannot open are fatal, named
+after the file) and runs its text one complete command at a time in this
+shell, through `Parser::ParseNext` with the reported syntax errors named
+after the file; `m_dotDepth` lets `return` unwind to it as to a function.
+`eval` (special) joins its arguments with one space and parses and runs the
+result the same way, line numbers kept from where it runs. Both run in the
+shell itself, so what they assign stays. One command at a time (never
+`ParseProgram` on the whole text) because each parsed command runs before
+the next is parsed: `.` of a file whose line 2 depends on line 1's run must
+work, as parse-a-then-run-a in `Shell::Run`.
+
+`read` (regular, `HshBuiltinRead.cpp`) reads a byte at a time -- never a
+buffered chunk -- so `read a; cat` leaves the rest of the same pipe for
+`cat`. A line is the bytes up to a newline (end of input ends it too, with
+status 1); without `-r` a backslash joins with the next line, protects the
+next byte from splitting, and a trailing lone one is dropped. `-p prompt`
+writes the prompt to stderr only when slot 0 is a terminal. The line is then
+split on `IFS` (unset: ` \t\n`; empty: no splitting): leading/trailing IFS
+white space goes, non-white IFS characters delimit once each, the last name
+takes the rest with its delimiters, and a leftover name is set empty.
+`read` with no name reports `read: arg count`, a bad name
+`read: <name>: bad variable name` (both status 2; read is regular so these
+are not fatal), an unknown option `read: Illegal option -<c>`.
 
 ## Pipelines, subshells, jobs
 
@@ -354,9 +442,11 @@ A pipeline `a | b | c` (and a negated `! a | b`) runs its stages at the same
 time, connected by pipes; its status is the last stage's. A stage is either a
 **child stage** (`IsChildStage`: a simple command with at least one word whose
 first word is literal text, `LiteralText`, naming neither a shell builtin nor
--- hsh--control-flow -- a function), a child process started at once so that
+a function, and holding no `CommandSubstitution` in a word or an assignment
+value -- one must expand in pass order, not in the started child), a child
+process started at once so that
 every child stage runs concurrently, or an **in-shell stage** (a shell
-builtin, an assignment-only command, later a compound command or a function),
+builtin, a function, an assignment-only command, a compound command),
 run one at a time after every child has been started. Then the shell waits
 for each child in order. A child stage of a pipeline is started but not
 waited: `RunStage` runs the command with its stdin/stdout replaced (slots 0
@@ -388,16 +478,21 @@ leaves `w` unset and `x=$(cd /; pwd)` the directory alone. It also counts the
 shell's subshell depth. `Shell::RunSubshell` wraps a body in one: `exit`
 (`ShellExit`) and fatal errors (`ShellError`, reported as at the top level,
 status 2) end only the subshell; `ShellStopped` passes through, to end the
-whole shell.
+whole shell. Since hsh--control-flow the scope also saves and restores the
+function table and the loop/function/dot depths and the errexit suppression,
+and its destructor drops the processes of every job the subshell added from
+the shell's live-children list with the job itself -- else each `( true & )`
+would leak one.
 
 A background list `cmd &` is started without waiting. One that is a single
 pipeline of child stages only starts its stages as a pipeline does, without
 the waiting (the first stage's stdin is a `NullInputDescriptor`: an
 asynchronous list's stdin is empty, as dash's /dev/null with no job control,
 before its own redirections). One that needs the shell itself (a builtin,
-`&&`/`||`, and from hsh--control-flow a compound command or a function) runs
+`&&`/`||`, a compound command or a function) runs
 as a **child hsh**: `hsh -c` of `BackgroundScript(item)` --
-`BackgroundPrelude()` then the item's `sourceText` -- started from the
+`BackgroundPrelude()` (the sourceText of every function the shell knows, so
+the child finds them) then the item's `sourceText` -- started from the
 running shell's own path (`IProcess::Path()`, no PATH lookup), with `$0` and
 the positional parameters passed on, the options that are on among e u f x C
 a as one invocation argument, the exported

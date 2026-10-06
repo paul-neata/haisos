@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <future>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -241,6 +243,25 @@ TEST_F(HshShellTest, CommandSubstitutionInAStageIsWaitedFor) {
     for (const auto& c : cases) {
         ExpectSh(c, "CommandSubstitutionInAStageIsWaitedFor");
     }
+}
+
+TEST_F(HshShellTest, ChildStageCommandSubstitutionDoesNotDeadlock) {
+    // A $(...) in the words of a child stage would expand in pass 1, before
+    // pass 2 ran the earlier in-shell stage: `cat` would block reading a pipe
+    // nothing has written to yet. Such a stage runs in the shell instead, so
+    // the pipe rule holds. Run off a background thread with a bounded wait: a
+    // regression fails here instead of hanging the suite.
+    auto promised = std::make_shared<std::promise<Captured>>();
+    std::future<Captured> future = promised->get_future();
+    std::thread([this, promised] { promised->set_value(Sh(": | /bin/echo $(cat)")); }).detach();
+    if (future.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+        FAIL() << "hsh -c ': | /bin/echo $(cat)' did not finish within 5 s (deadlock)";
+        return;
+    }
+    const Captured captured = future.get();
+    EXPECT_EQ(captured.out, "\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
 }
 
 TEST_F(HshShellTest, CommandSubstitutionBigOutput) {

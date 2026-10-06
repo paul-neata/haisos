@@ -3,7 +3,7 @@
 - Rock: builtins
 - Depends on: streams--console-and-start (and, through it, fd--descriptor-objects, fd--process-table)
 - Size: ~500 changed lines in ~14 files (five of them renames)
-- Plan checked against: develop @ 8fb8324
+- Plan checked against: develop @ 0d92271
 - PR title: Builtins in directories of their own; cat reads stdin, ls pipes
 
 ## Goal

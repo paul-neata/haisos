@@ -3,7 +3,7 @@
 - Rock: hsh
 - Depends on: hsh--parser, hsh--arith-glob
 - Size: ~1000 changed lines in ~8 files (pattern matching, globbing and arithmetic were split out into hsh--arith-glob)
-- Plan checked against: develop @ 8fb8324
+- Plan checked against: develop @ 0d92271
 - PR title: hsh: shell variables and POSIX word expansion
 
 ## Goal

@@ -3,7 +3,7 @@
 - Rock: hsh
 - Depends on: hsh--shell-builtins
 - Size: ~1000 changed lines in ~10 files
-- Plan checked against: develop @ 8fb8324
+- Plan checked against: develop @ 0d92271
 - PR title: hsh: control flow, functions, dot scripts, eval, read and -e
 
 ## Goal

@@ -3,7 +3,7 @@
 - Rock: hsh
 - Depends on: hsh--control-flow, builtins--man
 - Size: ~800 changed lines in ~12 files (about 250 of them the manual page's text)
-- Plan checked against: develop @ 8fb8324
+- Plan checked against: develop @ 0d92271
 - PR title: hsh: interactive mode, full manual page, end-to-end scenarios
 
 ## Goal

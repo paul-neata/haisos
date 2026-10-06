@@ -3,7 +3,7 @@
 - Rock: hsh
 - Depends on: hsh--lexer
 - Size: ~850 changed lines in ~9 files
-- Plan checked against: develop @ 8fb8324
+- Plan checked against: develop @ 0d92271
 - PR title: hsh: pattern matching, globbing and arithmetic evaluation
 
 (Split out of hsh--expansion, which came out at ~1900 lines. This task has no

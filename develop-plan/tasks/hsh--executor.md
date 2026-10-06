@@ -3,7 +3,7 @@
 - Rock: hsh
 - Depends on: hsh--expansion, pipes--broken-pipe (and through them hsh--parser, hsh--arith-glob, streams--exit-codes, builtins--directories)
 - Size: ~1000 changed lines in ~14 files (split: redirections, pipelines, the shell builtins, control flow and the interactive mode are the next five hsh tasks)
-- Plan checked against: develop @ 8fb8324
+- Plan checked against: develop @ 0d92271
 - PR title: hsh: register the shell, run simple commands and lists
 
 (The second half of the hsh rock came out at ~5000 lines, so it is six tasks:

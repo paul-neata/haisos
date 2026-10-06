@@ -4,7 +4,7 @@
 Removes every piece of link-specific code from the disk-backed filesystems:
 links and junctions on the disk are followed wherever they lead, as the host
 follows them, and `DELETE` treats a link like whatever it points at.
-Done directly on `develop` in b5b6b0a; its task is obsolete.
+Done directly on `develop` in 76079bd; its task is obsolete.
 Tasks: links--follow-anywhere
 
 ## fd -- File descriptors as objects

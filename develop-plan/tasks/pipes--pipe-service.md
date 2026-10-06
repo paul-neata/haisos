@@ -3,7 +3,7 @@
 - Rock: pipes
 - Depends on: streams--exit-codes (and through it fd--descriptor-objects, fd--process-table, streams--console-and-start, streams--runtime-streams)
 - Size: ~900 changed lines in ~25 files (code ~480, tests ~390, docs ~30)
-- Plan checked against: develop @ 8fb8324, plus the plans fd--descriptor-objects, fd--process-table, streams--console-and-start, streams--runtime-streams, streams--exit-codes
+- Plan checked against: develop @ 0d92271, plus the plans fd--descriptor-objects, fd--process-table, streams--console-and-start, streams--runtime-streams, streams--exit-codes
 - PR title: Add IPipeService, IFileIO::CreatePipe and interruptible pipe I/O
 
 ## Goal
@@ -84,7 +84,7 @@ including "Nothing that waits for a runtime thread is destroyed on one"),
 If the code on `develop` names any of these differently, the code wins: use
 its names and keep this plan's behaviour.
 
-### What exists at 8fb8324
+### What exists at 0d92271
 
 - `IServicesCreator` (`interfaces/IServicesCreator.h`) creates the
   filesystem, network and LLM services; `ServicesCreator` implements it, one

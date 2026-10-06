@@ -31,7 +31,7 @@ console is a plain terminal: output reaches the host raw and untagged, stderr
 on the host's stderr, and `haisos` exits with the code of its first failing
 `RUN`.
 
-Also in this develop, already on `develop` (b5b6b0a, task
+Also in this develop, already on `develop` (76079bd, task
 `links--follow-anywhere`, marked obsolete): symbolic links (and Windows
 junctions) inside a physical filesystem are followed wherever they lead, as
 the host follows them; Haisos keeps no link bookkeeping, and `DELETE` treats a

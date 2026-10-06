@@ -3,7 +3,7 @@
 - Rock: hsh
 - Depends on: hsh--lexer
 - Size: ~1020 changed lines in ~7 files
-- Plan checked against: develop @ 8fb8324
+- Plan checked against: develop @ 0d92271
 - PR title: hsh: AST and parser for the full POSIX shell grammar
 
 ## Goal

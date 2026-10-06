@@ -3,7 +3,7 @@
 - Rock: fd
 - Depends on: fd--descriptor-objects
 - Size: ~650 changed lines in ~20 files
-- Plan checked against: develop @ 8fb8324 (after fd--descriptor-objects)
+- Plan checked against: develop @ 0d92271 (after fd--descriptor-objects)
 - PR title: Give every process a descriptor table on IFileIO
 
 ## Goal

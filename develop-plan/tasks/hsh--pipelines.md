@@ -3,7 +3,7 @@
 - Rock: hsh
 - Depends on: hsh--redirections
 - Size: ~1000 changed lines in ~10 files (at the limit; `wait` stays here because the `&` tests need it, and both neighbouring hsh tasks are at ~1000 too)
-- Plan checked against: develop @ 8fb8324
+- Plan checked against: develop @ 0d92271
 - PR title: hsh: pipelines, background jobs, wait and command substitution
 
 ## Goal

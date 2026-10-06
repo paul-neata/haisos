@@ -3,7 +3,7 @@
 - Rock: hsh
 - Depends on: hsh--executor, builtins--wc (the tests use `wc`)
 - Size: ~700 changed lines in ~10 files
-- Plan checked against: develop @ 8fb8324
+- Plan checked against: develop @ 0d92271
 - PR title: hsh: every redirection, heredocs, here-strings and exec
 
 ## Goal

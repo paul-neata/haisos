@@ -3,7 +3,7 @@
 - Rock: hsh
 - Depends on: builtins--directories
 - Size: ~1030 changed lines in ~9 files (at the limit: the nested-substitution scanner needs the whole tokenizer, so it is not split)
-- Plan checked against: develop @ 8fb8324
+- Plan checked against: develop @ 0d92271
 - PR title: hsh: lexer for the shell language, with heredocs and nesting
 
 ## Goal

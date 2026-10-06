@@ -3,7 +3,7 @@
 - Rock: streams
 - Depends on: streams--console-and-start
 - Size: ~700 changed lines in ~22 files
-- Plan checked against: develop @ 8fb8324
+- Plan checked against: develop @ 0d92271
 - PR title: Agents and Lua scripts read slot 0 and write to slots 1 and 2
 
 ## Goal

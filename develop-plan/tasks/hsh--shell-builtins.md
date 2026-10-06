@@ -3,7 +3,7 @@
 - Rock: hsh
 - Depends on: hsh--pipelines
 - Size: ~1000 changed lines in ~12 files
-- Plan checked against: develop @ 8fb8324
+- Plan checked against: develop @ 0d92271
 - PR title: hsh: cd, export, unset, readonly, set, shift and test builtins
 
 ## Goal

@@ -3,7 +3,7 @@
 - Rock: builtins
 - Depends on: builtins--directories, builtins--unicode
 - Size: ~620 changed lines in ~9 files (about half of it tests)
-- Plan checked against: develop @ 8fb8324
+- Plan checked against: develop @ 0d92271
 - PR title: Add the wc builtin, GNU wc byte for byte
 
 ## Goal

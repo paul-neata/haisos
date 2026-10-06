@@ -3,7 +3,7 @@
 - Rock: builtins
 - Depends on: builtins--directories, builtins--wc (its page is used in the tests), and streams--exit-codes (the haisos test checks the exit code; earlier in the playbook)
 - Size: ~450 changed lines in ~10 files
-- Plan checked against: develop @ 8fb8324
+- Plan checked against: develop @ 0d92271
 - PR title: Add the man builtin, showing every builtin's manual page
 
 ## Goal

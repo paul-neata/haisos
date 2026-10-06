@@ -3,7 +3,7 @@
 - Rock: streams
 - Depends on: fd--descriptor-objects, fd--process-table
 - Size: ~850 changed lines in ~24 files
-- Plan checked against: develop @ 8fb8324
+- Plan checked against: develop @ 0d92271
 - PR title: Give every process stdio from StartProcessOptions; builtins write to 1/2
 
 ## Goal

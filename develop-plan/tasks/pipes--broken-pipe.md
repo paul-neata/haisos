@@ -3,7 +3,7 @@
 - Rock: pipes
 - Depends on: pipes--pipe-service
 - Size: ~350 changed lines in ~14 files (code ~150, tests ~170, docs ~30)
-- Plan checked against: develop @ 8fb8324, plus the plans fd--process-table, streams--console-and-start, streams--runtime-streams, streams--exit-codes, pipes--pipe-service
+- Plan checked against: develop @ 0d92271, plus the plans fd--process-table, streams--console-and-start, streams--runtime-streams, streams--exit-codes, pipes--pipe-service
 - PR title: Stop a program quietly with exit code 141 on a broken pipe
 
 ## Goal

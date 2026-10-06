@@ -3,7 +3,7 @@
 - Rock: fd
 - Depends on: none
 - Size: ~1100 changed lines in ~40 files (about 500 of them mechanical test edits: `int fd` -> descriptor object)
-- Plan checked against: develop @ 8fb8324
+- Plan checked against: develop @ 0d92271
 - PR title: Return IFileDescriptor objects from IFileSystem::OpenFile
 
 ## Goal

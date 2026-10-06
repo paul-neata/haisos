@@ -12,3 +12,4 @@
 - 2026-10-06 06:57 UTC -- streams--console-and-start merged #21 as 0.4.3: 1M 4L open, 1 tries
 - 2026-10-06 07:01 UTC -- start streams--runtime-streams (0.4.4)
 - 2026-10-06 07:28 UTC -- streams--runtime-streams: PR #22, ready
+- 2026-10-06 07:31 UTC -- streams--runtime-streams merged #22 as 0.4.4: 1M 4L open, 1 tries

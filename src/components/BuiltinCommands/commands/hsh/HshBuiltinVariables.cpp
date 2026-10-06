@@ -92,9 +92,9 @@ int BuiltinReadonly(Shell& shell, const std::vector<std::string>& args) {
 }
 
 // unset [-fv] name ..., as dash's unsetcmd: -v (the default) removes
-// variables, -f functions (none yet, so -f always succeeds); the last option
-// given wins. A bad name is "unset: <name>: bad variable name", a read-only
-// one "unset: <name>: is read only" -- both fatal (unset is special).
+// variables, -f functions; the last option given wins. A bad name is "unset:
+// <name>: bad variable name", a read-only variable "unset: <name>: is read
+// only" -- both fatal (unset is special).
 int BuiltinUnset(Shell& shell, const std::vector<std::string>& args) {
     bool functions = false;
     size_t i = 1;
@@ -115,11 +115,12 @@ int BuiltinUnset(Shell& shell, const std::vector<std::string>& args) {
         }
     }
     for (; i < args.size(); ++i) {
-        if (functions) {
-            continue;  // hsh has no functions yet: unset -f always succeeds
-        }
         if (!IsValidShellName(args[i])) {
             shell.Fail("unset: " + args[i] + ": bad variable name");
+        }
+        if (functions) {
+            shell.RemoveFunction(args[i]);  // unset -f: the function goes
+            continue;
         }
         if (!shell.State().variables.Unset(args[i])) {
             shell.Fail("unset: " + args[i] + ": is read only");

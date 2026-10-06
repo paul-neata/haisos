@@ -1,7 +1,9 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -16,13 +18,22 @@
 
 namespace Haisos::Hsh {
 
+class Shell;
+int BuiltinDot(Shell& shell, const std::vector<std::string>& args);
+
 // `exit`, `return` at the top level, and the end of a subshell: unwinds to
-// Shell::Run (or to the subshell boundary, hsh--pipelines) with the status.
+// Shell::Run (or to the subshell boundary) with the status.
 struct ShellExit { int status; };
 
 // The shell was asked to stop (TriggerStop), or broke a pipe with its own
 // output: unwinds to Shell::Run past everything, subshell boundaries included.
 struct ShellStopped {};
+
+// break n / continue n: unwinds to the loops (levels counts them, one loop
+// exiting per level).
+struct LoopControl { bool isBreak; int levels; };
+// return n: unwinds to the function call or the dot script running.
+struct FunctionReturn { int status; };
 
 // Why IFileIO::OpenFile failed, in dash's words, worked out with Stat:
 // reading: "No such file" (nothing there), "Is a directory", else
@@ -46,7 +57,7 @@ public:
     // returns the exit status (0-255).
     int Run();
 
-    // --- Running commands (later tasks fill in the kinds marked "not yet") ---
+    // --- Running commands ---
     int ExecuteList(const CommandList& list);
     int ExecuteAndOr(const AndOrList& andOr);
     int ExecutePipeline(const Pipeline& pipeline);
@@ -78,11 +89,24 @@ public:
     // its redirections instead of restoring the descriptor table afterwards.
     void KeepRedirections();
 
+    // --- Functions, loops, dot scripts ---
+    int LoopDepth() const { return m_loopDepth; }        // loops running in the current function (or top level)
+    int FunctionDepth() const { return m_functionDepth; }
+    int DotDepth() const { return m_dotDepth; }
+    bool HasFunction(const std::string& name) const;
+    void RemoveFunction(const std::string& name);
+
+    // For tests: how many children every live shell has started and has
+    // neither waited for nor dropped (the size of all m_liveChildren).
+    static long LiveChildCountForTest();
+
     // --- Pipelines, subshells, background jobs ---
-    // Whether |command|, as a pipeline stage, is started as a child at once: a
-    // SimpleCommand with at least one word whose first word is plain literal
-    // text (LiteralText) naming neither a shell builtin nor (hsh--control-flow)
-    // a function. Every other stage runs inside the shell, in a subshell.
+    // Whether |command|, as a pipeline stage, is started at once as a child: a
+    // SimpleCommand with no $(...) anywhere in its words (which would expand
+    // before pass 2 ran the earlier stages -- a pipe stage could deadlock on
+    // it), at least one word, the first word plain literal text (LiteralText)
+    // naming neither a shell builtin nor a function. Every other stage runs
+    // inside the shell, in a subshell.
     bool IsChildStage(const Command& command) const;
     // Runs |command| with its standard input and output replaced by |in| and
     // |out| -- in a subshell (RunSubshell), slots 0 and 1 set with
@@ -112,11 +136,11 @@ public:
     // The script a background child hsh runs for |item|: BackgroundPrelude(),
     // then item.sourceText, then "\n".
     std::string BackgroundScript(const ListItem& item) const;
-    // What the child must know of this shell beyond its environment: nothing
-    // in text yet (an empty prelude; the options that are on among e u f x C a
-    // reach the child as an invocation argument, since there is no `set`
-    // builtin yet). hsh--control-flow appends the sourceText of every function
-    // defined.
+    // What the child must know of this shell beyond its environment: the
+    // sourceText of every function defined, each followed by "\n", so the
+    // child has the functions (the options that are on among e u f x C a
+    // reach it as an invocation argument, the exported variables as its
+    // environment).
     std::string BackgroundPrelude() const;
 
     // --- Children ---
@@ -149,10 +173,28 @@ public:
     CommandSubstitutionResult RunCommandSubstitution(const std::string& source, int line) override;
 
 private:
-    // A construct this task does not run yet ("if is not supported yet",
-    // status 2). Each later task removes its uses; hsh--control-flow
-    // removes the helper.
-    int NotYet(const std::string& what);
+    // The compound kinds of ExecuteCommand.
+    int ExecuteIf(const IfCommand& command);
+    int ExecuteLoop(const LoopCommand& command);
+    int ExecuteFor(const ForCommand& command);
+    int ExecuteCase(const CaseCommand& command);
+    // A function call: its own positional parameters (fields[1..], $0 stays),
+    // loop depth from 0 (a break inside a function does not reach the caller's
+    // loop), FunctionReturn becoming the status. The body's redirections
+    // apply on every call (ExecuteCommand does them).
+    int CallFunction(const FunctionDefinition& function, const std::vector<std::string>& fields);
+
+    // A tested context for -e (errexit): an if/elif/while/until condition, and
+    // in ExecuteAndOr every pipeline but the last of the list plus any negated
+    // pipeline. A function called inside one inherits it.
+    struct TestedContext {
+        explicit TestedContext(Shell& shell) : m_shell(shell) { ++shell.m_errexitSuppressed; }
+        ~TestedContext() { --m_shell.m_errexitSuppressed; }
+        TestedContext(const TestedContext&) = delete;
+        TestedContext& operator=(const TestedContext&) = delete;
+        Shell& m_shell;
+    };
+
     void WriteDescriptor(int fd, const std::string& bytes);
     // WriteDescriptor's work on a descriptor already in hand (the trace's
     // stderr from before a command's redirections); null writes nothing.
@@ -168,8 +210,11 @@ private:
     void RecordJob(Job job);
     // ExecutePipeline for two or more commands.
     int ExecutePipelinedStages(const Pipeline& pipeline);
+    // Removes |child| from m_liveChildren (and the test count), when present.
+    void ForgetLiveChild(const std::shared_ptr<IProcess>& child);
 
-    friend class SubshellScope;  // it saves m_state, m_jobs and the depth
+    friend class SubshellScope;  // it saves m_state, m_jobs, m_functions and the depths
+    friend int BuiltinDot(Shell& shell, const std::vector<std::string>& args);  // counts m_dotDepth
 
     BuiltinContext& m_context;
     Invocation m_invocation;
@@ -185,6 +230,14 @@ private:
     // Set for a pipeline stage that may start a child without waiting for it
     // (RunStage); null normally.
     std::shared_ptr<IProcess>* m_startInsteadOfWait = nullptr;
+
+    std::map<std::string, CommandPtr> m_functions;  // name -> the FunctionDefinition node
+    int m_loopDepth = 0;            // loops running in the current function (or top level)
+    int m_functionDepth = 0;        // function calls running
+    int m_dotDepth = 0;             // dot scripts running
+    int m_errexitSuppressed = 0;    // > 0 inside a tested context (see TestedContext)
+
+    static std::atomic<long> s_liveChildCount;  // LiveChildCountForTest(), tests only
 };
 
 } // namespace Haisos::Hsh

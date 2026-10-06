@@ -33,6 +33,12 @@ int BuiltinUnset(Shell& shell, const std::vector<std::string>& args);      // Hs
 int BuiltinShift(Shell& shell, const std::vector<std::string>& args);      // HshBuiltinVariables.cpp
 int BuiltinSet(Shell& shell, const std::vector<std::string>& args);        // HshBuiltinSet.cpp
 int BuiltinTest(Shell& shell, const std::vector<std::string>& args);       // HshBuiltinTest.cpp ("test" and "[")
+int BuiltinBreak(Shell& shell, const std::vector<std::string>& args);      // HshBuiltinFlow.cpp
+int BuiltinContinue(Shell& shell, const std::vector<std::string>& args);   // HshBuiltinFlow.cpp
+int BuiltinReturn(Shell& shell, const std::vector<std::string>& args);     // HshBuiltinFlow.cpp
+int BuiltinDot(Shell& shell, const std::vector<std::string>& args);        // HshBuiltinFlow.cpp
+int BuiltinEval(Shell& shell, const std::vector<std::string>& args);       // HshBuiltinFlow.cpp
+int BuiltinRead(Shell& shell, const std::vector<std::string>& args);       // HshBuiltinRead.cpp
 
 // The version of the hsh builtin command (Hsh.cpp), for `set`'s not-treated
 // reports inside the shell, where BuiltinContext's version is not at hand.

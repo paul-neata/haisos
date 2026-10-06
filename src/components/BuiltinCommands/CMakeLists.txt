@@ -33,6 +33,8 @@ add_library(BuiltinCommands STATIC
     commands/hsh/HshBuiltinVariables.cpp
     commands/hsh/HshBuiltinSet.cpp
     commands/hsh/HshBuiltinTest.cpp
+    commands/hsh/HshBuiltinFlow.cpp
+    commands/hsh/HshBuiltinRead.cpp
     commands/hsh/HshSubshell.cpp
     commands/hsh/HshUnboundedPipe.cpp
 )

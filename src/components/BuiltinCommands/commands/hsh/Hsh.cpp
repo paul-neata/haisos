@@ -6,7 +6,7 @@
 #include "commands/hsh/HshShell.h"
 
 namespace Haisos::Hsh {
-const char* HshVersion() { return "0.4.0"; }
+const char* HshVersion() { return "0.5.0"; }
 } // namespace Haisos::Hsh
 
 namespace Haisos {

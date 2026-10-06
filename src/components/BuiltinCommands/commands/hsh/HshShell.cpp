@@ -10,6 +10,7 @@
 #include "commands/hsh/HshBuiltins.h"
 #include "commands/hsh/HshDescriptors.h"
 #include "commands/hsh/HshParser.h"
+#include "commands/hsh/HshPattern.h"
 #include "commands/hsh/HshRedirection.h"
 #include "commands/hsh/HshSubshell.h"
 #include "commands/hsh/HshUnboundedPipe.h"
@@ -29,7 +30,27 @@ constexpr const char* kDefaultPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/
 // How many background jobs the shell keeps; past that, finished ones are dropped.
 constexpr size_t kMaxJobs = 1024;
 
+// Whether a $(...) sits anywhere in |parts| (DoubleQuoted contents, parameter
+// operands and arithmetic expressions included). A word holding one expands
+// at run time.
+bool PartsHoldCommandSubstitution(const std::vector<WordPart>& parts) {
+    for (const WordPart& part : parts) {
+        if (part.kind == WordPartKind::CommandSubstitution ||
+            PartsHoldCommandSubstitution(part.parts)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
+
+std::atomic<long> Shell::s_liveChildCount{0};
+
+// static
+long Shell::LiveChildCountForTest() {
+    return s_liveChildCount.load();
+}
 
 std::string OpenFailureReason(IFileIO& io, const std::string& path, bool creating) {
     FileStatus status;
@@ -169,14 +190,33 @@ int Shell::ExecuteAndOr(const AndOrList& andOr) {
     const auto noexec = [this] {
         return m_state.options.noexec && !m_state.options.interactive;
     };
+    // For -e (errexit): every pipeline but the last, and a negated one, is a
+    // tested context -- its failure never exits the shell. Only the failure
+    // of the list's last pipeline (when it actually ran, was not negated and
+    // is not inside a tested context) exits, as dash.
+    const auto runPipeline = [this, &andOr](size_t i) -> int {
+        const Pipeline& pipeline = andOr.pipelines[i];
+        if (i + 1 < andOr.pipelines.size() || pipeline.negated) {
+            const TestedContext tested(*this);
+            return ExecutePipeline(pipeline);
+        }
+        return ExecutePipeline(pipeline);
+    };
+    size_t lastRan = andOr.pipelines.size();  // none ran yet
     if (!noexec()) {
-        status = ExecutePipeline(andOr.pipelines[0]);
+        status = runPipeline(0);
+        lastRan = 0;
     }
     for (size_t i = 0; i < andOr.operators.size(); ++i) {
         const bool run = andOr.operators[i] == AndOrOperator::And ? status == 0 : status != 0;
         if (run && !noexec()) {
-            status = ExecutePipeline(andOr.pipelines[i + 1]);
+            status = runPipeline(i + 1);
+            lastRan = i + 1;
         }
+    }
+    if (lastRan + 1 == andOr.pipelines.size() && status != 0 && m_state.options.errexit &&
+        !m_state.options.interactive && !andOr.pipelines[lastRan].negated && m_errexitSuppressed == 0) {
+        throw ShellExit{status};
     }
     return status;
 }
@@ -306,18 +346,180 @@ int Shell::ExecuteCommand(const Command& command) {
         return ExecuteSimpleCommand(static_cast<const SimpleCommand&>(command));
     }
     m_currentLine = command.line;
-    // hsh--control-flow removes each of these.
-    switch (command.kind) {
-    case CommandKind::BraceGroup:         return NotYet("{ }");
-    case CommandKind::Subshell:           return NotYet("( )");
-    case CommandKind::If:                 return NotYet("if");
-    case CommandKind::While:              return NotYet("while");
-    case CommandKind::Until:              return NotYet("until");
-    case CommandKind::For:                return NotYet("for");
-    case CommandKind::Case:               return NotYet("case");
-    case CommandKind::FunctionDefinition: return NotYet("function definitions");
-    default:                              return NotYet("compound commands");
+    if (command.kind == CommandKind::FunctionDefinition) {
+        // Only entered in the table; the body (with its redirections) runs on
+        // each call. A later definition of the name replaces the earlier one.
+        const auto& definition = static_cast<const FunctionDefinition&>(command);
+        auto kept = std::make_shared<FunctionDefinition>();
+        kept->line = definition.line;
+        kept->name = definition.name;
+        kept->body = definition.body;
+        kept->sourceText = definition.sourceText;
+        m_functions[definition.name] = std::move(kept);
+        return 0;
     }
+    // A compound command's redirections apply to the whole of it
+    // (`while read l; do ...; done < f`), undone when it ends; a failure is
+    // an ordinary error (status 2), compound commands not being special
+    // builtins. "Bad fd number" out of Apply stays fatal, as dash.
+    RedirectionScope scope(*this);
+    if (const std::optional<std::string> error = scope.Apply(command.redirections)) {
+        Report(*error);
+        return 2;
+    }
+    switch (command.kind) {
+    case CommandKind::BraceGroup:
+        return ExecuteList(static_cast<const BraceGroup&>(command).body);
+    case CommandKind::Subshell:
+        return RunSubshell([&] { return ExecuteList(static_cast<const Subshell&>(command).body); });
+    case CommandKind::If:
+        return ExecuteIf(static_cast<const IfCommand&>(command));
+    case CommandKind::While:
+    case CommandKind::Until:
+        return ExecuteLoop(static_cast<const LoopCommand&>(command));
+    case CommandKind::For:
+        return ExecuteFor(static_cast<const ForCommand&>(command));
+    case CommandKind::Case:
+        return ExecuteCase(static_cast<const CaseCommand&>(command));
+    default:
+        return 2;  // unreachable: every kind was handled above
+    }
+}
+
+int Shell::ExecuteIf(const IfCommand& command) {
+    for (const IfBranch& branch : command.branches) {
+        int condition;
+        {
+            const TestedContext tested(*this);  // a condition never trips -e
+            condition = ExecuteList(branch.condition);
+        }
+        if (condition == 0) {
+            return ExecuteList(branch.body);
+        }
+    }
+    if (command.elseBody) {
+        return ExecuteList(*command.elseBody);
+    }
+    return 0;
+}
+
+// Runs a while/until loop or a for loop's iterations over |words|: the body
+// once per round until the condition says stop / the words run out, the last
+// body's status (0 when it never ran). break/continue (LoopControl) unwind
+// here, |levels| loops at a time.
+int Shell::ExecuteLoop(const LoopCommand& command) {
+    ++m_loopDepth;
+    int status = 0;
+    try {
+        for (;;) {
+            int condition;
+            {
+                const TestedContext tested(*this);
+                condition = ExecuteList(command.condition);
+            }
+            const bool again = command.kind == CommandKind::While ? condition == 0 : condition != 0;
+            if (!again) {
+                break;
+            }
+            try {
+                status = ExecuteList(command.body);
+            } catch (LoopControl& control) {
+                if (control.levels > 1) {  // break/continue n: this loop is one of them
+                    --control.levels;
+                    throw;
+                }
+                if (control.isBreak) {
+                    // The body's status stands at its last command run.
+                    status = m_state.lastExitStatus;
+                    break;
+                }
+                // continue: the condition again.
+            }
+        }
+    } catch (...) {
+        --m_loopDepth;
+        throw;
+    }
+    --m_loopDepth;
+    return status;
+}
+
+int Shell::ExecuteFor(const ForCommand& command) {
+    const std::vector<std::string> words =
+        command.hasIn ? m_expander.ExpandWords(command.words) : m_state.positional;
+    ++m_loopDepth;
+    int status = 0;
+    try {
+        for (const std::string& word : words) {
+            // A read-only loop variable is fatal ("r: is read only"), as dash.
+            AssignVariable(command.variable, word);
+            try {
+                status = ExecuteList(command.body);
+            } catch (LoopControl& control) {
+                if (control.levels > 1) {
+                    --control.levels;
+                    throw;
+                }
+                if (control.isBreak) {
+                    status = m_state.lastExitStatus;
+                    break;
+                }
+            }
+        }
+    } catch (...) {
+        --m_loopDepth;
+        throw;
+    }
+    --m_loopDepth;
+    return status;
+}
+
+int Shell::ExecuteCase(const CaseCommand& command) {
+    const std::string subject = m_expander.ExpandToString(command.subject);
+    for (const CaseItem& item : command.items) {
+        for (const Word& pattern : item.patterns) {
+            if (MatchPattern(m_expander.ExpandPattern(pattern), subject)) {
+                // The first match runs; later items' patterns stay unexpanded.
+                return item.body.items.empty() ? 0 : ExecuteList(item.body);
+            }
+        }
+    }
+    return 0;  // no match, as dash
+}
+
+int Shell::CallFunction(const FunctionDefinition& function, const std::vector<std::string>& fields) {
+    // The call's own positional parameters ($0 does not change), the loop
+    // depth from 0: dash counts loops inside a function on their own, so a
+    // break never leaves the caller's loop.
+    const std::vector<std::string> keepPositional = std::move(m_state.positional);
+    m_state.positional.assign(fields.begin() + 1, fields.end());
+    const int keepLoopDepth = m_loopDepth;
+    m_loopDepth = 0;
+    ++m_functionDepth;
+    int status = 0;
+    const auto restore = [&] {
+        --m_functionDepth;
+        m_loopDepth = keepLoopDepth;
+        m_state.positional = std::move(keepPositional);
+    };
+    try {
+        status = ExecuteCommand(*function.body);
+    } catch (const FunctionReturn& ret) {
+        status = ret.status;
+    } catch (...) {
+        restore();
+        throw;
+    }
+    restore();
+    return status;
+}
+
+bool Shell::HasFunction(const std::string& name) const {
+    return m_functions.find(name) != m_functions.end();
+}
+
+void Shell::RemoveFunction(const std::string& name) {
+    m_functions.erase(name);
 }
 
 // How a prefix assignment ended for a variable: what to put back after a
@@ -392,19 +594,41 @@ int Shell::ExecuteSimpleCommand(const SimpleCommand& command) {
         return m_substitutionCount != substitutions ? m_state.lastExitStatus : 0;
     }
 
-    if (const ShellBuiltin* builtin = FindShellBuiltin(fields[0])) {
-        std::vector<ShellAssignmentRestore> restore;  // regular builtins only
+    // POSIX lookup order: special builtin, function, regular builtin, PATH --
+    // a function may override cd or test, not exit.
+    const ShellBuiltin* builtin = FindShellBuiltin(fields[0]);
+    const auto function = m_functions.find(fields[0]);
+    if (builtin && builtin->special) {
+        // A special builtin's prefix assignments stay (x=1 : sets x).
         for (const auto& [name, value] : assignments) {
-            if (!builtin->special) {
-                restore.push_back({name, m_state.variables.Get(name),
-                    m_state.variables.IsExported(name)});
-            }
             AssignVariable(name, value);
         }
         if (m_state.options.xtrace) {
             trace();
         }
         const int status = builtin->run(*this, fields);
+        if (m_keepRedirections) {
+            // exec with no command: the redirections stay.
+            scope.Keep();
+            m_keepRedirections = false;
+        }
+        return status;
+    }
+    if (function != m_functions.end() || builtin) {
+        // A regular builtin or a function: the prefix assignments are made for
+        // the command only and put back afterwards (x=1 true leaves x unset).
+        std::vector<ShellAssignmentRestore> restore;
+        for (const auto& [name, value] : assignments) {
+            restore.push_back({name, m_state.variables.Get(name),
+                m_state.variables.IsExported(name)});
+            AssignVariable(name, value);
+        }
+        if (m_state.options.xtrace) {
+            trace();
+        }
+        const int status = function != m_functions.end()
+            ? CallFunction(static_cast<const FunctionDefinition&>(*function->second), fields)
+            : builtin->run(*this, fields);
         if (m_keepRedirections) {
             // exec with no command: the redirections stay.
             scope.Keep();
@@ -541,13 +765,26 @@ bool Shell::IsChildStage(const Command& command) const {
     if (simple.words.empty()) {
         return false;
     }
+    // A command substitution anywhere in the words (or the prefix assignments)
+    // expands when the command runs. Child stages run in pass 1, before the
+    // in-shell stages of pass 2 -- so `: | echo $(cat)` would read a pipe
+    // nothing has been written to yet: such a stage runs in the shell too.
+    for (const Word& word : simple.words) {
+        if (PartsHoldCommandSubstitution(word.parts)) {
+            return false;
+        }
+    }
+    for (const Assignment& assignment : simple.assignments) {
+        if (PartsHoldCommandSubstitution(assignment.value.parts)) {
+            return false;
+        }
+    }
     const std::optional<std::string> name = LiteralText(simple.words[0]);
     if (!name) {
         return false;  // what the word expands to decides at run time
     }
-    // A shell builtin runs inside the shell; hsh--control-flow also excludes
-    // its functions here.
-    return !FindShellBuiltin(*name);
+    // A shell builtin or a function runs inside the shell.
+    return !FindShellBuiltin(*name) && !HasFunction(*name);
 }
 
 int Shell::RunStage(const Command& command, std::shared_ptr<IFileDescriptor> in,
@@ -577,7 +814,16 @@ int Shell::RunSubshell(const std::function<int()>& body) {
         const SubshellScope scope(*this);
         return body() & 0xFF;
     } catch (const ShellExit& e) {
+        // `exit`, or errexit inside the subshell: its status is the subshell
+        // command's (which may then trip errexit outside).
         return e.status & 0xFF;
+    } catch (const LoopControl&) {
+        // A break/continue crossing the subshell boundary (the loop it meant
+        // is outside: `for ...; do (break); ...; done`) just ends the subshell,
+        // as a forked dash subshell could not reach the outer loop.
+        return 0;
+    } catch (const FunctionReturn& ret) {
+        return ret.status & 0xFF;
     } catch (const ShellError& e) {
         // A fatal error is reported as at the top level and ends only the
         // subshell, with status 2.
@@ -719,11 +965,17 @@ void Shell::RecordJob(Job job) {
             continue;
         }
         for (const std::shared_ptr<IProcess>& process : it->processes) {
-            m_liveChildren.erase(std::remove(m_liveChildren.begin(), m_liveChildren.end(), process),
-                m_liveChildren.end());
+            ForgetLiveChild(process);
         }
         it = m_jobs.erase(it);
     }
+}
+
+void Shell::ForgetLiveChild(const std::shared_ptr<IProcess>& child) {
+    const size_t before = m_liveChildren.size();
+    m_liveChildren.erase(std::remove(m_liveChildren.begin(), m_liveChildren.end(), child),
+        m_liveChildren.end());
+    s_liveChildCount -= static_cast<long>(before - m_liveChildren.size());
 }
 
 std::string Shell::BackgroundScript(const ListItem& item) const {
@@ -731,7 +983,14 @@ std::string Shell::BackgroundScript(const ListItem& item) const {
 }
 
 std::string Shell::BackgroundPrelude() const {
-    return "";
+    // Every function defined, as written: the background child hsh then has
+    // them (`f() { echo in-bg; }; f & wait`), as a forked dash subshell would.
+    std::string prelude;
+    for (const auto& [name, definition] : m_functions) {
+        prelude += static_cast<const FunctionDefinition&>(*definition).sourceText;
+        prelude += '\n';
+    }
+    return prelude;
 }
 
 Shell::CommandLookup Shell::LookUpCommand(const std::string& name) {
@@ -812,6 +1071,7 @@ std::shared_ptr<IProcess> Shell::StartChild(const std::string& path, const std::
         ChildEnvironment(assignments), path, args, IO().GetCurrentDirectory(), options);
     if (child) {
         m_liveChildren.push_back(child);
+        ++s_liveChildCount;
     }
     return child;
 }
@@ -834,6 +1094,7 @@ int Shell::WaitForChild(const std::shared_ptr<IProcess>& child) {
         }
     }
     m_liveChildren.erase(std::remove(m_liveChildren.begin(), m_liveChildren.end(), child), m_liveChildren.end());
+    --s_liveChildCount;
     if (m_context.StopRequested()) {
         throw ShellStopped{};
     }
@@ -861,6 +1122,7 @@ void Shell::StopChildren() {
                 static_cast<unsigned long long>(kStopGraceMs));
         }
     }
+    s_liveChildCount -= static_cast<long>(m_liveChildren.size());
     m_liveChildren.clear();
 }
 
@@ -920,11 +1182,6 @@ CommandSubstitutionResult Shell::RunCommandSubstitution(const std::string& sourc
         output.append(buffer, static_cast<size_t>(count));
     }
     return {output, status};
-}
-
-int Shell::NotYet(const std::string& what) {
-    Report(what + " is not supported yet");
-    return 2;
 }
 
 } // namespace Haisos::Hsh

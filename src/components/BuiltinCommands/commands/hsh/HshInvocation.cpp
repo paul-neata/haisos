@@ -76,8 +76,8 @@ Invocation ParseInvocation(const std::vector<std::string>& args) {
                 continue;
             }
             if (letter == 'o') {
-                // The option name is the next argument; the rest of this one,
-                // if any, is ignored, as dash ignores it.
+                // The option name is the next argument; the rest of this
+                // cluster still parses, as dash (options() keeps going).
                 if (i + 1 >= args.size()) {
                     invocation.error = "-o requires an argument";
                     return invocation;
@@ -93,7 +93,7 @@ Invocation ParseInvocation(const std::vector<std::string>& args) {
                 } else {
                     invocation.options.*(info->field) = on;
                 }
-                break;
+                continue;
             }
             const ShellOptionInfo* info = FindShellOption(letter);
             if (!info) {

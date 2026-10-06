@@ -145,6 +145,11 @@ int Shell::Run() {
 int Shell::ExecuteList(const CommandList& list) {
     int status = m_state.lastExitStatus;
     for (const ListItem& item : list.items) {
+        // -n (noexec): dash checks it at every evaltree, so a `set -n` takes
+        // effect mid-list; an interactive shell is unaffected.
+        if (m_state.options.noexec && !m_state.options.interactive) {
+            continue;
+        }
         if (item.background) {
             if (!item.andOr.pipelines.empty()) {
                 m_currentLine = item.andOr.pipelines.back().line;
@@ -158,10 +163,18 @@ int Shell::ExecuteList(const CommandList& list) {
 }
 
 int Shell::ExecuteAndOr(const AndOrList& andOr) {
-    int status = ExecutePipeline(andOr.pipelines[0]);
+    int status = m_state.lastExitStatus;
+    // dash re-checks -n (noexec) for every branch of an &&/|| chain too
+    // (evaltree recurses into them).
+    const auto noexec = [this] {
+        return m_state.options.noexec && !m_state.options.interactive;
+    };
+    if (!noexec()) {
+        status = ExecutePipeline(andOr.pipelines[0]);
+    }
     for (size_t i = 0; i < andOr.operators.size(); ++i) {
         const bool run = andOr.operators[i] == AndOrOperator::And ? status == 0 : status != 0;
-        if (run) {
+        if (run && !noexec()) {
             status = ExecutePipeline(andOr.pipelines[i + 1]);
         }
     }
@@ -319,11 +332,18 @@ int Shell::ExecuteSimpleCommand(const SimpleCommand& command) {
     m_currentLine = command.line;
     const uint64_t substitutions = m_substitutionCount;
     const std::vector<std::string> fields = m_expander.ExpandWords(command.words);
+    // -n (noexec): dash re-checks it at every evaltree -- a `set -n` stops
+    // the rest even mid-list, mid-chain and mid-pipeline; an interactive
+    // shell is unaffected.
+    if (m_state.options.noexec && !m_state.options.interactive) {
+        return m_state.lastExitStatus;
+    }
 
     // The redirections change the shell's own descriptor table for the length
     // of the command and are undone afterwards, unless a builtin (exec with no
-    // command) asks to keep them. A failure: the command does not run and its
-    // prefix assignments are not made; fatal for a special builtin, as dash.
+    // command) asks to keep them. As dash they apply before the prefix
+    // assignments even expand and before the trace: a failure runs none of
+    // them, and is fatal for a special builtin.
     RedirectionScope scope(*this);
     if (const std::optional<std::string> error = scope.Apply(command.redirections)) {
         if (!fields.empty()) {
@@ -335,29 +355,52 @@ int Shell::ExecuteSimpleCommand(const SimpleCommand& command) {
         return 2;
     }
 
+    std::vector<std::pair<std::string, std::string>> assignments;
+    for (const Assignment& assignment : command.assignments) {
+        assignments.emplace_back(assignment.name, m_expander.ExpandAssignmentValue(assignment.value));
+    }
+
+    // dash's trace, after the assignments are made (so a `PS4=X` assignment
+    // restyles its own line) and stderr already redirected: PS4 as it is (not
+    // expanded, a documented exception), then the assignments as name=value
+    // and the fields, joined by single spaces.
+    const auto trace = [this, &assignments, &fields] {
+        std::string text = m_state.variables.Get("PS4").value_or("");
+        bool first = true;
+        for (const auto& [name, value] : assignments) {
+            text += (first ? "" : " ") + name + "=" + value;
+            first = false;
+        }
+        for (const std::string& field : fields) {
+            text += (first ? "" : " ") + field;
+            first = false;
+        }
+        WriteErr(text + "\n");
+    };
+
     if (fields.empty()) {
         // Assignments alone (x=1): applied to the shell. The command's status
         // is the last command substitution's, if one ran, else 0.
-        for (const Assignment& assignment : command.assignments) {
-            const std::string value = m_expander.ExpandAssignmentValue(assignment.value);
-            if (!m_state.variables.Set(assignment.name, value)) {
-                Fail(assignment.name + ": is read only");
-            }
+        for (const auto& [name, value] : assignments) {
+            AssignVariable(name, value);
+        }
+        if (m_state.options.xtrace) {
+            trace();
         }
         return m_substitutionCount != substitutions ? m_state.lastExitStatus : 0;
     }
 
     if (const ShellBuiltin* builtin = FindShellBuiltin(fields[0])) {
         std::vector<ShellAssignmentRestore> restore;  // regular builtins only
-        for (const Assignment& assignment : command.assignments) {
-            const std::string value = m_expander.ExpandAssignmentValue(assignment.value);
+        for (const auto& [name, value] : assignments) {
             if (!builtin->special) {
-                restore.push_back({assignment.name, m_state.variables.Get(assignment.name),
-                    m_state.variables.IsExported(assignment.name)});
+                restore.push_back({name, m_state.variables.Get(name),
+                    m_state.variables.IsExported(name)});
             }
-            if (!m_state.variables.Set(assignment.name, value)) {
-                Fail(assignment.name + ": is read only");
-            }
+            AssignVariable(name, value);
+        }
+        if (m_state.options.xtrace) {
+            trace();
         }
         const int status = builtin->run(*this, fields);
         if (m_keepRedirections) {
@@ -376,13 +419,15 @@ int Shell::ExecuteSimpleCommand(const SimpleCommand& command) {
         return status;
     }
 
-    // Anything else is a child process.
-    std::vector<std::pair<std::string, std::string>> assignments;
-    for (const Assignment& assignment : command.assignments) {
-        if (m_state.variables.IsReadonly(assignment.name)) {
-            Fail(assignment.name + ": is read only");
+    // Anything else is a child process. A read-only variable is an error
+    // after the assignments have expanded and before the trace, as dash.
+    for (const auto& [name, value] : assignments) {
+        if (m_state.variables.IsReadonly(name)) {
+            Fail(name + ": is read only");
         }
-        assignments.emplace_back(assignment.name, m_expander.ExpandAssignmentValue(assignment.value));
+    }
+    if (m_state.options.xtrace) {
+        trace();
     }
     const CommandLookup lookup = LookUpCommand(fields[0]);
     if (lookup.result == CommandLookup::Result::NotFound) {
@@ -462,6 +507,15 @@ void Shell::Report(const std::string& message) {
 
 void Shell::Fail(const std::string& message) {
     throw ShellError(message, m_currentLine);
+}
+
+void Shell::AssignVariable(const std::string& name, const std::string& value) {
+    if (!m_state.variables.Set(name, value)) {
+        Fail(name + ": is read only");
+    }
+    if (m_state.options.allexport) {
+        m_state.variables.Export(name);
+    }
 }
 
 void Shell::ThrowIfStopRequested() {
@@ -782,11 +836,25 @@ int Shell::WaitForChild(const std::shared_ptr<IProcess>& child) {
 }
 
 void Shell::StopChildren() {
+    // Each child's pid and path are captured before it is signalled: the
+    // child may be gone when a wait times out, and the name must still be
+    // there for the report.
+    struct StoppingChild {
+        std::shared_ptr<IProcess> process;
+        uint64_t pid = 0;
+        std::string path;
+    };
+    std::vector<StoppingChild> children;
     for (const auto& child : m_liveChildren) {
+        children.push_back({child, child->GetPid(), child->Path()});
         child->TriggerStop();
     }
-    for (const auto& child : m_liveChildren) {
-        child->WaitToFinish(kStopGraceMs);
+    for (const StoppingChild& stopping : children) {
+        if (!stopping.process->WaitToFinish(kStopGraceMs)) {
+            LogWarning("hsh: child (pid %llu, %s) did not stop within %llu ms",
+                static_cast<unsigned long long>(stopping.pid), stopping.path.c_str(),
+                static_cast<unsigned long long>(kStopGraceMs));
+        }
     }
     m_liveChildren.clear();
 }

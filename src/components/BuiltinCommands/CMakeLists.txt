@@ -24,9 +24,15 @@ add_library(BuiltinCommands STATIC
     commands/hsh/HshShell.cpp
     commands/hsh/HshDescriptors.cpp
     commands/hsh/HshRedirection.cpp
+    commands/hsh/HshQuote.cpp
+    commands/hsh/HshNumber.cpp
     commands/hsh/HshBuiltins.cpp
     commands/hsh/HshBuiltinExec.cpp
     commands/hsh/HshBuiltinWait.cpp
+    commands/hsh/HshBuiltinCd.cpp
+    commands/hsh/HshBuiltinVariables.cpp
+    commands/hsh/HshBuiltinSet.cpp
+    commands/hsh/HshBuiltinTest.cpp
     commands/hsh/HshSubshell.cpp
     commands/hsh/HshUnboundedPipe.cpp
 )

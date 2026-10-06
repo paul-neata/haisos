@@ -47,10 +47,18 @@ int BuiltinTrue(Shell&, const std::vector<std::string>&) {
 const std::vector<ShellBuiltin>& ShellBuiltins() {
     static const std::vector<ShellBuiltin> builtins = {
         {":", true, &BuiltinColon},
+        {"[", false, &BuiltinTest},
+        {"cd", false, &BuiltinCd},
         {"exec", true, &BuiltinExec},
         {"exit", true, &BuiltinExit},
+        {"export", true, &BuiltinExport},
         {"false", false, &BuiltinFalse},
+        {"readonly", true, &BuiltinReadonly},
+        {"set", true, &BuiltinSet},
+        {"shift", true, &BuiltinShift},
+        {"test", false, &BuiltinTest},
         {"true", false, &BuiltinTrue},
+        {"unset", true, &BuiltinUnset},
         {"wait", false, &BuiltinWait},
     };
     return builtins;

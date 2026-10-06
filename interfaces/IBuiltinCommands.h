@@ -27,9 +27,9 @@ struct BuiltinCommandHost {
     std::string programPath;
 };
 
-// The commands compiled into Haisos itself -- echo, cat, ls, pwd, mkdir -- as
-// opposed to the programs (.md agents, .lua scripts) that live as files on a
-// filesystem. A builtin is placed on a filesystem at a path (see
+// The commands compiled into Haisos itself -- the ones
+// CreateStandardBuiltinCommands() lists -- as opposed to the programs
+// (.md agents, .lua scripts) that live as files on a filesystem. A builtin is placed on a filesystem at a path (see
 // IBuiltinConfigurator); IHaisosOS::StartProcess notices a path its root
 // filesystem says is a builtin and runs it from here instead of loading a file.
 //

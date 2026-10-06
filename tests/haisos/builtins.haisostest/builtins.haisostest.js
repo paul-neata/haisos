@@ -23,6 +23,7 @@ function writeHaisosfile(runLines) {
         "BUILTIN rootfs ls /bin/ls\n" +
         "BUILTIN rootfs mkdir /bin/mkdir\n" +
         "BUILTIN rootfs pwd /bin/pwd\n" +
+        "BUILTIN rootfs wc /bin/wc\n" +
         "CREATE /notes/hello.txt 'Hello, builtins'\n" +
         runLines);
 }
@@ -58,6 +59,8 @@ try {
     expectContains(ls, " mkdir", "ls -l");
     expectContains(runHaisos("RUN /bin/mkdir -v /made\n"), "mkdir: created directory '/made'", "mkdir -v");
     expectContains(runHaisos("RUN /bin/ls --version\n"), "ls (HaisosOS builtin)", "ls --version");
+    // "Hello, builtins": 15 bytes, 2 words, no newline; one file, three counts.
+    expectEquals(runHaisos("RUN /bin/wc /notes/hello.txt\n"), " 0  2 15 /notes/hello.txt\n", "wc");
 
     // Errors go to stderr, and to stderr only -- and ls's own status (2) is
     // haisos's.

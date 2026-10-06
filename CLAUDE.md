@@ -1,6 +1,6 @@
 # Haisos - C++ Platform for Running Agents
 
-Haisos is a C++ platform that boots a small OS-like environment (`IHaisosOS`) from a `haisosfile` manifest and runs processes in it: LLM agents (`.md` files, sent to a local LLM like Ollama with tool-calling), embedded Lua scripts (`.lua` files), and builtin commands (`echo`, `cat`, `ls`, ... compiled into Haisos and placed on a filesystem at a path, such as `/bin/ls`).
+Haisos is a C++ platform that boots a small OS-like environment (`IHaisosOS`) from a `haisosfile` manifest and runs processes in it: LLM agents (`.md` files, sent to a local LLM like Ollama with tool-calling), embedded Lua scripts (`.lua` files), and builtin commands (`echo`, `cat`, `ls`, `wc`, ... compiled into Haisos and placed on a filesystem at a path, such as `/bin/ls`).
 
 ## Project Overview
 
@@ -28,7 +28,7 @@ haisos/
 ├── src/
 │   ├── components/        - Component implementations (each has its own CLAUDE.md)
 │   │   ├── Agent/
-│   │   ├── BuiltinCommands/ - The builtin commands (echo, cat, ls, mkdir, pwd; each in commands/<name>/) and what places them on filesystems
+│   │   ├── BuiltinCommands/ - The builtin commands (echo, cat, ls, mkdir, pwd, wc; each in commands/<name>/) and what places them on filesystems
 │   │   ├── Console/
 │   │   ├── Environment/
 │   │   ├── Factory/
@@ -585,6 +585,7 @@ use a builtin with what it already knows about the real command:
 | `ls` | Lists directories as GNU ls prints them to a terminal: columns, `-l` with `total`/links/owner/group/size/time, sorting, time styles, quoting; to a pipe or file, one name per line, unquoted |
 | `mkdir` | Creates directories (`-p -v`) |
 | `pwd` | Prints the working directory (`-L -P`) |
+| `wc` | Counts lines, words, characters, bytes and the widest line (`-c -m -l -L -w`, `--files0-from`, `--total`), GNU's columns |
 
 ## Planning skills
 

@@ -3,7 +3,7 @@
 - Rock: hsh
 - Depends on: hsh--lexer
 - Size: ~1020 changed lines in ~7 files
-- Plan checked against: develop @ 0d92271
+- Plan checked against: develop @ a8381c6
 - PR title: hsh: AST and parser for the full POSIX shell grammar
 
 ## Goal
@@ -50,6 +50,41 @@ hsh--expansion, hsh--executor and hsh--control-flow are planned on top of the
 AST below: name and shape everything exactly as written.
 
 ## Changes
+
+### Preliminary fixes from the hsh--lexer review (PR #30)
+
+Small fixes to already-merged lexer code, folded in here since hsh copies
+dash byte for byte (`develop-plan/goal.md`, Clarifications) and the parser is
+the first thing built on top of it:
+
+- `HshLexer.h`/`.cpp`: the declared `~Lexer()` suppresses `Lexer`'s implicit
+  move constructor and move assignment, so it can currently be neither copied
+  nor moved; default both (declared in the header, `= default;` in the .cpp,
+  where `Impl` is complete) since the parser holds a `Lexer` across calls to
+  `ParseNext`. Remove the unused private constructor
+  `Lexer(std::shared_ptr<const std::string> source, size_t start, int startLine, const LexerOptions& options)`
+  at `HshLexer.h:90` and its definition: command substitution's sub-lexing
+  (`HshLexer.cpp`'s `ReadCommandSubstitution`) already constructs `Impl`
+  directly, never this constructor, and the parser needs only the public one.
+- `HshLexer.cpp`'s `ReadHereDocBodies` (around line 862): the heredoc
+  delimiter is matched by comparing raw lines, with no handling of a
+  `\<newline>` continuation inside the body. In an *unquoted* heredoc (the
+  delimiter word had no quotes) dash joins such a continuation with the next
+  line before comparing it to the delimiter; a *quoted* delimiter's body
+  keeps raw-line matching, unchanged. E.g. body `a\<newline>E<newline>E` with
+  delimiter `E` gives body `aE`, terminating on the third line, not the
+  second. Document the rule in `commands/hsh/CLAUDE.md`'s heredoc
+  description.
+
+Tests (added to the existing `HshLexerTest.cpp`, not `HshParserTest.cpp`,
+since both fixes are lexer-level):
+- A test that move-constructs and move-assigns a `Lexer` mid-stream (e.g.
+  lex a couple of tokens, move it into another `Lexer`, keep lexing from the
+  moved-to one) and checks the tokens come out right.
+- `HshLexerTest.HereDocLineContinuation`: body `a\<newline>E<newline>E` with
+  an unquoted delimiter `E` lexes to heredoc body `"aE"`, terminated, ending
+  at the third line; the same source with a quoted delimiter (`<<'E'`) keeps
+  raw-line matching, terminating at the second line with raw body `"a\\\n"`.
 
 ### `commands/hsh/HshAst.h` and `HshAst.cpp` (new)
 
@@ -491,10 +526,17 @@ bash ./scripts/test_linux.sh L U
 (one line per node type), `ParseNext` versus `ParseProgram` and when each is
 used (scripts, `-c` and interactive input one complete command at a time;
 `eval`, `.` and command substitutions whole), the reserved-word positions,
-and the `$(...)` error-wording deviation.
+and the `$(...)` error-wording deviation. Also document the heredoc
+line-continuation rule from the preliminary fix above (unquoted delimiter:
+`\<newline>` joins before matching; quoted delimiter: raw-line matching).
 
 ## Acceptance
 
+- [ ] `Lexer` is move-constructible and move-assignable; the unused private
+      constructor is gone.
+- [ ] An unquoted heredoc's `\<newline>` continuation joins with the next
+      line before delimiter matching; a quoted delimiter's body still matches
+      raw lines.
 - [ ] Every type and function above exists with exactly these names, fields
       and signatures, in namespace `Haisos::Hsh`.
 - [ ] `ParseNext` returns one complete command at a time; a syntax error on a

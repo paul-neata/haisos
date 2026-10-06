@@ -38,3 +38,4 @@
 - 2026-10-06 14:39 UTC -- start hsh--lexer (0.4.12)
 - 2026-10-06 15:05 UTC -- hsh--lexer: PR #30, ready
 - 2026-10-06 15:17 UTC -- hsh--lexer merged #30 as 0.4.12: 2H fixed, 3M 2L open, 1 tries; dash follow-ups go into the parser/expansion/interactive plans
+- 2026-10-06 15:22 UTC -- start hsh--parser (0.4.13)

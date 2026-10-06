@@ -18,7 +18,7 @@ Pause: no
 | 11 | [builtins--wc](tasks/builtins--wc.md) | done | 0.4.10 | 9, 10 | #28 | 1 | 1H fixed, 1M 4L open | reviewer added a chunk-split test |
 | 12 | [builtins--man](tasks/builtins--man.md) | done | 0.4.11 | 6, 9, 11 | #29 | 1 | 3L open | |
 | 13 | [hsh--lexer](tasks/hsh--lexer.md) | done | 0.4.12 | 9 | #30 | 1 | 2H fixed, 3M 2L open | 3M dash differences folded into later hsh plans |
-| 14 | [hsh--parser](tasks/hsh--parser.md) | todo | | 13 | | | | |
+| 14 | [hsh--parser](tasks/hsh--parser.md) | in-progress | 0.4.13 | 13 | | | | |
 | 15 | [hsh--arith-glob](tasks/hsh--arith-glob.md) | todo | | 13 | | | | |
 | 16 | [hsh--expansion](tasks/hsh--expansion.md) | todo | | 14, 15 | | | | |
 | 17 | [hsh--executor](tasks/hsh--executor.md) | todo | | 8, 16 | | | | |
@@ -47,3 +47,4 @@ Pause: no
 - 2026-10-06 13:29 (implement) builtins--wc refreshed: checked against 7374f6d, no content changes needed
 - 2026-10-06 14:20 (implement) builtins--man refreshed: checked against 2e744cf; haisos test reuses the existing non-throwing spawnSync pattern from streams--exit-codes
 - 2026-10-06 14:39 (implement) hsh--lexer refreshed: checked against 1209878, no content changes needed
+- 2026-10-06 15:22 (implement) hsh--parser refreshed: checked against a8381c6; preliminary fixes from #30's review: Lexer move ops / unused ctor removed, heredoc \<newline> joining before an unquoted delimiter (dash), with tests

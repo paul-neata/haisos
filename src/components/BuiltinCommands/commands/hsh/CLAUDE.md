@@ -379,8 +379,8 @@ running the first matching body.
 
 `break [n]`/`continue [n]` throw a `LoopControl{isBreak, levels}` that the
 loops catch: each loop decrements and rethrows while `levels` stays above 1,
-`break` leaving the loop with the last status, `continue` starting the next
-iteration. `n` past the running loops just ends them all
+`break` leaving the loop, `continue` starting the next
+iteration (a body so ended has status 0, theirs; one thrown by the condition, `while break; do`, acts on that loop alike). `n` past the running loops just ends them all
 (`std::min(levels, LoopDepth())`); outside a loop both return 0, as dash. A
 function call (`CallFunction`) runs the definition's body command with its
 own positional parameters (`$0` unchanged, the call's fields becoming

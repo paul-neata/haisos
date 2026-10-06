@@ -77,6 +77,14 @@ TEST_F(HshShellTest, BreakContinueReturn) {
         // A top-level return ends the -c string.
         {"return 3; echo no", "", "", 3},
         {"return x", "", "hsh: 1: return: Illegal number: x\n", 2},
+        // break/continue in a loop's condition end or repeat that loop only.
+        {"while break; do :; done; echo after", "after\n"},
+        {"for i in 1; do while break; do :; done; echo x; done", "x\n"},
+        {"i=0; until [ $i = 1 ] && break; do i=1; false; done; echo $?", "1\n"},
+        // A body ended by break/continue has their status, 0.
+        {"for i in 1; do false; break; done; echo $?", "0\n"},
+        {"for i in 1 2; do [ $i = 2 ] && continue; false; done; echo $?", "0\n"},
+        {"i=0; while [ $i -lt 1 ]; do i=1; false; break; done; echo $?", "0\n"},
     };
     for (const auto& c : cases) {
         ExpectSh(c, "BreakContinueReturn");
@@ -105,6 +113,22 @@ TEST_F(HshShellTest, Functions) {
     for (const auto& c : cases) {
         ExpectSh(c, "Functions");
     }
+}
+
+TEST_F(HshShellTest, FunctionRedefinedOrUnsetWhileRunning) {
+    // Each line is parsed and run on its own, so the table holds the only
+    // copy of a definition from an earlier line: a body that replaces or
+    // unsets its own name must still run to its end.
+    WriteFile("/redef.sh",
+        "f() { f() { echo new; }; echo old; }\n"
+        "f\n"
+        "f\n"
+        "g() { unset -f g; echo still; }\n"
+        "g\n");
+    const Captured captured = RunCaptured("hsh", {"/redef.sh"});
+    EXPECT_EQ(captured.out, "old\nnew\nstill\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
 }
 
 TEST_F(HshShellTest, BackgroundCompoundCommandsAndFunctions) {

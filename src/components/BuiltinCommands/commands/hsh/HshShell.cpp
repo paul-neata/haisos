@@ -412,25 +412,30 @@ int Shell::ExecuteLoop(const LoopCommand& command) {
     int status = 0;
     try {
         for (;;) {
-            int condition;
-            {
-                const TestedContext tested(*this);
-                condition = ExecuteList(command.condition);
-            }
-            const bool again = command.kind == CommandKind::While ? condition == 0 : condition != 0;
-            if (!again) {
-                break;
-            }
+            // break/continue may come from the condition too (`while break;
+            // do ...`): it ends or repeats this loop, as dash, never an outer one.
+            bool inBody = false;
             try {
+                int condition;
+                {
+                    const TestedContext tested(*this);
+                    condition = ExecuteList(command.condition);
+                }
+                const bool again = command.kind == CommandKind::While ? condition == 0 : condition != 0;
+                if (!again) {
+                    break;
+                }
+                inBody = true;
                 status = ExecuteList(command.body);
             } catch (LoopControl& control) {
                 if (control.levels > 1) {  // break/continue n: this loop is one of them
                     --control.levels;
                     throw;
                 }
+                if (inBody) {
+                    status = 0;  // the body ended in break/continue, whose status is 0 (dash)
+                }
                 if (control.isBreak) {
-                    // The body's status stands at its last command run.
-                    status = m_state.lastExitStatus;
                     break;
                 }
                 // continue: the condition again.
@@ -460,8 +465,8 @@ int Shell::ExecuteFor(const ForCommand& command) {
                     --control.levels;
                     throw;
                 }
+                status = 0;  // the body ended in break/continue, whose status is 0 (dash)
                 if (control.isBreak) {
-                    status = m_state.lastExitStatus;
                     break;
                 }
             }
@@ -598,6 +603,9 @@ int Shell::ExecuteSimpleCommand(const SimpleCommand& command) {
     // a function may override cd or test, not exit.
     const ShellBuiltin* builtin = FindShellBuiltin(fields[0]);
     const auto function = m_functions.find(fields[0]);
+    // The running definition is held for the call: the body may redefine or
+    // `unset -f` its own name, which would free it from m_functions mid-run.
+    const CommandPtr held = function != m_functions.end() ? function->second : nullptr;
     if (builtin && builtin->special) {
         // A special builtin's prefix assignments stay (x=1 : sets x).
         for (const auto& [name, value] : assignments) {
@@ -614,7 +622,7 @@ int Shell::ExecuteSimpleCommand(const SimpleCommand& command) {
         }
         return status;
     }
-    if (function != m_functions.end() || builtin) {
+    if (held || builtin) {
         // A regular builtin or a function: the prefix assignments are made for
         // the command only and put back afterwards (x=1 true leaves x unset).
         std::vector<ShellAssignmentRestore> restore;
@@ -626,8 +634,8 @@ int Shell::ExecuteSimpleCommand(const SimpleCommand& command) {
         if (m_state.options.xtrace) {
             trace();
         }
-        const int status = function != m_functions.end()
-            ? CallFunction(static_cast<const FunctionDefinition&>(*function->second), fields)
+        const int status = held
+            ? CallFunction(static_cast<const FunctionDefinition&>(*held), fields)
             : builtin->run(*this, fields);
         if (m_keepRedirections) {
             // exec with no command: the redirections stay.

@@ -94,6 +94,16 @@ TEST(HshArithmeticTest, Variables) {
     EXPECT_EQ(EvaluateArithmetic("1 || 1/0", variables), 1);
     EXPECT_EQ(EvaluateArithmetic("0 ? 1/0 : 2", variables), 2);
     EXPECT_EQ(EvaluateArithmetic("0 && 1/0", variables), 0);
+
+    // Assignment reads the variable at the right time: a plain '=' never
+    // reads the old value, a compound operator reads it only after the
+    // right-hand side has been evaluated (dash).
+    variables.values["x"] = "abc";
+    EXPECT_EQ(EvaluateArithmetic("x=3", variables), 3); // not "Illegal number: abc"
+    EXPECT_EQ(variables.values["x"], "3");
+    variables.values["x"] = "5";
+    EXPECT_EQ(EvaluateArithmetic("x += (x=2)", variables), 4);
+    EXPECT_EQ(variables.values["x"], "4");
 }
 
 void ExpectArithError(const std::string& expression, IArithmeticVariables& variables,

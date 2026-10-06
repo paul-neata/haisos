@@ -7,6 +7,19 @@
 
 namespace Haisos::Hsh {
 
+// ## Source text
+//
+// `ListItem::sourceText` and `FunctionDefinition::sourceText` hold the text
+// of the command exactly as written: they are cut from the source string the
+// parser was given, never rebuilt from the tree. The lexer stamps every token
+// with its byte offsets (`Token::begin`/`Token::end`); the parser takes a
+// command's text from the `begin` of its first token through the `end` of its
+// last (so comments, blanks and the `;`/`&` that follows stay out), plus,
+// when heredoc bodies end after that range, one newline and each such body
+// region in order (`HereDocument::sourceBegin`/`sourceEnd`). Parsing a
+// sourceText again gives the same command; a background item needing the
+// shell at run time is run as `hsh -c <sourceText>`.
+
 struct ParserOptions {
     int firstLine = 1;
     bool interactive = false;   // passed to the lexer (see LexerOptions)

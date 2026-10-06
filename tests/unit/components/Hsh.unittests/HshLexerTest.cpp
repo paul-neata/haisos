@@ -151,6 +151,10 @@ TEST(HshLexerTest, Parameters) {
     ExpectLex("${x-\\}}", {"W(P(x-[Q'}']))"});
     ExpectLex("\"${x:-\"a b\"}\"", {"W(D[P(x:-[D[Q'a b']])])"});
     ExpectLex("\"${x:-'a'}\"", {"W(D[P(x:-[Q''a''])])"});
+    // A pattern operand keeps its own quotes even inside double quotes;
+    // everywhere else in a double-quoted operand a ' is a plain character.
+    ExpectLex("\"${x#'a'}\"", {"W(D[P(x#[Q'a'])])"});
+    ExpectLex("\"${x%%'a'}\"", {"W(D[P(x%%[Q'a'])])"});
     ExpectLex("${}", {"W(P(<bad>))"});
     ExpectLex("${x!}", {"W(P(<bad>))"});
     ExpectLex("${#x:-a}", {"W(P(<bad>))"});

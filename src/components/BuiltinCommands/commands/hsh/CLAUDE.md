@@ -82,9 +82,39 @@ task of the hsh rock and adds its files here:
   `++`, `**` or `,`), assignments stored decimally through
   `IArithmeticVariables`, short-circuit of `&&`, `||` and `?:` (the branch not
   taken is parsed but never looked up, assigned or divided), and dash's error
-  messages byte for byte, thrown as `ShellError`.
-- (later tasks: expansion, the executor that registers the
+  messages byte for byte, thrown as `ShellError`. A name directly before an
+  assignment operator is not read there: a plain `=` never reads the old value
+  and a compound op reads it only after the right-hand side has been
+  evaluated, as dash.
+- `HshVariables.h/.cpp` - the shell's state: `ShellVariables` (named
+  variables with exported and read-only flags, `ImportFrom` seeding from an
+  `IEnvironment`), `ShellOptions` (dash's options, `OptionLetters` for `$-`)
+  and `ShellState` (options, `$0`, `$1...`, `$?`, `$$`, `$!`) -- the state
+  the executor owns and a subshell copies.
+- `HshExpansion.h/.cpp` - word expansion (`Expander`): turns the parser's
+  `Word`s into strings, in dash's order (see "Expansion" below). Still a
+  library: reading directories and running command substitutions go through
+  `IExpansionHost`, which the executor implements over the process's
+  `IFileIO` and a subshell.
+- (later tasks: the executor that registers the
   `hsh` builtin, the interactive loop.)
+
+## AST dump
+
+`DumpCommandList`/`DumpCommand` (`HshAst.cpp`) write a tree on one line, for
+the tests, which compare against it byte for byte. A command list is its
+items joined by `; `, a background item followed by ` &`. An and-or list
+joins its pipelines with ` && `/` || `; a pipeline is its commands joined by
+` | `, prefixed `! ` when negated. A simple command is `[` then its
+assignments (`name=<value source>`), words and redirections space-separated,
+then `]`; a redirection is `<fd><op><target as written>` (no fd for `&>`; op
+from the kind, `<<`/`<<-` by the heredoc's `stripTabs`). Compound commands
+spell themselves out: `{ <list> }`, `( <list> )`, `if <list> then <list>
+[elif ... ] [else <list> ] fi`, `while|until <list> do <list> done`,
+`for v[ in <word>...] do <list> done`, `case <subject> in p1|p2)
+[<list> ] ;; ... esac` (the body omitted when empty), `name() <body>` --
+with words written from `Word::source`, exactly as typed -- and a
+non-simple command's redirections appended after it with a space.
 
 ## Reserved words and source text
 
@@ -107,6 +137,71 @@ While a word is kept in the tree, every `CommandSubstitution` part in it (at
 any depth, heredoc bodies included) is checked at parse time by parsing its
 text with `ParseProgram`; an error there is the error of the whole parse, as
 dash checks substitutions when it parses them.
+
+## Expansion
+
+The `Expander` (`HshExpansion.h`) turns a `Word` into strings. One object is
+built per shell state: the executor owns the one `ShellState` of its shell
+(variables, options, `$0`, `$1...`, `$?`, `$$`, `$!`); a subshell works on a
+copy of it. All file access and command running go through `IExpansionHost`,
+never around it: `ReadDirectory`/`Exists` for globbing (the executor answers
+them with the process's `IFileIO` -- `ICurrentProcess::IO()`, never a
+filesystem of its own) and `RunCommandSubstitution`, whose text the executor
+parses (`ParseProgram`) and runs in a subshell with its stdout on a pipe.
+Expansion itself never sees an `IFileIO`, an `IFileSystem` or the host.
+
+`ShellVariables` (`HshVariables.h`) is the variable store: names are valid
+shell names (`IsValidShellName`), each entry has a value-or-unset plus
+exported and read-only flags (`export`/`readonly` of an unset name set the
+flag; `Set`/`Unset` of a read-only one fail). `ImportFrom` seeds it from the
+environment the shell starts with: every variable with a valid shell name,
+set and exported. `ExportedVariables` is what a command the shell starts
+gets as its environment. `OptionLetters` spells `$-` in dash's order
+"uaCvxsnife".
+
+There is one `Expander` method per expansion context:
+
+- `ExpandWords`/`ExpandWord` -- command words and `for`-loop words: every
+  expansion, then field splitting by `IFS`, pathname expansion (unless
+  `noglob`), quote removal. Zero or more fields per word.
+- `ExpandAssignmentValue` -- an assignment's value (`x=...`, and the operand
+  of `${x:=...}`): tilde at the start and after every unquoted `:`, the other
+  expansions, quote removal; no splitting, no globbing. (dash quirk: the
+  `:=`/`=` operand itself gets no tilde expansion -- `${x:=~/b}` assigns
+  `~/b` literally.)
+- `ExpandToString` -- a redirection target, a here-string, the `case`
+  subject: one string, no splitting, no globbing.
+- `ExpandPattern` -- a `case` pattern: as `ExpandToString`, but every quoted
+  character comes out escaped (`EscapeForPattern`) so `MatchPattern` takes it
+  literally, while unquoted `* ? [` and the results of unquoted expansions
+  keep their meaning.
+- `ExpandHereDocument` -- a heredoc body: `rawBody` as it is when the
+  delimiter was quoted; else the body's parameters, command substitutions and
+  arithmetic expanded (never a tilde there).
+
+The order of expansions is dash's: tilde (only `~`/HOME; `~user` is left as
+it is), parameter, command substitution and arithmetic in one recursive walk
+(a command substitution's status becomes `$?`), then field splitting,
+pathname expansion and quote removal. The walk builds **fields under
+construction**: a field is a sequence of elements, each a character flagged
+`quoted` (from a quoted context: no splitting, literal for globbing) or
+`splittable` (from an unquoted expansion: subject to IFS splitting), or a
+*quote mark* -- an element with no character recording that a quoted,
+possibly empty string stood here (that is why `"$x"` with x empty still gives
+one empty field). A *hard break* ends the current field and starts a new one
+-- between the values of `"$@"` (`"x$@y"` with `a b` gives `xa`, `by`), and
+unquoted keeps them separate even when `IFS` is empty, an empty one
+disappearing. In string contexts hard breaks join with the first character of
+`IFS` (space when unset, nothing when empty). Splitting follows dash's IFS
+rules exactly (white-space IFS characters merge delimiters, non-white ones
+keep empty fields); a field with pattern characters whose `ExpandPathname`
+result is non-empty is replaced by the matches, otherwise kept as written.
+
+Expansion errors throw `ShellError` with dash's messages byte for byte
+(`Bad substitution`, `<name>: parameter not set`, `<name>: parameter not set
+or null`, `<name>: <text>`, `<name>: bad variable name`, `<name>: is read
+only`, the arithmetic messages), with line 0 -- the executor knows the
+command's line.
 
 ## How the end of a `$(...)` is found
 
@@ -136,6 +231,9 @@ delimiter line has not come yet, and a source ending in a backslash-newline.
 
 ## Documented deviations from dash
 
+- `~user` is left as it is (dash expands it through the user database: there
+  are no users yet); `~` alone is `HOME`, or the text itself when HOME is
+  unset.
 - `&>` and `<<<` are bash's operators (`echo a &>f` redirects stdout and
   stderr to `f`; in dash it would be `echo a &` then `>f`).
 - `${x:}` is a `Bad substitution` (`ParameterOp::Bad`, failing at expansion)

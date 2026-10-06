@@ -188,6 +188,11 @@ private:
         std::string name = lhs.lvalue;
         Value rhs = ParseAssign(); // right associative
         if (!m_evaluating) { lhs.value = 0; lhs.lvalue.clear(); return lhs; }
+        // As dash: a plain '=' never reads the variable's old value, and a
+        // compound operator reads it only after the right-hand side has been
+        // evaluated, so a side effect in the right-hand side is seen by the
+        // read ($((x += (x=2))) doubles 2).
+        if (op != TokenKind::Assign) lhs.value = VariableValue(name);
         intmax_t result;
         switch (op) {
             case TokenKind::Assign:    result = rhs.value; break;
@@ -374,7 +379,11 @@ private:
                 const Token& token = Next();
                 Value v;
                 v.lvalue = token.name;
-                v.value = VariableValue(token.name);
+                // Directly before an assignment operator the variable is not
+                // read here: it is the target, and ParseAssign reads it (or
+                // not, for a plain '=') after the right-hand side.
+                if (!IsAssignOp(Peek()))
+                    v.value = VariableValue(token.name);
                 return v;
             }
             case TokenKind::LParen: {

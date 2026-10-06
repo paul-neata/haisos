@@ -460,6 +460,10 @@ struct Lexer::Impl {
                 part.op = d == '%' ? ParameterOp::RemoveSmallestSuffix
                                    : ParameterOp::RemoveSmallestPrefix;
             }
+            // A pattern operand keeps its own quoting even inside double
+            // quotes: "${x#'a'}" removes the a, not the literal 'a'.
+            ReadOperand(part.parts, dquote, true);
+            return part;
         } else {
             bool colon = false;
             if (d == ':') {
@@ -476,12 +480,15 @@ struct Lexer::Impl {
             }
             RawGet();
         }
-        ReadOperand(part.parts, dquote);
+        ReadOperand(part.parts, dquote, false);
         return part;
     }
 
     // Reads the operand of a ${...}, up to and including the matching '}'.
-    void ReadOperand(std::vector<WordPart>& parts, bool dquote) {
+    // |patternOperand|: the operand of #, ##, % or %% -- one place where a
+    // single quote opens real quoting even inside double quotes, as dash does
+    // (everywhere else in a double-quoted operand a ' is a plain character).
+    void ReadOperand(std::vector<WordPart>& parts, bool dquote, bool patternOperand = false) {
         while (true) {
             int c = Peek();
             if (c == kEof) {
@@ -517,7 +524,7 @@ struct Lexer::Impl {
                 continue;
             }
             if (c == '\'') {
-                if (dquote) {
+                if (dquote && !patternOperand) {
                     RawGet();
                     AppendChar(parts, plain, '\'');
                 } else {

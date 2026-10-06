@@ -166,14 +166,16 @@ There is one `Expander` method per expansion context:
   `noglob`), quote removal. Zero or more fields per word.
 - `ExpandAssignmentValue` -- an assignment's value (`x=...`, and the operand
   of `${x:=...}`): tilde at the start and after every unquoted `:`, the other
-  expansions, quote removal; no splitting, no globbing. dash's per-operator
-  tilde quirks hold in the operands: the `:=`/`=` operand's tilde expands at
-  its very start only, and only when the whole word is an unquoted
-  assignment's value (`z=${x:=~/b}` assigns `/home/u/b`; `echo ${x:=~/b}`
-  and `z="${x:=~/b}"` leave `~/b` literal), and a `+`/`:+` operand never
-  gets a tilde.
+  expansions, quote removal; no splitting, no globbing. In a `${...}`
+  operand a tilde at its start expands unless the `${...}` is in double
+  quotes (`echo ${x:=~/b}` and `${q:+~}` expand, `"${x:-~}"` does not); in an
+  assignment's value the after-`:` rule holds in the operands too, except in
+  a `:=`/`=` operand (`z=${x:=a:~}` assigns `a:~`, as dash).
 - `ExpandToString` -- a redirection target, a here-string, the `case`
   subject: one string, no splitting, no globbing.
+- A `#`/`##`/`%`/`%%` operand is lexed as an unquoted word even inside
+  double quotes or a heredoc body, as dash does: `"${x%/*}"` is a pattern,
+  `"${x%"$y"}"` is literal.
 - `ExpandPattern` -- a `case` pattern: as `ExpandToString`, but every quoted
   character comes out escaped (`EscapeForPattern`) so `MatchPattern` takes it
   literally, while unquoted `* ? [` and the results of unquoted expansions

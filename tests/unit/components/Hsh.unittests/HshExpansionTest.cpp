@@ -209,19 +209,22 @@ TEST(HshExpansionTest, Tilde) {
     EXPECT_EQ(assign.Expand("${x:-~}"), Fields({"/h"}));
     EXPECT_EQ(assign.Expand("\"${x:-~}\""), Fields({"~"}));
 
-    // dash's per-operator tilde rules for ${...} operands: the :=/= operand's
-    // tilde expands at its very start only, and only when the whole word is an
-    // unquoted assignment's value; the +/:+ operand never gets one.
+    // dash's tilde rules for ${...} operands (dash 0.5.12): a tilde at the
+    // operand's start expands for every op unless in double quotes; the
+    // :=/= operand alone never gets the after-':' rule of an assignment.
     Fixture ops;
     ops.state.variables.Set("HOME", "/h");
     EXPECT_EQ(ops.AssignmentValue("z1=${z1:=~/a}"), "/h/a");
     EXPECT_EQ(ops.AssignmentValue("z2=${z2:=a:~}"), "a:~"); // never after ':' inside
-    EXPECT_EQ(ops.Expand("${z3:=~/a}"), Fields({"~/a"}));   // a plain word: literal
+    EXPECT_EQ(ops.Expand("a${z3:=~/a}"), Fields({"a/h/a"})); // a plain word too
     EXPECT_EQ(ops.AssignmentValue("z4=\"${z4:=~/a}\""), "~/a"); // quoted value: literal
     EXPECT_EQ(ops.AssignmentValue("z=${zz:-a:~}"), "a:/h"); // -/:- keep the word's rules
     ops.state.variables.Set("q", "1");
-    EXPECT_EQ(ops.Expand("${q:+~}"), Fields({"~"}));
-    EXPECT_EQ(ops.AssignmentValue("z=${q:+~}"), "~");
+    EXPECT_EQ(ops.Expand("${q:+~}"), Fields({"/h"}));
+    EXPECT_EQ(ops.Expand("\"${q:+~}\""), Fields({"~"}));
+    EXPECT_EQ(ops.AssignmentValue("z=${q:+a:~}"), "a:/h");
+    ops.state.variables.Set("p", "/habc");
+    EXPECT_EQ(ops.Expand("\"${p#~}\""), Fields({"abc"})); // a pattern operand's own tilde
 }
 
 TEST(HshExpansionTest, SpecialParameters) {
@@ -293,6 +296,13 @@ TEST(HshExpansionTest, ParameterOps) {
         EXPECT_EQ(f.Expand("${x#\\a}"), Fields({"bc"}));
         EXPECT_EQ(f.Expand("${x#[ab]}"), Fields({"bc"}));
         EXPECT_EQ(f.Expand("${x%?}"), Fields({"ab"}));
+        // Inside double quotes the pattern operand is a pattern of its own.
+        EXPECT_EQ(f.Expand("\"${x#\\a}\""), Fields({"bc"}));
+        f.state.variables.Set("y", "b*");
+        EXPECT_EQ(f.Expand("\"${x%$y}\""), Fields({"a"}));
+        EXPECT_EQ(f.Expand("\"${x%\"$y\"}\""), Fields({"abc"}));
+        f.state.variables.Set("x", "a/b/c");
+        EXPECT_EQ(f.Expand("\"${x%/*}\" \"${x##*/}\""), Fields({"a/b", "c"}));
     }
     {
         Fixture f;

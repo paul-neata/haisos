@@ -306,8 +306,8 @@ private:
 
     // The operand of a ${...}, walked where it stands (its literals splittable
     // when the ${...} is not in double quotes). |tilde| is whether a tilde at
-    // the operand's very start expands -- dash expands it for -/:-/?/:?/#/%%'s
-    // operands (with a full assignment's after-':' rule), but never for +/:+.
+    // the operand's very start expands (outside double quotes and heredocs,
+    // for every op), with a full assignment's after-':' rule.
     void WalkOperandInPlace(PendingFields& out, const std::vector<WordPart>& parts, bool tilde) {
         bool savedOperand = m_inOperand;
         if (!m_inDoubleQuotes) {
@@ -323,9 +323,15 @@ private:
         return FinishString(sub);
     }
 
-    std::string WalkOperandToPattern(const std::vector<WordPart>& parts, bool tilde) {
+    // A #/##/%/%% operand has its own quoting even inside double quotes (the
+    // lexer reads it as an unquoted word): "${x#$y}" with y='*' is a pattern,
+    // and a tilde at its start expands.
+    std::string WalkOperandToPattern(const std::vector<WordPart>& parts) {
+        bool savedQuotes = m_inDoubleQuotes;
+        m_inDoubleQuotes = false;
         PendingFields sub;
-        WalkWordInto(sub, parts, tilde);
+        WalkWordInto(sub, parts, TildeAllowed());
+        m_inDoubleQuotes = savedQuotes;
         return FinishPattern(sub);
     }
 
@@ -443,7 +449,7 @@ private:
             case ParameterOp::RemoveSmallestPrefix:
             case ParameterOp::RemoveLargestPrefix: {
                 CheckNounset(name, resolved);
-                std::string pattern = WalkOperandToPattern(part.parts, TildeAllowed());
+                std::string pattern = WalkOperandToPattern(part.parts);
                 PatternRemoval which = RemovalFor(part.op);
                 std::vector<std::string> values;
                 for (const std::string& value : resolved.values) {
@@ -474,10 +480,9 @@ private:
                         throw ShellError(name + ": bad variable name");
                     }
                     // dash: a tilde at the very start of a :=/= operand
-                    // expands only when the whole word is an unquoted
-                    // assignment's value (z1=${z:=~/a} is /h/a; in any other
-                    // word, or quoted, it stays literal), and never after ':'.
-                    bool tilde = m_kind == ExpansionKind::Assignment && !m_inDoubleQuotes;
+                    // expands (not inside double quotes or a heredoc), but
+                    // never after a ':' in it, even in an assignment.
+                    bool tilde = TildeAllowed();
                     ExpansionKind savedKind = m_kind;
                     m_kind = ExpansionKind::String;
                     std::string value = WalkOperandToString(part.parts, tilde);
@@ -517,8 +522,7 @@ private:
                 bool alternative = resolved.set &&
                     (part.op == ParameterOp::UseAlternativeIfSet || !IsNull(resolved));
                 if (alternative) {
-                    // dash: no tilde expansion at all in a +/:+ operand.
-                    WalkOperandInPlace(out, part.parts, false);
+                    WalkOperandInPlace(out, part.parts, TildeAllowed());
                 }
                 return;
             }

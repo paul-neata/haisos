@@ -155,6 +155,7 @@ TEST(HshLexerTest, Parameters) {
     // everywhere else in a double-quoted operand a ' is a plain character.
     ExpectLex("\"${x#'a'}\"", {"W(D[P(x#[Q'a'])])"});
     ExpectLex("\"${x%%'a'}\"", {"W(D[P(x%%[Q'a'])])"});
+    ExpectLex("\"${x%/*}\"", {"W(D[P(x%[L'/*'])])"});
     ExpectLex("${}", {"W(P(<bad>))"});
     ExpectLex("${x!}", {"W(P(<bad>))"});
     ExpectLex("${#x:-a}", {"W(P(<bad>))"});

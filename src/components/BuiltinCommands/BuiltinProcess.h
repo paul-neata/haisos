@@ -49,6 +49,10 @@ public:
     std::shared_ptr<IFileIO> IO() const override;
     std::shared_ptr<IAgent> AsAgent() override;
     std::shared_ptr<IHaisosOS> OS() const override;
+    // The command's own output path (BuiltinContext::WriteAll) calls this when a
+    // write of the command's bytes hit a pipe with no reader: the command stops
+    // quietly, as it would from SIGPIPE, with exit code 141.
+    void StopForBrokenPipe() override;
 
 private:
     BuiltinProcess(
@@ -77,6 +81,9 @@ private:
 
     std::thread m_thread;
     std::atomic<bool> m_stopRequested{false};
+    // Set by StopForBrokenPipe, from the command's own thread as it writes:
+    // the command's pipe lost its reader. Wins over a stop (141, not 143).
+    std::atomic<bool> m_brokenPipe{false};
     // What wakes a pipe Read/Write blocked on this process's behalf: installed
     // on the command's thread by RunThread, signalled by TriggerStop.
     std::shared_ptr<StopToken> m_stopToken = StopToken::Create();

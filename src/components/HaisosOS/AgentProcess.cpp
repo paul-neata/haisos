@@ -147,6 +147,15 @@ void AgentProcess::TriggerStop() {
     m_agent->TriggerStop();
 }
 
+void AgentProcess::StopForBrokenPipe() {
+    m_brokenPipe = true;
+    // The agent's own stop -- closes its queue, refuses further tool calls,
+    // signals its stop token. Not TriggerStop(): that one is the stop from
+    // outside, which latches "stopped" for the exit code, and a broken pipe
+    // is not that.
+    m_agent->TriggerStop();
+}
+
 std::optional<int> AgentProcess::ExitCode() const {
     // WaitToFinish is not const because it can join the thread; a timeout of 0
     // only asks "has it finished?".
@@ -154,14 +163,17 @@ std::optional<int> AgentProcess::ExitCode() const {
         return std::nullopt;
     }
     // The agent runtime's one ProcessEnd decision point (see ExitCodes.h),
-    // latched so a stop racing in afterwards cannot change it: stopped from
+    // latched so a stop racing in afterwards cannot change it: a broken pipe
+    // first of all -- 141, set before the agent finished -- then stopped from
     // outside is 143; otherwise the agent's last command's outcome, as a shell
     // reports its last command's.
     std::lock_guard<std::mutex> lock(m_exitCodeMutex);
     if (!m_exitCode) {
-        m_exitCode = m_stopRequested
-            ? ExitCodeFor(ProcessEnd::Stopped, 0)
-            : ExitCodeFor(ProcessEnd::Exited, m_agent->LastCommandFailed() ? 1 : 0);
+        m_exitCode = m_brokenPipe
+            ? ExitCodeFor(ProcessEnd::BrokenPipe, 0)
+            : m_stopRequested
+                ? ExitCodeFor(ProcessEnd::Stopped, 0)
+                : ExitCodeFor(ProcessEnd::Exited, m_agent->LastCommandFailed() ? 1 : 0);
     }
     return m_exitCode;
 }

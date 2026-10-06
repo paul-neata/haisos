@@ -114,10 +114,14 @@ void BuiltinProcess::RunThread() {
     m_io->ReleaseAllDescriptors();
     {
         std::lock_guard<std::mutex> lock(m_finishedMutex);
-        // The builtin's one ProcessEnd decision point (see ExitCodes.h): stop
-        // beats the command's own result. A throw out of Run left status at 1,
-        // the same code a failed program reports.
-        m_exitCode = ExitCodeFor(m_stopRequested ? ProcessEnd::Stopped : ProcessEnd::Exited, status);
+        // The builtin's one ProcessEnd decision point (see ExitCodes.h): a
+        // broken pipe beats a stop, which beats the command's own result. A
+        // throw out of Run left status at 1, the same code a failed program
+        // reports. The final flush in ~BuiltinContext has already run, so a
+        // pipe found broken only when the buffered output went out is caught.
+        m_exitCode = ExitCodeFor(
+            m_brokenPipe ? ProcessEnd::BrokenPipe : m_stopRequested ? ProcessEnd::Stopped : ProcessEnd::Exited,
+            status);
         m_finished = true;
     }
     m_finishedCv.notify_all();
@@ -149,6 +153,12 @@ void BuiltinProcess::TriggerStop() {
     m_stopRequested = true;
     // Wake a pipe Read/Write the command is blocked in.
     m_stopToken->RequestStop();
+}
+
+void BuiltinProcess::StopForBrokenPipe() {
+    m_brokenPipe = true;
+    // Stopped the way TriggerStop would stop it -- quietly, nothing printed.
+    TriggerStop();
 }
 
 bool BuiltinProcess::WaitToFinish(uint64_t timeoutMs) {

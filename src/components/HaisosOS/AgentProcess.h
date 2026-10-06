@@ -64,6 +64,11 @@ public:
     std::shared_ptr<IFileIO> IO() const override;
     std::shared_ptr<IAgent> AsAgent() override;
     std::shared_ptr<IHaisosOS> OS() const override;
+    // The agent's console (ProcessAgentConsole) calls this on the agent's own
+    // thread when a write of a reply or diagnostic hit a pipe with no reader:
+    // the agent stops, quietly, and the exit code is 141 -- as a program
+    // stopped by SIGPIPE. Wins over a stop from outside (143).
+    void StopForBrokenPipe() override;
 
 private:
     AgentProcess(
@@ -91,6 +96,9 @@ private:
     // from outside, which the exit code reports as 143. (The input loop stops
     // the agent directly at end of input, which does not count.)
     std::atomic<bool> m_stopRequested{false};
+    // Set by StopForBrokenPipe on the agent's own thread as it writes, so it is
+    // always in place before the agent finishes and the code is latched.
+    std::atomic<bool> m_brokenPipe{false};
     // Computed once, the first time ExitCode is asked for on a finished
     // process, and latched under this mutex.
     mutable std::mutex m_exitCodeMutex;

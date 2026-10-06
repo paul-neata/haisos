@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <memory>
 #include <string>
 #include "interfaces/ILLMService.h"
@@ -26,9 +27,17 @@ private:
     explicit ProcessAgentConsole(std::shared_ptr<CurrentProcessHandle> process);
 
     // message + "\n" to the process's descriptor fd, wherever it points now.
+    // A write the pipe's reader is gone for (kIOBrokenPipe) stops the process
+    // quietly with exit code 141, as SIGPIPE would -- stderr's pipe as well as
+    // stdout's -- and every line after is dropped. What the agent keeps in its
+    // history and message buffer is unchanged either way: this console only
+    // decides where the bytes go.
     void WriteLineToDescriptor(int fd, const std::string& message);
 
     std::shared_ptr<CurrentProcessHandle> m_process;
+    // Set once a write has hit a broken pipe and the process was told to stop
+    // for it: the agent is dying quietly, so nothing more is written.
+    std::atomic<bool> m_brokenPipe{false};
 };
 
 }

@@ -185,8 +185,10 @@ Every process reports an exit code, `IProcess::ExitCode()`: empty while it
 runs, then a shell-style 0-255 that never changes once set. A program's own
 code is taken modulo 256 (`exit(256)` is 0, `exit(-1)` is 255); a process
 stopped through `TriggerStop()` reports 143 (128 + SIGTERM, as a shell would
-for a killed program); 141 (128 + SIGPIPE) is reserved for the pipes work to
-come. A `RUN` whose process never starts has no code -- as with a shell's 127,
+for a killed program); and 141 (128 + SIGPIPE) when a builtin, a Lua script or
+an agent wrote to a pipe nobody reads any more -- its runtime stops it quietly,
+as SIGPIPE stops a Linux program, and 141 wins over a stop asked for
+afterwards. A `RUN` whose process never starts has no code -- as with a shell's 127,
 reporting it is the launcher's business, not the process's.
 
 haisos's own exit status is the exit code of the first `RUN` (in file order)

@@ -19,6 +19,7 @@
 #include "ProcessFileIO.h"
 #include "src/components/Filesystem/BuiltinCommandFile.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
+#include "src/components/libheaders/ExitCodes.h"
 #include "tests/mocks/MockFileDescriptor.h"
 
 #ifndef _WIN32
@@ -153,13 +154,17 @@ public:
     void TriggerStop() override {}
     bool WaitToFinish(uint64_t) override { return true; }
     std::optional<int> ExitCode() const override { return 0; }
+    void StopForBrokenPipe() override { ++m_stopForBrokenPipeCount; }
 
     std::shared_ptr<IFileIO> IO() const override { return m_io; }
     std::shared_ptr<IAgent> AsAgent() override { return nullptr; }
     std::shared_ptr<IHaisosOS> OS() const override { return nullptr; }
 
+    int StopForBrokenPipeCount() const { return m_stopForBrokenPipeCount.load(); }
+
 private:
     std::shared_ptr<ProcessFileIO> m_io;
+    std::atomic<int> m_stopForBrokenPipeCount{0};
 };
 
 // The command object of that name from the standard set, or null.
@@ -929,6 +934,48 @@ TEST_F(BuiltinCommandsTest, SameDescriptorForStdoutAndStderr) {
     EXPECT_NE(written.find("a.md"), std::string::npos) << written;
 }
 
+// --- a write into a pipe nobody reads ---
+
+TEST_F(BuiltinCommandsTest, EchoIntoAPipeWithNoReaderExits141Quietly) {
+    auto ends = os->GetPipeService()->CreatePipe();
+    // The read end released before the start: nobody can ever read this pipe.
+    ends.readEnd.reset();
+    StartProcessOptions options;
+    options.stdOut = ends.writeEnd;
+    auto process = os->StartProcess(os->GetOsEnvironment()->Clone(), "/bin/echo", {"hello"}, "/", options);
+    ends.writeEnd.reset();
+    options.stdOut.reset();
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kWaitMs));
+    ASSERT_TRUE(process->ExitCode().has_value());
+    EXPECT_EQ(*process->ExitCode(), kExitCodeBrokenPipe);
+    EXPECT_EQ(console->TakeOut(), "");
+    EXPECT_EQ(console->TakeErr(), "");
+}
+
+// ls reports its failure on stderr -- a broken stderr is as fatal as a broken
+// stdout, as SIGPIPE does not care which descriptor the write was on.
+TEST_F(BuiltinCommandsTest, ABrokenStderrAlsoExits141Quietly) {
+    auto ends = os->GetPipeService()->CreatePipe();
+    ends.readEnd.reset();
+    StartProcessOptions options;
+    options.stdOut = ends.writeEnd;
+    options.stdErr = ends.writeEnd;
+    auto process = os->StartProcess(os->GetOsEnvironment()->Clone(), "/bin/ls", {"/nope"}, "/", options);
+    ends.writeEnd.reset();
+    options.stdOut.reset();
+    options.stdErr.reset();
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kWaitMs));
+    ASSERT_TRUE(process->ExitCode().has_value());
+    // 141, not ls's 2 for what it cannot access.
+    EXPECT_EQ(*process->ExitCode(), kExitCodeBrokenPipe);
+    // Quietly: not even the diagnostic went anywhere -- it was dropped once
+    // the write failed, so the pipe took nothing and the console neither.
+    EXPECT_EQ(console->TakeOut(), "");
+    EXPECT_EQ(console->TakeErr(), "");
+}
+
 // --- BuiltinContext's output rule ---
 
 TEST(BuiltinContextTest, TerminalStdoutIsWrittenAtOnce) {
@@ -977,6 +1024,32 @@ TEST(BuiltinContextTest, OtherStdoutIsBufferedUntilFullOrEnd) {
     }
     // The destructor flushed what was left.
     EXPECT_EQ(both->Written().size(), 9u + 5000u + 1u);
+}
+
+// A broken pipe stops the process once -- on the first failed write -- and
+// everything after is dropped, stderr included: the program is dying quietly.
+TEST(BuiltinContextTest, ABrokenStdoutStopsTheProcessOnceAndDropsTheRest) {
+    auto io = ProcessFileIO::Create({}, "/");
+    auto in = std::make_shared<Mocks::MockFileDescriptor>();
+    // Terminal, so Out writes at once rather than buffering.
+    auto out = std::make_shared<Mocks::MockFileDescriptor>(/*isTerminal=*/true);
+    auto err = std::make_shared<Mocks::MockFileDescriptor>(/*isTerminal=*/true);
+    out->SetWriteResult(kIOBrokenPipe);
+    ASSERT_TRUE(io->InstallStandardStreams(in, out, err));
+    FakeProcess process(io);
+    auto echo = FindStandardCommand("echo");
+    ASSERT_NE(echo, nullptr);
+    std::atomic<bool> stop{false};
+    {
+        BuiltinContext context(process, *echo, {}, stop);
+        context.Out("a");
+        context.Out("b");
+        context.Error("e");
+    }
+    EXPECT_EQ(process.StopForBrokenPipeCount(), 1);
+    // One write was tried; "b" and the diagnostic never reached a descriptor.
+    EXPECT_EQ(out->WriteCalls(), 1);
+    EXPECT_EQ(err->Written(), "");
 }
 
 // --- option parsing ---

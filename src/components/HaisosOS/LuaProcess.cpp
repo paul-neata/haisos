@@ -477,7 +477,18 @@ std::optional<int> LuaProcess::ExitCode() const {
     return m_exitCode;
 }
 
+void LuaProcess::StopForBrokenPipe() {
+    m_brokenPipe = true;
+    // Stopped the way a kill stops it -- a script has no gentler request.
+    Kill();
+}
+
 void LuaProcess::WriteToDescriptor(int fd, const std::string& bytes) {
+    if (m_brokenPipe) {
+        // The process is already dying quietly for an earlier broken pipe:
+        // nothing more is written.
+        return;
+    }
     auto descriptor = m_io->GetDescriptor(fd);
     if (!descriptor) {
         // The slot is empty (or was never filled): the bytes are dropped, not
@@ -487,8 +498,13 @@ void LuaProcess::WriteToDescriptor(int fd, const std::string& bytes) {
     size_t written = 0;
     while (written < bytes.size()) {
         const ssize_t n = descriptor->Write(bytes.data() + written, bytes.size() - written);
-        // Seam for pipes--pipe-service: a kIOBrokenPipe here is where that
-        // task makes the process stop quietly.
+        if (n == kIOBrokenPipe) {
+            // The pipe's reader is gone: the script stops quietly, exit code
+            // 141, as a standalone lua would from SIGPIPE -- on stderr's pipe
+            // (the error line below) as well as stdout's (print).
+            StopForBrokenPipe();
+            return;
+        }
         if (n < 0) {
             return;
         }
@@ -593,6 +609,16 @@ int LuaProcess::LuaPrintTrampoline(lua_State* L) {
         }
         // As print() on a terminal: the line and one newline, on stdout.
         self->WriteToDescriptor(IFileIO::kStdOut, line + "\n");
+        if (self->m_brokenPipe) {
+            // The write hit a pipe with no reader: the script stops as it
+            // would from SIGPIPE. Never raise (luaL_error) from here -- this
+            // trampoline has C++ locals, and a longjmp over them is undefined
+            // -- so the kill hook is re-armed to fire on the next instruction
+            // exactly as it re-arms itself, and the latched unwinding runs as
+            // for a kill: RunThread then sees a kill and writes no lua: line.
+            lua_sethook(L, &KillHookTrampoline,
+                        LUA_MASKCOUNT | LUA_MASKCALL | LUA_MASKRET | LUA_MASKLINE, 1);
+        }
     } catch (...) {
         return 0;
     }
@@ -747,11 +773,15 @@ void LuaProcess::RunThread() {
     {
         std::lock_guard<std::mutex> lock(m_finishedMutex);
         // The Lua runtime's one ProcessEnd decision point (see ExitCodes.h): a
-        // script's own exit() is the code it asked for; a stop that caught the
-        // script still running is 143 (one finished before a late Kill() keeps
-        // its own code); otherwise a load or runtime error is 1 and a clean
-        // run 0.
-        if (m_exitRequested) {
+        // broken pipe first of all -- 141 -- so even a script's own error line
+        // written into a pipe nobody reads ends that way, as a standalone lua
+        // would from SIGPIPE; then a script's own exit() is the code it asked
+        // for; a stop that caught the script still running is 143 (one
+        // finished before a late Kill() keeps its own code); otherwise a load
+        // or runtime error is 1 and a clean run 0.
+        if (m_brokenPipe) {
+            m_exitCode = ExitCodeFor(ProcessEnd::BrokenPipe, 0);
+        } else if (m_exitRequested) {
             m_exitCode = ExitCodeFor(ProcessEnd::Exited, m_exitCodeRequested);
         } else if (m_killed && !ranToEnd) {
             m_exitCode = ExitCodeFor(ProcessEnd::Stopped, 0);

@@ -86,12 +86,22 @@ void BuiltinContext::Flush() {
 }
 
 bool BuiltinContext::WriteAll(IFileDescriptor* descriptor, const std::string& bytes) {
-    if (!descriptor) {
+    // Once a write has hit a broken pipe the command is already dying quietly:
+    // nothing more may go out, a diagnostic least of all.
+    if (m_brokenPipe || !descriptor) {
         return false;
     }
     size_t written = 0;
     while (written < bytes.size()) {
         const ssize_t result = descriptor->Write(bytes.data() + written, bytes.size() - written);
+        if (result == kIOBrokenPipe) {
+            // The pipe's reader is gone: the process stops as a Linux program
+            // stopped by SIGPIPE does -- quietly, exit code 141 -- whichever
+            // stream the write was on.
+            m_brokenPipe = true;
+            m_process.StopForBrokenPipe();
+            return false;
+        }
         if (result < 0) {
             return false;
         }

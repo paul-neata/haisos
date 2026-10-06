@@ -111,7 +111,7 @@ std::shared_ptr<IBuiltinCommand> FindStandardCommand(const std::string& name) {
 
 TEST_F(BuiltinCommandsTest, ListsEveryBuiltinSortedWithAVersion) {
     const auto commands = builtins->GetCommands();
-    EXPECT_EQ(commands, (Lines{"cat", "echo", "ls", "mkdir", "pwd", "wc"}));
+    EXPECT_EQ(commands, (Lines{"cat", "echo", "ls", "man", "mkdir", "pwd", "wc"}));
     for (const auto& name : commands) {
         EXPECT_FALSE(builtins->GetBuiltinVersion(name).empty()) << name;
     }
@@ -1030,6 +1030,34 @@ TEST(BuiltinArgsTest, ParsesClustersLongOptionsArgumentsAndOperands) {
     EXPECT_EQ(ParseBuiltinArgs({"-"}, options).operands, (std::vector<std::string>{"-"}));
     EXPECT_EQ(ParseBuiltinArgs({"--he"}, options).options[0].id, kBuiltinOptionHelp);
 
+}
+
+// man-db's -T/-H/-X kind: an argument taken only attached ("-Tutf8",
+// "--troff-device=utf8"), never from the next word.
+TEST(BuiltinArgsTest, OptionalAttachedTakesOnlyAnAttachedArgument) {
+    const std::vector<BuiltinOption> options = {
+        {'T', "troff-device", 1, BuiltinArgument::OptionalAttached, "DEVICE"},
+        {'F', "classify", 2, BuiltinArgument::Optional, "WHEN"},
+        {'l', "", 3},
+    };
+    auto parsed = ParseBuiltinArgs({"-Tutf8", "-T", "x", "--troff-device=a", "--troff-device", "-Fl"}, options);
+    ASSERT_TRUE(parsed.error.empty()) << parsed.error;
+    EXPECT_EQ(parsed.operands, (std::vector<std::string>{"x"}));
+    ASSERT_EQ(parsed.options.size(), 6u);
+    EXPECT_EQ(parsed.options[0].id, 1);
+    EXPECT_TRUE(parsed.options[0].hasArgument);
+    EXPECT_EQ(parsed.options[0].argument, "utf8");
+    EXPECT_EQ(parsed.options[1].id, 1);
+    EXPECT_FALSE(parsed.options[1].hasArgument);
+    EXPECT_EQ(parsed.options[2].id, 1);
+    EXPECT_TRUE(parsed.options[2].hasArgument);
+    EXPECT_EQ(parsed.options[2].argument, "a");
+    EXPECT_EQ(parsed.options[3].id, 1);
+    EXPECT_FALSE(parsed.options[3].hasArgument);
+    EXPECT_EQ(parsed.options[4].id, 2);
+    EXPECT_FALSE(parsed.options[4].hasArgument);
+    EXPECT_EQ(parsed.options[5].id, 3);
+    EXPECT_FALSE(parsed.options[5].hasArgument);
 }
 
 // The quoting GNU's shell-escape styles give (checked against GNU ls 9.4

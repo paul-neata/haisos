@@ -28,7 +28,7 @@ haisos/
 ├── src/
 │   ├── components/        - Component implementations (each has its own CLAUDE.md)
 │   │   ├── Agent/
-│   │   ├── BuiltinCommands/ - The builtin commands (echo, cat, ls, mkdir, pwd, wc; each in commands/<name>/) and what places them on filesystems
+│   │   ├── BuiltinCommands/ - The builtin commands (echo, cat, ls, man, mkdir, pwd, wc; each in commands/<name>/) and what places them on filesystems
 │   │   ├── Console/
 │   │   ├── Environment/
 │   │   ├── Factory/
@@ -530,7 +530,8 @@ returned by `IHaisosOS`'s `OSToolFactory` and merged with an agent's tools
 
 ## Builtin Commands
 
-Commands compiled into Haisos, implemented in `src/components/BuiltinCommands/`
+Commands compiled into Haisos (`cat`, `echo`, `ls`, `man`, `mkdir`, `pwd`,
+`wc`), implemented in `src/components/BuiltinCommands/`
 (see its `CLAUDE.md`). A builtin is not a file on disk: it is placed on a
 filesystem at a path (`IBuiltinConfigurator`, or the haisosfile's `BUILTIN`),
 where it lists as a file, reads as a note naming it, cannot be written, and
@@ -583,6 +584,7 @@ use a builtin with what it already knows about the real command:
 | `cat` | Concatenates files and standard input (`-A -b -e -E -n -s -t -T -u -v`) |
 | `echo` | Prints its arguments (`-n -e -E`) |
 | `ls` | Lists directories as GNU ls prints them to a terminal: columns, `-l` with `total`/links/owner/group/size/time, sorting, time styles, quoting; to a pipe or file, one name per line, unquoted |
+| `man` | Prints a builtin's manual page (`man ls`, `man 1 ls`, `-f`, `-k`): its `--help` text, or a full page for `hsh` |
 | `mkdir` | Creates directories (`-p -v`) |
 | `pwd` | Prints the working directory (`-L -P`) |
 | `wc` | Counts lines, words, characters, bytes and the widest line (`-c -m -l -L -w`, `--files0-from`, `--total`), GNU's columns |

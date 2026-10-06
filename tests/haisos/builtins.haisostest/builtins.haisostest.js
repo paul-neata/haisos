@@ -21,6 +21,7 @@ function writeHaisosfile(runLines) {
         "BUILTIN rootfs cat /bin/cat\n" +
         "BUILTIN rootfs echo /bin/echo\n" +
         "BUILTIN rootfs ls /bin/ls\n" +
+        "BUILTIN rootfs man /bin/man\n" +
         "BUILTIN rootfs mkdir /bin/mkdir\n" +
         "BUILTIN rootfs pwd /bin/pwd\n" +
         "BUILTIN rootfs wc /bin/wc\n" +
@@ -31,6 +32,16 @@ function writeHaisosfile(runLines) {
 function runHaisos(runLines) {
     writeHaisosfile(runLines);
     return execSync(`${haisosPath} haisosfile`, { encoding: 'utf8', timeout: 60000, cwd: tmpDir });
+}
+
+// For RUNs that fail on purpose: spawnSync instead of execSync, which throws.
+function runHaisosExpectingFailure(runLines) {
+    writeHaisosfile(runLines);
+    const result = spawnSync(haisosPath, ['haisosfile'], { encoding: 'utf8', timeout: 60000, cwd: tmpDir });
+    if (result.error) {
+        throw new Error(`runHaisosExpectingFailure: ${result.error.message}`);
+    }
+    return result;
 }
 
 function expectContains(output, text, what) {
@@ -62,13 +73,28 @@ try {
     // "Hello, builtins": 15 bytes, 2 words, no newline; one file, three counts.
     expectEquals(runHaisos("RUN /bin/wc /notes/hello.txt\n"), " 0  2 15 /notes/hello.txt\n", "wc");
 
+    // man prints a builtin's --help text as its page, byte for byte.
+    const manWc = runHaisos("RUN /bin/man wc\n");
+    const wcHelp = runHaisos("RUN /bin/wc --help\n");
+    if (manWc.length === 0) {
+        throw new Error("man wc: expected a non-empty page");
+    }
+    expectEquals(manWc, wcHelp, "man wc == wc --help");
+
+    // An unknown page is an error line on stderr, and its status (16) is
+    // haisos's, as man-db's would be.
+    const noEntry = runHaisosExpectingFailure("RUN /bin/man nosuch\n");
+    if (noEntry.status !== 16 || noEntry.signal) {
+        throw new Error(`man nosuch: expected exit status 16, got status ${noEntry.status}, signal ${noEntry.signal}`);
+    }
+    expectContains(noEntry.stderr, "No manual entry for nosuch", "man nosuch stderr");
+    if (noEntry.stdout.includes("No manual entry")) {
+        throw new Error(`man nosuch: the error leaked into stdout:\n${noEntry.stdout}`);
+    }
+
     // Errors go to stderr, and to stderr only -- and ls's own status (2) is
     // haisos's.
-    writeHaisosfile("RUN /bin/ls /nope\n");
-    const failing = spawnSync(haisosPath, ['haisosfile'], { encoding: 'utf8', timeout: 60000, cwd: tmpDir });
-    if (failing.error) {
-        throw new Error(`ls /nope: ${failing.error.message}`);
-    }
+    const failing = runHaisosExpectingFailure("RUN /bin/ls /nope\n");
     if (failing.status !== 2 || failing.signal) {
         throw new Error(`ls /nope: expected exit status 2, got status ${failing.status}, signal ${failing.signal}`);
     }

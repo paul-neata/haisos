@@ -36,3 +36,4 @@
 - 2026-10-06 14:34 UTC -- builtins--man: PR #29, ready
 - 2026-10-06 14:37 UTC -- builtins--man merged #29 as 0.4.11: 3L open, 1 tries
 - 2026-10-06 14:39 UTC -- start hsh--lexer (0.4.12)
+- 2026-10-06 15:05 UTC -- hsh--lexer: PR #30, ready

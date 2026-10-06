@@ -6,7 +6,7 @@ Pause: no
 | # | Task | Status | Version | Depends | PR | Tries | Review | Notes |
 |---|------|--------|---------|---------|----|-------|--------|-------|
 | 1 | [links--follow-anywhere](tasks/links--follow-anywhere.md) | obsolete | | - | | | | implemented directly on develop in 76079bd |
-| 2 | [fd--descriptor-objects](tasks/fd--descriptor-objects.md) | todo | | - | | | | |
+| 2 | [fd--descriptor-objects](tasks/fd--descriptor-objects.md) | in-progress | 0.4.1 | - | | | | |
 | 3 | [fd--process-table](tasks/fd--process-table.md) | todo | | 2 | | | | |
 | 4 | [streams--console-and-start](tasks/streams--console-and-start.md) | todo | | 3 | | | | |
 | 5 | [streams--runtime-streams](tasks/streams--runtime-streams.md) | todo | | 4 | | | | |

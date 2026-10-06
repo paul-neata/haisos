@@ -725,6 +725,46 @@ TEST(AgentTest, AFailedCommandEndsANonInteractiveAgentVisibly) {
     EXPECT_TRUE(AnyContains(console->GetErrors(), "Error: the command failed: simulated failure"));
 }
 
+// LastCommandFailed is the last command's outcome (what an AgentProcess exit
+// code is made of): an error done reason sets it, a plain reply clears it, a
+// command that throws sets it.
+TEST(AgentTest, LastCommandFailedFollowsTheLastCommand) {
+    auto mockLLM = std::make_shared<MockLLMCommunicator>();
+    auto console = std::make_shared<MockAgentConsole>();
+    auto agent = Agent::Create(mockLLM, ToolFactory::Create(), console,
+        std::vector<std::string>{"You are a helpful AI assistant."},
+        "test_agent", nullptr, /*startTime=*/"", /*interactive=*/true);
+
+    // The agent works on a thread of its own, so each step waits for the call
+    // count and the flag rather than assuming an order.
+    auto waitUntil = [](const std::function<bool()>& pred) {
+        for (int i = 0; i < 500; ++i) {
+            if (pred()) {
+                return true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return pred();
+    };
+
+    mockLLM->SetMessageResponse("Error: x");
+    mockLLM->SetDoneReason("http_error");
+    agent->Post("first");
+    ASSERT_TRUE(waitUntil([&] { return mockLLM->GetCallCount() >= 1 && agent->LastCommandFailed(); }));
+
+    mockLLM->SetDoneReason("");
+    mockLLM->SetMessageResponse("fine");
+    agent->Post("second");
+    ASSERT_TRUE(waitUntil([&] { return mockLLM->GetCallCount() >= 2 && !agent->LastCommandFailed(); }));
+
+    mockLLM->SetThrowOnCall(3, "simulated failure");
+    agent->Post("third");
+    ASSERT_TRUE(waitUntil([&] { return mockLLM->GetCallCount() >= 3 && agent->LastCommandFailed(); }));
+
+    agent->TriggerStop();
+    ASSERT_TRUE(agent->WaitToFinish(kWaitTimeoutMs));
+}
+
 // A response whose done reason marks a failure (the communicator's "error",
 // "parse_error", "http_error") is written as an error; an ordinary reply is a
 // message.

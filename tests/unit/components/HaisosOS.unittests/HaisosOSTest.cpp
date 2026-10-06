@@ -10,7 +10,9 @@
 #include <iterator>
 #include <mutex>
 #include <thread>
+#include <nlohmann/json.hpp>
 #include "HaisosOS.h"
+#include "OSToolFactory.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
 #include "Factory.h"
 #include "ServicesCreator.h"
@@ -755,6 +757,86 @@ TEST_F(HaisosOSTest, AnAgentsLLMFailureGoesToStderr) {
     // The endpoint is unreachable, so the one round trip failed.
     EXPECT_NE(err->Written().find("Error: HTTP request failed"), std::string::npos);
     EXPECT_EQ(out->Written().find("Error:"), std::string::npos);
+}
+
+// --- Exit codes ---
+
+// An agent whose (only) command failed at the LLM round trip exits 1, as a
+// shell reports its last command's outcome.
+TEST_F(HaisosOSTest, AnAgentWhoseLLMCallFailsExitsOne) {
+    auto os = BuildOS();
+    auto process = os->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/"", StartProcessOptions{});
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    ASSERT_TRUE(process->ExitCode().has_value());
+    EXPECT_EQ(*process->ExitCode(), 1);
+}
+
+// A stop asked for once the process has finished is not a stop at all: the
+// code it already earned is kept.
+TEST_F(HaisosOSTest, AStopAfterFinishingKeepsTheExitCode) {
+    auto os = BuildOS();
+    auto process = os->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/"", StartProcessOptions{});
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    ASSERT_EQ(process->ExitCode().value_or(-1), 1);
+
+    process->TriggerStop();
+    EXPECT_EQ(process->ExitCode().value_or(-1), 1);
+}
+
+TEST_F(HaisosOSTest, AScriptExitCodeIsVisibleFromOutside) {
+    std::ofstream(kTestRoot + "/exit5.lua") << "exit(5)";
+    auto os = BuildOS();
+
+    auto process = os->StartProcess(TestEnvironment(), "exit5.lua", {}, /*workingDirectory=*/"", StartProcessOptions{});
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    ASSERT_TRUE(process->ExitCode().has_value());
+    EXPECT_EQ(*process->ExitCode(), 5);
+}
+
+TEST_F(HaisosOSTest, OsListProcessesShowsExitCodes) {
+    std::ofstream(kTestRoot + "/loop.lua") << "while true do end";
+    std::ofstream(kTestRoot + "/exit5.lua") << "exit(5)";
+    auto os = BuildOS();
+
+    auto looping = os->StartProcess(TestEnvironment(), "loop.lua", {}, /*workingDirectory=*/"", StartProcessOptions{});
+    auto exited = os->StartProcess(TestEnvironment(), "exit5.lua", {}, /*workingDirectory=*/"", StartProcessOptions{});
+    ASSERT_NE(looping, nullptr);
+    ASSERT_NE(exited, nullptr);
+    ASSERT_TRUE(exited->WaitToFinish(kProcessWaitMs));
+
+    // Build the tool as the finished process would have it (its OS() is still
+    // this OS), and call it before any further StartProcess, which would prune
+    // the finished process from the list.
+    auto handle = CurrentProcessHandle::Create();
+    handle->Set(std::dynamic_pointer_cast<ICurrentProcess>(exited));
+    auto tool = OSToolFactory::Create(handle)->CreateTool("os_list_processes");
+    ASSERT_NE(tool, nullptr);
+    const ToolResult result = tool->Call(nullptr, nlohmann::json::object());
+    ASSERT_FALSE(result.isError) << result.content;
+    const auto listed = nlohmann::json::parse(result.content);
+    ASSERT_TRUE(listed.is_array()) << result.content;
+
+    bool sawLooping = false;
+    bool sawExited = false;
+    for (const auto& entry : listed) {
+        if (entry.value("path", "") == "loop.lua") {
+            sawLooping = true;
+            // Still running: no code yet.
+            EXPECT_TRUE(entry["exit_code"].is_null()) << entry.dump();
+        } else if (entry.value("path", "") == "exit5.lua") {
+            sawExited = true;
+            EXPECT_EQ(entry["exit_code"], 5) << entry.dump();
+        }
+    }
+    EXPECT_TRUE(sawLooping) << result.content;
+    EXPECT_TRUE(sawExited) << result.content;
+
+    looping->TriggerStop();
+    ASSERT_TRUE(looping->WaitToFinish(kProcessWaitMs));
+    EXPECT_EQ(looping->ExitCode().value_or(-1), 143);
 }
 
 // A script's print goes to the process's stdout -- a given one, not the

@@ -50,6 +50,12 @@ public:
 
     bool IsFinished() const;
 
+    // Whether the last command the agent took ended in a failure: an LLM, HTTP
+    // or parse error response, the round cap reached, or the command having
+    // thrown. On the concrete Agent only (IAgent is not changed): it exists so
+    // AgentProcess can turn the conversation's end into an exit code.
+    bool LastCommandFailed() const;
+
     // Runs |hook| once, on the agent's own thread, when its conversation thread
     // ends -- before the agent reports finished (WaitToFinish). If the thread has
     // already ended, runs it at once on the calling thread. Exceptions from the
@@ -115,6 +121,9 @@ private:
     SynchronizedQueueEx<std::string> m_commandQueue;
     std::thread m_thread;
     std::atomic<bool> m_finished{false};
+    // Set false as each command starts and true as it is found to have failed
+    // (see LastCommandFailed).
+    std::atomic<bool> m_lastCommandFailed{false};
     // Set by TriggerStop. Read on the agent's own thread between tool calls, so
     // a stop asked for while a round is in flight takes effect at the next
     // point where stopping is safe rather than only at the next command.

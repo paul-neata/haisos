@@ -1,4 +1,5 @@
 #include "OSListProcessesTool.h"
+#include <optional>
 #include "src/tools/os_tools_common/OSToolsCommon.h"
 
 
@@ -25,6 +26,8 @@ ToolResult OSListProcessesTool::Call(std::shared_ptr<IAgent> /*callerAgent*/, co
 
     nlohmann::json result = nlohmann::json::array();
     for (const auto& process : context.os->GetRunningProcesses()) {
+        // ExitCode() is empty -- JSON null -- while the process runs.
+        const std::optional<int> exitCode = process->ExitCode();
         result.push_back({
             {"pid", process->GetPid()},
             {"parent_pid", process->GetParentPid()},
@@ -32,7 +35,8 @@ ToolResult OSListProcessesTool::Call(std::shared_ptr<IAgent> /*callerAgent*/, co
             {"agent_name", process->StartingAgentName()},
             // WaitToFinish(0) does not wait; it just reports whether the
             // process has finished.
-            {"finished", process->WaitToFinish(0)}
+            {"finished", process->WaitToFinish(0)},
+            {"exit_code", exitCode ? nlohmann::json(*exitCode) : nlohmann::json(nullptr)}
         });
     }
     // A path is an arbitrary byte string, so it need not be valid UTF-8, on

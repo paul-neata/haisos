@@ -2,6 +2,7 @@
 #include <chrono>
 #include "ProcessFileIO.h"
 #include "src/components/libheaders/DestroyOffRuntimeThreads.h"
+#include "src/components/libheaders/ExitCodes.h"
 #include "src/components/Logger/Logger.h"
 
 namespace Haisos {
@@ -103,7 +104,6 @@ void BuiltinProcess::RunThread() {
     } catch (...) {
         LogError("BuiltinProcess '%s': %s failed with an unknown error", m_path.c_str(), name.c_str());
     }
-    m_exitStatus = status;
     LogDebug("BuiltinProcess '%s': %s exited with status %d", m_path.c_str(), name.c_str(), status);
     // Every descriptor this process opened is released before it reports
     // finished, so a pipe's reader sees end of file when its writer's program
@@ -111,6 +111,10 @@ void BuiltinProcess::RunThread() {
     m_io->ReleaseAllDescriptors();
     {
         std::lock_guard<std::mutex> lock(m_finishedMutex);
+        // The builtin's one ProcessEnd decision point (see ExitCodes.h): stop
+        // beats the command's own result. A throw out of Run left status at 1,
+        // the same code a failed program reports.
+        m_exitCode = ExitCodeFor(m_stopRequested ? ProcessEnd::Stopped : ProcessEnd::Exited, status);
         m_finished = true;
     }
     m_finishedCv.notify_all();
@@ -174,8 +178,9 @@ std::shared_ptr<IHaisosOS> BuiltinProcess::OS() const {
     return m_os.lock();
 }
 
-int BuiltinProcess::ExitStatus() const {
-    return m_exitStatus.load();
+std::optional<int> BuiltinProcess::ExitCode() const {
+    std::lock_guard<std::mutex> lock(m_finishedMutex);
+    return m_exitCode;
 }
 
 } // namespace Haisos

@@ -6,6 +6,14 @@ Header-only C++ utilities. Not a formal component.
 
 - `SynchronizedQueue.h` - Thread-safe queue
 - `SynchronizedQueueEx.h` - Extended synchronized queue with additional features
+- `ExitCodes.h` - the process exit-code vocabulary every runtime shares (see
+  "Exit codes" in the root `CLAUDE.md`): `kExitCodeBrokenPipe` (141),
+  `kExitCodeStopped` (143), `kExitCodeNotStarted` (127, for the launcher to
+  report -- a `RUN` that never starts has no code), and `ExitCodeFor(ProcessEnd,
+  programCode)`: `Exited` takes the program's code modulo 256, `Stopped` and
+  `BrokenPipe` ignore it. `ProcessEnd` is the seam a runtime's one decision
+  point switches on, so a later broken-pipe case slots in without the runtimes
+  changing shape.
 - `DestroyOffRuntimeThreads.h` - keeps whatever waits for a runtime thread in
   its destructor from being destroyed on one (see "Creating things" in the root
   `CLAUDE.md`). `RuntimeThreadScope` marks the thread it is declared on as a

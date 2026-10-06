@@ -61,6 +61,14 @@ Manages LLM conversations with parent/child agent relationships. Supports subage
   (`AnswerUnansweredToolCalls`), because the history is only a valid
   conversation with one result per tool call. An interactive agent then takes
   its next command; a non-interactive one finishes, as it would have anyway.
+- **`LastCommandFailed()` says whether the command most recently finished ended
+  badly** -- on the concrete `Agent` alone, not `IAgent`, because it is the
+  process's business (`AgentProcess` turns it into the agent process's exit
+  code, 1 or 0). Set false as each command starts, true on an LLM, HTTP or
+  parse failure, on the LLM-round cap being reached (which also writes
+  `Error: the command reached the maximum of <n> LLM rounds` to the agent's
+  error stream -- a diagnostic, nothing the history or message buffer sees),
+  and on the failed-command catch above.
 - **Replies and diagnostics are two streams on the agent's console.** What the
   agent says -- the text of an assistant message -- goes to
   `IAgentConsole::Write`. What goes wrong in its own running goes to

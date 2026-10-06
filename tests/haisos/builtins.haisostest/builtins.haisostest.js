@@ -59,11 +59,15 @@ try {
     expectContains(runHaisos("RUN /bin/mkdir -v /made\n"), "mkdir: created directory '/made'", "mkdir -v");
     expectContains(runHaisos("RUN /bin/ls --version\n"), "ls (HaisosOS builtin)", "ls --version");
 
-    // Errors go to stderr, and to stderr only.
+    // Errors go to stderr, and to stderr only -- and ls's own status (2) is
+    // haisos's.
     writeHaisosfile("RUN /bin/ls /nope\n");
     const failing = spawnSync(haisosPath, ['haisosfile'], { encoding: 'utf8', timeout: 60000, cwd: tmpDir });
     if (failing.error) {
         throw new Error(`ls /nope: ${failing.error.message}`);
+    }
+    if (failing.status !== 2 || failing.signal) {
+        throw new Error(`ls /nope: expected exit status 2, got status ${failing.status}, signal ${failing.signal}`);
     }
     expectEquals(failing.stdout, "", "ls /nope stdout");
     expectContains(failing.stderr, "ls: cannot access '/nope': No such file or directory", "ls /nope stderr");

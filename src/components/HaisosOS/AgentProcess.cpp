@@ -1,6 +1,7 @@
 #include "AgentProcess.h"
 #include <chrono>
 #include "src/components/libheaders/DestroyOffRuntimeThreads.h"
+#include "src/components/libheaders/ExitCodes.h"
 #include "src/components/Logger/Logger.h"
 
 namespace Haisos {
@@ -136,7 +137,31 @@ std::shared_ptr<IEnvironment> AgentProcess::GetEnvironment() const {
 }
 
 void AgentProcess::TriggerStop() {
+    // Only a stop asked for while the process has not finished counts toward
+    // the exit code; asking one that already finished changes nothing.
+    if (!WaitToFinish(0)) {
+        m_stopRequested = true;
+    }
     m_agent->TriggerStop();
+}
+
+std::optional<int> AgentProcess::ExitCode() const {
+    // WaitToFinish is not const because it can join the thread; a timeout of 0
+    // only asks "has it finished?".
+    if (!const_cast<AgentProcess*>(this)->WaitToFinish(0)) {
+        return std::nullopt;
+    }
+    // The agent runtime's one ProcessEnd decision point (see ExitCodes.h),
+    // latched so a stop racing in afterwards cannot change it: stopped from
+    // outside is 143; otherwise the agent's last command's outcome, as a shell
+    // reports its last command's.
+    std::lock_guard<std::mutex> lock(m_exitCodeMutex);
+    if (!m_exitCode) {
+        m_exitCode = m_stopRequested
+            ? ExitCodeFor(ProcessEnd::Stopped, 0)
+            : ExitCodeFor(ProcessEnd::Exited, m_agent->LastCommandFailed() ? 1 : 0);
+    }
+    return m_exitCode;
 }
 
 bool AgentProcess::WaitToFinish(uint64_t timeoutMs) {

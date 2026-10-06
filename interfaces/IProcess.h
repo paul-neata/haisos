@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include "IEnvironment.h"
 #include "IFileIO.h"
@@ -51,6 +52,14 @@ public:
     // has. A timeout of 0 does not wait at all, so WaitToFinish(0) is how to ask
     // "has it finished?" without blocking.
     virtual bool WaitToFinish(uint64_t timeoutMs) = 0;
+
+    // Empty until the process has finished; then 0-255, with the shell's
+    // meanings: the program's own code modulo 256; 143 (128 + SIGTERM) when it
+    // ended because it was asked to stop (TriggerStop is Haisos's SIGTERM); 141
+    // (128 + SIGPIPE) when it was stopped by writing to a pipe nobody reads.
+    // Once set it never changes. A StartProcess that returned null made no
+    // process, and so no code (a shell reports 127 itself).
+    virtual std::optional<int> ExitCode() const = 0;
 };
 
 // What a process looks like from the inside -- the handle a process has on

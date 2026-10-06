@@ -15,6 +15,7 @@
 #include "src/components/Factory/Factory.h"
 #include "src/components/ServicesCreator/ServicesCreator.h"
 #include "src/components/HaisosOS/HaisosOS.h"
+#include "src/components/libheaders/ExitCodes.h"
 #include "src/components/Logger/Logger.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
 #include "src/components/Filesystem/PhysicalPath.h"
@@ -356,7 +357,15 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::vector<std::shared_ptr<IProcess>> processes;
+    // Every RUN kept in file order, started or not, so the exit status can be
+    // the first one's code that is not 0 (see ExitCodes.h for the vocabulary).
+    struct RunOutcome {
+        std::string programPath;
+        // Null when the process could not be started (a shell reports 127 for
+        // that itself; haisos does the same).
+        std::shared_ptr<IProcess> process;
+    };
+    std::vector<RunOutcome> runs;
     for (const auto& runEntry : parseResult.config.runEntries) {
         // Each RUN gets its own copy of the OS's environment: nothing is
         // inherited implicitly, and one process's edits never reach another's.
@@ -369,35 +378,58 @@ int main(int argc, char* argv[]) {
         if (!process) {
             LogError("Failed to start process: %s", runEntry.programPath.c_str());
             std::cerr << "Error: Failed to start process: " << runEntry.programPath << "\n";
-            continue;
         }
-        processes.push_back(process);
+        runs.push_back({runEntry.programPath, std::move(process)});
     }
 
-    if (processes.empty()) {
+    bool anyStarted = false;
+    for (const auto& run : runs) {
+        anyStarted = anyStarted || run.process != nullptr;
+    }
+    if (runs.empty() || !anyStarted) {
         LogError("No process could be started from '%s'; nothing to run", haisosFilePath.c_str());
         std::cerr << "Error: no process could be started from " << haisosFilePath << "\n";
         physicalConsole->Stop();
-        return 1;
+        return kExitCodeNotStarted;
     }
 
     // The haisos process finishes once all of its initial processes have. The
     // wait is bounded rather than endless: IProcess has no untimed wait,
     // because an interactive agent never finishes on its own.
     constexpr uint64_t INITIAL_PROCESS_WAIT_MS = 24ULL * 60 * 60 * 1000;
-    for (const auto& process : processes) {
-        if (!process->WaitToFinish(INITIAL_PROCESS_WAIT_MS)) {
+    for (const auto& run : runs) {
+        if (!run.process) {
+            continue;
+        }
+        if (!run.process->WaitToFinish(INITIAL_PROCESS_WAIT_MS)) {
             LogWarning("Process '%s' did not finish within %llums; shutting down anyway",
-                process->Path().c_str(), static_cast<unsigned long long>(INITIAL_PROCESS_WAIT_MS));
+                run.programPath.c_str(), static_cast<unsigned long long>(INITIAL_PROCESS_WAIT_MS));
         }
     }
 
-    // OUTCOPY: what the processes produced is pulled out once they are done.
+    // The exit status is the code of the first RUN in file order that did not
+    // exit 0: 127 for one never started, and the code of one still running now
+    // is 143 -- the OS's destruction below is about to stop it.
     int exitCode = 0;
+    std::string firstFailingRun;
+    for (const auto& run : runs) {
+        const int code = !run.process
+            ? kExitCodeNotStarted
+            : run.process->ExitCode().value_or(kExitCodeStopped);
+        if (exitCode == 0 && code != 0) {
+            exitCode = code;
+            firstFailingRun = run.programPath;
+        }
+    }
+
+    // OUTCOPY: what the processes produced is pulled out once they are done. A
+    // failure here is haisos's own error (1), unless a RUN already chose worse.
     if (!ApplyHaisosFileOperations(*factory, *os->GetRootFileSystem(), parseResult.config.outCopyOperations, haisosFileDir, operationsError)) {
         LogError("Failed to copy files out of the OS for '%s': %s", haisosFilePath.c_str(), operationsError.c_str());
         std::cerr << operationsError;
-        exitCode = 1;
+        if (exitCode == 0) {
+            exitCode = 1;
+        }
     }
 
     physicalConsole->Stop();
@@ -406,6 +438,10 @@ int main(int argc, char* argv[]) {
         tempJsonLog->close();
     }
 
-    LogInfo("Haisos finished");
+    if (exitCode == 0) {
+        LogInfo("Haisos finished with exit code 0 (every RUN exited 0)");
+    } else {
+        LogInfo("Haisos finished with exit code %d (from RUN %s)", exitCode, firstFailingRun.c_str());
+    }
     return exitCode;
 }

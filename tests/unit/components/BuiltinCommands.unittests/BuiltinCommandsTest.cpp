@@ -7,6 +7,7 @@
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <regex>
 #include <string>
 #include <thread>
@@ -151,6 +152,7 @@ public:
     std::shared_ptr<IEnvironment> GetEnvironment() const override { return nullptr; }
     void TriggerStop() override {}
     bool WaitToFinish(uint64_t) override { return true; }
+    std::optional<int> ExitCode() const override { return 0; }
 
     std::shared_ptr<IFileIO> IO() const override { return m_io; }
     std::shared_ptr<IAgent> AsAgent() override { return nullptr; }
@@ -199,7 +201,7 @@ protected:
     }
 
     // Runs /bin/<command> with args from workingDirectory, waits for it, and
-    // returns what it printed; its exit status goes to *status.
+    // returns what it printed; its exit code goes to *status.
     std::vector<std::string> Run(const std::string& command, const std::vector<std::string>& args,
                                  int* status = nullptr, const std::string& workingDirectory = "/") {
         auto process = os->StartProcess(os->GetOsEnvironment()->Clone(), "/bin/" + command, args, workingDirectory, StartProcessOptions{});
@@ -209,9 +211,10 @@ protected:
         }
         EXPECT_TRUE(process->WaitToFinish(kWaitMs)) << command;
         if (status) {
-            auto builtin = std::dynamic_pointer_cast<BuiltinProcess>(process);
-            EXPECT_NE(builtin, nullptr);
-            *status = builtin ? builtin->ExitStatus() : -1;
+            // The exit code is set before the process reports finished, so
+            // after the wait it is always there.
+            EXPECT_TRUE(process->ExitCode().has_value()) << command;
+            *status = process->ExitCode().value_or(-1);
         }
         return console->TakeLines();
     }
@@ -430,6 +433,65 @@ TEST_F(BuiltinCommandsTest, ABuiltinsDescriptorsAreReleasedWhenItsCommandReturns
     ASSERT_TRUE(process->WaitToFinish(kWaitMs));
     // Already released at the moment WaitToFinish returned -- not after.
     EXPECT_EQ(releases->load(), 1);
+}
+
+// A builtin's exit code: nothing while the command is still running; the
+// command's own result (modulo 256) once it has returned; 143 -- 128 +
+// SIGTERM -- when it was asked to stop first.
+TEST_F(BuiltinCommandsTest, ExitCodeIsEmptyUntilFinishedThenTheStatus) {
+    BuiltinCommandHost host{os, /*pid=*/1, /*parentPid=*/1, "/wait"};
+    StartProcessOptions options;
+    options.stdIn = std::make_shared<Mocks::MockFileDescriptor>();
+    options.stdOut = std::make_shared<Mocks::MockFileDescriptor>();
+    options.stdErr = std::make_shared<Mocks::MockFileDescriptor>();
+    auto waiting = BuiltinProcess::Create(host, factory->CreateEnvironment(),
+        std::make_shared<WaitCommand>(), {}, "/", options);
+    ASSERT_NE(waiting, nullptr);
+    EXPECT_FALSE(waiting->ExitCode().has_value());
+
+    waiting->TriggerStop();
+    ASSERT_TRUE(waiting->WaitToFinish(kWaitMs));
+    ASSERT_TRUE(waiting->ExitCode().has_value());
+    EXPECT_EQ(*waiting->ExitCode(), 143);
+
+    // The command's own result: ls reports 2 for what it cannot access, and a
+    // successful pwd 0.
+    int status = -1;
+    Run("ls", {"/nope"}, &status);
+    EXPECT_EQ(status, 2);
+    Run("pwd", {}, &status);
+    EXPECT_EQ(status, 0);
+}
+
+// The low 8 bits of whatever Run returned, as a shell takes them.
+TEST_F(BuiltinCommandsTest, ExitCodeIsTheCommandStatusModulo256) {
+    class FixedStatusCommand : public IBuiltinCommand {
+    public:
+        explicit FixedStatusCommand(int status) : m_status(status) {}
+        std::string Name() const override { return "exiter"; }
+        std::string Version() const override { return "1"; }
+        const std::vector<BuiltinOption>& Options() const override { return m_options; }
+        BuiltinHelp Help() const override { return BuiltinHelp{"exits with a fixed status", {"exiter"}, ""}; }
+        int Run(BuiltinContext&) override { return m_status; }
+
+    private:
+        int m_status;
+        std::vector<BuiltinOption> m_options;
+    };
+
+    for (const auto [given, expected] : {std::pair{-1, 255}, {256 + 7, 7}}) {
+        BuiltinCommandHost host{os, /*pid=*/1, /*parentPid=*/1, "/exiter"};
+        StartProcessOptions options;
+        options.stdIn = std::make_shared<Mocks::MockFileDescriptor>();
+        options.stdOut = std::make_shared<Mocks::MockFileDescriptor>();
+        options.stdErr = std::make_shared<Mocks::MockFileDescriptor>();
+        auto process = BuiltinProcess::Create(host, factory->CreateEnvironment(),
+            std::make_shared<FixedStatusCommand>(given), {}, "/", options);
+        ASSERT_NE(process, nullptr);
+        ASSERT_TRUE(process->WaitToFinish(kWaitMs));
+        ASSERT_TRUE(process->ExitCode().has_value());
+        EXPECT_EQ(*process->ExitCode(), expected) << given;
+    }
 }
 
 // --- echo ---

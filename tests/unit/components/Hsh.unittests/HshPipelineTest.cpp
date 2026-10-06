@@ -229,6 +229,20 @@ TEST_F(HshShellTest, CommandSubstitution) {
     }
 }
 
+TEST_F(HshShellTest, CommandSubstitutionInAStageIsWaitedFor) {
+    WriteFile("/e.lua", "exit(3)");
+    const ShellCase cases[] = {
+        // The words of a child stage (started without waiting) hold a
+        // substitution: its commands still run one after another, each
+        // waited for, so $? inside it is /e.lua's.
+        {"/bin/echo $(/e.lua; echo $?) | cat", "3\n"},
+        {"/bin/echo $(/e.lua; echo $?) > /s.txt & wait; cat /s.txt", "3\n"},
+    };
+    for (const auto& c : cases) {
+        ExpectSh(c, "CommandSubstitutionInAStageIsWaitedFor");
+    }
+}
+
 TEST_F(HshShellTest, CommandSubstitutionBigOutput) {
     WriteFile("/big.txt", std::string(200000, 'x'));
     // Past a bounded pipe's 64 KiB, so only the unbounded pipe lets this run.

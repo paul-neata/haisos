@@ -812,15 +812,27 @@ CommandSubstitutionResult Shell::RunCommandSubstitution(const std::string& sourc
     // An unbounded pipe: the reader (this shell, below) runs only after the
     // writer (the subshell), so a bounded one would deadlock past 64 KiB.
     UnboundedPipeEnds pipe = CreateUnboundedPipe();
-    const int status = RunSubshell([&]() -> int {
-        PlaceDescriptor(IO(), IFileIO::kStdOut, pipe.writeEnd);
-        pipe.writeEnd.reset();
-        // The scope puts slot 1 back when the subshell ends, which releases
-        // the write end unless a background child of the subshell still holds
-        // it -- then the read below waits for that child, as dash waits for
-        // end of file.
-        return ExecuteList(parsed.commands);
-    });
+    // The substitution may sit in the words of a pipeline stage that is
+    // started without waiting (RunStage): its own commands run and are waited
+    // for as usual, so the no-wait mode is off for its length.
+    std::shared_ptr<IProcess>* const keepStartInsteadOfWait = m_startInsteadOfWait;
+    m_startInsteadOfWait = nullptr;
+    int status;
+    try {
+        status = RunSubshell([&]() -> int {
+            PlaceDescriptor(IO(), IFileIO::kStdOut, pipe.writeEnd);
+            pipe.writeEnd.reset();
+            // The scope puts slot 1 back when the subshell ends, which releases
+            // the write end unless a background child of the subshell still
+            // holds it -- then the read below waits for that child, as dash
+            // waits for end of file.
+            return ExecuteList(parsed.commands);
+        });
+    } catch (...) {
+        m_startInsteadOfWait = keepStartInsteadOfWait;
+        throw;
+    }
+    m_startInsteadOfWait = keepStartInsteadOfWait;
     // Read to end of file.
     std::string output;
     char buffer[4096];

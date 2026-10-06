@@ -27,7 +27,25 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   by `ICurrentProcess::IO()` -- never through `GetRootFileSystem()`, which
   understands absolute paths alone. `ProcessFileIO` fetches the filesystem from
   the OS on every call rather than holding it, so a process handed a narrowed
-  OS does its I/O through that OS's root and nothing else.
+  OS does its I/O through that OS's root and nothing else. The same `IFileIO`
+  holds the process's **descriptor table**: its open files by number, as a
+  POSIX process holds them -- slots 0, 1 and 2 reserved for stdin, stdout and
+  stderr (left empty for now), 3 and up ordinary, at most
+  `IFileIO::kMaxDescriptors` (1024) in all. `OpenFile` hands back the
+  descriptor itself without numbering it; placing it in the table
+  (`AddDescriptor`, lowest free slot), duplicating it (`Dup`, lowest free slot;
+  `Dup2`, a chosen slot replaced atomically), looking it up (`GetDescriptor`)
+  and closing a slot (`CloseDescriptor`) are table operations, and none of them
+  needs the OS.
+- When a process's program ends, every descriptor in its table is released
+  **before the process reports finished** -- whoever sees `WaitToFinish` return
+  true finds the table already empty, which is what will let a pipe's reader
+  see end of file when its writer's program ends. Each process class calls
+  `ProcessFileIO::ReleaseAllDescriptors()` (not on `IFileIO`, so no program can
+  call it): a builtin's `Run` returning, in `BuiltinProcess::RunThread`; a
+  script's chunk ending, in `LuaProcess::RunThread`; and an agent's
+  conversation thread ending, through `Agent::SetFinishedHook`, which
+  `AgentProcess::Create` sets. Every drop happens outside the table's mutex.
 - **`ICurrentProcess` is the only door out of a process.** Everything a running
   program reaches beyond its own memory it reaches through
   `ICurrentProcess` -- files via `IO()`, everything else via `OS()` --
@@ -156,5 +174,5 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   its own thread. Its `Kill()` aborts the script via a Lua instruction-count
   hook -- an interpreter really can be interrupted mid-instruction -- and
   `TriggerStop()` simply calls it, since a script has no command queue to close
-- `ProcessFileIO` - the `IFileIO` behind `ICurrentProcess::IO()`: the OS's root filesystem plus this process's working directory. It keeps the process's open files (the `IFileDescriptor` objects the root filesystem hands out) under numbers of its own, from 3 -- 0, 1 and 2 never name a file (interim, until the descriptor table of fd--process-table). Built as a library of its own (`ProcessFileIO` in `CMakeLists.txt`), so a runtime living outside this component -- `BuiltinProcess` -- gives its processes the same I/O without linking all of `HaisosOS`
+- `ProcessFileIO` - the `IFileIO` behind `ICurrentProcess::IO()`: the OS's root filesystem plus this process's working directory, and its owner of the descriptor table (the process's open files by number; see the bullets above). Built as a library of its own (`ProcessFileIO` in `CMakeLists.txt`), so a runtime living outside this component -- `BuiltinProcess` -- gives its processes the same I/O without linking all of `HaisosOS`
 - `OSToolFactory` - the OS-level tool set (`os_read_file`, `os_write_file`, `os_list_directory`, `os_start_process`, `os_list_processes`), built once per process and bound to it

@@ -189,8 +189,8 @@ private:
             context.Error(file + ": Is a directory");
             return false;
         }
-        const int fd = io.OpenFile(file, kFileOpenReadOnly);
-        if (fd < 0) {
+        const auto handle = io.OpenFile(file, kFileOpenReadOnly);
+        if (!handle) {
             context.Error(file + ": Permission denied");
             return false;
         }
@@ -201,7 +201,7 @@ private:
                 ok = false;
                 break;
             }
-            const ssize_t n = io.ReadFile(fd, buffer, sizeof(buffer));
+            const ssize_t n = handle->Read(buffer, sizeof(buffer));
             if (n == 0) {
                 break;
             }
@@ -214,7 +214,7 @@ private:
             formatter.Append(buffer, static_cast<size_t>(n), out);
             context.Out(out);
         }
-        io.CloseFile(fd);
+        // The descriptor is released at end of scope; the table needs no Close.
         return ok;
     }
 };

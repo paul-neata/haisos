@@ -114,32 +114,14 @@ inline bool ReadWholeFile(IFileSystem& fs, const std::string& path, std::string&
 
 // Reads the whole file at |path| through a process's IFileIO, which also
 // resolves a relative path against where that process currently is. Up to a
-// 10 MB cap; false on any failure. fd--process-table turns this body into the
-// same two lines as the IFileSystem overload reads through a descriptor.
+// 10 MB cap; false on any failure. The descriptor is released, not placed in
+// the process's descriptor table.
 inline bool ReadWholeFile(IFileIO& io, const std::string& path, std::string& outContent) {
-    int fd = io.OpenFile(path, kFileOpenReadOnly);
-    if (fd < 0) {
+    auto file = io.OpenFile(path, kFileOpenReadOnly);
+    if (!file) {
         return false;
     }
-
-    constexpr size_t kMaxSize = 10 * 1024 * 1024;
-    constexpr size_t kChunkSize = 64 * 1024;
-    std::string content;
-    char buf[kChunkSize];
-    while (content.size() < kMaxSize) {
-        ssize_t n = io.ReadFile(fd, buf, sizeof(buf));
-        if (n < 0) {
-            io.CloseFile(fd);
-            return false;
-        }
-        if (n == 0) {
-            break;
-        }
-        content.append(buf, static_cast<size_t>(n));
-    }
-    io.CloseFile(fd);
-    outContent = std::move(content);
-    return true;
+    return ReadWholeDescriptor(*file, outContent);
 }
 
 }

@@ -19,6 +19,10 @@ add_library(BuiltinCommands STATIC
     commands/hsh/HshArithmetic.cpp
     commands/hsh/HshVariables.cpp
     commands/hsh/HshExpansion.cpp
+    commands/hsh/Hsh.cpp
+    commands/hsh/HshInvocation.cpp
+    commands/hsh/HshShell.cpp
+    commands/hsh/HshBuiltins.cpp
 )
 target_include_directories(BuiltinCommands PUBLIC
     ${CMAKE_SOURCE_DIR}/interfaces

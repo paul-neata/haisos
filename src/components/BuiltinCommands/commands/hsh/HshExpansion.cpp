@@ -285,9 +285,11 @@ private:
     }
 
     void WalkDoubleQuoted(PendingFields& out, const WordPart& part) {
-        // A "$@" alone keeps no quote mark: with no positional parameters it
-        // gives no field at all.
-        bool onlyPlainAt = !part.parts.empty();
+        // A lone "$@" keeps no quote mark: with no positional parameters it
+        // gives no field at all. Two in a row ("$@$@"), or a $@ next to
+        // anything else, are quoted text like any other and keep theirs, so
+        // with no positional parameters each is one empty field (as dash).
+        bool onlyPlainAt = part.parts.size() == 1;
         for (const WordPart& inner : part.parts) {
             if (inner.kind != WordPartKind::Parameter || inner.text != "@" ||
                 inner.op != ParameterOp::None) {

@@ -405,6 +405,9 @@ TEST(HshExpansionTest, PositionalParameters) {
         EXPECT_EQ(empty.Expand("\"x$@y\""), Fields({"xy"}));
         EXPECT_EQ(empty.Expand("\"$@\""), Fields({}));
         EXPECT_EQ(empty.Expand("\"$@\"\"\""), Fields({""}));
+        // Only a lone "$@" vanishes; two in a row are one empty field, as dash.
+        EXPECT_EQ(empty.Expand("\"$@$@\""), Fields({""}));
+        EXPECT_EQ(empty.Expand("\"${@}${@}\""), Fields({""}));
     }
     {
         Fixture g;

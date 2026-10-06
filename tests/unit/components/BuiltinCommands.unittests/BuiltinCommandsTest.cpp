@@ -111,7 +111,7 @@ std::shared_ptr<IBuiltinCommand> FindStandardCommand(const std::string& name) {
 
 TEST_F(BuiltinCommandsTest, ListsEveryBuiltinSortedWithAVersion) {
     const auto commands = builtins->GetCommands();
-    EXPECT_EQ(commands, (Lines{"cat", "echo", "ls", "man", "mkdir", "pwd", "wc"}));
+    EXPECT_EQ(commands, (Lines{"cat", "echo", "hsh", "ls", "man", "mkdir", "pwd", "wc"}));
     for (const auto& name : commands) {
         EXPECT_FALSE(builtins->GetBuiltinVersion(name).empty()) << name;
     }
@@ -147,7 +147,8 @@ TEST_F(BuiltinCommandsTest, EveryBuiltinsHelpHasTheSameShape) {
         EXPECT_EQ(status, 0) << name;
         ASSERT_GE(help.size(), 5u) << name;
         EXPECT_EQ(help[0].rfind("HaisosOS " + name + " version " + command->Version() + " - ", 0), 0u) << help[0];
-        EXPECT_EQ(help[1], "Based on Linux " + name + ": https://man7.org/linux/man-pages/man1/" + name + ".1.html");
+        const std::string& real = command->Help().basedOn.empty() ? name : command->Help().basedOn;
+        EXPECT_EQ(help[1], "Based on Linux " + real + ": https://man7.org/linux/man-pages/man1/" + real + ".1.html");
         EXPECT_EQ(help[2], "");
         EXPECT_EQ(help[3].rfind("Usage: " + name, 0), 0u) << help[3];
         EXPECT_TRUE(Contains(help, "      --help"));

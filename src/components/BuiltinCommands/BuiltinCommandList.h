@@ -13,6 +13,7 @@ namespace Haisos {
 // other command itself needs only BuiltinCommand.h.
 std::shared_ptr<IBuiltinCommand> CreateCatCommand();
 std::shared_ptr<IBuiltinCommand> CreateEchoCommand();
+std::shared_ptr<IBuiltinCommand> CreateHshCommand();
 std::shared_ptr<IBuiltinCommand> CreateLsCommand();
 std::shared_ptr<IBuiltinCommand> CreateManCommand();
 std::shared_ptr<IBuiltinCommand> CreateMkdirCommand();
@@ -26,6 +27,7 @@ inline std::vector<std::shared_ptr<IBuiltinCommand>> CreateStandardBuiltinComman
     return {
         CreateCatCommand(),
         CreateEchoCommand(),
+        CreateHshCommand(),
         CreateLsCommand(),
         CreateManCommand(),
         CreateMkdirCommand(),

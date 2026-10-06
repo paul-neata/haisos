@@ -15,7 +15,7 @@ Pause: no
 | 8 | [pipes--broken-pipe](tasks/pipes--broken-pipe.md) | done | 0.4.7 | 7 | #25 | 1 | 1M 2L open | |
 | 9 | [builtins--directories](tasks/builtins--directories.md) | done | 0.4.8 | 4 | #26 | 1 | 3L open | |
 | 10 | [builtins--unicode](tasks/builtins--unicode.md) | done | 0.4.9 | - | #27 | 1 | 4L open | Windows red from the 30 s HaisosOS limit; green on re-run |
-| 11 | [builtins--wc](tasks/builtins--wc.md) | in-review | 0.4.10 | 9, 10 | #28 | 1 | | |
+| 11 | [builtins--wc](tasks/builtins--wc.md) | done | 0.4.10 | 9, 10 | #28 | 1 | 1H fixed, 1M 4L open | reviewer added a chunk-split test |
 | 12 | [builtins--man](tasks/builtins--man.md) | todo | | 6, 9, 11 | | | | |
 | 13 | [hsh--lexer](tasks/hsh--lexer.md) | todo | | 9 | | | | |
 | 14 | [hsh--parser](tasks/hsh--parser.md) | todo | | 13 | | | | |

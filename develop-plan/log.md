@@ -31,3 +31,4 @@
 - 2026-10-06 13:26 UTC -- builtins--unicode merged #27 as 0.4.9: 4L open, 1 tries; Windows flake (HaisosOS 30 s limit), green on re-run
 - 2026-10-06 13:29 UTC -- start builtins--wc (0.4.10)
 - 2026-10-06 13:52 UTC -- builtins--wc: PR #28, ready
+- 2026-10-06 14:15 UTC -- builtins--wc merged #28 as 0.4.10: 1H fixed, 1M 4L open, 1 tries; review restarted twice after API 529s

@@ -235,6 +235,17 @@ TEST_F(BuiltinCommandsTest, WcCountsUtf8) {
     }
 }
 
+TEST_F(BuiltinCommandsTest, WcCharacterSplitAcrossReadChunksCountsOnce) {
+    // wc reads 16 KiB at a time: 16383 'a's put the 3-byte 中 across the
+    // first chunk's end, so its first two bytes are carried into the next.
+    ASSERT_EQ(root->CreateDirectory("/w", kDirMode), 0);
+    WriteFile("/w/big.txt", std::string(16383, 'a') + "\xE4\xB8\xAD\n");
+    const auto captured = RunCaptured("wc", {"-lwmcL", "big.txt"}, std::nullopt, "/w");
+    EXPECT_EQ(captured.out, "    1     1 16385 16387 16385 big.txt\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+}
+
 TEST_F(BuiltinCommandsTest, WcPosixlyCorrectKeepsNoBreakSpaceInWords) {
     const std::string nbsp("a\xC2\xA0" "b");
     EXPECT_EQ(RunCaptured("wc", {"-w"}, nbsp).out, "2\n");

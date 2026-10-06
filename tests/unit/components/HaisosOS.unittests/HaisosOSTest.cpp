@@ -554,6 +554,10 @@ TEST_F(HaisosOSTest, OpenFileHandsBackAnUnnumberedDescriptor) {
     auto process = std::dynamic_pointer_cast<ICurrentProcess>(
         os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"", StartProcessOptions{}));
     ASSERT_NE(process, nullptr);
+    // The script ends at once, releasing its table as it does: wait for that
+    // first, or the release could empty slot 0 between AddDescriptor and
+    // GetDescriptor below. The table stays usable after the end.
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
     auto io = process->IO();
 
     auto file = io->OpenFile("x.txt", kFileOpenWriteCreateTruncate, kFileCreateMode);

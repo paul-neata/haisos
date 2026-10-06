@@ -3,7 +3,7 @@
 - Rock: hsh
 - Depends on: hsh--pipelines
 - Size: ~1000 changed lines in ~12 files
-- Plan checked against: develop @ 0d92271
+- Plan checked against: develop @ e632275
 - PR title: hsh: cd, export, unset, readonly, set, shift and test builtins
 
 ## Goal
@@ -60,6 +60,26 @@ What earlier tasks provide (as if on develop; the code wins on names):
   `modificationTime` (`interfaces/IFileIO.h`, `IFileSystemService.h`);
   `IFileIO::GetDescriptor(fd)` and `IFileDescriptor::IsTerminal()`.
 
+Checked against the merged code: `:`, `exec`, `exit`, `false`, `true` and
+`wait` are already implemented (`HshBuiltins.h`/`.cpp`, `HshBuiltinExec.cpp`,
+`HshBuiltinWait.cpp`, from hsh--executor and hsh--pipelines) and are not
+redone here -- the Changes below add only `cd`, `export`, `readonly`, `set`,
+`shift`, `test`/`[` and `unset`. `ShellBuiltins()`/`FindShellBuiltin`,
+`ShellOptionTable()`/`FindShellOption`, `RedirectionScope`, `SubshellScope`,
+`Jobs()`/background lists and the fixture all already match this plan's
+references, named exactly as above.
+
+`BackgroundPrelude()` (`HshShell.h`) currently passes the options that are on
+(`e u f x C a`) to a background child hsh as an invocation argument, "since
+there is no `set` builtin yet". Now that this task adds `set`, that could
+change to pass them as `set -eu...` text in the prelude instead -- but this
+task does not touch `BackgroundPrelude`/`StartBackgroundShell`/`Hsh.cpp`'s
+reading of that invocation argument: keep it as is. Switching it is a small,
+separate change (it would also need the child to run the `set` text before
+anything else, including any function definitions hsh--control-flow appends)
+and is better left to whichever task next touches background lists, or to
+the final develop review.
+
 ## Changes
 
 All in namespace `Haisos::Hsh`, `src/components/BuiltinCommands/commands/hsh/`,
@@ -76,6 +96,46 @@ plain portable C++17.
   applied.
 - hsh's version becomes `0.4.0`.
 - New files in the two `CMakeLists.txt`.
+
+### Preliminary: three fixes from the PR #35 review
+
+1. **An `-o`/`+o` option cluster stops parsing early**
+   (`HshInvocation.cpp`, `ParseInvocation`, the `letter == 'o'` branch): after
+   taking the option's name from the next whole argument, the loop does
+   `break`, dropping any further letters of the *same* cluster (`-oe errexit`
+   parses `-o errexit` and silently ignores the `e`); dash keeps parsing them
+   (`continue`). Change the `break` to `continue`, and drop the comment above
+   it that currently claims the drop is intentional ("the rest of this one,
+   if any, is ignored, as dash ignores it" -- it is not).
+   - Test: `HshInvocationTest.cpp`, parsing `{"-oe", "nounset", "-c", "x"}`
+     expects both `nounset` (named by `-o`) and `errexit` (the trailing
+     letter `e`) on.
+   - [ ] Acceptance: an `-o`/`+o` not last in a cluster still leaves the
+     cluster's remaining letters parsed.
+
+2. **A read-only check for a child command's assignment runs before the
+   value is expanded** (`HshShell.cpp`, `ExecuteSimpleCommand`, the "anything
+   else is a child process" branch): `IsReadonly(assignment.name)` is checked
+   before `ExpandAssignmentValue(assignment.value)` runs; dash expands first
+   (so a command substitution in the value still runs, and `$?` reflects it)
+   and only then rejects the assignment. Expand the value first, then check.
+   - Test: `HshBuiltinsTest.cpp` (or `HshShellTest.cpp`), two `Sh` calls (a
+     `Fail` is fatal, so nothing after it in the same script runs):
+     `readonly x=1; x=$(pwd >/seen.txt) /bin/true` -> out empty, err
+     `hsh: 1: x: is read only\n`, status 2; then `cat /seen.txt` -> `/\n`,
+     proving the substitution ran (and wrote the file) before the read-only
+     assignment was rejected.
+   - [ ] Acceptance: a read-only assignment on a child command still expands
+     (and runs any command substitution in) its value before failing.
+
+3. **A child that ignores `TriggerStop` is left running, unlogged**
+   (`HshShell.cpp`, `StopChildren`): after the `kStopGraceMs` wait, a child
+   whose `WaitToFinish` still returns false is left running with nothing
+   logged. Capture each child's pid (`GetPid()`) and path (`Path()`) before
+   signalling it, and `LogWarning` the ones `WaitToFinish` times out on.
+   - Test: none needed (a log line only).
+   - [ ] Acceptance: `StopChildren` logs a warning naming the pid and path of
+     any child still running after the grace period.
 
 ### `HshShell.h` / `.cpp` -- assignments, xtrace, noexec
 

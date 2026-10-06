@@ -24,7 +24,7 @@ Pause: no
 | 17 | [hsh--executor](tasks/hsh--executor.md) | done | 0.4.17 | 8, 16 | #35 | 1 | 1M 3L open | |
 | 18 | [hsh--redirections](tasks/hsh--redirections.md) | done | 0.4.18 | 11, 17 | #36 | 1 | 1H fixed, 5L open | |
 | 19 | [hsh--pipelines](tasks/hsh--pipelines.md) | done | 0.4.19 | 18 | #37 | 1 | 1H fixed, 3M 4L open | Windows HaisosOS timeout, green on re-run |
-| 20 | [hsh--shell-builtins](tasks/hsh--shell-builtins.md) | todo | | 19 | | | | |
+| 20 | [hsh--shell-builtins](tasks/hsh--shell-builtins.md) | in-progress | 0.4.20 | 19 | | | | |
 | 21 | [hsh--control-flow](tasks/hsh--control-flow.md) | todo | | 20 | | | | |
 | 22 | [hsh--interactive](tasks/hsh--interactive.md) | todo | | 12, 21 | | | | |
 | 23 | [streams--coroutine-latch](tasks/streams--coroutine-latch.md) | done | 0.4.15 | 6, 8 | #33 | 1 | 1C 2H 1M fixed, 1M 1L open | follow-up to #23/#25 findings; reviewer fixed coroutine.wrap argument handling |
@@ -56,3 +56,4 @@ Pause: no
 - 2026-10-06 19:10 (implement) hsh--executor refreshed: checked against 7fd962a, interfaces unchanged; preliminary fix from #34 added to the plan ("$@$@" with no positional parameters gives one empty field). The re-check agent had instead edited and built src/tests on the host; those edits were reverted, nothing committed
 - 2026-10-06 19:45 (implement) hsh--redirections refreshed: checked against 64378f3, interfaces unchanged; preliminary dash fixes moved here from hsh--expansion: heredoc join only on an odd number of trailing backslashes (#31), glob brackets never span '/' (#32); fd-number parse checks the whole string; size ~770
 - 2026-10-06 20:17 (implement) hsh--pipelines refreshed: checked against baa0799, interfaces unchanged; preliminary fix of #35's flaky StopEndsTheShellAndItsChild (poll until /spin.lua runs), and the plan's own StopEndsEveryStage polls too
+- 2026-10-06 21:02 (implement) hsh--shell-builtins refreshed: checked against e632275, interfaces unchanged; notes that :, exec, exit, false, true, wait already exist; preliminary dash fixes from #35: -o inside an option cluster, read-only check after expansion, LogWarning for a child outliving the stop grace

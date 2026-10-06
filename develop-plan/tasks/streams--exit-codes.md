@@ -3,7 +3,7 @@
 - Rock: streams
 - Depends on: streams--runtime-streams
 - Size: ~600 changed lines in ~20 files
-- Plan checked against: develop @ 0d92271
+- Plan checked against: develop @ 04a0a36
 - PR title: Add IProcess::ExitCode and exit haisos with the first failing RUN's
 
 ## Goal
@@ -241,7 +241,12 @@ reply clears it; `OnCommandFailed` (throw on call) sets it.
 Haisos tests:
 
 - `tests/haisos/agent_{start,query,list_running,wait_to_finish}.haisostest/*.js`:
-  also fail unless `result.status === 0`; keep the stderr/stdout `Error:` check.
+  these already use `spawnSync` and check `result.stdout`/`result.stderr` for
+  `Error:`, but no longer check the exit status (PR #22 dropped it switching
+  off `execSync`), so a haisos that crashes or exits non-zero without printing
+  `Error:` now passes. Also fail when `result.status !== 0 || result.signal`
+  (every one of these runs is expected to exit 0): keep the existing
+  stderr/stdout `Error:` check alongside it.
 - `tests/haisos/builtins.haisostest/builtins.haisostest.js`: the `ls /nope`
   run expects status 2.
 - New `tests/haisos/exit_codes.haisostest/exit_codes.haisostest.js` (picked up

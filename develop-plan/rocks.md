@@ -27,7 +27,7 @@ exit code, and `haisos` returns the first failing `RUN`'s. Touches
 `IBuiltinCommands` (`BuiltinCommandHost`), the Console, HaisosOS,
 BuiltinCommands and Agent components, `src/haisos/main.cpp`, the haisos tests.
 About 2150 changed lines.
-Tasks: streams--console-and-start, streams--runtime-streams, streams--exit-codes
+Tasks: streams--console-and-start, streams--runtime-streams, streams--exit-codes, streams--coroutine-latch
 
 ## pipes -- Unnamed pipes
 `IPipeService` makes bounded, blocking, unidirectional pipes whose ends are

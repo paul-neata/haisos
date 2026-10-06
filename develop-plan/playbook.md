@@ -12,7 +12,7 @@ Pause: no
 | 5 | [streams--runtime-streams](tasks/streams--runtime-streams.md) | done | 0.4.4 | 4 | #22 | 1 | 1M 4L open | |
 | 6 | [streams--exit-codes](tasks/streams--exit-codes.md) | done | 0.4.5 | 5 | #23 | 1 | 1C fixed, 2M 3L open | reviewer fixed an unprotected Lua __tostring (host abort) |
 | 7 | [pipes--pipe-service](tasks/pipes--pipe-service.md) | done | 0.4.6 | 6 | #24 | 1 | 2M 2L open | Windows test time fixed on the host |
-| 8 | [pipes--broken-pipe](tasks/pipes--broken-pipe.md) | in-progress | 0.4.7 | 7 | | | | |
+| 8 | [pipes--broken-pipe](tasks/pipes--broken-pipe.md) | in-review | 0.4.7 | 7 | #25 | 1 | | |
 | 9 | [builtins--directories](tasks/builtins--directories.md) | todo | | 4 | | | | |
 | 10 | [builtins--unicode](tasks/builtins--unicode.md) | todo | | - | | | | |
 | 11 | [builtins--wc](tasks/builtins--wc.md) | todo | | 9, 10 | | | | |

@@ -19,3 +19,4 @@
 - 2026-10-06 08:27 UTC -- start pipes--pipe-service (0.4.6)
 - 2026-10-06 08:56 UTC -- pipes--pipe-service: PR #24, windows-failed
 - 2026-10-06 10:03 UTC -- review of #24 interrupted by the session limit (no changes made); restarted
+- 2026-10-06 10:32 UTC -- pipes--pipe-service merged #24 as 0.4.6: 2M 2L open, 1 tries, Windows test time fixed on the host; question on the 30 s Windows limit

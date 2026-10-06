@@ -11,7 +11,7 @@ Pause: no
 | 4 | [streams--console-and-start](tasks/streams--console-and-start.md) | done | 0.4.3 | 3 | #21 | 1 | 1M 4L open | |
 | 5 | [streams--runtime-streams](tasks/streams--runtime-streams.md) | done | 0.4.4 | 4 | #22 | 1 | 1M 4L open | |
 | 6 | [streams--exit-codes](tasks/streams--exit-codes.md) | done | 0.4.5 | 5 | #23 | 1 | 1C fixed, 2M 3L open | reviewer fixed an unprotected Lua __tostring (host abort) |
-| 7 | [pipes--pipe-service](tasks/pipes--pipe-service.md) | in-review | 0.4.6 | 6 | #24 | 1 | | |
+| 7 | [pipes--pipe-service](tasks/pipes--pipe-service.md) | done | 0.4.6 | 6 | #24 | 1 | 2M 2L open | Windows test time fixed on the host |
 | 8 | [pipes--broken-pipe](tasks/pipes--broken-pipe.md) | todo | | 7 | | | | |
 | 9 | [builtins--directories](tasks/builtins--directories.md) | todo | | 4 | | | | |
 | 10 | [builtins--unicode](tasks/builtins--unicode.md) | todo | | - | | | | |
@@ -32,6 +32,8 @@ Pause: no
 
 ## Questions
 - (implement, 2026-10-06) streams--exit-codes (#23) left a medium: `exit()` inside a Lua coroutine re-arms the stop hook only on the coroutine's thread, so after `coroutine.resume` catches it the script runs up to ~1000 more instructions, tool calls included (LuaProcess.cpp:614; fix: also re-arm on `self->m_luaState` in LuaExitTrampoline, test `coroutine.resume(coroutine.create(function() exit(2) end)) print('after')` prints nothing, exits 2). Plus no test for the LLM-round-cap failure (Agent.cpp:507). Add a small follow-up task now, or leave both for the final-review fixes? Until answered: left for the final review.
+
+- (implement, 2026-10-06) Windows: HaisosOS.unittests.exe takes ~29.5 s on Windows against CI's 30 s per-executable timeout -- the existing HaisosOSTest.cpp alone is ~29.4 s (127.0.0.1:9999 takes ~2 s to refuse on Windows; HaisosOSTest still uses it). Every later task adding HaisosOS tests risks a red Windows check. Options: raise the timeout (scripts/ or .github/, so the plan session or master), switch HaisosOSTest to 0.0.0.0:9999 as #24 did for its own tests (a small follow-up task), or split the executable. Until answered: tasks go on; a Windows timeout is fixed on the host as for #24.
 
 ## Adjustments
 - 2026-10-06 05:57 (implement) fd--process-table refreshed: checked-against line fixed to 7b72167; Tests note to drop the stale 'IFileIO keeps int fds' comment (PR #19 finding)

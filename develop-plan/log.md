@@ -42,3 +42,4 @@
 - 2026-10-06 15:52 UTC -- hsh--parser: PR #31, ready
 - 2026-10-06 16:05 UTC -- hsh--parser merged #31 as 0.4.13: 2H fixed, 2M 3L open, 1 tries
 - 2026-10-06 16:07 UTC -- start hsh--arith-glob (0.4.14)
+- 2026-10-06 16:27 UTC -- hsh--arith-glob: PR #32, windows-failed

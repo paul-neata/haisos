@@ -1,7 +1,7 @@
 # BuiltinCommands
 
 The commands compiled into Haisos itself -- `cat`, `echo`, `ls`, `mkdir`,
-`pwd` -- and what places them on filesystems. Implements `IBuiltinCommands`
+`pwd`, `wc` -- and what places them on filesystems. Implements `IBuiltinCommands`
 and `IBuiltinConfigurator` (`interfaces/IBuiltinCommands.h`); both are created
 through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
 
@@ -110,6 +110,7 @@ that table, so the help can never disagree with what is parsed.
 | `ls` | 1.3.0 | `-a -A -B -c -C -d -f -g -G -h -k -l -m -N -o -p -r -R -s -S -t -u -U -w -x -X -1`, `--file-type --format --full-time --group-directories-first --sort --time --time-style`; off a terminal (stdout a pipe, a file, a device), one name per line unless `-C`/`-x`/`-m`/`-l` asks for a layout, and names literal with control characters written raw -- GNU's own defaults when stdout is not a terminal; `-1` after `-l` keeps the long listing | owner and group are `haisos`, permissions `rwxrwxrwx` (no users or permissions yet), so a device shows as `crwxrwxrwx`, with its major and minor numbers in the size column as GNU ls shows them; columns are padded with spaces, not tabs; the width is 80 unless `-w` says otherwise; `--sort=version/width` and `--time=birth` are reported as not treated; on Windows, a `--time-style=+FORMAT` conversion the Microsoft C runtime lacks (`%k`, `%P`, ...) prints as written, as glibc prints one it does not know |
 | `mkdir` | 1.1.0 | `-p -v` | `-m`/`--mode`, `-Z`/`--context` not treated (no permissions or security contexts) |
 | `pwd` | 1.1.0 | `-L -P` (the same: no symlinks) | -- |
+| `wc` | 1.0.0 | `-c -m -l -L -w`, `--files0-from`, `--total`; with no FILE, or a FILE of `-`, the standard input is read | standard input has no size, so with it the columns are at least 7 wide (GNU sizes a redirected file); character classes and display widths come from the `Unicode` component's compact tables (unassigned code points count as printable; rare scripts' widths are approximate); `--debug` not treated |
 
 `ls` follows GNU ls as it prints to a terminal: the column layout (a line
 kept shorter than the width), `-l` with a `total` line in 1K blocks, link

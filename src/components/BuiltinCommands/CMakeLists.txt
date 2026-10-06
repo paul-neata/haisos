@@ -8,10 +8,11 @@ add_library(BuiltinCommands STATIC
     commands/ls/Ls.cpp
     commands/mkdir/Mkdir.cpp
     commands/pwd/Pwd.cpp
+    commands/wc/Wc.cpp
 )
 target_include_directories(BuiltinCommands PUBLIC
     ${CMAKE_SOURCE_DIR}/interfaces
     ${CMAKE_SOURCE_DIR}/src/components/BuiltinCommands
 )
-target_link_libraries(BuiltinCommands PUBLIC Logger Filesystem ProcessFileIO)
+target_link_libraries(BuiltinCommands PUBLIC Logger Filesystem ProcessFileIO Unicode)
 target_compile_features(BuiltinCommands PUBLIC cxx_std_17)

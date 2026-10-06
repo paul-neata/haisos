@@ -190,10 +190,12 @@ protected:
 
     // Runs /bin/<command> with stdout and stderr connected to files (not
     // terminals) and, if |input| is given, stdin reading it (else the default
-    // empty input). Returns both streams byte for byte and the exit status.
+    // empty input). |environment|, when given, is the process's environment.
+    // Returns both streams byte for byte and the exit status.
     Captured RunCaptured(const std::string& command, const std::vector<std::string>& args,
                          const std::optional<std::string>& input = std::nullopt,
-                         const std::string& workingDirectory = "/") {
+                         const std::string& workingDirectory = "/",
+                         std::shared_ptr<IEnvironment> environment = nullptr) {
         Captured captured;
         StartProcessOptions options;
         if (input) {
@@ -209,7 +211,8 @@ protected:
         options.stdErr = streams->OpenFile("/err", kFileOpenWriteCreateTruncate, kFileCreateMode);
         EXPECT_NE(options.stdOut, nullptr);
         EXPECT_NE(options.stdErr, nullptr);
-        auto process = os->StartProcess(os->GetOsEnvironment()->Clone(), "/bin/" + command, args, workingDirectory, options);
+        auto process = os->StartProcess(environment ? environment : os->GetOsEnvironment()->Clone(),
+            "/bin/" + command, args, workingDirectory, options);
         EXPECT_NE(process, nullptr) << command;
         if (process) {
             EXPECT_TRUE(process->WaitToFinish(kWaitMs)) << command;

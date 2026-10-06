@@ -14,6 +14,7 @@ std::shared_ptr<IBuiltinCommand> CreateEchoCommand();
 std::shared_ptr<IBuiltinCommand> CreateLsCommand();
 std::shared_ptr<IBuiltinCommand> CreateMkdirCommand();
 std::shared_ptr<IBuiltinCommand> CreatePwdCommand();
+std::shared_ptr<IBuiltinCommand> CreateWcCommand();
 
 // Every builtin Haisos has. Adding one here is all it takes for it to be
 // runnable, listed by IBuiltinCommands::GetCommands() -- and so written into
@@ -25,6 +26,7 @@ inline std::vector<std::shared_ptr<IBuiltinCommand>> CreateStandardBuiltinComman
         CreateLsCommand(),
         CreateMkdirCommand(),
         CreatePwdCommand(),
+        CreateWcCommand(),
     };
 }
 

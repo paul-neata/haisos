@@ -890,7 +890,8 @@ struct Lexer::Impl {
                     // newline joins: they pair off into literal backslashes,
                     // and only the last one is a continuation marker.
                     for (;;) {
-                        if (raw.back() != '\n' || pos >= src->size()) {
+                        // raw is empty for a last line of only tabs under <<-.
+                        if (raw.empty() || raw.back() != '\n' || pos >= src->size()) {
                             break;
                         }
                         size_t backslashes = 0;

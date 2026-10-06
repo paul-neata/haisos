@@ -308,6 +308,16 @@ TEST(HshLexerTest, HereDocuments) {
         EXPECT_FALSE(hd.terminated);
         EXPECT_EQ(tokens.back().kind, TokenKind::EndOfInput);
     }
+    // <<- with a last line of only tabs and no newline: the stripped line is
+    // empty, the body too, and the join test must not read past it.
+    {
+        std::vector<Token> tokens = LexTokens("cat <<-E\n\t\t");
+        ASSERT_TRUE(tokens[2].hereDoc != nullptr);
+        const HereDocument& hd = *tokens[2].hereDoc;
+        EXPECT_EQ(hd.rawBody, "");
+        EXPECT_TRUE(hd.complete);
+        EXPECT_FALSE(hd.terminated);
+    }
     // A quoted heredoc with an empty body keeps no part.
     {
         std::vector<Token> tokens = LexTokens("cat <<'E'\nE\n");

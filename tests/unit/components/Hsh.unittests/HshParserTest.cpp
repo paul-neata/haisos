@@ -473,6 +473,29 @@ TEST(HshParserTest, SourceTextRoundTrips) {
         EXPECT_EQ(function.sourceText, "g()\n(echo g)");
     }
     {
+        // A heredoc body read after the inner list or the function has ended
+        // is still appended to its text.
+        ParseResult result = MustParse("{ cat <<E & }\nb\nE\n");
+        const auto& group = static_cast<const BraceGroup&>(
+            *result.commands.items[0].andOr.pipelines[0].commands[0]);
+        ASSERT_EQ(group.body.items.size(), 1u);
+        EXPECT_EQ(group.body.items[0].sourceText, "cat <<E\nb\nE\n");
+        EXPECT_EQ(result.commands.items[0].sourceText, "{ cat <<E & }\nb\nE\n");
+    }
+    {
+        ParseResult result = MustParse("case x in a) cat <<E;; esac\nbody\nE\n");
+        const auto& caseCommand = static_cast<const CaseCommand&>(
+            *result.commands.items[0].andOr.pipelines[0].commands[0]);
+        ASSERT_EQ(caseCommand.items.size(), 1u);
+        EXPECT_EQ(caseCommand.items[0].body.items[0].sourceText, "cat <<E\nbody\nE\n");
+    }
+    {
+        ParseResult result = MustParse("f() { cat <<E; } && :\nb\nE\n");
+        const auto& function = static_cast<const FunctionDefinition&>(
+            *result.commands.items[0].andOr.pipelines[0].commands[0]);
+        EXPECT_EQ(function.sourceText, "f() { cat <<E; }\nb\nE\n");
+    }
+    {
         ParseResult result = MustParse("{ a & b; }");
         const auto& group = static_cast<const BraceGroup&>(
             *result.commands.items[0].andOr.pipelines[0].commands[0]);
@@ -486,7 +509,14 @@ TEST(HshParserTest, SourceTextRoundTrips) {
 TEST(HshParserTest, CommandSubstitutionChecked) {
     // An error inside $(...) is an error of the whole parse; the wording comes
     // from parsing the text alone, so it names ")" rather than the outer line.
-    ExpectError("echo $(if)", "Syntax error: \")\" unexpected (expecting \"then\")", 1, true);
+    // Never incomplete: the substitution is closed, so more input cannot help.
+    ExpectError("echo $(if)", "Syntax error: \")\" unexpected (expecting \"then\")", 1, false);
+    {
+        ParserOptions interactive;
+        interactive.interactive = true;
+        ExpectError("echo $(if)\n", "Syntax error: \")\" unexpected (expecting \"then\")", 1,
+                    false, interactive);
+    }
     ExpectError("echo \"$(fi)\"", "Syntax error: \"fi\" unexpected", 1, false);
     ExpectDump("echo $(echo ok)", "[echo $(echo ok)]");
     ExpectDump("x=$(case a in a) echo;; esac)", "[x=$(case a in a) echo;; esac)]");

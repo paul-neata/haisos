@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <optional>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -92,6 +93,13 @@ std::string PlainText(const Word& word) {
 
 } // namespace
 
+// Parser::Impl::PendingText points into lists that are moved into these
+// before the texts are filled: their moves must keep the lists' storage.
+static_assert(std::is_nothrow_move_constructible_v<IfBranch> &&
+              std::is_nothrow_move_constructible_v<CaseItem> &&
+              std::is_nothrow_move_constructible_v<CommandList>,
+              "a pending source text would dangle");
+
 struct Parser::Impl {
     std::string source;
     Lexer lexer;
@@ -104,6 +112,18 @@ struct Parser::Impl {
     // delimiter taken is noted on every open frame, so an enclosing item sees
     // the bodies of the constructs inside it too.
     std::vector<std::vector<std::shared_ptr<HereDocument>>> hereDocFrames;
+    // Source texts to cut once the complete command is read: a heredoc's body
+    // is read at the newline ending its line, after an inner list (`{ cat <<E
+    // & }`) or a function (`f() { cat <<E; } && x`) has already ended. Each
+    // target lives in a list's or a command's heap storage, which moving the
+    // lists and commands around keeps in place.
+    struct PendingText {
+        std::string* target = nullptr;
+        size_t begin = 0;
+        size_t end = 0;
+        std::vector<std::shared_ptr<HereDocument>> hereDocs;
+    };
+    std::vector<PendingText> pendingTexts;
     std::optional<ParseResult> errorResult;
 
     Impl(std::string sourceText, const ParserOptions& options)
@@ -264,10 +284,11 @@ struct Parser::Impl {
         return item;
     }
 
-    void FillSourceTexts(CommandList& list, std::vector<ItemMeta>& metas) const {
+    // Called once the list is complete, so its items no longer move.
+    void FillSourceTexts(CommandList& list, std::vector<ItemMeta>& metas) {
         for (size_t i = 0; i < list.items.size(); ++i) {
-            list.items[i].sourceText =
-                BuildSourceText(metas[i].begin, metas[i].end, metas[i].hereDocs);
+            pendingTexts.push_back({&list.items[i].sourceText, metas[i].begin, metas[i].end,
+                                    std::move(metas[i].hereDocs)});
         }
     }
 
@@ -662,7 +683,7 @@ struct Parser::Impl {
         size_t end = lastEnd;
         std::vector<std::shared_ptr<HereDocument>> hereDocs = std::move(hereDocFrames.back());
         hereDocFrames.pop_back();
-        function->sourceText = BuildSourceText(nameToken.begin, end, hereDocs);
+        pendingTexts.push_back({&function->sourceText, nameToken.begin, end, std::move(hereDocs)});
         return function;
     }
 
@@ -718,8 +739,9 @@ struct Parser::Impl {
                     options.endOfInputName = part.backquoted ? "end of file" : "\")\"";
                     ParseResult result = ParseProgram(part.text, options);
                     if (result.status == ParseResult::Status::Error) {
-                        throw ShellError(result.errorMessage, result.errorLine,
-                                         result.incomplete);
+                        // Never incomplete: the substitution is closed, so no
+                        // more input can complete its text.
+                        throw ShellError(result.errorMessage, result.errorLine, false);
                     }
                     break;
                 }
@@ -771,7 +793,14 @@ struct Parser::Impl {
             return result;
         }
         result.status = ParseResult::Status::Command;
+        pendingTexts.clear();
         result.commands = ParseCompleteCommand();
+        // The line's newline (or the end of input) is taken: every heredoc
+        // body is read now.
+        for (const PendingText& pending : pendingTexts) {
+            *pending.target = BuildSourceText(pending.begin, pending.end, pending.hereDocs);
+        }
+        pendingTexts.clear();
         CheckList(result.commands);
         return result;
     }

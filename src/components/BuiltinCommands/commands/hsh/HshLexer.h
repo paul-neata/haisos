@@ -77,6 +77,8 @@ struct LexerOptions {
 class Lexer {
 public:
     explicit Lexer(std::string source, LexerOptions options = {});
+    Lexer(Lexer&& other) noexcept;
+    Lexer& operator=(Lexer&& other) noexcept;
     ~Lexer();
 
     // The next token; EndOfInput forever once the source is used up. Throws
@@ -87,9 +89,6 @@ public:
     int Line() const;
 
 private:
-    Lexer(std::shared_ptr<const std::string> source, size_t start, int startLine,
-          const LexerOptions& options);
-
     struct Impl;
     friend struct Impl;
     std::unique_ptr<Impl> m_impl;

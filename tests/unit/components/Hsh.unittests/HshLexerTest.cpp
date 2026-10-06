@@ -475,3 +475,43 @@ TEST(HshLexerTest, OperatorAndReservedWordText) {
     // DescribeToken of an operator is its text; the other kinds have shapes.
     EXPECT_EQ(DescribeToken(LexTokens(";")[0]), ";");
 }
+
+TEST(HshLexerTest, LexerIsMovable) {
+    Lexer lexer("a | b\n", {});
+    EXPECT_EQ(DescribeToken(lexer.Next()), "W(L'a')");
+    EXPECT_EQ(DescribeToken(lexer.Next()), "|");
+    Lexer moved(std::move(lexer));  // move-construct mid-stream
+    EXPECT_EQ(DescribeToken(moved.Next()), "W(L'b')");
+    Lexer assigned("x", {});
+    assigned = std::move(moved);    // move-assign mid-stream
+    EXPECT_EQ(DescribeToken(assigned.Next()), "NL");
+    EXPECT_EQ(DescribeToken(assigned.Next()), "EOF");
+}
+
+TEST(HshLexerTest, HereDocLineContinuation) {
+    // Unquoted delimiter: a \<newline> inside the body joins with the next
+    // line before the delimiter comparison, so this body's first logical line
+    // is "aE" and the delimiter matches on the third body line.
+    {
+        std::vector<Token> tokens = LexTokens("cat <<E\na\\\nE\nE\n");
+        ASSERT_EQ(tokens.size(), 5u);
+        std::shared_ptr<HereDocument> hd = tokens[2].hereDoc;
+        ASSERT_TRUE(hd != nullptr);
+        EXPECT_EQ(hd->rawBody, "aE\n");
+        EXPECT_TRUE(hd->terminated);
+        ASSERT_EQ(hd->body.parts.size(), 1u);
+        EXPECT_EQ(hd->body.parts[0].text, "aE\n");
+        EXPECT_EQ(tokens[4].line, 5);
+    }
+    // Quoted delimiter: raw-line matching, no continuation handling.
+    {
+        std::vector<Token> tokens = LexTokens("cat <<'E'\na\\\nE\nnext\n");
+        std::shared_ptr<HereDocument> hd = tokens[2].hereDoc;
+        ASSERT_TRUE(hd != nullptr);
+        EXPECT_EQ(hd->rawBody, "a\\\n");
+        EXPECT_TRUE(hd->terminated);
+        EXPECT_EQ(tokens[3].kind, TokenKind::Newline);
+        EXPECT_EQ(tokens[4].kind, TokenKind::Word); // "next" is a command now
+        EXPECT_EQ(tokens[4].line, 4);
+    }
+}

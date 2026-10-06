@@ -19,4 +19,17 @@ private:
     ClosedDescriptor() = default;
 };
 
+// The standard input of a background command (dash: an asynchronous list's
+// stdin is /dev/null when there is no job control): Read ends at once,
+// Write takes the bytes and drops them. Not a terminal.
+class NullInputDescriptor : public IFileDescriptor {
+public:
+    static std::shared_ptr<NullInputDescriptor> Create();
+    ssize_t Read(void* buf, size_t count) override;           // 0: end of input
+    ssize_t Write(const void* buf, size_t count) override;    // count: the bytes vanish
+    bool IsTerminal() const override;                          // false
+private:
+    NullInputDescriptor() = default;
+};
+
 } // namespace Haisos::Hsh

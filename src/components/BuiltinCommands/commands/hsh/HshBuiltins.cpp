@@ -51,6 +51,7 @@ const std::vector<ShellBuiltin>& ShellBuiltins() {
         {"exit", true, &BuiltinExit},
         {"false", false, &BuiltinFalse},
         {"true", false, &BuiltinTrue},
+        {"wait", false, &BuiltinWait},
     };
     return builtins;
 }

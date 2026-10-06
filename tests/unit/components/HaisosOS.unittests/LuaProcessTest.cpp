@@ -180,6 +180,25 @@ TEST(LuaProcessTest, ANonStringErrorIsDescribed) {
     EXPECT_EQ(*run.process->ExitCode(), 1);
 }
 
+// An error object's __tostring is the message; one that itself raises is only
+// another error of the script -- never an unprotected Lua error, on which Lua
+// aborts the whole host.
+TEST(LuaProcessTest, AnErrorObjectsTostringRunsProtected) {
+    auto toolFactory = std::make_shared<TestToolFactory>();
+
+    auto run = RunScript(toolFactory,
+        "error(setmetatable({}, {__tostring = function() return 'custom' end}))");
+    EXPECT_EQ(run.err->Written(), "lua: custom\n");
+    ASSERT_TRUE(run.process->ExitCode().has_value());
+    EXPECT_EQ(*run.process->ExitCode(), 1);
+
+    run = RunScript(toolFactory,
+        "error(setmetatable({}, {__tostring = function() error('inner') end}))");
+    EXPECT_EQ(run.err->Written().rfind("lua: ", 0), 0u) << run.err->Written();
+    ASSERT_TRUE(run.process->ExitCode().has_value());
+    EXPECT_EQ(*run.process->ExitCode(), 1);
+}
+
 TEST(LuaProcessTest, ExitEndsTheScriptWithItsCode) {
     auto toolFactory = std::make_shared<TestToolFactory>();
 

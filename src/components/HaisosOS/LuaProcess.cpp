@@ -264,22 +264,32 @@ void KillHookTrampoline(lua_State* L, lua_Debug* /*ar*/) {
     }
 }
 
-// The error value on top of the stack rendered as the standalone interpreter's
-// msghandler renders it (lua.c), minus the traceback it appends: a string (or
-// number, which lua_tostring converts in place, as msghandler takes it) as it
-// is; otherwise its __tostring result when that produces a string; otherwise
-// "(error object is a <type> value)".
+// The message handler of the script's top-level lua_pcall: the standalone
+// interpreter's msghandler (lua.c), minus the traceback it appends. A string
+// (or number, which lua_tostring converts in place) is the message as it is;
+// otherwise its __tostring result when that produces a string; otherwise
+// "(error object is a <type> value)". It runs inside the protected call, so a
+// __tostring that raises (or is interrupted by a kill) is just another error
+// of the script. Run after lua_pcall had returned, the same metamethod raising
+// would be an unprotected error -- and Lua aborts the whole host on one.
+int LuaErrorMessageHandler(lua_State* L) {
+    if (lua_tostring(L, 1) == nullptr) {
+        if (luaL_callmeta(L, 1, "__tostring") && lua_type(L, -1) == LUA_TSTRING) {
+            return 1;
+        }
+        lua_pushfstring(L, "(error object is a %s value)", luaL_typename(L, 1));
+    }
+    return 1;
+}
+
+// The error value on top of the stack as text. It is a string whenever the
+// message handler above produced it, and for every load error; nothing here
+// runs Lua code, so nothing here can raise.
 std::string RenderLuaError(lua_State* L) {
-    const int at = lua_gettop(L);
-    if (const char* msg = lua_tostring(L, at)) {
+    if (const char* msg = lua_tostring(L, -1)) {
         return msg;
     }
-    // luaL_callmeta leaves the metamethod's result on top when there is one.
-    if (luaL_callmeta(L, at, "__tostring") && lua_type(L, -1) == LUA_TSTRING) {
-        return lua_tostring(L, -1);
-    }
-    lua_settop(L, at);
-    return std::string("(error object is a ") + luaL_typename(L, at) + " value)";
+    return std::string("(error object is a ") + luaL_typename(L, -1) + " value)";
 }
 
 } // namespace
@@ -676,13 +686,17 @@ void LuaProcess::RunThread() {
         // chunk name as a path, so its messages read "<path>:<line>:" as the
         // standalone interpreter's do.
         const std::string chunkName = "@" + m_path;
+        // The message handler goes under the chunk, so the error value is made
+        // text inside the protected call (see LuaErrorMessageHandler).
+        lua_pushcfunction(m_luaState, &LuaErrorMessageHandler);
+        const int messageHandler = lua_gettop(m_luaState);
         if (luaL_loadbufferx(m_luaState, m_scriptContent.data(), m_scriptContent.size(), chunkName.c_str(), "t") != LUA_OK) {
             const std::string rendered = RenderLuaError(m_luaState);
             LogError("LuaProcess '%s': failed to load script: %s", m_path.c_str(), rendered.c_str());
             // As the standalone lua prints it, without the traceback.
             WriteToDescriptor(IFileIO::kStdErr, "lua: " + rendered + "\n");
             scriptFailed = true;
-        } else if (lua_pcall(m_luaState, 0, 0, 0) != LUA_OK) {
+        } else if (lua_pcall(m_luaState, 0, 0, messageHandler) != LUA_OK) {
             if (IsExitRequested()) {
                 // Not a fault: exit() aborts the script by raising through the
                 // kill hook, so this is the expected way such a script unwinds.

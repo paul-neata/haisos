@@ -260,7 +260,11 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   instruction, so the unwinding is the one a kill runs, with no `lua:` line.
   The same hook serves the global `exit()`: the hook's C trampoline
   re-arms it on every call, return and line, so neither a stop nor an `exit()`
-  can be caught and ignored by a `pcall`. The chunk is loaded as text with its
+  can be caught and ignored by a `pcall`. Both also stop the script from inside
+  any coroutine: a hook set is per Lua thread, so the latch is armed on the
+  main thread as well, and `coroutine.resume`/`coroutine.wrap` are wrapped to
+  arm each resuming thread as control comes back to it (a nested resumer
+  included), so the resumer stops before its next instruction. The chunk is loaded as text with its
   path for a name (`"@" + path`), so error messages come out `path:line:` as
   the standalone interpreter's do
 - `ProcessFileIO` - the `IFileIO` behind `ICurrentProcess::IO()`: the OS's root filesystem plus this process's working directory, and its owner of the descriptor table (the process's open files by number; see the bullets above). Built as a library of its own (`ProcessFileIO` in `CMakeLists.txt`), so a runtime living outside this component -- `BuiltinProcess` -- gives its processes the same I/O without linking all of `HaisosOS`

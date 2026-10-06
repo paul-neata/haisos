@@ -240,6 +240,71 @@ TEST(LuaProcessTest, ExitCannotBeCaughtByPcall) {
     EXPECT_EQ(*run.process->ExitCode(), 4);
 }
 
+// exit() taken one coroutine deep: resume catches the "exit" error it raises,
+// but the latched hook is armed on the main thread too, so the resumer stops
+// before its next instruction rather than running on.
+TEST(LuaProcessTest, ExitInsideACoroutineEndsTheScript) {
+    auto toolFactory = std::make_shared<TestToolFactory>();
+    auto run = RunScript(toolFactory,
+        "coroutine.resume(coroutine.create(function() exit(2) end)) print('after')");
+
+    EXPECT_EQ(run.out->Written(), "");
+    EXPECT_EQ(run.err->Written(), "");
+    ASSERT_TRUE(run.process->ExitCode().has_value());
+    EXPECT_EQ(*run.process->ExitCode(), 2);
+}
+
+// Nested coroutines (main -> co1 -> co2): co1 is neither the coroutine that
+// exited nor the main thread, so the resume wrapper arms it as its resume
+// returns -- print('mid') must not run either.
+TEST(LuaProcessTest, ExitInsideANestedCoroutineEndsTheScript) {
+    auto toolFactory = std::make_shared<TestToolFactory>();
+    auto run = RunScript(toolFactory,
+        "coroutine.resume(coroutine.create(function() coroutine.resume(coroutine.create(function() exit(5) end)) print('mid') end)) print('after')");
+
+    EXPECT_EQ(run.out->Written(), "");
+    EXPECT_EQ(run.err->Written(), "");
+    ASSERT_TRUE(run.process->ExitCode().has_value());
+    EXPECT_EQ(*run.process->ExitCode(), 5);
+}
+
+// The same through coroutine.wrap: the wrapped call raises the coroutine's
+// error in the caller, and the pcall around it cannot swallow it.
+TEST(LuaProcessTest, ExitInsideAWrappedCoroutineEndsTheScript) {
+    auto toolFactory = std::make_shared<TestToolFactory>();
+    auto run = RunScript(toolFactory,
+        "pcall(coroutine.wrap(function() exit(6) end)) print('after')");
+
+    EXPECT_EQ(run.out->Written(), "");
+    EXPECT_EQ(run.err->Written(), "");
+    ASSERT_TRUE(run.process->ExitCode().has_value());
+    EXPECT_EQ(*run.process->ExitCode(), 6);
+}
+
+// The resume/wrap wrappers change nothing when nothing latched: yields,
+// values, statuses and caught ordinary errors all behave as before.
+TEST(LuaProcessTest, CoroutinesStillWork) {
+    auto toolFactory = std::make_shared<TestToolFactory>();
+
+    auto run = RunScript(toolFactory,
+        "local co = coroutine.create(function(a) local b = coroutine.yield(a + 1) print(b) end) "
+        "local _, x = coroutine.resume(co, 1) print(x) coroutine.resume(co, 'z') "
+        "print(coroutine.status(co)) "
+        "local g = coroutine.wrap(function() coroutine.yield(7) end) print(g())");
+    EXPECT_EQ(run.out->Written(), "2\nz\ndead\n7\n");
+    EXPECT_EQ(run.err->Written(), "");
+    ASSERT_TRUE(run.process->ExitCode().has_value());
+    EXPECT_EQ(*run.process->ExitCode(), 0);
+
+    // A plain error inside a coroutine is still caught by resume.
+    run = RunScript(toolFactory,
+        "print(coroutine.resume(coroutine.create(function() error('x', 0) end)))");
+    EXPECT_EQ(run.out->Written(), "false\tx\n");
+    EXPECT_EQ(run.err->Written(), "");
+    ASSERT_TRUE(run.process->ExitCode().has_value());
+    EXPECT_EQ(*run.process->ExitCode(), 0);
+}
+
 TEST(LuaProcessTest, AStoppedScriptExits143) {
     auto toolFactory = std::make_shared<TestToolFactory>();
     auto in = std::make_shared<MockFileDescriptor>();

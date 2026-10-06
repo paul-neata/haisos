@@ -208,6 +208,10 @@ LuaProcess* SelfFromState(lua_State* L) {
     return *static_cast<LuaProcess**>(lua_getextraspace(L));
 }
 
+// Defined below, next to the kill hook they arm.
+int LuaResumeTrampoline(lua_State* L);
+int LuaWrapTrampoline(lua_State* L);
+
 // Opens only the Lua libraries that are safe for a sandboxed .lua process:
 // base, table, string, math, utf8, and coroutine. Deliberately omits `io`,
 // `os`, `package`, and `debug`, which would grant raw filesystem/process/env
@@ -235,12 +239,38 @@ void OpenSafeLuaLibs(lua_State* L) {
     luaL_requiref(L, LUA_COLIBNAME, luaopen_coroutine, 1);
     lua_settop(L, 0);
 
+    // coroutine.resume and coroutine.wrap are replaced with wrappers that arm
+    // the latched kill hook on the resuming thread when a kill or an exit()
+    // latched while the coroutine ran (see LuaResumeTrampoline). The originals
+    // are kept as each wrapper's upvalue, so coroutines behave exactly as
+    // before when nothing latched.
+    lua_getglobal(L, LUA_COLIBNAME);
+    lua_getfield(L, -1, "resume");
+    lua_pushcclosure(L, &LuaResumeTrampoline, 1);
+    lua_setfield(L, -2, "resume");
+    lua_getfield(L, -1, "wrap");
+    lua_pushcclosure(L, &LuaWrapTrampoline, 1);
+    lua_setfield(L, -2, "wrap");
+    lua_pop(L, 1);
+
     static const char* const kRemovedGlobals[] = {"dofile", "loadfile", "load", "warn"};
     for (const char* name : kRemovedGlobals) {
         lua_pushnil(L);
         lua_setglobal(L, name);
     }
 }
+
+// Arms the latched kill hook on L and on the script's main thread. A hook set
+// is per lua_State (thread), and a kill or an exit() raised inside a coroutine
+// must also stop the thread it was ultimately resumed from: resume catches the
+// error and hands control back, so a hook armed on the coroutine alone would
+// never fire again. The main thread is found through the registry rather than
+// a C++ member, so the trampolines this runs inside never touch one (an
+// intermediate thread between a nested coroutine and the main one is armed by
+// the coroutine.resume/coroutine.wrap wrappers below, as its resume returns).
+// Only atomics and Lua API calls: no C++ allocation, so nothing here can throw
+// across Lua's frames.
+void ArmLatchedKillHook(lua_State* L);
 
 // Latched kill hook. A plain error raised from a count hook is an ordinary
 // catchable Lua error, so `while true do pcall(f) end` would swallow the kill
@@ -252,16 +282,84 @@ void OpenSafeLuaLibs(lua_State* L) {
 // be entered, since the hook fires before the call instruction runs - until the
 // error reaches the top-level lua_pcall and the script terminates.
 // lua_sethook() re-arms the trap flag on every Lua frame on the stack, so the
-// hook survives the error unwinding back into an outer frame.
+// hook survives the error unwinding back into an outer frame. The hook is armed
+// on the main thread as well as on L (see ArmLatchedKillHook), so it latches
+// across coroutines too; a thread that resumed a coroutine is armed by the
+// resume/wrap wrappers the moment control comes back to it.
 void KillHookTrampoline(lua_State* L, lua_Debug* /*ar*/) {
     LuaProcess* self = SelfFromState(L);
     // The exit flag latches exactly like the kill one: exit() aborts through
     // this same hook so that a pcall wrapping it is stripped just the same.
     if (self->IsKillRequested() || self->IsExitRequested()) {
-        lua_sethook(L, &KillHookTrampoline,
-                    LUA_MASKCOUNT | LUA_MASKCALL | LUA_MASKRET | LUA_MASKLINE, 1);
+        ArmLatchedKillHook(L);
         luaL_error(L, "process killed");
     }
+}
+
+void ArmLatchedKillHook(lua_State* L) {
+    lua_sethook(L, &KillHookTrampoline,
+                LUA_MASKCOUNT | LUA_MASKCALL | LUA_MASKRET | LUA_MASKLINE, 1);
+    lua_rawgeti(L, LUA_REGISTRYINDEX, LUA_RIDX_MAINTHREAD);
+    lua_State* mainThread = lua_tothread(L, -1);
+    lua_pop(L, 1);
+    if (mainThread != nullptr && mainThread != L) {
+        lua_sethook(mainThread, &KillHookTrampoline,
+                    LUA_MASKCOUNT | LUA_MASKCALL | LUA_MASKRET | LUA_MASKLINE, 1);
+    }
+}
+
+// coroutine.resume, wrapped. Running a coroutine hands control to its thread;
+// when a kill or an exit() latched while it ran, its error came back caught
+// (that is what resume does) and the hook was armed on the coroutine and the
+// main thread only -- the resuming thread itself, when it is neither (a
+// nested resume), would run on for up to a count period, tool calls included.
+// This wrapper arms the calling thread as control comes back, so the latched
+// hook raises on its very next instruction and the `false, "exit"` resume
+// returned is never acted on. It holds no C++ object across lua_call (see the
+// comment on LuaToolTrampoline).
+int LuaResumeTrampoline(lua_State* L) {
+    // The original coroutine.resume is the upvalue; the arguments follow it.
+    lua_pushvalue(L, lua_upvalueindex(1));
+    lua_insert(L, 1);
+    lua_call(L, lua_gettop(L) - 1, LUA_MULTRET);
+    LuaProcess* self = SelfFromState(L);
+    if (self->IsKillRequested() || self->IsExitRequested()) {
+        ArmLatchedKillHook(L);
+    }
+    return lua_gettop(L);
+}
+
+// One call of a function coroutine.wrap returned, wrapped. The wrapped call
+// raises the coroutine's error in the caller, so it runs protected here, the
+// caller is armed when the latch is set, and the error is re-raised unchanged:
+// the hook still strips each pcall level, as it does for resume. lua_error is
+// allowed here because this closure holds no C++ locals (see the comment on
+// LuaToolTrampoline).
+int LuaWrapCallTrampoline(lua_State* L) {
+    // The function the original coroutine.wrap returned is the upvalue.
+    lua_pushvalue(L, lua_upvalueindex(1));
+    lua_insert(L, 1);
+    const int status = lua_pcall(L, lua_gettop(L) - 1, LUA_MULTRET, 0);
+    LuaProcess* self = SelfFromState(L);
+    if (self->IsKillRequested() || self->IsExitRequested()) {
+        ArmLatchedKillHook(L);
+    }
+    if (status != LUA_OK) {
+        return lua_error(L);
+    }
+    return lua_gettop(L);
+}
+
+// coroutine.wrap, wrapped: as the original, but the function it hands back is
+// wrapped in LuaWrapCallTrampoline above.
+int LuaWrapTrampoline(lua_State* L) {
+    // The original coroutine.wrap is the upvalue; wrap(f) takes one argument
+    // and returns one function, which becomes the call wrapper's upvalue.
+    lua_pushvalue(L, lua_upvalueindex(1));
+    lua_insert(L, 1);
+    lua_call(L, 1, 1);
+    lua_pushcclosure(L, &LuaWrapCallTrampoline, 1);
+    return 1;
 }
 
 // The message handler of the script's top-level lua_pcall: the standalone
@@ -614,10 +712,10 @@ int LuaProcess::LuaPrintTrampoline(lua_State* L) {
             // would from SIGPIPE. Never raise (luaL_error) from here -- this
             // trampoline has C++ locals, and a longjmp over them is undefined
             // -- so the kill hook is re-armed to fire on the next instruction
-            // exactly as it re-arms itself, and the latched unwinding runs as
-            // for a kill: RunThread then sees a kill and writes no lua: line.
-            lua_sethook(L, &KillHookTrampoline,
-                        LUA_MASKCOUNT | LUA_MASKCALL | LUA_MASKRET | LUA_MASKLINE, 1);
+            // exactly as it re-arms itself (on the main thread too, so this
+            // latches from inside a coroutine as well), and the unwinding runs
+            // as for a kill: RunThread then sees a kill and writes no lua: line.
+            ArmLatchedKillHook(L);
         }
     } catch (...) {
         return 0;
@@ -647,11 +745,13 @@ int LuaProcess::LuaExitTrampoline(lua_State* L) {
     }
     self->m_exitCodeRequested = static_cast<int>(code);
     self->m_exitRequested = true;
-    // Re-armed exactly as on a kill (every instruction/call/return/line), so
-    // the error raised below cannot be swallowed: a pcall around exit() strips
-    // one pcall level per caught error until the top-level lua_pcall returns.
-    lua_sethook(L, &KillHookTrampoline,
-                LUA_MASKCOUNT | LUA_MASKCALL | LUA_MASKRET | LUA_MASKLINE, 1);
+    // Re-armed exactly as on a kill (every instruction/call/return/line, on the
+    // main thread too, so an exit() taken inside a coroutine latches across to
+    // the thread that resumed it; the resume/wrap wrappers arm any thread in
+    // between), so the error raised below cannot be swallowed: a pcall around
+    // exit() strips one pcall level per caught error until the top-level
+    // lua_pcall returns.
+    ArmLatchedKillHook(L);
     return luaL_error(L, "exit");
 }
 

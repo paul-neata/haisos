@@ -460,6 +460,11 @@ struct Lexer::Impl {
                 part.op = d == '%' ? ParameterOp::RemoveSmallestSuffix
                                    : ParameterOp::RemoveSmallestPrefix;
             }
+            // A pattern operand is read as an unquoted word even inside
+            // double quotes or a heredoc body, as dash does: "${x%/*}" removes
+            // the shortest /... suffix, "${x#'a'}" removes the a.
+            ReadOperand(part.parts, false);
+            return part;
         } else {
             bool colon = false;
             if (d == ':') {

@@ -6,3 +6,4 @@
 - 2026-10-06 05:55 UTC -- fd--descriptor-objects merged #19 as 0.4.1: 1C fixed, 1M 2L open, 1 tries
 - 2026-10-06 05:57 UTC -- start fd--process-table (0.4.2)
 - 2026-10-06 06:16 UTC -- fd--process-table: PR #20, ready
+- 2026-10-06 06:25 UTC -- fd--process-table merged #20 as 0.4.2: 1H fixed, 1M 1L open, 1 tries

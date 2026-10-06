@@ -9,3 +9,4 @@
 - 2026-10-06 06:25 UTC -- fd--process-table merged #20 as 0.4.2: 1H fixed, 1M 1L open, 1 tries
 - 2026-10-06 06:28 UTC -- start streams--console-and-start (0.4.3)
 - 2026-10-06 06:54 UTC -- streams--console-and-start: PR #21, ready
+- 2026-10-06 06:57 UTC -- streams--console-and-start merged #21 as 0.4.3: 1M 4L open, 1 tries

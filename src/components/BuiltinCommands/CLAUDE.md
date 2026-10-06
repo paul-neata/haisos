@@ -1,6 +1,6 @@
 # BuiltinCommands
 
-The commands compiled into Haisos itself -- `cat`, `echo`, `ls`, `man`,
+The commands compiled into Haisos itself -- `cat`, `echo`, `hsh`, `ls`, `man`,
 `mkdir`, `pwd`, `wc` -- and what places them on filesystems. Implements `IBuiltinCommands`
 and `IBuiltinConfigurator` (`interfaces/IBuiltinCommands.h`); both are created
 through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
@@ -57,8 +57,8 @@ through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
   `BuiltinArgument::OptionalAttached` is man-db's `-Tutf8` kind: the argument
   is taken only when attached (`-Tutf8`, `--troff-device=utf8`), never from the
   next word (`-T utf8` is `-T`, then the operand utf8).
-- `commands/hsh/` - `hsh`, the Haisos shell (dash reimplemented), in progress:
-  not a builtin yet; has its own CLAUDE.md.
+- `commands/hsh/` - `hsh`, the Haisos shell (dash reimplemented); has its own
+  CLAUDE.md.
 
 ## Output
 
@@ -106,12 +106,16 @@ Commands). Here they are built from `IBuiltinCommand::Options()`: one table
 per command listing every option of the real one, `id` `kBuiltinNotTreated`
 for those Haisos does not act on. `ParseBuiltinArgs`, `BeginBuiltin` (help,
 version, usage errors, not-treated reports) and `BuiltinHelpText` all read
-that table, so the help can never disagree with what is parsed.
+that table, so the help can never disagree with what is parsed. A command that
+copies a real command of another name (hsh copies dash) says so in
+`BuiltinHelp::basedOn`, and its "Based on Linux <command>:" line names that
+command and links its man page.
 
 | Command | Version | Treated | Documented exceptions |
 |---------|---------|---------|-----------------------|
 | `cat` | 1.2.0 | every option of GNU cat; with no FILE, or a FILE of `-`, the standard input is read | -- |
 | `echo` | 1.1.0 | `-n -e -E`, the `-e` escapes; `--help`/`--version` only as the sole argument, as GNU echo | -- |
+| `hsh` | 0.1.0 | dash's invocation (`-c`, a script file, standard input, `-a -c -C -e -f -i -n -o -s -u -x`), simple commands and `;` `&&` `||` `!` lists, the shell builtins `:` `true` `false` `exit` | the reference command is dash, not hsh (`BuiltinHelp::basedOn`); `--help`/`--version` only as the first argument; `$0` is `hsh` unless a script or `-c` command_name names it; redirections, pipelines, `&`, `$(...)`, compound commands and functions report `<what> is not supported yet` until their tasks land |
 | `ls` | 1.3.0 | `-a -A -B -c -C -d -f -g -G -h -k -l -m -N -o -p -r -R -s -S -t -u -U -w -x -X -1`, `--file-type --format --full-time --group-directories-first --sort --time --time-style`; off a terminal (stdout a pipe, a file, a device), one name per line unless `-C`/`-x`/`-m`/`-l` asks for a layout, and names literal with control characters written raw -- GNU's own defaults when stdout is not a terminal; `-1` after `-l` keeps the long listing | owner and group are `haisos`, permissions `rwxrwxrwx` (no users or permissions yet), so a device shows as `crwxrwxrwx`, with its major and minor numbers in the size column as GNU ls shows them; columns are padded with spaces, not tabs; the width is 80 unless `-w` says otherwise; `--sort=version/width` and `--time=birth` are reported as not treated; on Windows, a `--time-style=+FORMAT` conversion the Microsoft C runtime lacks (`%k`, `%P`, ...) prints as written, as glibc prints one it does not know |
 | `man` | 1.0.0 | `-f -k -i -I`, a section first (`man 1 ls`), several pages | pages are compiled in (each builtin's `ManPage()`, its `--help` unless overridden), all section 1, plain text, no pager; `-k` matches names and summaries only; everything else of man-db's reported as not treated |
 | `mkdir` | 1.1.0 | `-p -v` | `-m`/`--mode`, `-Z`/`--context` not treated (no permissions or security contexts) |

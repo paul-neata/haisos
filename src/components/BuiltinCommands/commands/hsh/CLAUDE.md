@@ -96,8 +96,25 @@ task of the hsh rock and adds its files here:
   library: reading directories and running command substitutions go through
   `IExpansionHost`, which the executor implements over the process's
   `IFileIO` and a subshell.
-- (later tasks: the executor that registers the
-  `hsh` builtin, the interactive loop.)
+- `HshInvocation.h/.cpp` - the invocation: `ShellOptionTable` (dash's options
+  in `set -o` order, each with its letter, its `set -o` name and the
+  `ShellOptions` field it drives or null when hsh does not act on it) and
+  `ParseInvocation`, dash's `procargs`: options up to the first operand
+  (`+x` turns an option off, `-o` takes the next argument, `--`/`-` end the
+  options), then what to run -- a `-c` string, a script file, or standard
+  input -- with `$0` and `$1...`. Untreated options come back in `notTreated`
+  to be reported; invocation mistakes in dash's own words ("Illegal option
+  -y", `-c requires an argument`, status 2).
+- `HshShell.h/.cpp` - the executor (`Shell`), running one shell inside the
+  builtin's process: see "Running" below.
+- `HshBuiltins.h/.cpp` - the shell's own builtins (`:`, `exit`, `false`,
+  `true`): a sorted table of name, special/regular, function; later tasks add
+  rows (and files of their own for the bigger ones).
+- `Hsh.cpp` - the `hsh` builtin itself: the option table (every dash option,
+  treated or marked for the not-treated report), the dash-based `--help`
+  (`BuiltinHelp::basedOn`), `ParseInvocation`, and `Shell` on the context.
+- (later tasks: redirections, pipelines, the rest of the shell builtins,
+  control flow, the interactive loop.)
 
 ## AST dump
 
@@ -207,6 +224,52 @@ Expansion errors throw `ShellError` with dash's messages byte for byte
 or null`, `<name>: <text>`, `<name>: bad variable name`, `<name>: is read
 only`, the arithmetic messages), with line 0 -- the executor knows the
 command's line.
+
+## Running
+
+The executor is `Shell` (`HshShell.h`), built by the `hsh` builtin (`Hsh.cpp`)
+on the run's `BuiltinContext` and `Invocation`. It owns the one `ShellState`
+(startup seeds `IFS`, `OPTIND`, `PPID`, `PS1`/`PS2`/`PS4`, `PATH` and `PWD` as
+dash does) and the `Expander` over it, and is itself the `IExpansionHost`:
+globbing reads directories through the process's `IFileIO`, everything else
+likewise -- the only door out is `ICurrentProcess`, the OS asked for at each
+`Process().OS()` call and never stored.
+
+`Shell::Run` takes the invocation's source (the `-c` string; a script read
+whole through `IO().OpenFile`; standard input read to its end), then loops on
+`Parser::ParseNext`: one complete command parsed, then run, so a script's
+line 1 runs before line 2 is parsed. A parse error is reported
+(`<arg0>: <line>: Syntax error: ...`) with status 2; a `ShellError` (an
+expansion error or a builtin's `Fail`) is fatal to a non-interactive shell --
+reported, status 2, over; a `ShellExit` (the `exit` builtin) sets the status;
+a `ShellStopped` (TriggerStop seen between commands or from
+`ThrowIfStopRequested`, a `kIOInterrupted` read/write, or a broken pipe on the
+shell's own output at the top level, which also calls `StopForBrokenPipe`)
+stops every live child and returns 143 -- the process records 143, or 141 when
+a broken pipe came first. Every other command's status only sets `$?`.
+
+A simple command runs in dash's order: the words expand first
+(`ExpandWords`); with no fields the prefix assignments apply to the shell
+(status 0, or the last command substitution's); a name in the shell-builtin
+table runs in the shell -- a special builtin's prefix assignments stay
+(`x=1 :` sets x), a regular one's are remembered and put back (`x=1 true`
+leaves x unset) -- and anything else is a child: the assignments expand into
+the child's environment (a clone of the process's with every variable dropped,
+the exported shell variables and the prefix assignments set; secrets and LLM
+identifiers kept), the command is looked up (a name with a `/` is `Stat`ed; a
+plain name is searched in `PATH` -- unset finds nothing, an empty entry is the
+working directory), then started through `OS()->StartProcess` with the shell's
+working directory and its slots 0/1/2 as the child's standard streams.
+`NotFound` reports `<name>: not found` (127), a directory or a refused start
+`<name>: Permission denied` (126); `$?` is the child's `ExitCode()`. Waiting
+polls in 50 ms slices so a stop of the shell reaches the child
+(`TriggerStop`, 5 s grace) before the shell unwinds with `ShellStopped`.
+
+What is not implemented yet reports `<what> is not supported yet` with status
+2 through the `NotYet` helper: `&`, pipelines of more than one command and
+`$(...)` (hsh--pipelines), redirections (hsh--redirections), every compound
+command and function definitions (hsh--control-flow). Each later task removes
+its uses; hsh--control-flow removes the helper.
 
 ## How the end of a `$(...)` is found
 

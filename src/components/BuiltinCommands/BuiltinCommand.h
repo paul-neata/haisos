@@ -68,6 +68,10 @@ struct BuiltinHelp {
     // Anything else the command handles that is not an option (echo's
     // escapes, say), in a few lines; may be empty.
     std::string notes;
+    // The real command this builtin copies, when its name differs from the
+    // builtin's own: "dash" for hsh. Empty: the builtin's own name. The "Based
+    // on Linux <command>: <url>" line of --help names it and links its page.
+    std::string basedOn;
 };
 
 class IBuiltinCommand;

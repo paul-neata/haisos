@@ -24,7 +24,7 @@ Pause: no
 | 17 | [hsh--executor](tasks/hsh--executor.md) | done | 0.4.17 | 8, 16 | #35 | 1 | 1M 3L open | |
 | 18 | [hsh--redirections](tasks/hsh--redirections.md) | done | 0.4.18 | 11, 17 | #36 | 1 | 1H fixed, 5L open | |
 | 19 | [hsh--pipelines](tasks/hsh--pipelines.md) | done | 0.4.19 | 18 | #37 | 1 | 1H fixed, 3M 4L open | Windows HaisosOS timeout, green on re-run |
-| 20 | [hsh--shell-builtins](tasks/hsh--shell-builtins.md) | in-progress | 0.4.20 | 19 | | | | |
+| 20 | [hsh--shell-builtins](tasks/hsh--shell-builtins.md) | in-review | 0.4.20 | 19 | #38 | 1 | | |
 | 21 | [hsh--control-flow](tasks/hsh--control-flow.md) | todo | | 20 | | | | |
 | 22 | [hsh--interactive](tasks/hsh--interactive.md) | todo | | 12, 21 | | | | |
 | 23 | [streams--coroutine-latch](tasks/streams--coroutine-latch.md) | done | 0.4.15 | 6, 8 | #33 | 1 | 1C 2H 1M fixed, 1M 1L open | follow-up to #23/#25 findings; reviewer fixed coroutine.wrap argument handling |

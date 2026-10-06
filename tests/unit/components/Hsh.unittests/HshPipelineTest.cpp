@@ -264,6 +264,27 @@ TEST_F(HshShellTest, ChildStageCommandSubstitutionDoesNotDeadlock) {
     EXPECT_EQ(captured.status, 0);
 }
 
+TEST_F(HshShellTest, ChildStageRedirectionCommandSubstitutionDoesNotDeadlock) {
+    // A $(...) in a redirection's target word makes the stage expand in pass
+    // 1 exactly like one in its words: here its own `$(cat)` would read a
+    // bounded pipe nothing has written to yet. The stage must run in the
+    // shell; the bounded wait fails a regression instead of hanging.
+    auto promised = std::make_shared<std::promise<Captured>>();
+    std::future<Captured> future = promised->get_future();
+    std::thread([this, promised] { promised->set_value(Sh(": | /bin/cat < $(cat)")); }).detach();
+    if (future.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+        FAIL() << "hsh -c ': | /bin/cat < $(cat)' did not finish within 5 s (deadlock)";
+        return;
+    }
+    const Captured captured = future.get();
+    // No deadlock: the stage ran in pass 2, after `:`, so `$(cat)` saw the
+    // end of the pipe, the target came out empty and the redirection failed
+    // as dash's does.
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "hsh: 1: cannot open : No such file\n");
+    EXPECT_EQ(captured.status, 2);
+}
+
 TEST_F(HshShellTest, CommandSubstitutionBigOutput) {
     WriteFile("/big.txt", std::string(200000, 'x'));
     // Past a bounded pipe's 64 KiB, so only the unbounded pipe lets this run.

@@ -135,11 +135,13 @@ int BuiltinRead(Shell& shell, const std::vector<std::string>& args) {
             field += text[at++];
         }
         if (at < text.size()) {
-            if (unprotectedIfsWhite(at)) {
-                while (unprotectedIfsWhite(at)) {
-                    ++at;  // IFS white-space runs collapse
-                }
-            } else {
+            // One delimiter event: IFS white space around a non-white IFS
+            // character merges with it (`a : b` with IFS=" :" is a then b),
+            // as dash -- not two delimiters with an empty field between.
+            while (unprotectedIfsWhite(at)) {
+                ++at;  // IFS white-space runs collapse
+            }
+            if (!unprotectedIfsWhite(at) && unprotectedIfs(at)) {
                 ++at;  // one non-white IFS character ...
                 while (unprotectedIfsWhite(at)) {
                     ++at;  // ... with the white space after it, delimits once

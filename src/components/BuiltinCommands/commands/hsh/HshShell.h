@@ -5,6 +5,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -173,6 +174,23 @@ public:
     CommandSubstitutionResult RunCommandSubstitution(const std::string& source, int line) override;
 
 private:
+    // Runs one complete command and returns its status. ShellExit and
+    // ShellStopped pass through; a ShellError is reported ("hsh: <line>:
+    // <message>", $? set to 2) and then rethrown to end a non-interactive
+    // shell -- an interactive one goes on with status 2.
+    int RunOneCommand(const CommandList& commands);
+    // The interactive top level (see "The interactive protocol" in CLAUDE.md):
+    // the prompt (PS1; PS2 while the buffer holds an incomplete command) on
+    // stderr, one line read at a time, the buffer re-parsed whole after each.
+    // Errors are reported and the shell goes on; `exit` ends it; the end of
+    // the input ends it with the last status, after a newline to stderr.
+    int RunInteractive();
+    // Reads one line from slot 0, one byte at a time (so nothing after the
+    // line is taken from a pipe), without its '\n'. Nullopt at the end of the
+    // input (a 0 read, an empty slot, or a read error); kIOInterrupted throws
+    // ShellStopped. The last line may end without '\n'.
+    std::optional<std::string> ReadInputLine();
+
     // The compound kinds of ExecuteCommand.
     int ExecuteIf(const IfCommand& command);
     int ExecuteLoop(const LoopCommand& command);

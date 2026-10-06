@@ -153,8 +153,12 @@ task of the hsh rock and adds its files here:
   numbers and `-t` fd.
 - `Hsh.cpp` - the `hsh` builtin itself: the option table (every dash option,
   treated or marked for the not-treated report), the dash-based `--help`
-  (`BuiltinHelp::basedOn`), `ParseInvocation`, and `Shell` on the context.
-- (later task: the interactive loop.)
+  (`BuiltinHelp::basedOn`), `ParseInvocation`, the decision whether the shell
+  runs interactively (see "The interactive protocol"), and `Shell` on the
+  context. Its `ManPage()` override returns the full manual page.
+- `HshManPage.h/.cpp` - `HshManPage()`: the shell's full manual page, plain
+  text. The page is several raw string literals concatenated, one per
+  section, because MSVC refuses a string literal longer than 16 KB.
 
 ## AST dump
 
@@ -606,14 +610,41 @@ inode numbers to compare).
 
 ## The interactive protocol
 
-(hsh--interactive implements it.) Keep a buffer of the lines typed since the
-last complete command; after each line, lex/parse the whole buffer again from
-the start with `LexerOptions::interactive` set and `firstLine` the number of
-that buffer's first line; on an error with `Incomplete()` show PS2 and read
-another line; otherwise run (or report) and empty the buffer. Re-reading the
-buffer each time keeps the lexer free of suspended state. With `interactive`,
-two endings a script accepts become incomplete-input errors: a heredoc whose
-delimiter line has not come yet, and a source ending in a backslash-newline.
+`HshCommand::Run` makes the shell interactive when `-i` was given -- whatever
+the source (with `-c` it changes only `$-` and error handling, as dash) -- or
+when the source is standard input and both descriptor 0 and descriptor 2
+exist and are terminals (`RUN -i /bin/hsh` arranges that on the console).
+
+`Shell::RunInteractive` keeps a buffer of the lines typed since the last
+complete command; after each line, the whole buffer is parsed again from the
+start with `ParserOptions::interactive` set (while the input has not ended)
+and `firstLine` the number of that buffer's first line; on an error with
+`incomplete` the buffer is kept, PS2 is shown and another line is read;
+otherwise the commands run (or the error is reported) and the buffer is
+emptied. Every complete command of the buffer is collected before any runs:
+`ParseNext` can return a Command whose heredoc is unterminated and only
+report it on the next call, and a line already run must not run again when
+the buffer is re-parsed a line later.
+
+The prompt is PS1's value when the buffer is empty, PS2's when it is not --
+written to stderr as the variable is, never expanded, nothing when unset.
+`ReadInputLine` reads slot 0 one byte at a time (so nothing after the line is
+taken from a pipe), without the newline; the last line may lack it. Line
+numbers count every line read, so an error on the third line typed says
+`hsh: 3:`. At the end of the input with the buffer empty the shell writes a
+newline and exits with the last command's status; with a buffer pending, it
+is parsed once without the interactive flag -- what a script would accept
+runs, the rest errors -- and the next read ends the shell. `exit` ends it
+with the status given, without the newline.
+
+An error never ends an interactive shell: parse errors and runtime
+`ShellError`s are reported, `$?` becomes 2 and the next prompt shows
+(`RunOneCommand` reports and continues only when interactive; a
+non-interactive shell rethrows, and is ended by the error with status 2).
+`-e` and `-n` have no effect interactively. Once a heredoc's delimiter line
+has arrived, a lexing error in its body is a plain syntax error, never
+"more input needed" (`ReadHereDocBodies` rethrows it with `incomplete`
+cleared) -- otherwise the shell would wait at PS2 forever.
 
 ## Documented deviations from dash
 

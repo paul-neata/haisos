@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <sstream>
 #include "src/haisos/HaisosFileParser.h"
 
@@ -512,6 +513,38 @@ TEST(HaisosFileParserTest, TemplateNamesTheRootRootfsAndListsEveryBuiltin) {
     // CREATE_DIR /bin comes after ROOT and before the BUILTINs that need it.
     EXPECT_LT(haisosfile.find("\nROOT rootfs\n"), haisosfile.find("# CREATE_DIR /bin"));
     EXPECT_LT(haisosfile.find("# CREATE_DIR /bin"), haisosfile.find("# BUILTIN rootfs cat"));
+}
+
+TEST(HaisosFileParserTest, TemplateSuggestsPathForTheShell) {
+    // Right after the commented BUILTIN lines the template suggests
+    // `ENV PATH=/bin` so hsh finds commands by name.
+    const std::string haisosfile = GetHaisosFileTemplate({"cat", "hsh"});
+    const size_t suggestion = haisosfile.find("\n# ENV PATH=/bin\n");
+    ASSERT_NE(suggestion, std::string::npos);
+    const size_t lastBuiltin = haisosfile.rfind("# BUILTIN rootfs ", suggestion);
+    ASSERT_NE(lastBuiltin, std::string::npos);
+    const size_t endOfBuiltinLine = haisosfile.find('\n', lastBuiltin);
+    ASSERT_NE(endOfBuiltinLine, std::string::npos);
+    EXPECT_LT(endOfBuiltinLine, suggestion);
+
+    // Uncommenting CREATE_DIR /bin, the BUILTIN lines and that line, in place,
+    // still gives a valid haisosfile with a PATH entry.
+    std::istringstream lines(haisosfile);
+    std::string uncommented;
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (line == "# CREATE_DIR /bin" || line.rfind("# BUILTIN rootfs ", 0) == 0 ||
+            line == "# ENV PATH=/bin") {
+            line = line.substr(2);
+        }
+        uncommented += line + "\n";
+    }
+    auto result = ParseHaisosFile(uncommented, {});
+    ASSERT_TRUE(result.error.empty()) << result.error;
+    auto entry = std::find_if(result.config.envEntries.begin(), result.config.envEntries.end(),
+        [](const HaisosFileEnvEntry& e) { return e.name == "PATH"; });
+    ASSERT_NE(entry, result.config.envEntries.end());
+    EXPECT_EQ(entry->value, "/bin");
 }
 
 TEST(HaisosFileParserTest, TemplateBuiltinExamplesParseOnceUncommented) {

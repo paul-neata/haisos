@@ -180,6 +180,9 @@ TEST_F(HshShellTest, Read) {
         {"read x; echo \"st=$? [$x]\"", "st=1 []\n", "", 0, {}, ""},
         // A non-white IFS character delimits once.
         {"IFS=:; read x y; echo \"[$x][$y]\"", "[a][b:c]\n", "", 0, {}, "a:b:c\n"},
+        // IFS white space around a non-white IFS character merges with it:
+        // one delimiter event, as dash -- "[a][b][]", not "[a][][b]".
+        {"IFS=' :'; read x y z; echo \"[$x][$y][$z]\"", "[a][b][]\n", "", 0, {}, "a : b\n"},
         // One name: inner delimiters kept, the edges' IFS white space off.
         {"read x; echo \"[$x]\"", "[a b]\n", "", 0, {}, "a b\n"},
         {"read", "", "hsh: 1: read: arg count\n", 2},

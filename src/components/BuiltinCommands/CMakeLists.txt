@@ -20,6 +20,7 @@ add_library(BuiltinCommands STATIC
     commands/hsh/HshVariables.cpp
     commands/hsh/HshExpansion.cpp
     commands/hsh/Hsh.cpp
+    commands/hsh/HshManPage.cpp
     commands/hsh/HshInvocation.cpp
     commands/hsh/HshShell.cpp
     commands/hsh/HshDescriptors.cpp

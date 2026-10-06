@@ -54,7 +54,7 @@ ssize_t HostFileDescriptor::Read(void* buf, size_t count) {
     NoCriticalErrorDialogs noDialogs;
     CrtInvalidParameterAsError crtErrors;
     // A short read is allowed; a silently truncated count is not.
-    const size_t capped = std::min(count, static_cast<size_t>(INT_MAX));
+    const size_t capped = (std::min)(count, static_cast<size_t>(INT_MAX));
     const int n = ::_read(m_hostFd, buf, static_cast<unsigned int>(capped));
     return n < 0 ? kIOError : n;
 }
@@ -62,7 +62,7 @@ ssize_t HostFileDescriptor::Read(void* buf, size_t count) {
 ssize_t HostFileDescriptor::Write(const void* buf, size_t count) {
     NoCriticalErrorDialogs noDialogs;
     CrtInvalidParameterAsError crtErrors;
-    const size_t capped = std::min(count, static_cast<size_t>(INT_MAX));
+    const size_t capped = (std::min)(count, static_cast<size_t>(INT_MAX));
     const int n = ::_write(m_hostFd, buf, static_cast<unsigned int>(capped));
     return n < 0 ? kIOError : n;
 }

@@ -118,18 +118,33 @@ task of the hsh rock and adds its files here:
   reader runs only after the writer (two in-shell pipeline stages, `$(...)`).
 - `HshSubshell.h/.cpp` - `SubshellScope`, an in-process subshell's save and
   restore of everything it may change: see "Pipelines, subshells, jobs".
-- `HshBuiltins.h/.cpp` - the shell's own builtins (`:`, `exec`, `exit`,
-  `false`, `true`, `wait`): a sorted table of name, special/regular,
-  function; later tasks add rows (and files of their own for the bigger ones).
+- `HshBuiltins.h/.cpp` - the shell's own builtins (`:`, `[`, `cd`, `exec`,
+  `exit`, `export`, `false`, `readonly`, `set`, `shift`, `test`, `true`,
+  `unset`, `wait`): a sorted table of name, special/regular, function. Also
+  `HshVersion`, for `set`'s not-treated reports inside the shell, where a
+  `BuiltinContext`'s version is not at hand.
 - `HshBuiltinExec.cpp` - `exec`: with no command its redirections stay; with
   one, the command runs in the shell's place.
 - `HshBuiltinWait.cpp` - `wait`: waits for the background jobs, all of them
   or by pid, with dash's statuses and messages.
+- `HshBuiltinCd.cpp` - `cd`: `-L`/`-P` (the same: no symlinks), HOME and
+  OLDPWD defaults, CDPATH, and dash's print rules (`cd -`, a non-empty CDPATH
+  entry that found it).
+- `HshBuiltinVariables.cpp` - `export`, `readonly`, `unset`, `shift`: the
+  sorted `-p` listings, name/value operands, `-f`/`-v`, dash's messages.
+- `HshBuiltinSet.cpp` - `set`: the sorted variable listing, option clusters
+  and `-o` names, positional parameters, and the `set -o`/`set +o` tables.
+- `HshBuiltinTest.cpp` - `test` and `[` (one builtin, two names): dash's
+  POSIX reductions and expression descent byte for byte (see "test" below).
+- `HshQuote.h/.cpp` - `ShellSingleQuote`: dash's single_quote -- a value as
+  `'plain'`, `''`, or `'it'"'"'s'` -- for the `export -p`/`set` listings.
+- `HshNumber.h/.cpp` - `Atomax10`: dash's atomax10 -- blanks, a sign,
+  decimal digits, overflow-rejected -- for `shift`'s count and `test`'s
+  numbers and `-t` fd.
 - `Hsh.cpp` - the `hsh` builtin itself: the option table (every dash option,
   treated or marked for the not-treated report), the dash-based `--help`
   (`BuiltinHelp::basedOn`), `ParseInvocation`, and `Shell` on the context.
-- (later tasks: the rest of the shell builtins,
-  control flow, the interactive loop.)
+- (later tasks: control flow, the interactive loop.)
 
 ## AST dump
 
@@ -263,22 +278,71 @@ shell's own output at the top level, which also calls `StopForBrokenPipe`)
 stops every live child and returns 143 -- the process records 143, or 141 when
 a broken pipe came first. Every other command's status only sets `$?`.
 
-A simple command runs in dash's order: the words expand first
-(`ExpandWords`); with no fields the prefix assignments apply to the shell
-(status 0, or the last command substitution's); a name in the shell-builtin
-table runs in the shell -- a special builtin's prefix assignments stay
-(`x=1 :` sets x), a regular one's are remembered and put back (`x=1 true`
-leaves x unset) -- and anything else is a child: the assignments expand into
-the child's environment (a clone of the process's with every variable dropped,
-the exported shell variables and the prefix assignments set; secrets and LLM
-identifiers kept), the command is looked up (a name with a `/` is `Stat`ed; a
-plain name is searched in `PATH` -- unset finds nothing, an empty entry is the
-working directory), then started through `OS()->StartProcess` with the shell's
-working directory and its slots 0/1/2 as the child's standard streams.
-`NotFound` reports `<name>: not found` (127), a directory or a refused start
-`<name>: Permission denied` (126); `$?` is the child's `ExitCode()`. Waiting
-polls in 50 ms slices so a stop of the shell reaches the child
-(`TriggerStop`, 5 s grace) before the shell unwinds with `ShellStopped`.
+A simple command runs in dash's order (dash's `evalcommand`): the words
+expand first (`ExpandWords`); then `-n` (noexec) ends the command's whole
+list from here -- dash re-checks it at every `evaltree`, so a `set -n`
+stops what follows even mid-list, mid-`&&`/`||`-chain and per pipeline
+stage, and once set it cannot be turned off again (the `set +n` itself is
+skipped); an interactive shell is unaffected; then the redirections apply
+(a failure: the command does not run and its prefix assignments do not even
+expand; fatal for a special builtin); then the prefix assignments' values
+expand and are made, through `Shell::AssignVariable` -- the one place every
+shell assignment goes: a read-only variable is fatal (`<name>: is read
+only`), and under `-a` (allexport) the variable is exported too; then the
+trace (see below); then the run. With no fields the assignments apply to
+the shell (status 0, or the last command substitution's); a name in the
+shell-builtin table runs in the shell -- a special builtin's prefix
+assignments stay (`x=1 :` sets x), a regular one's are remembered and put
+back (`x=1 true` leaves x unset) -- and anything else is a child: a
+read-only variable there is still fatal, after the assignments have
+expanded (`readonly x=1; x=$(pwd >/s) c` writes s), and the assignments go
+into the child's environment (a clone of the process's with every variable
+dropped, the exported shell variables and the prefix assignments set;
+secrets and LLM identifiers kept), the command is looked up (a name with a
+`/` is `Stat`ed; a plain name is searched in `PATH` -- unset finds nothing,
+an empty entry is the working directory), then started through
+`OS()->StartProcess` with the shell's working directory and its slots 0/1/2
+as the child's standard streams. `NotFound` reports `<name>: not found`
+(127), a directory or a refused start `<name>: Permission denied` (126);
+`$?` is the child's `ExitCode()`. Waiting polls in 50 ms slices so a stop
+of the shell reaches the child (`TriggerStop`, 5 s grace: a child still
+running then is logged, `hsh: child (pid <pid>, <path>) did not stop
+within <ms> ms`) before the shell unwinds with `ShellStopped`.
+
+Under `-x` (xtrace), the trace of a command is dash's: written to stderr
+after the redirections apply but to the stderr from before them (so
+`echo a 2>f` traces to the shell's stderr, not into `f`, as dash), after the
+prefix assignments are made (so `PS4=X` restyles its own trace line) and
+nowhere on a redirection error. It is PS4's value as it is, never expanded
+(a documented exception), glued to the line with no separator -- only the
+seed `"+ "` carries a space -- then the assignments as `name=value` and the
+fields, `x=1 echo "a b"` tracing as `+ x=1 echo a b`. The trace is written
+even for a command that then fails to start (`not found`).
+
+The shell builtins of this task: `cd` (`HshBuiltinCd.cpp`; regular) is
+dash's cdcmd: no operand means HOME (unset or empty is `.`, dash's own
+quirk), `-` is OLDPWD with the new directory printed, `""` is `.`; a
+destination not empty, not absolute and not starting with `.`/`..` is
+looked up in CDPATH (empty entry: the working directory, and the print is
+only for a non-empty entry that found it); the result is `OLDPWD` and `PWD` set and exported, as
+dash (and `AssignVariable` makes a read-only PWD fatal where dash only
+prints `cd: PWD: is read only` and goes on -- a documented deviation). `export`, `readonly`, `unset`,
+`shift` (`HshBuiltinVariables.cpp`; special but `cd`-style errors aside) are
+dash's exportcmd/readonlycmd/unsetcmd/shiftcmd byte for byte: the sorted
+`-p` listings (`export name`, `export name='value'`, `ShellSingleQuote`),
+`name=value` operands, bare names only flagging, unset's `-f`/`[-v]` (there
+are no functions yet, so `-f` is always a success), `Illegal option -x`,
+`bad variable name`, `is read only`, `Illegal number: <n>` and `can't
+shift that many`. `set` (`HshBuiltinSet.cpp`; special) is setcmd: no
+arguments lists every set variable sorted and single-quoted (flagged-but-
+unset ones stay out), option clusters with `-o` taking the next argument
+(anywhere in the cluster, as dash), `--` keeping or (alone) clearing the
+positional parameters, a lone `-` clearing `-x`/`-v` and keeping them,
+operands becoming the new `$1...`; `set -o` and `set +o` print the option
+table (every dash option; the untreated ones are always "off" there and
+reported not-treated when set or cleared, through the shell's own stderr
+so the reports obey redirections). `test` and `[` are one builtin,
+`HshBuiltinTest.cpp` -- see "test" below.
 
 What is not implemented yet reports `<what> is not supported yet` with status
 2 through the `NotYet` helper: every compound command and function definitions
@@ -336,7 +400,7 @@ as a **child hsh**: `hsh -c` of `BackgroundScript(item)` --
 `BackgroundPrelude()` then the item's `sourceText` -- started from the
 running shell's own path (`IProcess::Path()`, no PATH lookup), with `$0` and
 the positional parameters passed on, the options that are on among e u f x C
-a as one invocation argument (there is no `set` builtin yet), the exported
+a as one invocation argument, the exported
 variables, the shell's working directory and its stdout/stderr, and an empty
 stdin. Documented exception: an **unexported** variable does not reach that
 child, where a forked dash subshell would see it (the child is a process, not
@@ -423,6 +487,28 @@ Heredocs still waiting at the closing `)` get an empty body, as dash. The
 part's `text` is the source between `$(` and `)` exactly, heredoc bodies
 included; nothing is parsed here.
 
+## The test builtin
+
+`test` and `[` (`HshBuiltinTest.cpp`, one entry, two names; a regular
+builtin) are dash's `bltin/test.c` ported with the same window: an index pair
+over the arguments, the POSIX two-, three- and four-operand reductions at the
+top (so `test a -a` is 1 and `test a -o` is 0, as dash), then the descent
+`!` -> `-a` -> `-o` over primary expressions. A bare expression token can
+still be an operator when an operand follows it and a binary operator follows
+that (`test -a a` is `-a: unexpected operator`); a trailing `(` before the
+end is an operand. Errors are reported and the status is 2 (`missing ]`,
+`unexpected operator`, `argument expected`, `closing paren expected`,
+`Illegal number: <x>`; `[` only needs its last argument to *begin* with `]`
+-- `]foo` closes fine, as dash). Numbers are `Atomax10` -- blanks and a sign
+around decimal digits, overflow rejected exactly as dash's atomax10 (so
+`" 12 " -eq 12` is true). Documented exceptions, all pinned in
+`HshBuiltinsTest.cpp`: `-r`/`-w`/`-x`/`-O`/`-G` only test that the file is
+there (no permissions or users yet), `-h`/`-L` are always false (nothing in
+Haisos creates a link) and so are `-b`/`-p`/`-S`/`-u`/`-g`/`-k` (no device
+kinds beyond files, directories and character devices, no set-user-id bits),
+and `-ef` compares what `ResolvePath` gives for the two paths (there are no
+inode numbers to compare).
+
 ## The interactive protocol
 
 (hsh--interactive implements it.) Keep a buffer of the lines typed since the
@@ -451,3 +537,10 @@ delimiter line has not come yet, and a source ending in a backslash-newline.
   names `")"` (the substitution's end) where dash names what its own parser
   happened to see: `echo $(if)` says `")" unexpected (expecting "then")`
   where dash says `")" unexpected`.
+- `cd` into a directory with a read-only `PWD` (or `OLDPWD`) is a fatal
+  error in hsh -- the assignment goes through `AssignVariable` -- where dash
+  prints `cd: PWD: is read only` and goes on.
+- The xtrace's PS4 is written as it is, never parameter-expanded as dash
+  does; `-v` is accepted but not acted on (echo of the line as read).
+- `test`'s file access and identity tests are approximations where there are
+  no permissions, users, links or inode numbers: see "The test builtin".

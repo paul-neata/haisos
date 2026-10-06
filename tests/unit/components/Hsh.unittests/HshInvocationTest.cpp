@@ -61,6 +61,8 @@ TEST(HshInvocationTest, Sources) {
 TEST(HshInvocationTest, Options) {
     ExpectInvocation({{"-eu", "-c", "x"}, Invocation::Source::CommandString, "x", "", "hsh", {}, "ue"});
     ExpectInvocation({{"-o", "errexit", "-c", "x"}, Invocation::Source::CommandString, "x", "", "hsh", {}, "e"});
+    // An -o not last in a cluster leaves the cluster's remaining letters parsed.
+    ExpectInvocation({{"-oe", "nounset", "-c", "x"}, Invocation::Source::CommandString, "x", "", "hsh", {}, "ue"});
     ExpectInvocation({{"+o", "errexit", "-e", "-c", "x"}, Invocation::Source::CommandString, "x", "", "hsh", {}, "e"});
     ExpectInvocation({{"-eu", "+e", "-c", "x"}, Invocation::Source::CommandString, "x", "", "hsh", {}, "u"});
     ExpectInvocation({{"-aCfnx", "-c", "x"}, Invocation::Source::CommandString, "x", "", "hsh", {}, "aCxnf"});

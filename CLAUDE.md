@@ -586,7 +586,7 @@ use a builtin with what it already knows about the real command:
 |---------|-------------|
 | `cat` | Concatenates files and standard input (`-A -b -e -E -n -s -t -T -u -v`) |
 | `echo` | Prints its arguments (`-n -e -E`) |
-| `hsh` | The Haisos shell, after dash: `-c`, scripts, stdin; simple commands and lists; pipelines, background lists (`&`, `wait`) and command substitution (`$(...)`, `` `...` ``); redirections (`<` `>` `>>` `<>` `n>&m` `&>`, ...) and heredocs/here-strings, `exec` (more to come in this develop) |
+| `hsh` | The Haisos shell, after dash: `-c`, scripts, stdin; simple commands and lists; pipelines, background lists (`&`, `wait`) and command substitution (`$(...)`, `` `...` ``); redirections (`<` `>` `>>` `<>` `n>&m` `&>`, ...) and heredocs/here-strings; the shell builtins `:` `[` `cd` `exec` `exit` `export` `false` `readonly` `set` `shift` `test` `true` `unset` `wait`, with `-x`/`-a`/`-n` as dash (more to come in this develop) |
 | `ls` | Lists directories as GNU ls prints them to a terminal: columns, `-l` with `total`/links/owner/group/size/time, sorting, time styles, quoting; to a pipe or file, one name per line, unquoted |
 | `man` | Prints a builtin's manual page (`man ls`, `man 1 ls`, `-f`, `-k`): its `--help` text, or a full page for `hsh` |
 | `mkdir` | Creates directories (`-p -v`) |

@@ -68,6 +68,10 @@ public:
     void Report(const std::string& message);
     // A fatal error: throws ShellError(message, CurrentLine()).
     [[noreturn]] void Fail(const std::string& message);
+    // Every variable assignment the shell makes goes through here: Set, a
+    // read-only variable being fatal (Fail("<name>: is read only")), then
+    // Export when allexport (-a) is on.
+    void AssignVariable(const std::string& name, const std::string& value);
     // Throws ShellStopped once the shell has been asked to stop.
     void ThrowIfStopRequested();
     // Called by `exec` with no command: the simple command running it keeps
@@ -150,6 +154,9 @@ private:
     // removes the helper.
     int NotYet(const std::string& what);
     void WriteDescriptor(int fd, const std::string& bytes);
+    // WriteDescriptor's work on a descriptor already in hand (the trace's
+    // stderr from before a command's redirections); null writes nothing.
+    void WriteTo(const std::shared_ptr<IFileDescriptor>& descriptor, const std::string& bytes);
 
     // A `&` list item: as a nowait pipeline when its and-or list is one
     // pipeline of child stages only, else as a child hsh running its text.

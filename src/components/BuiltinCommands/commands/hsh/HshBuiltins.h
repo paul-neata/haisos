@@ -19,13 +19,24 @@ struct ShellBuiltin {
     ShellBuiltinFunction run;
 };
 
-// The shell builtins of this task; later tasks add theirs in files of their own.
+// The shell builtins of past tasks; each later one lives in a file of its own.
 int BuiltinColon(Shell& shell, const std::vector<std::string>& args);
 int BuiltinExec(Shell& shell, const std::vector<std::string>& args);
 int BuiltinExit(Shell& shell, const std::vector<std::string>& args);
 int BuiltinFalse(Shell& shell, const std::vector<std::string>& args);
 int BuiltinTrue(Shell& shell, const std::vector<std::string>& args);
-int BuiltinWait(Shell& shell, const std::vector<std::string>& args);  // HshBuiltinWait.cpp
+int BuiltinWait(Shell& shell, const std::vector<std::string>& args);       // HshBuiltinWait.cpp
+int BuiltinCd(Shell& shell, const std::vector<std::string>& args);         // HshBuiltinCd.cpp
+int BuiltinExport(Shell& shell, const std::vector<std::string>& args);     // HshBuiltinVariables.cpp
+int BuiltinReadonly(Shell& shell, const std::vector<std::string>& args);  // HshBuiltinVariables.cpp
+int BuiltinUnset(Shell& shell, const std::vector<std::string>& args);      // HshBuiltinVariables.cpp
+int BuiltinShift(Shell& shell, const std::vector<std::string>& args);      // HshBuiltinVariables.cpp
+int BuiltinSet(Shell& shell, const std::vector<std::string>& args);        // HshBuiltinSet.cpp
+int BuiltinTest(Shell& shell, const std::vector<std::string>& args);       // HshBuiltinTest.cpp ("test" and "[")
+
+// The version of the hsh builtin command (Hsh.cpp), for `set`'s not-treated
+// reports inside the shell, where BuiltinContext's version is not at hand.
+const char* HshVersion();
 
 // Every builtin hsh has, sorted by name (byte order). Later tasks add rows.
 const std::vector<ShellBuiltin>& ShellBuiltins();

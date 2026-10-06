@@ -39,7 +39,11 @@ through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
   other runtime does -- `ICurrentProcess` is still the only door out.
   `ExitCode()` (`IProcess::ExitCode`) is empty while the command runs, then
   its status modulo 256 -- or 143 when it was stopped (see "Exit codes" in the
-  root `CLAUDE.md`).
+  root `CLAUDE.md`). The process also owns a `StopToken`
+  (`src/components/libheaders/StopToken.h`), installed on the command's thread
+  by `RunThread` and signalled by `TriggerStop()`, so a pipe `Read`/`Write`
+  the command is blocked in returns `kIOInterrupted` at once rather than
+  outliving the stop.
 - `IBuiltinCommand` / `BuiltinContext` (`BuiltinCommand.h`) - one command, and
   what a run of it is handed: its process, arguments, output, and the stop flag.
   Commands are stateless, so one instance serves every process running it.

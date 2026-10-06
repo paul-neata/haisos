@@ -109,6 +109,18 @@ remaining LLM rounds refusing tool calls. Every call still gets a result, an
 error one, because the history is only well-formed with one result per tool
 call.
 
+**An agent owns its process's stop token** (`Agent::GetStopToken()`, on the
+concrete `Agent` only, not `IAgent`): `RunThread` installs it on the agent's
+thread with a `StopTokenScope`, and `TriggerStop()` signals it with
+`RequestStop()` after setting the flag and closing the queue -- so
+`self_close`, the input loop's stop at end of input and
+`AgentProcess::TriggerStop` all interrupt a blocked pipe call of the agent (a
+`ProcessAgentConsole` write to a full stdout pipe) at once: what could not be
+written is dropped. The same token is handed to the interactive process's
+`AgentInputLoop`, so a read blocked on the agent's piped stdin is likewise
+interrupted (`kIOInterrupted`, which `DescriptorLineReader` reports as end of
+input).
+
 **There is no `Kill()`.** An agent cannot be forced down, because its thread
 spends its time inside an HTTP call or a tool call that has to be allowed to
 return; a flag saying it was killed would change nothing about when it actually

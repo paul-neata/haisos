@@ -192,6 +192,23 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   on). An OS cannot step outside that root, but it can compose further
   filesystems on top of it, through the filesystem service that
   `GetServicesCreator()` -- this OS's own sandboxed services -- creates.
+- `GetPipeService()` is the OS's own pipe service (`IPipeService`, see the
+  PipeService component), created from its services creator when the OS is
+  created -- `HaisosOS::Create` makes one beside the network and LLM services,
+  so a sub-OS gets its own too. Nothing in the OS uses it directly: a process
+  reaches it through `ProcessFileIO::CreatePipe()`, which makes a pipe through
+  `OS()` (the one door) and places the read and write ends in the two lowest
+  free slots of the caller's descriptor table, read end first.
+- Every runtime thread -- a builtin's command, a Lua script, an agent's
+  conversation and an interactive process's input loop -- carries its
+  process's `StopToken` (`src/components/libheaders/StopToken.h`), installed
+  with a `StopTokenScope` right after its `RuntimeThreadScope` and signalled
+  by `TriggerStop()` (`BuiltinProcess::TriggerStop`, `LuaProcess::Kill`,
+  `Agent::TriggerStop`; a Lua `exit()` does not touch it -- it ends by
+  unwinding, not by blocking). So a pipe `Read`/`Write` blocked on a process's
+  behalf returns `kIOInterrupted` as soon as the process is asked to stop, and
+  a stuck pipeline never wedges `~HaisosOS`'s drain. Console input stays
+  uninterruptible (D7).
 
 ## Key Classes
 

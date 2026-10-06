@@ -41,6 +41,7 @@ haisos/
 │   │   ├── LLMService/
 │   │   ├── Logger/
 │   │   ├── NetworkService/
+│   │   ├── PipeService/
 │   │   ├── ServicesCreator/
 │   │   └── ToolFactory/
 │   ├── tools/             - Tool implementations (each has its own CLAUDE.md)
@@ -59,7 +60,7 @@ haisos/
 │   │   ├── os_start_process/
 │   │   └── os_list_processes/
 │   └── haisos/            - Entry point, CLI parser, haisosfile parser, root-filesystem builder, file-directive executor, agent traffic log (--log-agent-to-file / -L), and the re-creatable log file behind both file logs
-├── interfaces/             - Service-based interfaces (IFactory.h [IPhysicalConsole], IBuiltinCommands.h [IBuiltinConfigurator, BuiltinCommandHost], IServicesCreator.h, IHaisosOS.h, IProcess.h, IEnvironment.h [LLMIdentifier], ILLMService.h [IAgent, ITool, IToolFactory, IAgentConsole], INetworkService.h [IHTTPClient], IFileSystemService.h [IFileSystem], IProcess.h [ICurrentProcess], ILLMCommunicator.h, IFileDescriptor.h [IFileDescriptor, IOResult kIO*])
+├── interfaces/             - Service-based interfaces (IFactory.h [IPhysicalConsole], IBuiltinCommands.h [IBuiltinConfigurator, BuiltinCommandHost], IServicesCreator.h, IHaisosOS.h, IProcess.h, IEnvironment.h [LLMIdentifier], ILLMService.h [IAgent, ITool, IToolFactory, IAgentConsole], INetworkService.h [IHTTPClient], IFileSystemService.h [IFileSystem], IProcess.h [ICurrentProcess], ILLMCommunicator.h, IFileDescriptor.h [IFileDescriptor, IOResult kIO*], IPipeService.h [PipeEnds])
 ├── tests/                 - All tests
 │   ├── mocks/             - Mock classes for testing
 │   ├── unit/              - Unit tests (Google Test)
@@ -435,6 +436,12 @@ composing filesystems is how an OS is assembled, not something a program running
 inside one may do to the ground it stands on. A process that could mount could
 widen its own reach, which is what this whole arrangement exists to prevent.
 
+Pipes go through the same door: a process makes a pipe only with
+`IFileIO::CreatePipe`, which reaches the OS's pipe service through
+`ICurrentProcess::OS()` -- nothing in a process holds an `IPipeService` or an
+`IHaisosOS` of its own, and a pipe's ends land in the process's descriptor
+table like any other descriptor.
+
 ### Creating things: private constructors and `Create()`
 
 Every class implementing an interface from `interfaces/` has **private
@@ -481,8 +488,9 @@ under "Objects released last on their own threads".
 | **HTTPClient** | `src/components/HTTPClient/` | Platform-specific HTTP implementation (Curl/WinHTTP/Fetch) |
 | **Factory** | `src/components/Factory/` | Creates the root concepts: physical console, disk-backed filesystems (a directory, or the host's whole disk), the services layer, and the OS itself |
 | **Filesystem** | `src/components/Filesystem/` | Composable `IFileSystem` implementations: an unrooted passthrough, a `PhysicalFileSystem` rooted at a real disk path, the Windows-only `WindowsFullPhysicalFileSystem` (every drive under `/`, as `/c/...`), plus in-memory, read-only, sub-path and mounted/overlay ones |
-| **ServicesCreator** | `src/components/ServicesCreator/` | Factory-of-services built on `IFactory`; creates `IFileSystemService`/`INetworkService`/`ILLMService`, passing each the services it depends on |
+| **ServicesCreator** | `src/components/ServicesCreator/` | Factory-of-services built on `IFactory`; creates `IFileSystemService`/`IPipeService`/`INetworkService`/`ILLMService`, passing each the services it depends on |
 | **NetworkService** | `src/components/NetworkService/` | Service-layer wrapper over network access (creates `IHTTPClient`) |
+| **PipeService** | `src/components/PipeService/` | `IPipeService`: unnamed pipes -- bounded, blocking, one-way, both ends descriptors; no threads |
 | **FileSystemService** | `src/components/FileSystemService/` | Stateless factory that composes filesystems (read-only / in-memory / sub / mount); holds no filesystem of its own |
 | **LLMService** | `src/components/LLMService/` | Service-layer entry point for creating LLM-backed agents; exposes the shared agent-management tool set |
 | **HaisosOS** | `src/components/HaisosOS/` | An OS instance: owns a rooted filesystem, physical console, and services; starts processes (`.md` agents, `.lua` scripts, builtins) and sub-OS instances |

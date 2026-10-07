@@ -37,7 +37,7 @@ Unicode database would cost much more than it buys:
 
 ## Who uses it
 
-First the `wc` builtin (`-m`, `-w`, `-L`, from the builtins--wc task), whose
+First the `wc` builtin (`-m`, `-w`, `-L`), whose
 `--help` notes the approximations. The rule: a builtin (or anything else)
 needing character classes or display widths uses this component rather than
 `<cwctype>`/`wcwidth` -- those depend on the process locale, which Haisos

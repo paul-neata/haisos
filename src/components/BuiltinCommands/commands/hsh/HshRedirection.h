@@ -47,13 +47,15 @@ private:
     // A heredoc or here-string: a pipe sized exactly to |text| (so writing it
     // whole never blocks and no thread is needed), its read end in slot |fd|.
     std::optional<std::string> PipeInput(int fd, const std::string& text);
-    // Records slot |fd|'s current content (possibly null), if not recorded yet.
+    // Records slot |fd|'s current content (possibly null), if not recorded
+    // yet in the current Apply.
     void Save(int fd);
     // Undoes the slots saved at index |first| and later, latest first.
     void RestoreFrom(size_t first);
 
     Shell& m_shell;
     std::vector<std::pair<int, std::shared_ptr<IFileDescriptor>>> m_saved;
+    size_t m_applyFirst = 0;  // m_saved's size when the current Apply started
 };
 
 } // namespace Haisos::Hsh

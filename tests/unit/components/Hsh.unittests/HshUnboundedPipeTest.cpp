@@ -60,6 +60,35 @@ TEST(HshUnboundedPipeTest, WritesNeverBlock) {
     EXPECT_EQ(read, written);
 }
 
+TEST(HshUnboundedPipeTest, LargeTransferDrainsInOrder) {
+    auto ends = Hsh::CreateUnboundedPipe();
+    // 8 MiB of a known pattern through, read back in 4096-byte reads: the
+    // bytes come back identical, in order, and the reads end in end of file.
+    // (Also the per-read cost check: an erase-per-read drain is quadratic and
+    // would take minutes here.)
+    const size_t total = 8 * 1024 * 1024;
+    std::string pattern;
+    pattern.reserve(total);
+    for (size_t i = 0; i < total; ++i) {
+        pattern += static_cast<char>((i * 131 + i / 4096) & 0xff);
+    }
+    ASSERT_EQ(ends.writeEnd->Write(pattern.data(), pattern.size()),
+        static_cast<ssize_t>(pattern.size()));
+    ends.writeEnd.reset();
+    std::string readBack;
+    readBack.reserve(total);
+    char buffer[4096];
+    for (;;) {
+        const ssize_t count = ends.readEnd->Read(buffer, sizeof(buffer));
+        ASSERT_GE(count, 0);
+        if (count == 0) {
+            break;  // end of file
+        }
+        readBack.append(buffer, static_cast<size_t>(count));
+    }
+    EXPECT_EQ(readBack, pattern);
+}
+
 TEST(HshUnboundedPipeTest, ReadBlocksUntilDataOrEndOfFile) {
     auto ends = Hsh::CreateUnboundedPipe();
     AsyncCall call;

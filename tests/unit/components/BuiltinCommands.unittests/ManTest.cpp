@@ -65,6 +65,22 @@ TEST_F(BuiltinCommandsTest, ManShowsTheShellsFullPage) {
             EXPECT_EQ(line.rfind("       Example: ", 0), 0u) << line;
         }
     }
+
+    // The DIFFERENCES FROM DASH list covers the -ef approximation, and the
+    // --help notes name the prompt variables.
+    bool inDifferences = false;
+    bool efMentioned = false;
+    for (const std::string& line : lines) {
+        if (line == "DIFFERENCES FROM DASH") {
+            inDifferences = true;
+        } else if (line == "SEE ALSO") {
+            inDifferences = false;
+        } else if (inDifferences && line.find("-ef") != std::string::npos) {
+            efMentioned = true;
+        }
+    }
+    EXPECT_TRUE(efMentioned);
+    EXPECT_NE(help.out.find("PS1, PS2 and PS4 are not expanded"), std::string::npos);
 }
 
 TEST_F(BuiltinCommandsTest, ManPrintsSeveralPagesBackToBack) {

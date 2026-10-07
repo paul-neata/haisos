@@ -914,13 +914,10 @@ struct Lexer::Impl {
                             lastContinuationAtEnd = false;
                             next += '\n';
                         }
-                        if (hd->stripTabs) {
-                            size_t i = 0;
-                            while (i < next.size() && next[i] == '\t') {
-                                ++i;
-                            }
-                            next.erase(0, i);
-                        }
+                        // A line reached through a backslash-newline is part of
+                        // the same logical line as what it continues: <<-
+                        // strips only the tabs at the start of a physical line
+                        // (above), as dash does, so its leading tabs stay.
                         raw += next;
                     }
                 }

@@ -69,6 +69,14 @@ private:
     // every operation fails the way any other failure would.
     std::shared_ptr<IFileSystem> RootFileSystem() const;
 
+    // AddDescriptor, and Dup's placement, with m_descriptorsMutex already
+    // held: the lowest free slot, growing the table if needed.
+    int AddDescriptorLocked(std::shared_ptr<IFileDescriptor> descriptor);
+    // The index of the lowest free slot at or after |from| (a slot past the
+    // end counts as free while the table may still grow), or -1 when none.
+    // m_descriptorsMutex is held.
+    int NextFreeSlotLocked(size_t from) const;
+
     std::weak_ptr<IHaisosOS> m_os;
 
     // Guarded: the process's own thread and whoever inspects it run concurrently.

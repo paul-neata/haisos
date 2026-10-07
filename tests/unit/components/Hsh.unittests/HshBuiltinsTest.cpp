@@ -42,10 +42,16 @@ TEST_F(HshShellTest, Cd) {
     // cd sets PWD and OLDPWD, both exported, as dash's setpwd.
     ExpectSh({"cd /docs; export -p | cat",
         "export OLDPWD='/'\nexport PWD='/docs'\n"}, "Cd");
-    // A read-only PWD: hsh's AssignVariable makes cd's set of PWD a fatal
-    // error, where dash prints "cd: PWD: is read only" and goes on. A
-    // documented deviation (the plan's).
-    ExpectSh({"readonly PWD; cd /docs; echo after", "", "hsh: 1: PWD: is read only\n", 2}, "Cd");
+    // A read-only PWD or OLDPWD: cd reports it and goes on without assigning
+    // that variable, status 2, as dash -- the cd itself stands.
+    ExpectSh({"readonly PWD; cd /docs; echo \"st $?\"; pwd", "st 2\n/docs\n",
+        "hsh: 1: cd: PWD: is read only\n"}, "Cd");
+    ExpectSh({"readonly OLDPWD; cd /docs; echo \"st $?\"", "st 2\n",
+        "hsh: 1: cd: OLDPWD: is read only\n"}, "Cd");
+    // Under -e the failing cd ends the shell with its status, as any failing
+    // command in an untested context.
+    ExpectSh({"set -e; readonly PWD; cd /docs; echo still", "",
+        "hsh: 1: cd: PWD: is read only\n", 2}, "Cd");
 }
 
 TEST_F(HshShellTest, ExportAndReadonly) {

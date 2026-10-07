@@ -27,11 +27,10 @@ constexpr ssize_t kIOInterrupted = -3;  // the calling process was asked to stop
 // opened read-only, or Read on one opened write-only, fails with kIOError, as
 // EBADF would.
 //
-// Only a pipe, console input or console output may block in Read or Write --
-// of these, only the console descriptors exist so far (ConsoleDescriptors.h in
-// the Console component), and only console input blocks. kIOBrokenPipe and
-// kIOInterrupted are reserved for pipes (the pipes--pipe-service task); no
-// filesystem descriptor returns them.
+// Only a pipe (IPipeService's, or hsh's in-process unbounded pipe), console
+// input or console output may block in Read or Write. kIOBrokenPipe and
+// kIOInterrupted are reserved for pipes; no filesystem descriptor returns
+// them.
 //
 // A descriptor keeps working after its file's filesystem is unmounted, and
 // after the last outside reference to that filesystem is gone, until the

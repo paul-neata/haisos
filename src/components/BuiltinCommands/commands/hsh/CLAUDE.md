@@ -339,8 +339,8 @@ quirk), `-` is OLDPWD with the new directory printed, `""` is `.`; a
 destination not empty, not absolute and not starting with `.`/`..` is
 looked up in CDPATH (empty entry: the working directory, and the print is
 only for a non-empty entry that found it); the result is `OLDPWD` and `PWD` set and exported, as
-dash (and `AssignVariable` makes a read-only PWD fatal where dash only
-prints `cd: PWD: is read only` and goes on -- a documented deviation). `export`, `readonly`, `unset`,
+dash's setpwd -- a read-only one is reported (`cd: PWD: is read only`), left
+as it was, and cd's status is 2, the cd itself done, as dash. `export`, `readonly`, `unset`,
 `shift` (`HshBuiltinVariables.cpp`; special but `cd`-style errors aside) are
 dash's exportcmd/readonlycmd/unsetcmd/shiftcmd byte for byte: the sorted
 `-p` listings (`export name`, `export name='value'`, `ShellSingleQuote`),
@@ -473,6 +473,13 @@ forked dash subshell would (`WriteOut`/`WriteErr` throw `ShellExit` in a
 subshell, where at the top level they keep stopping the shell itself,
 `StopForBrokenPipe`).
 
+A documented limitation comes with this: two in-shell stages of one pipeline
+run one after the other, not at the same time. So an in-shell stage that
+never ends, written into an in-shell reader (`while :; do echo y; done |
+while read l; do break; done`), never ends, and its output is held in memory
+as it grows -- where dash, forking both, ends at once. A child stage (a
+program) has no such limit: it runs concurrently, through a bounded pipe.
+
 `SubshellScope` (`HshSubshell.h`) is the in-process subshell: what a subshell
 may change and must not leak -- the `ShellState` (variables, options,
 positional parameters, `$?`, `$!`), the working directory, every slot of the
@@ -482,7 +489,7 @@ leaves `w` unset and `x=$(cd /; pwd)` the directory alone. It also counts the
 shell's subshell depth. `Shell::RunSubshell` wraps a body in one: `exit`
 (`ShellExit`) and fatal errors (`ShellError`, reported as at the top level,
 status 2) end only the subshell; `ShellStopped` passes through, to end the
-whole shell. Since hsh--control-flow the scope also saves and restores the
+whole shell. The scope also saves and restores the
 function table and the loop/function/dot depths and the errexit suppression,
 and its destructor drops the processes of every job the subshell added from
 the shell's live-children list with the job itself -- else each `( true & )`
@@ -529,8 +536,8 @@ process's `IFileIO` slots) for the length of the command. `RedirectionScope`
 words have expanded, and the table is put back when the scope ends (after the
 child has been waited for) unless `exec` with no command called
 `Shell::KeepRedirections()`, which makes the scope `Keep()` the changes. Every
-slot is saved (`GetDescriptor`, possibly null) before its first change in the
-scope -- before an `AddDescriptor`, a `Dup2`, a `CloseDescriptor`, and before a
+slot is saved (`GetDescriptor`, possibly null) before its first change in an
+`Apply` -- before an `AddDescriptor`, a `Dup2`, a `CloseDescriptor`, and before a
 `CreatePipe` (whose two new slots may be the ones about to be changed) -- and
 `Restore()` puts the saved content back, latest change undone first through
 `PlaceDescriptor`, never writing or throwing. On the first failure `Apply`
@@ -540,7 +547,7 @@ nonexistent` / `Is a directory` / `Permission denied` from
 `OpenFailureReason`, `<m>: Bad file descriptor` for a dup of an empty slot,
 `<n>: Too many open files` when the table is full, `Pipe call failed`); the
 caller reports it with status 2 -- unless the command is a special builtin or
-the dup word expanded to something that is no digit, both fatal
+the dup word expanded to something that is not exactly one digit, both fatal
 (`Syntax error: Bad fd number`, thrown through `Shell::Fail`), as dash exits
 on them.
 
@@ -656,6 +663,9 @@ cleared) -- otherwise the shell would wait at PS2 forever.
 - A background (`&`) list that needs the shell runs in a child `hsh -c`
   process, which sees only the exported variables (a forked dash subshell
   would see them all).
+- Two in-shell stages of one pipeline run one after the other, so an endless
+  in-shell writer before an in-shell reader never ends (its output held in
+  memory); see "Pipelines, subshells, jobs".
 - `${x:}` is a `Bad substitution` (`ParameterOp::Bad`, failing at expansion)
   rather than dash's syntax error `Missing '}'`.
 - `$'...'` is not ANSI-C quoting (as dash): a plain `$` followed by the quote.
@@ -663,9 +673,6 @@ cleared) -- otherwise the shell would wait at PS2 forever.
   names `")"` (the substitution's end) where dash names what its own parser
   happened to see: `echo $(if)` says `")" unexpected (expecting "then")`
   where dash says `")" unexpected`.
-- `cd` into a directory with a read-only `PWD` (or `OLDPWD`) is a fatal
-  error in hsh -- the assignment goes through `AssignVariable` -- where dash
-  prints `cd: PWD: is read only` and goes on.
 - The xtrace's PS4 is written as it is, never parameter-expanded as dash
   does; `-v` is accepted but not acted on (echo of the line as read).
 - `test`'s file access and identity tests are approximations where there are

@@ -8,7 +8,7 @@
 #include "interfaces/IFileIO.h"
 
 namespace Haisos::Hsh {
-const char* HshVersion() { return "1.0.0"; }
+const char* HshVersion() { return "1.0.1"; }
 } // namespace Haisos::Hsh
 
 namespace Haisos {
@@ -72,8 +72,10 @@ public:
         };
         help.notes =
             "Commands not built into hsh are looked up in PATH and started as Haisos processes (builtins, .md agents, .lua scripts).\n"
-            "--help and --version only as the first argument; $0 is \"hsh\" unless a script or -c command_name names it; +X turns option X off. PS4 is not expanded; -v is accepted, not acted on.\n"
-            "A background (&) builtin, function or compound command runs in a child hsh, which sees only exported variables.\n";
+            "--help and --version only as the first argument; $0 is \"hsh\" unless a script or -c command_name names it; +X turns option X off. PS1, PS2 and PS4 are not expanded; -v is accepted, not acted on.\n"
+            "A background (&) builtin, function or compound command runs in a child hsh, which sees only exported variables.\n"
+            "test's -r -w -x -O -G only test that the file exists; -h and -L are never true; -ef compares resolved paths.\n"
+            "Two in-shell pipeline stages run one after the other: an endless one before another in-shell stage never ends.\n";
         help.basedOn = "dash";
         return help;
     }

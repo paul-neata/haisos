@@ -68,6 +68,17 @@ TEST_F(HshShellTest, BadFdNumberIsFatal) {
         "BadFdNumberIsFatal");
 }
 
+TEST_F(HshShellTest, RedirectionFdMustBeOneDigit) {
+    // A >&/<& target is exactly one digit, as dash: a blank or a sign before
+    // it is already "Bad fd number", and the shell exits.
+    ExpectSh({"x=' 3'; echo hi >&$x; echo after", "",
+        "hsh: 1: Syntax error: Bad fd number\n", 2}, "RedirectionFdMustBeOneDigit");
+    ExpectSh({"echo hi >&+1; echo after", "",
+        "hsh: 1: Syntax error: Bad fd number\n", 2}, "RedirectionFdMustBeOneDigit");
+    // A single digit is fine.
+    ExpectSh({"echo hi >&1; echo after", "hi\nafter\n"}, "RedirectionFdMustBeOneDigit");
+}
+
 TEST_F(HshShellTest, HereDocuments) {
     const ShellCase cases[] = {
         // An unquoted delimiter's body is expanded; a quoted one's is not.
@@ -75,6 +86,10 @@ TEST_F(HshShellTest, HereDocuments) {
         {"cat <<'E'\n$x\nE", "$x\n"},
         // <<- strips the leading tabs of the body and the delimiter line.
         {"cat <<-E\n\ta\n\tE", "a\n"},
+        // ...but not those of a line reached through a backslash-newline: it
+        // continues the same logical line, and dash strips only the start of
+        // a line it reads fresh.
+        {"cat <<-E\n\ta\\\n\tb\n\tE", "a\tb\n"},
         {"cat <<E\nE", ""},
         {"cat 0<<E\ny\nE", "y\n"},
         {"wc -l <<E\nx\ny\nE", "2\n"},

@@ -60,8 +60,8 @@ private:
 
 // A terminal's input: every line typed on the console, delivered with its "\n"
 // restored, until the console reports end of input. A Read blocks while no
-// input is pending and the console is not at end -- the documented exception of
-// goal.md's D7: console input cannot be interrupted.
+// input is pending and the console is not at end, and it cannot be
+// interrupted: a line being read from the host's terminal cannot be abandoned.
 class ConsoleInputDescriptor : public IFileDescriptor {
 public:
     static std::shared_ptr<ConsoleInputDescriptor> Create(std::shared_ptr<IPhysicalConsole> console);

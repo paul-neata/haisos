@@ -1,4 +1,6 @@
 #include "ProcessFileIO.h"
+#include <algorithm>
+
 #include "src/components/Filesystem/VirtualPath.h"
 
 namespace Haisos {
@@ -81,22 +83,41 @@ std::shared_ptr<IFileDescriptor> ProcessFileIO::GetDescriptor(int fd) const {
     return m_descriptors[static_cast<size_t>(fd)];
 }
 
+int ProcessFileIO::NextFreeSlotLocked(size_t from) const {
+    for (size_t i = from; i < m_descriptors.size(); ++i) {
+        if (!m_descriptors[i]) {
+            return static_cast<int>(i);
+        }
+    }
+    // No hole at or past |from|: the table may still grow, one slot at a
+    // time, so the slot at |from|, |size| or beyond is free while it is below
+    // kMaxDescriptors.
+    const size_t grown = std::max(from, m_descriptors.size());
+    if (grown < static_cast<size_t>(IFileIO::kMaxDescriptors)) {
+        return static_cast<int>(grown);
+    }
+    return -1;
+}
+
+int ProcessFileIO::AddDescriptorLocked(std::shared_ptr<IFileDescriptor> descriptor) {
+    const int slot = NextFreeSlotLocked(0);
+    if (slot < 0) {
+        return -1;
+    }
+    if (static_cast<size_t>(slot) == m_descriptors.size()) {
+        m_descriptors.push_back(std::move(descriptor));
+    } else {
+        m_descriptors[static_cast<size_t>(slot)] = std::move(descriptor);
+    }
+    return slot;
+}
+
 int ProcessFileIO::AddDescriptor(std::shared_ptr<IFileDescriptor> descriptor) {
     if (!descriptor) {
         return -1;
     }
     std::lock_guard<std::mutex> lock(m_descriptorsMutex);
-    for (size_t i = 0; i < m_descriptors.size(); ++i) {
-        if (!m_descriptors[i]) {
-            m_descriptors[i] = std::move(descriptor);
-            return static_cast<int>(i);
-        }
-    }
-    if (m_descriptors.size() >= static_cast<size_t>(IFileIO::kMaxDescriptors)) {
-        return -1;
-    }
-    m_descriptors.push_back(std::move(descriptor));
-    return static_cast<int>(m_descriptors.size() - 1);
+    return AddDescriptorLocked(std::move(descriptor));
 }
 
 int ProcessFileIO::Dup(int fd) {
@@ -104,18 +125,7 @@ int ProcessFileIO::Dup(int fd) {
     if (fd < 0 || static_cast<size_t>(fd) >= m_descriptors.size() || !m_descriptors[static_cast<size_t>(fd)]) {
         return -1;
     }
-    auto descriptor = m_descriptors[static_cast<size_t>(fd)];
-    for (size_t i = 0; i < m_descriptors.size(); ++i) {
-        if (!m_descriptors[i]) {
-            m_descriptors[i] = std::move(descriptor);
-            return static_cast<int>(i);
-        }
-    }
-    if (m_descriptors.size() >= static_cast<size_t>(IFileIO::kMaxDescriptors)) {
-        return -1;
-    }
-    m_descriptors.push_back(std::move(descriptor));
-    return static_cast<int>(m_descriptors.size() - 1);
+    return AddDescriptorLocked(m_descriptors[static_cast<size_t>(fd)]);
 }
 
 int ProcessFileIO::Dup2(int oldFd, int newFd) {
@@ -184,21 +194,26 @@ std::optional<std::pair<int, int>> ProcessFileIO::CreatePipe(size_t capacity) {
     if (!service) {
         return std::nullopt;
     }
-    // Placed in the table first: should fewer than two slots be free, ends
-    // goes away here and the pipe is closed with it, the table left as it was.
     PipeEnds ends = service->CreatePipe(capacity);
-    // AddDescriptor takes the lowest free slot, so this gives the two lowest
-    // free slots, read end first.
-    const int readSlot = AddDescriptor(ends.readEnd);
-    if (readSlot < 0) {
-        return std::nullopt;
+    std::optional<std::pair<int, int>> slots;
+    {
+        std::lock_guard<std::mutex> lock(m_descriptorsMutex);
+        // Both of the two lowest free slots are found before either is
+        // filled: with fewer than two free the table is left untouched (no
+        // rollback) and the ends not placed close the pipe as they are
+        // released on return, outside the lock.
+        const int readSlot = NextFreeSlotLocked(0);
+        if (readSlot >= 0 && NextFreeSlotLocked(static_cast<size_t>(readSlot) + 1) >= 0) {
+            // AddDescriptorLocked takes the lowest free slot, so the two it
+            // returns are the two lowest free slots, the read end first.
+            const int placedRead = AddDescriptorLocked(std::move(ends.readEnd));
+            const int placedWrite = AddDescriptorLocked(std::move(ends.writeEnd));
+            if (placedRead >= 0 && placedWrite >= 0) {  // guaranteed above
+                slots.emplace(placedRead, placedWrite);
+            }
+        }
     }
-    const int writeSlot = AddDescriptor(ends.writeEnd);
-    if (writeSlot < 0) {
-        CloseDescriptor(readSlot);
-        return std::nullopt;
-    }
-    return std::make_pair(readSlot, writeSlot);
+    return slots;
 }
 
 void ProcessFileIO::ReleaseAllDescriptors() {

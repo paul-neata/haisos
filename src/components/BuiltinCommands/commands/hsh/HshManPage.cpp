@@ -179,26 +179,26 @@ std::string HshManPage() {
 
 )MAN"
         R"MAN(BUILTIN COMMANDS
-       . file        run a file's commands in this shell (special)
-       :             do nothing, status 0 (special)
-       [ expr ]      test's other name
-       break [n]     leave n loops (special)
-       cd [dir]      change the working directory
-       continue [n]  next iteration of n loops (special)
-       eval args     the arguments run as a command (special)
-       exec [args]   replace the shell, or keep its redirections (special)
-       exit [n]      end the shell (special)
-       export names  mark variables for the environment (special)
-       false         status 1
-       read names    a line of input, split on IFS
-       readonly nm.  mark variables unchangeable (special)
-       return [n]    end the function or dot script running (special)
-       set ...       options, positional parameters, a listing (special)
-       shift [n]     drop positional parameters (special)
-       test expr     a condition's truth
-       true          status 0
-       unset names   remove variables (special)
-       wait [pids]   wait for background jobs
+       . file         run a file's commands in this shell (special)
+       :              do nothing, status 0 (special)
+       [ expr ]       test's other name
+       break [n]      leave n loops (special)
+       cd [dir]       change the working directory
+       continue [n]   next iteration of n loops (special)
+       eval args      the arguments run as a command (special)
+       exec [args]    replace the shell, or keep its redirections (special)
+       exit [n]       end the shell (special)
+       export names   mark variables for the environment (special)
+       false          status 1
+       read names     a line of input, split on IFS
+       readonly names mark variables unchangeable (special)
+       return [n]     end the function or dot script running (special)
+       set ...        options, positional parameters, a listing (special)
+       shift [n]      drop positional parameters (special)
+       test expr      a condition's truth
+       true           status 0
+       unset names    remove variables (special)
+       wait [pids]    wait for background jobs
 
 )MAN"
         R"MAN(EXIT STATUS
@@ -211,17 +211,26 @@ std::string HshManPage() {
 
 )MAN"
         R"MAN(DIFFERENCES FROM DASH
-       &> and <<< are bash's operators; ~user is not expanded; ${x:} is a
-       "Bad substitution" expansion error; the messages of a $(...)'s
-       syntax error come from parsing its inner text alone; $0 is "hsh"
-       unless a script or -c command_name names it; --help and --version
-       count only as the first argument; the prompts and PS4 are written
-       as they are, not parameter-expanded; -v is accepted, not acted
-       on; a background (&) builtin, function or compound command runs in
-       a child hsh, which sees only the exported variables; test -r -w -x
-       -O -G only test that the file is there, -h and -L are never true;
-       there is no job control, line editing, history, trap, local or
-       getopts; commands are run as Haisos processes, never by a #! line.
+       &> and <<< are bash's operators.
+       ~user is not expanded.
+       ${x:} is a "Bad substitution" expansion error.
+       The messages of a $(...)'s syntax error come from parsing its
+         inner text alone.
+       $0 is "hsh" unless a script or -c command_name names it.
+       --help and --version count only as the first argument.
+       The prompts (PS1, PS2) and PS4 are written as they are, not
+         parameter-expanded; -v is accepted, not acted on.
+       A background (&) builtin, function or compound command runs in a
+         child hsh, which sees only the exported variables.
+       test -r -w -x -O -G only test that the file is there; -h and -L
+         are never true; -ef compares resolved paths (no inode numbers).
+       Two in-shell pipeline stages run one after the other, so an
+         endless one written into another in-shell stage never ends, its
+         output growing in memory; a child stage (a program) runs
+         concurrently and has no such limit.
+       There is no job control, line editing, history, trap, local or
+         getopts.
+       Commands are run as Haisos processes, never by a #! line.
 
 )MAN"
         R"MAN(SEE ALSO

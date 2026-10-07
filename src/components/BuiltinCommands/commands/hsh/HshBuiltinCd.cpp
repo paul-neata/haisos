@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <utility>
 
 #include "commands/hsh/HshShell.h"
 #include "commands/hsh/HshVariables.h"
@@ -112,15 +113,25 @@ int BuiltinCd(Shell& shell, const std::vector<std::string>& args) {
         shell.Report("cd: can't cd to " + dest);
         return 2;
     }
-    shell.AssignVariable("OLDPWD", oldDirectory);
-    shell.State().variables.Export("OLDPWD");
-    shell.AssignVariable("PWD", shell.IO().GetCurrentDirectory());
-    shell.State().variables.Export("PWD");
+    // dash's setpwd: OLDPWD, then PWD, each exported. A read-only one is
+    // reported and left as it was -- the cd itself stands, as dash's does.
+    bool readOnly = false;
+    for (const std::pair<const char*, std::string>& assignment : {
+             std::pair<const char*, std::string>{"OLDPWD", oldDirectory},
+             std::pair<const char*, std::string>{"PWD", shell.IO().GetCurrentDirectory()}}) {
+        if (shell.State().variables.IsReadonly(assignment.first)) {
+            shell.Report(std::string("cd: ") + assignment.first + ": is read only");
+            readOnly = true;
+        } else {
+            shell.AssignVariable(assignment.first, assignment.second);
+            shell.State().variables.Export(assignment.first);
+        }
+    }
     if (print) {
         shell.WriteOut(shell.IO().GetCurrentDirectory() + "\n");
     }
     // Further operands are ignored, as dash ignores them.
-    return 0;
+    return readOnly ? 2 : 0;
 }
 
 } // namespace Haisos::Hsh

@@ -76,7 +76,8 @@ ssize_t ConsoleInputDescriptor::Read(void* buf, size_t count) {
     }
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_pending.empty() && !m_atEnd) {
-        // Blocking and uninterruptible, as console input is (goal.md D7).
+        // Blocking and uninterruptible, as console input is: a line being
+        // read from the host's terminal cannot be abandoned.
         auto line = m_console->ReadLine();
         if (!line) {
             m_atEnd = true;

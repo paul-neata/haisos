@@ -1,6 +1,6 @@
 # Playbook
 
-Phase: final
+Phase: implementing
 Pause: no
 
 | # | Task | Status | Version | Depends | PR | Tries | Review | Notes |
@@ -27,6 +27,7 @@ Pause: no
 | 20 | [hsh--shell-builtins](tasks/hsh--shell-builtins.md) | done | 0.4.20 | 19 | #38 | 1 | 2H 1L fixed, 2M 2L open | reviewer added the planned tests kimi-k3 had skipped |
 | 21 | [hsh--control-flow](tasks/hsh--control-flow.md) | done | 0.4.21 | 20 | #39 | 1 | 2H 1M fixed, 3M 4L open | reviewer fixed break-in-condition and a use-after-free |
 | 22 | [hsh--interactive](tasks/hsh--interactive.md) | done | 0.4.22 | 12, 21 | #40 | 1 | 1M 4L open | Windows HaisosOS timeout, green on re-run; haisos tests run in the container |
+| 24 | [final--review-fixes](tasks/final--review-fixes.md) | todo | | - | | | | from the whole-develop review (5H) |
 | 23 | [streams--coroutine-latch](tasks/streams--coroutine-latch.md) | done | 0.4.15 | 6, 8 | #33 | 1 | 1C 2H 1M fixed, 1M 1L open | follow-up to #23/#25 findings; reviewer fixed coroutine.wrap argument handling |
 
 ## Directions
@@ -38,6 +39,8 @@ Pause: no
 - (implement, 2026-10-06) Windows: HaisosOS.unittests.exe takes ~29.5 s on Windows against CI's 30 s per-executable timeout -- the existing HaisosOSTest.cpp alone is ~29.4 s (127.0.0.1:9999 takes ~2 s to refuse on Windows; HaisosOSTest still uses it). Every later task adding HaisosOS tests risks a red Windows check. Options: raise the timeout (scripts/ or .github/, so the plan session or master), switch HaisosOSTest to 0.0.0.0:9999 as #24 did for its own tests (a small follow-up task), or split the executable. Until answered: tasks go on; a Windows timeout is fixed on the host as for #24. Update after builtins--unicode (#27): it hit again on a PR that does not touch HaisosOS (HaisosOS.unittests ran ~33 s and was killed); a re-run passed -- so the limit now makes Windows CI flaky for every task. -> answered: raise the timeout only (scripts/internal/test.js getTimeout, unit tests 30 s). The plan session does this on develop outside plan mode, not a task. HaisosOSTest keeps 127.0.0.1:9999. Until it lands, keep fixing Windows timeouts on the host or re-running.
 
 - (implement, 2026-10-07) goal.md acceptance scenario 3 contradicts itself: `RUN /bin/hsh /count.sh hello` with `case "$1" in hi*) echo "greeted";; *) echo "plain";; esac` -- `hello` does not match `hi*`, so dash (and hsh) print `plain`, not `greeted` (found in the #39 review). Fix the scenario: run it with `hi`, or change the pattern to `h*`? Until answered: tests follow dash (`hi` -> greeted, `hello` -> plain), and hsh--interactive's haisos test uses `hi`.
+
+- (implement, 2026-10-07) goal.md preamble: `/abc.txt` has no final newline as written, so acceptance scenarios 1 and 2 would print `2` and `13 /out.txt`, not `3` and `14 /out.txt` (found by the whole-develop review). Fix the preamble (an empty line before `END`) or the expected numbers? Until answered: the haisos test adds the empty line and expects `3` / `14 /out.txt`.
 
 ## Adjustments
 - 2026-10-06 05:57 (implement) fd--process-table refreshed: checked-against line fixed to 7b72167; Tests note to drop the stale 'IFileIO keeps int fds' comment (PR #19 finding)

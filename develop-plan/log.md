@@ -72,3 +72,4 @@
 - 2026-10-07 00:09 UTC -- start final--review-fixes (0.4.23)
 - 2026-10-07 00:36 UTC -- final--review-fixes: PR #41, ready
 - 2026-10-07 00:39 UTC -- final--review-fixes merged #41 as 0.4.23: 5H+7M fixed, 2M 2L open, 1 tries -- final phase
+- 2026-10-07 03:29 UTC -- final Windows build + unit tests on the host: 21 passed, 0 failed (develop @ bba0186); --since review cut off by the session limit, restarted

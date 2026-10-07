@@ -71,3 +71,4 @@
 - 2026-10-07 00:09 UTC -- final review: 0C 5H 8M 4L; fixes task final--review-fixes added; question on goal.md /abc.txt
 - 2026-10-07 00:09 UTC -- start final--review-fixes (0.4.23)
 - 2026-10-07 00:36 UTC -- final--review-fixes: PR #41, ready
+- 2026-10-07 00:39 UTC -- final--review-fixes merged #41 as 0.4.23: 5H+7M fixed, 2M 2L open, 1 tries -- final phase

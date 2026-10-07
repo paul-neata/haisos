@@ -1,6 +1,6 @@
 # Final review
 
-- Reviewed: develop @ 8eca554
+- Reviewed: develop @ 3e9c9bc (whole develop at 8eca554, then 8eca554..3e9c9bc)
 
 ## Overview
 The develop does what `goal.md` asks for. Every process gets its own
@@ -72,3 +72,55 @@ wc on the host.
 | low | promoted -> final--review-fixes | src/components/BuiltinCommands/commands/hsh/HshRedirection.cpp:62 | `Save` skips a slot already saved anywhere in the scope, so a failing second `Apply` on the same scope would not put back the slots its first `Apply` changed. There is no reachable trigger today (one `Apply` per scope); scoping the de-duplication to the current `Apply` makes it safe (from #36) |
 | low | open | src/components/BuiltinCommands/commands/hsh/HshShell.cpp:608 | `const std::vector<std::string> keepPositional = std::move(...)` makes both the save and the restore copies (from #39) |
 | low | open | CLAUDE.md (Exit codes) | "127 when one or no process could be started" is unclear; it means 127 for a RUN that never started, and also when none could (from #23) |
+
+## Review of 8eca554..3e9c9bc
+
+### Overview
+One task was merged after the whole-develop review: final--review-fixes (#41,
+af6f65c, 0.4.23). It fixes every finding promoted above:
+- `cd` with a read-only PWD/OLDPWD now reports it and goes on, status 2;
+- a `>&`/`<&` target must be exactly one digit;
+- `<<-` no longer strips the tabs of a backslash-continued line;
+- an empty `--files0-from` list still prints the total that `--total=always`
+  or `--total=only` asks for;
+- the hsh `--help` notes and the man page's DIFFERENCES FROM DASH list every
+  documented exception, including the in-shell pipeline limitation, which is
+  now also in both `CLAUDE.md` files;
+- the unbounded pipe drains in linear time (a read offset, compacted once the
+  consumed prefix passes 64 KiB and half of the buffer);
+- `ProcessFileIO::CreatePipe` finds and fills both slots under one lock, with
+  no rollback;
+- `RedirectionScope::Save` de-duplicates within the current `Apply` only;
+- `NoExec()` is one helper;
+- `ReleaseCountingDescriptor` is in `tests/mocks/`;
+- the stale text and `goal.md`/task-id references are gone, except those
+  already known.
+
+Each behaviour fix comes with a test that fails on the old code. The
+one-free-slot `CreatePipe` test only pins the outcome; that is already known.
+Versions are bumped and the tables match: hsh 1.0.1, wc 1.0.1.
+
+Security holds:
+- the changes touch only builtin internals, the descriptor table, comments and
+  tests;
+- nothing reaches out of a process other than through `ICurrentProcess`;
+- the six gate REVIEW lines (five `CLAUDE.md` files and
+  `hsh.haisostest.js`) are benign. The changed lines are documentation of the
+  code and two comments, and none of them is aimed at AI.
+
+A search of `src`, `interfaces` and `tests` for text pointing at `goal.md`,
+`D<n>` items, `develop-plan/` or task ids finds only the three
+`AgentInputLoop` lines already known. The two open mediums of the task review
+are worth fixing before master:
+- `cd` should stop after the first read-only report;
+- the `AgentInputLoop` comments still cite D7.
+
+dash 0.5.12 on the host also shows a third side of the cd one: dash prints
+nothing for `cd -` once a read-only variable has been reported (the error
+leaves cd before the print), and hsh still prints the directory.
+
+### Findings
+| Severity | Status | Where | Finding |
+|----------|--------|-------|---------|
+| medium | open | src/components/BuiltinCommands/commands/hsh/HshBuiltinCd.cpp:130-132 | After a read-only OLDPWD/PWD report, `cd -` still prints the new directory. dash 0.5.12 prints nothing: `cd /usr; readonly OLDPWD; cd -` gives only `dash: 1: cd: OLDPWD: is read only`, status 2. Fix it together with the known "stop after the first report" finding of #41: return 2 right after the report, before the print |
+| low | open | src/components/BuiltinCommands/commands/hsh/HshRedirection.cpp:58-60 | `Keep()` clears `m_saved` but leaves `m_applyFirst`, so a `Save` after a `Keep` with no new `Apply` would start past the end (UB). Today it cannot happen (`Save` runs only inside `Apply`, which resets it first). Reset `m_applyFirst = 0` in `Keep()` |

@@ -124,3 +124,12 @@ leaves cd before the print), and hsh still prints the directory.
 |----------|--------|-------|---------|
 | medium | open | src/components/BuiltinCommands/commands/hsh/HshBuiltinCd.cpp:130-132 | After a read-only OLDPWD/PWD report, `cd -` still prints the new directory. dash 0.5.12 prints nothing: `cd /usr; readonly OLDPWD; cd -` gives only `dash: 1: cd: OLDPWD: is read only`, status 2. Fix it together with the known "stop after the first report" finding of #41: return 2 right after the report, before the print |
 | low | open | src/components/BuiltinCommands/commands/hsh/HshRedirection.cpp:58-60 | `Keep()` clears `m_saved` but leaves `m_applyFirst`, so a `Save` after a `Keep` with no new `Apply` would start past the end (UB). Today it cannot happen (`Save` runs only inside `Apply`, which resets it first). Reset `m_applyFirst = 0` in `Keep()` |
+
+## Final tests
+
+| Platform | Where | Build | Unit | Integration | Haisos | Develop |
+|----------|-------|-------|------|-------------|--------|---------|
+| Linux | task container, clean build, host ollama (kimi-k2.6:cloud) | ok | 21 passed | 13 passed | 8 passed | da93d8a |
+| Windows | host (scripts/develop/windows.sh) | ok | 21 passed | -- | -- | bba0186 |
+
+Linux: 42 test executables passed, 0 failed (430 s). Windows: unit tests only, as the final phase prescribes; between bba0186 and da93d8a only plan files changed. On Windows CI, HaisosOS.unittests.exe runs close to its 30 s per-executable timeout and was killed on 5 task PRs (#24, #27, #34, #37, #40); every re-run passed -- raising that timeout (scripts/internal/test.js), as the user decided, is still to land.

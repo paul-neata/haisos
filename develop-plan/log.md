@@ -75,3 +75,4 @@
 - 2026-10-07 03:29 UTC -- final Windows build + unit tests on the host: 21 passed, 0 failed (develop @ bba0186); --since review cut off by the session limit, restarted
 - 2026-10-07 03:31 UTC -- final review since 8eca554: 0C 0H 1M 1L, no fixes task
 - 2026-10-07 03:32 UTC -- wrote notes/note-0.4-review-findings.md: 4M 54L open
+- 2026-10-07 03:39 UTC -- develop done: 23 tasks (22 + the final fixes), final tests Linux 42/42 (U, I, H), Windows unit 21/21

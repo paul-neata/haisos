@@ -27,7 +27,7 @@ Pause: no
 | 20 | [hsh--shell-builtins](tasks/hsh--shell-builtins.md) | done | 0.4.20 | 19 | #38 | 1 | 2H 1L fixed, 2M 2L open | reviewer added the planned tests kimi-k3 had skipped |
 | 21 | [hsh--control-flow](tasks/hsh--control-flow.md) | done | 0.4.21 | 20 | #39 | 1 | 2H 1M fixed, 3M 4L open | reviewer fixed break-in-condition and a use-after-free |
 | 22 | [hsh--interactive](tasks/hsh--interactive.md) | done | 0.4.22 | 12, 21 | #40 | 1 | 1M 4L open | Windows HaisosOS timeout, green on re-run; haisos tests run in the container |
-| 24 | [final--review-fixes](tasks/final--review-fixes.md) | in-progress | 0.4.23 | - | | | | from the whole-develop review (5H) |
+| 24 | [final--review-fixes](tasks/final--review-fixes.md) | in-review | 0.4.23 | - | #41 | 1 | | from the whole-develop review (5H) |
 | 23 | [streams--coroutine-latch](tasks/streams--coroutine-latch.md) | done | 0.4.15 | 6, 8 | #33 | 1 | 1C 2H 1M fixed, 1M 1L open | follow-up to #23/#25 findings; reviewer fixed coroutine.wrap argument handling |
 
 ## Directions

@@ -70,3 +70,4 @@
 - 2026-10-06 23:56 UTC -- hsh--interactive merged #40 as 0.4.22: 1M 4L open, 1 tries; all tasks done -- final phase
 - 2026-10-07 00:09 UTC -- final review: 0C 5H 8M 4L; fixes task final--review-fixes added; question on goal.md /abc.txt
 - 2026-10-07 00:09 UTC -- start final--review-fixes (0.4.23)
+- 2026-10-07 00:36 UTC -- final--review-fixes: PR #41, ready

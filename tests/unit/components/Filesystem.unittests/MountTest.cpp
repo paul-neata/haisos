@@ -10,10 +10,11 @@ namespace {
 
 std::shared_ptr<IFileSystem> MakeInMemoryWith(const std::string& path, const std::string& contents) {
     auto fs = InMemoryFileSystem::Create();
-    int fd = fs->OpenFile(path, kFileOpenWriteCreateTruncate);
-    EXPECT_GE(fd, 0);
-    fs->WriteFile(fd, contents.data(), contents.size());
-    fs->CloseFile(fd);
+    auto file = fs->OpenFile(path, kFileOpenWriteCreateTruncate);
+    EXPECT_NE(file, nullptr);
+    if (file) {
+        file->Write(contents.data(), contents.size());
+    }
     return fs;
 }
 
@@ -33,11 +34,11 @@ TEST(MountTest, MountedPathsAreServedByTheMountedFilesystem) {
 
 TEST(MountTest, MountDoesNotDisturbTheHostsOwnPaths) {
     auto host = InMemoryFileSystem::Create();
-    int fd = host->OpenFile("/own.txt", kFileOpenWriteCreateTruncate);
-    ASSERT_GE(fd, 0);
+    auto hostFile = host->OpenFile("/own.txt", kFileOpenWriteCreateTruncate);
+    ASSERT_NE(hostFile, nullptr);
     const std::string own = "host file";
-    host->WriteFile(fd, own.data(), own.size());
-    host->CloseFile(fd);
+    hostFile->Write(own.data(), own.size());
+    hostFile.reset();
 
     host->Mount("/data", MakeInMemoryWith("/note.txt", "mounted"));
 
@@ -50,43 +51,39 @@ TEST(MountTest, WritesUnderAMountPointLandOnTheMountedFilesystem) {
     auto host = InMemoryFileSystem::Create();
     host->Mount("/scratch", mounted);
 
-    int fd = host->OpenFile("/scratch/out.txt", kFileOpenWriteCreateTruncate);
-    ASSERT_GE(fd, 0);
+    auto file = host->OpenFile("/scratch/out.txt", kFileOpenWriteCreateTruncate);
+    ASSERT_NE(file, nullptr);
     const std::string payload = "written through the mount";
-    EXPECT_EQ(host->WriteFile(fd, payload.data(), payload.size()), static_cast<ssize_t>(payload.size()));
-    EXPECT_EQ(host->CloseFile(fd), 0);
+    EXPECT_EQ(file->Write(payload.data(), payload.size()), static_cast<ssize_t>(payload.size()));
 
     // The bytes must be on the mounted filesystem, not the host's own storage:
     // each call is routed to whichever filesystem owns the path.
     EXPECT_EQ(ReadAll(*mounted, "/out.txt"), payload);
 }
 
-TEST(MountTest, HostAndMountedDescriptorsDoNotCollide) {
-    // Both filesystems hand out descriptors from their own namespaces, starting
-    // at the same number, so an unmapped fd would route a read to the wrong file.
+TEST(MountTest, HostAndMountedFilesReadThroughTheirOwnDescriptors) {
+    // A mounted file's open is routed to the mounted filesystem, which hands
+    // back its own descriptor; each descriptor then reads its own file.
     auto host = InMemoryFileSystem::Create();
-    int hostFd = host->OpenFile("/host->txt", kFileOpenWriteCreateTruncate);
-    ASSERT_GE(hostFd, 0);
+    auto hostFile = host->OpenFile("/host.txt", kFileOpenWriteCreateTruncate);
+    ASSERT_NE(hostFile, nullptr);
     const std::string hostPayload = "host";
-    host->WriteFile(hostFd, hostPayload.data(), hostPayload.size());
-    host->CloseFile(hostFd);
+    hostFile->Write(hostPayload.data(), hostPayload.size());
+    hostFile.reset();
 
     host->Mount("/m", MakeInMemoryWith("/mounted.txt", "mounted"));
 
-    int a = host->OpenFile("/host->txt", kFileOpenReadOnly);
-    int b = host->OpenFile("/m/mounted.txt", kFileOpenReadOnly);
-    ASSERT_GE(a, 0);
-    ASSERT_GE(b, 0);
-    EXPECT_NE(a, b);
+    auto a = host->OpenFile("/host.txt", kFileOpenReadOnly);
+    auto b = host->OpenFile("/m/mounted.txt", kFileOpenReadOnly);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
 
     char bufA[16] = {};
     char bufB[16] = {};
-    EXPECT_GT(host->ReadFile(a, bufA, sizeof(bufA) - 1), 0);
-    EXPECT_GT(host->ReadFile(b, bufB, sizeof(bufB) - 1), 0);
+    EXPECT_GT(a->Read(bufA, sizeof(bufA) - 1), 0);
+    EXPECT_GT(b->Read(bufB, sizeof(bufB) - 1), 0);
     EXPECT_STREQ(bufA, "host");
     EXPECT_STREQ(bufB, "mounted");
-    host->CloseFile(a);
-    host->CloseFile(b);
 }
 
 TEST(MountTest, ListingAnAncestorShowsTheWayToAMountPoint) {

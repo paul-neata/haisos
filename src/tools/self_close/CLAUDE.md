@@ -2,7 +2,7 @@
 
 Closes the calling agent: it stops taking commands and finishes once the
 current turn is over. It is how an **interactive** agent (see
-`StartProcessOptions::interactiveAgent` and `RUN -i` in the haisosfile) ends
+`StartProcessOptions::interactive` and `RUN -i` in the haisosfile) ends
 its own session -- such an agent otherwise keeps waiting for the next line
 typed on its console forever.
 

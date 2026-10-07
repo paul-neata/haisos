@@ -2,6 +2,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -9,6 +10,7 @@
 #include <vector>
 #include "interfaces/ILLMService.h"
 #include "interfaces/ILLMCommunicator.h"
+#include "src/components/libheaders/StopToken.h"
 #include "src/components/libheaders/SynchronizedQueueEx.h"
 #include "AgentMessageBuffer.h"
 
@@ -48,6 +50,25 @@ public:
     void AddChild(std::shared_ptr<IAgent> child) override;
 
     bool IsFinished() const;
+
+    // Whether the last command the agent took ended in a failure: an LLM, HTTP
+    // or parse error response, the round cap reached, or the command having
+    // thrown. On the concrete Agent only (IAgent is not changed): it exists so
+    // AgentProcess can turn the conversation's end into an exit code.
+    bool LastCommandFailed() const;
+
+    // Runs |hook| once, on the agent's own thread, when its conversation thread
+    // ends -- before the agent reports finished (WaitToFinish). If the thread has
+    // already ended, runs it at once on the calling thread. Exceptions from the
+    // hook are caught and logged.
+    void SetFinishedHook(std::function<void()> hook);
+
+    // The agent's stop token, on the concrete Agent only (not IAgent): installed
+    // on the agent's thread by RunThread so a pipe Read/Write blocked there is
+    // woken when the agent is asked to stop, and handed to the process's input
+    // loop so a blocked read of the agent's stdin pipe ends it too. Signalled
+    // by TriggerStop() (and so by self_close).
+    std::shared_ptr<StopToken> GetStopToken() const;
 
 private:
     Agent(
@@ -108,13 +129,28 @@ private:
     SynchronizedQueueEx<std::string> m_commandQueue;
     std::thread m_thread;
     std::atomic<bool> m_finished{false};
+    // Set false as each command starts and true as it is found to have failed
+    // (see LastCommandFailed).
+    std::atomic<bool> m_lastCommandFailed{false};
     // Set by TriggerStop. Read on the agent's own thread between tool calls, so
     // a stop asked for while a round is in flight takes effect at the next
     // point where stopping is safe rather than only at the next command.
     std::atomic<bool> m_stopRequested{false};
+    // Signalled by TriggerStop along with the flag, so a pipe call blocked on
+    // this agent's thread (or its process's input loop) is woken at once --
+    // an agent asked to stop no longer waits out a full pipe; what could not
+    // be written is dropped.
+    std::shared_ptr<StopToken> m_stopToken = StopToken::Create();
     std::condition_variable m_finishedCv;
     std::mutex m_finishedMutex;
     std::mutex m_joinMutex;
+
+    // A single hook run when the conversation thread ends, before m_finished is
+    // set. Guarded by the mutex; m_finishedHookTaken says the thread has passed
+    // the point of running it, so a hook set later runs at once instead.
+    std::mutex m_finishedHookMutex;
+    std::function<void()> m_finishedHook;
+    bool m_finishedHookTaken = false;
 };
 
 }

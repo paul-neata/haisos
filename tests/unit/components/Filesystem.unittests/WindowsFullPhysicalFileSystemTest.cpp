@@ -121,10 +121,10 @@ TEST_F(WindowsFullPhysicalFileSystemTest, APathBelowADriveIsThatPathOnTheDrive) 
 
 TEST_F(WindowsFullPhysicalFileSystemTest, WritingBelowADriveWritesTheDisk) {
     ASSERT_EQ(m_fs->CreateDirectory(m_full + "/made", _S_IREAD | _S_IWRITE), 0);
-    const int fd = m_fs->OpenFile(m_full + "/made/new.txt", kFileOpenWriteCreateTruncate, kFileCreateMode);
-    ASSERT_GE(fd, 0);
-    EXPECT_EQ(m_fs->WriteFile(fd, "written", 7), 7);
-    EXPECT_EQ(m_fs->CloseFile(fd), 0);
+    auto file = m_fs->OpenFile(m_full + "/made/new.txt", kFileOpenWriteCreateTruncate, kFileCreateMode);
+    ASSERT_NE(file, nullptr);
+    EXPECT_EQ(file->Write("written", 7), 7);
+    file.reset();
     std::stringstream content;
     {
         // Closed before the removal below: Windows removes no open file.
@@ -142,10 +142,8 @@ TEST_F(WindowsFullPhysicalFileSystemTest, TheRootAndADriveAreDirectories) {
     FileStatus status;
     ASSERT_EQ(m_fs->Stat("/", status), 0);
     EXPECT_EQ(status.type, DirectoryEntryType::Dir);
-    EXPECT_FALSE(status.symbolicLink);
     ASSERT_EQ(m_fs->Stat("/" + std::string(1, m_drive), status), 0);
     EXPECT_EQ(status.type, DirectoryEntryType::Dir);
-    EXPECT_FALSE(status.symbolicLink);
     ASSERT_EQ(m_fs->Stat(m_full + "/f.txt", status), 0);
     EXPECT_EQ(status.type, DirectoryEntryType::File);
     EXPECT_EQ(status.size, 11u);
@@ -159,8 +157,8 @@ TEST_F(WindowsFullPhysicalFileSystemTest, NothingIsCreatedOrRemovedAtTheTop) {
     EXPECT_NE(m_fs->RemoveDirectory(drive), 0);
     EXPECT_NE(m_fs->RemoveFile(drive), 0);
     EXPECT_NE(m_fs->RemoveDirectory("/"), 0);
-    EXPECT_LT(m_fs->OpenFile("/new.txt", kFileOpenWriteCreateTruncate, kFileCreateMode), 0);
-    EXPECT_LT(m_fs->OpenFile("/", kFileOpenReadOnly), 0);
+    EXPECT_EQ(m_fs->OpenFile("/new.txt", kFileOpenWriteCreateTruncate, kFileCreateMode), nullptr);
+    EXPECT_EQ(m_fs->OpenFile("/", kFileOpenReadOnly), nullptr);
     FileStatus status;
     EXPECT_NE(m_fs->Stat("/newdir", status), 0);
 }
@@ -174,7 +172,7 @@ TEST_F(WindowsFullPhysicalFileSystemTest, ADriveThatIsNotThereHoldsNothing) {
     FileStatus status;
     EXPECT_NE(m_fs->Stat(drive, status), 0);
     EXPECT_TRUE(m_fs->ReadDirectory(drive).empty());
-    EXPECT_LT(m_fs->OpenFile(drive + "/x.txt", kFileOpenWriteCreateTruncate, kFileCreateMode), 0);
+    EXPECT_EQ(m_fs->OpenFile(drive + "/x.txt", kFileOpenWriteCreateTruncate, kFileCreateMode), nullptr);
     EXPECT_NE(m_fs->CreateDirectory(drive + "/x", _S_IREAD | _S_IWRITE), 0);
 }
 
@@ -206,7 +204,7 @@ TEST_F(WindowsFullPhysicalFileSystemTest, ADriveWithNoMediumInListsAsEmpty) {
         FileStatus status;
         ASSERT_EQ(m_fs->Stat(drive, status), 0) << drive;
         EXPECT_EQ(status.type, DirectoryEntryType::Dir);
-        EXPECT_LT(m_fs->OpenFile(drive + "/x.txt", kFileOpenReadOnly), 0);
+        EXPECT_EQ(m_fs->OpenFile(drive + "/x.txt", kFileOpenReadOnly), nullptr);
     }
 }
 

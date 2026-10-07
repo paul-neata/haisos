@@ -1,6 +1,7 @@
 #include "ServicesCreator.h"
 #include "src/components/NetworkService/NetworkService.h"
 #include "src/components/FileSystemService/FileSystemService.h"
+#include "src/components/PipeService/PipeService.h"
 #include "src/components/LLMService/LLMService.h"
 
 namespace Haisos {
@@ -19,6 +20,10 @@ std::shared_ptr<IServicesCreator> ServicesCreator::Clone() const {
 
 std::shared_ptr<IFileSystemService> ServicesCreator::CreateFileSystemService() {
     return FileSystemService::Create();
+}
+
+std::shared_ptr<IPipeService> ServicesCreator::CreatePipeService() {
+    return PipeService::Create();
 }
 
 std::shared_ptr<INetworkService> ServicesCreator::CreateNetworkService() {

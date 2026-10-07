@@ -2,9 +2,8 @@
 
 namespace Haisos {
 
-AgentConsoleAdapter::AgentConsoleAdapter(std::shared_ptr<IPhysicalConsole> physicalConsole, const std::string& sourceName)
+AgentConsoleAdapter::AgentConsoleAdapter(std::shared_ptr<IPhysicalConsole> physicalConsole)
     : m_physicalConsole(std::move(physicalConsole))
-    , m_sourceName(sourceName)
 {
 }
 
@@ -12,17 +11,16 @@ AgentConsoleAdapter::~AgentConsoleAdapter() = default;
 
 void AgentConsoleAdapter::Write(const std::string& message) {
     if (m_physicalConsole) {
-        // Tagging happens here, in the one place that knows the source, rather
-        // than in the console -- a shared console has no business knowing who
-        // its writers are, and only one kind of writer wants a label at all.
-        m_physicalConsole->Write("[" + m_sourceName + "] " + message);
+        // One Write per line: the physical console adds no newline of its own.
+        m_physicalConsole->Write(message + "\n");
     }
 }
 
-std::optional<std::string> AgentConsoleAdapter::ReadLine() {
-    // Input is not tagged: what the user types is addressed to whoever is
-    // reading, and a label would only have to be stripped off again.
-    return m_physicalConsole ? m_physicalConsole->ReadLine() : std::nullopt;
+void AgentConsoleAdapter::WriteError(const std::string& message) {
+    if (m_physicalConsole) {
+        // A diagnostic goes to the host's stderr, like a reply goes to stdout.
+        m_physicalConsole->WriteError(message + "\n");
+    }
 }
 
 }

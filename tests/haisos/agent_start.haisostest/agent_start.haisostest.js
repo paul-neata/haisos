@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -17,17 +17,26 @@ fs.writeFileSync(path.join(tmpDir, 'haisosfile'),
     "ENV HAISOS_ENDPOINT\nENV HAISOS_MODEL\nENV HAISOS_API_KEY\nROOT .\nRUN /agent.md\n");
 
 try {
-    const result = execSync(`${haisosPath} haisosfile`, { encoding: 'utf8', timeout: 120000, cwd: tmpDir });
-    console.log(result);
-    // haisos exits 0 even when the agent itself fails, so assert on the output.
-    if (/Error:/.test(result)) {
+    // spawnSync, not execSync: an agent's failures now go to stderr, which
+    // execSync never returns.
+    const result = spawnSync(haisosPath, ['haisosfile'], { encoding: 'utf8', timeout: 120000, cwd: tmpDir });
+    if (result.error) {
+        console.error("agent_start haisos test failed:", result.error.message);
+        process.exit(1);
+    }
+    console.log(result.stdout);
+    // A haisos that crashed, or exited non-zero without reporting an error,
+    // must fail too -- and every one of these runs is expected to exit 0.
+    if (result.status !== 0 || result.signal) {
+        console.error(`agent_start haisos test failed: exit status ${result.status}, signal ${result.signal}`);
+        process.exit(1);
+    }
+    // Assert on the output as well, on both streams.
+    if (/Error:/.test(result.stdout) || /Error:/.test(result.stderr)) {
         console.error("agent_start haisos test failed: the agent reported an error");
         process.exit(1);
     }
     console.log("agent_start haisos test passed");
-} catch (e) {
-    console.error("agent_start haisos test failed:", e.message);
-    process.exit(1);
 } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
 }

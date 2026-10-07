@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include "interfaces/IFileDescriptor.h"
+#include "interfaces/IFileIO.h"
 #include "interfaces/IFileSystemService.h"
 #include "VirtualPath.h"
 
@@ -20,6 +22,7 @@ namespace Haisos {
 constexpr int kFileOpenReadOnly = _O_RDONLY | _O_BINARY;
 constexpr int kFileOpenWriteCreateTruncate = _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY;
 constexpr int kFileOpenWriteCreateAppend = _O_WRONLY | _O_CREAT | _O_APPEND | _O_BINARY;
+constexpr int kFileOpenReadWriteCreate = _O_RDWR | _O_CREAT | _O_BINARY;  // the <> redirection (dash)
 constexpr int kFileCreateMode = _S_IREAD | _S_IWRITE;
 constexpr int kFileWriteOnlyBit = _O_WRONLY;
 constexpr int kFileReadWriteBit = _O_RDWR;
@@ -30,6 +33,7 @@ constexpr int kFileAppendBit = _O_APPEND;
 constexpr int kFileOpenReadOnly = O_RDONLY;
 constexpr int kFileOpenWriteCreateTruncate = O_WRONLY | O_CREAT | O_TRUNC;
 constexpr int kFileOpenWriteCreateAppend = O_WRONLY | O_CREAT | O_APPEND;
+constexpr int kFileOpenReadWriteCreate = O_RDWR | O_CREAT;  // the <> redirection (dash)
 constexpr int kFileCreateMode = S_IRUSR | S_IWUSR;
 constexpr int kFileWriteOnlyBit = O_WRONLY;
 constexpr int kFileReadWriteBit = O_RDWR;
@@ -78,26 +82,16 @@ inline std::optional<char> EntryTypeOf(FileAccess& fs, const std::string& absolu
     return status.type;
 }
 
-// Reads the whole file at |path|, up to a 10 MB cap. Returns false on any
-// failure. |fs| is anything offering the IFileSystem file operations: an
-// IFileSystem (which may be rooted/jailed, and understands absolute paths
-// only) or a process's IFileIO (which also resolves a relative path against
-// where that process currently is).
-template <typename FileAccess>
-inline bool ReadWholeFile(FileAccess& fs, const std::string& path, std::string& outContent) {
-    int fd = fs.OpenFile(path, kFileOpenReadOnly);
-    if (fd < 0) {
-        return false;
-    }
-
+// Reads |file| to its end, up to the same 10 MB cap as ReadWholeFile below.
+// False on a read error.
+inline bool ReadWholeDescriptor(IFileDescriptor& file, std::string& outContent) {
     constexpr size_t kMaxSize = 10 * 1024 * 1024;
     constexpr size_t kChunkSize = 64 * 1024;
     std::string content;
     char buf[kChunkSize];
     while (content.size() < kMaxSize) {
-        ssize_t n = fs.ReadFile(fd, buf, sizeof(buf));
+        ssize_t n = file.Read(buf, sizeof(buf));
         if (n < 0) {
-            fs.CloseFile(fd);
             return false;
         }
         if (n == 0) {
@@ -105,9 +99,31 @@ inline bool ReadWholeFile(FileAccess& fs, const std::string& path, std::string& 
         }
         content.append(buf, static_cast<size_t>(n));
     }
-    fs.CloseFile(fd);
     outContent = std::move(content);
     return true;
+}
+
+// Reads the whole file at |path| on an IFileSystem (which may be
+// rooted, and understands absolute paths only), up to a 10 MB cap.
+// Returns false on any failure.
+inline bool ReadWholeFile(IFileSystem& fs, const std::string& path, std::string& outContent) {
+    auto file = fs.OpenFile(path, kFileOpenReadOnly);
+    if (!file) {
+        return false;
+    }
+    return ReadWholeDescriptor(*file, outContent);
+}
+
+// Reads the whole file at |path| through a process's IFileIO, which also
+// resolves a relative path against where that process currently is. Up to a
+// 10 MB cap; false on any failure. The descriptor is released, not placed in
+// the process's descriptor table.
+inline bool ReadWholeFile(IFileIO& io, const std::string& path, std::string& outContent) {
+    auto file = io.OpenFile(path, kFileOpenReadOnly);
+    if (!file) {
+        return false;
+    }
+    return ReadWholeDescriptor(*file, outContent);
 }
 
 }

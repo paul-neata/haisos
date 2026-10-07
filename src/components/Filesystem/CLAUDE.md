@@ -12,14 +12,29 @@ decides what the call means. Mounting a `PhysicalFileSystem` inside an
 There are two ways to combine filesystems. `IFileSystem::Mount`/`Unmount` change
 a filesystem **in place**, adding or removing a mount point on it.
 `IFileSystemService::CreateComposedFileSystem` leaves both operands untouched and
-returns a **new** filesystem instead. Both share one implementation: the routing,
-file-descriptor translation and mount-point listing all live in
+returns a **new** filesystem instead. Both share one implementation: the routing
+and mount-point listing all live in
 `MountableFileSystem`, which every filesystem here derives from, so mounting
 behaves identically no matter what you mount onto.
 
 ## Responsibilities
 
-- Provides file operations: open, close, read, write
+- Provides file operations. `OpenFile` returns an `IFileDescriptor` object (see
+  `interfaces/IFileDescriptor.h`), null on failure; the file is read and written
+  through the object, and it is closed when its last `shared_ptr` is released.
+  Every leaf descriptor enforces the access mode it was opened with: `Write` on
+  a read-only descriptor and `Read` on a write-only one fail with `kIOError`, as
+  `EBADF` would.
+- Every filesystem returns a descriptor class of its own: `HostFileDescriptor`
+  (`Filesystem.h`, wrapping the host's descriptor, its methods defined per
+  backend), `InMemoryFileDescriptor` (holding the in-memory filesystem alive
+  while open; an `O_APPEND` one writes at the end of the file **before every
+  write**, as POSIX says), `DeviceFileDescriptor` (`/dev/null`, `/dev/zero`),
+  and `BuiltinCommandFileDescriptor` (a builtin's note text, read-only). The
+  wrappers (read-only, sub-path, composed) and every mount pass the inner
+  filesystem's descriptor up untouched -- there is no descriptor translation.
+  A descriptor keeps working after its filesystem is unmounted, and after the
+  last outside reference to that filesystem is gone, until it is released.
 - Provides file removal (unlink, via `RemoveFile`) and directory operations: mkdir, rmdir
 - Provides custom directory listing via `ReadDirectory`, which starts every
   listing of a directory with `.` and `..`, as `readdir()` does. They are put in
@@ -42,9 +57,7 @@ behaves identically no matter what you mount onto.
   `DirectoryEntryType::CharDevice` of size 0 and 0 blocks, with Linux's major
   and minor numbers for it (`deviceMajor`/`deviceMinor`, as `st_rdev`); a
   disk's character devices are reported so on Linux too. A symbolic link is
-  followed, as by `stat()`, and `symbolicLink` says the path was one (only
-  `PhysicalFileSystem` has links to report; composing filesystems pass it
-  on). There are no permissions or owners to report yet. `EntryTypeOf` is
+  followed, as by `stat()`. There are no permissions or owners to report yet. `EntryTypeOf` is
   built on it.
 - Holds **no current directory**. That notion belongs to a process
   (`ICurrentProcess::IO()`, an `IFileIO`), not to a filesystem: one filesystem is
@@ -84,9 +97,7 @@ behaves identically no matter what you mount onto.
   - **Windows**: Windows CRT and API, wide-character (`windows/WindowsFilesystem.cpp`)
   - **WASM**: POSIX calls (`linux/PosixFilesystem.cpp`, same source as Linux)
 
-  Each also defines `FileSystem::IsLink` (is a host path itself a link: a
-  symbolic link, or on Windows a junction or a WSL symlink, by its reparse
-  tag -- `std::filesystem` misses both), `FileSystem::IsDevicePath` (does the
+  Each also defines `FileSystem::IsDevicePath` (does the
   host take a path for a device: on Windows, as `GetFullPathNameW` says --
   `NUL.txt` is the null device on Windows 10 and a file on Windows 11, so no
   fixed list could say) and `NoCriticalErrorDialogs`, which
@@ -97,16 +108,17 @@ behaves identically no matter what you mount onto.
 ## Key Classes
 
 - `FileSystem` - Main implementation of `IFileSystem`, unrooted (operates on real paths)
-- `PhysicalFileSystem` - `IFileSystem` jailed to a real disk directory; validates every path stays within that root before delegating to an inner `FileSystem`. Its root is a physical path (`PhysicalPath.h`): absolute or relative to the current directory, and on Windows written with `\` or `/`, with a drive (`c:\x`, `c:/x`), as a UNC path (`\\server\share\x`), or as a path of the full physical filesystem (`/c/x`); `Create("/")` there returns `WindowsFullPhysicalFileSystem`. A root naming no directory is logged, and every call then fails. All of it happens in `ResolveOnHost`: the path is split as the mounts over it split it (`SplitVirtualPath`: a `..` climbing above the root is refused, so no `..` can hide a component from `weakly_canonical`'s walk either), each segment must be a plain host name (`IsPlainHostName`: no NUL; on Windows no `:`, wildcard, trailing dot or space, or device name such as `con`, any of which would reach something other than the path says, past mounts and builtins), the segments are placed on the host (`HostPathOf`, under the root) -- where the host must not take the path for a device (`FileSystem::IsDevicePath`) -- canonicalized, and checked to lie within (`IsWithin`). Symbolic links already on the disk (nothing here can create one; on Windows a junction is one too) are followed only while they stay within the root, and a path ending in a link that leads nowhere is refused -- `weakly_canonical` cannot resolve a dangling link, and `open()` with `O_CREAT` would create its target, outside the root perhaps. `LocalOpenFile` also adds `O_NOFOLLOW` on POSIX, in case a link appears between the check and the open; a directory swapped for a link higher up the path in that window is not caught (it takes something outside Haisos to do it). `RemoveFile`, `RemoveDirectory` and `CreateDirectory` resolve only the directory holding the last component and take that component as it is, as `unlink()`/`rmdir()`/`mkdir()` do: a link is removed itself, never what it points at, and the root itself can be neither removed nor created. `Stat` follows links but reports one in `FileStatus::symbolicLink`, which the haisosfile's `DELETE` uses to remove a link rather than descend into it. A physical directory taken from the full physical filesystem is a `PhysicalFileSystem` jailed there, never a `SubFileSystem` of the full one, whose confinement goes by the path as written: a link inside would lead anywhere on the disk
-- `WindowsFullPhysicalFileSystem` (`windows/`, Windows only) - the machine's whole disk as one filesystem, as Cygwin shows it: `/` holds a directory per drive, named by its letter in lowercase (`GetLogicalDriveStringsW`), and `/c/Users/x.txt` is `C:\Users\x.txt`. What `IFactory::CreateFullPhysicalFileSystem()` returns on Windows; on Linux that is a `PhysicalFileSystem` at `/`. A `PhysicalFileSystem` with no root of its own: it overrides `HostPathOf` (the drive letter, in either case, then the rest) and `IsWithin` (anywhere on a drive, so a link may lead from one drive to another, but not to a share), and lists `/` itself. A drive of removable or optical media (`GetDriveTypeW`) with no medium in lists as an empty directory. Nothing is created or removed at the top. A UNC path is on no drive, so not in it; `PhysicalFileSystem` takes one directly
+- `PhysicalFileSystem` - `IFileSystem` rooted at a real disk directory; places every path under that root before delegating to an inner `FileSystem`. Its root is a physical path (`PhysicalPath.h`): absolute or relative to the current directory, and on Windows written with `\` or `/`, with a drive (`c:\x`, `c:/x`), as a UNC path (`\\server\share\x`), or as a path of the full physical filesystem (`/c/x`); `Create("/")` there returns `WindowsFullPhysicalFileSystem`. A root naming no directory is logged, and every call then fails. All of it happens in `ResolveOnHost`: the path is split as the mounts over it split it (`SplitVirtualPath`: a `..` climbing above the root is refused), each segment must be a plain host name (`IsPlainHostName`: no NUL; on Windows no `:`, wildcard, trailing dot or space, or device name such as `con`, any of which would reach something other than the path says, past mounts and builtins), the segments are placed on the host (`HostPathOf`, under the root) -- where the host must not take the path for a device (`FileSystem::IsDevicePath`) -- and handed to it as they are; nothing on the disk is consulted. Symbolic links on the disk (on Windows also junctions; nothing here creates one) are followed wherever they lead, out of the root included, by the host call itself: whoever creates the filesystem vouches for them. `RemoveFile`, `RemoveDirectory` and `CreateDirectory` are `unlink()`/`rmdir()`/`mkdir()` on that path, and the root itself can be neither removed nor created. A physical directory taken from the full physical filesystem is a `PhysicalFileSystem` of its own rather than a `SubFileSystem` of the full one, because on Windows a UNC directory is on no drive, so the full filesystem does not hold it
+- `WindowsFullPhysicalFileSystem` (`windows/`, Windows only) - the machine's whole disk as one filesystem, as Cygwin shows it: `/` holds a directory per drive, named by its letter in lowercase (`GetLogicalDriveStringsW`), and `/c/Users/x.txt` is `C:\Users\x.txt`. What `IFactory::CreateFullPhysicalFileSystem()` returns on Windows; on Linux that is a `PhysicalFileSystem` at `/`. A `PhysicalFileSystem` with no root of its own: it overrides `HostPathOf` (the drive letter, in either case, then the rest), and lists `/` itself. A drive of removable or optical media (`GetDriveTypeW`) with no medium in lists as an empty directory. Nothing is created or removed at the top. A UNC path is on no drive, so not in it; `PhysicalFileSystem` takes one directly
 - `InMemoryFileSystem` - an empty, in-memory read/write `IFileSystem` (no real disk); files are plain byte buffers keyed by normalized path
 - `DeviceFileSystem` - a device filesystem, as Linux's `/dev`: a root directory holding the character devices `null` (writes discarded, reads end at once) and `zero` (writes discarded, reads return endless 0 bytes). Nothing can be created or removed in it -- files, directories, or builtins (`LocalCanHoldBuiltinCommands`) -- but a device opens with any flags, so `> /dev/null` works
 - `ReadOnlyFileSystem` - wraps another `IFileSystem`, rejecting every write/create/remove
-- `SubFileSystem` - confines access to a sub-path of another `IFileSystem`, resolved purely lexically (no real disk access, unlike `PhysicalFileSystem`): no path as written can leave its base, but a symbolic link under its base on a physical filesystem leads wherever that filesystem lets it -- which is why a directory of the disk is jailed with a `PhysicalFileSystem` of its own instead
+- `SubFileSystem` - confines access to a sub-path of another `IFileSystem`, resolved purely lexically (no real disk access, unlike `PhysicalFileSystem`): no path as written can leave its base, but a symbolic link under its base on a physical filesystem leads wherever that filesystem lets it
 - `ComposedFileSystem` - overlays one `IFileSystem` inside another at a path, without touching either; it is a filesystem that delegates to `main` with the overlay registered as a mount point
 - `MountableFileSystem` - the base every filesystem here derives from; implements `Mount`/`Unmount` and the routing they need, so a subclass only implements the `Local*` operations for the paths it owns itself
-- `MountPoints` - the mount table behind that: longest-prefix path matching, plus the file-descriptor translation a mount requires (the two filesystems hand out descriptors from independent namespaces that both start at 3, so a mounted file's descriptor is re-issued from a range far above any real one and can never be confused with the host's). The synthetic range is allocated from one program-wide counter (`AllocateSyntheticFd`), not one per table: filesystems stack, and an inner one's synthetic fd passes up through the outer one untranslated, so per-table counters would collide. Builtin command files take their fds from the same counter.
-- `FilesystemUtils.h` / `VirtualPath.h` - header-only helpers shared beyond this component: `ReadWholeFile`, `EntryTypeOf` (what is at a path -- `Stat`'s type, or nothing), the open-flag constants, and lexical path handling (`IsVirtualPathSeparator`, `NormalizeVirtualPath`, `SplitVirtualPath`, `VirtualParentOf`, `VirtualLastSegment`)
+- `MountPoints` - the mount table behind that: longest-prefix path matching, so a
+  mounted filesystem serves every path at or under its mount point.
+- `FilesystemUtils.h` / `VirtualPath.h` - header-only helpers shared beyond this component: `ReadWholeFile` (on an `IFileSystem` and on an `IFileIO`), `ReadWholeDescriptor`, `EntryTypeOf` (what is at a path -- `Stat`'s type, or nothing), the open-flag constants, and lexical path handling (`IsVirtualPathSeparator`, `NormalizeVirtualPath`, `SplitVirtualPath`, `VirtualParentOf`, `VirtualLastSegment`)
 - `PhysicalPath.h` - physical paths, how the host's disk is named to Haisos (a physical filesystem's root, a haisosfile's `FS ... PHYSICAL`, `COPY`/`OUTCOPY` host paths): `ResolvePhysicalPath` turns one into an absolute host path, `IsFullFileSystemRoot` tells the root of the full physical filesystem apart, and `IsPlainHostName` says whether a name reaches the host as that very name. The Windows and POSIX rules are pure string handling, each testable on either platform (`ResolveWindowsPhysicalPath`, `IsPlainWindowsName`, ...)
 - `NoCriticalErrorDialogs.h` - see the backends above
 

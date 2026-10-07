@@ -9,8 +9,18 @@ Console::~Console() {
     Stop();
 }
 
-void Console::Write(const std::string& message) {
-    m_queue.Post(message);
+void Console::Write(const std::string& bytes) {
+    if (bytes.empty()) {
+        return;
+    }
+    m_queue.Post(ConsoleOutput{false, bytes});
+}
+
+void Console::WriteError(const std::string& bytes) {
+    if (bytes.empty()) {
+        return;
+    }
+    m_queue.Post(ConsoleOutput{true, bytes});
 }
 
 std::optional<std::string> Console::ReadLine() {
@@ -42,13 +52,15 @@ void Console::Stop() {
 
 void Console::ProcessQueue() {
     while (true) {
-        std::string message;
-        if (!m_queue.Pop(message)) {
+        ConsoleOutput output;
+        if (!m_queue.Pop(output)) {
             break;
         }
-        if (!message.empty()) {
-            std::cout << message << '\n';
-        }
+        // The bytes as they are: nothing added, and the stream is flushed
+        // after every write, so a partial line (a prompt) shows at once.
+        std::ostream& stream = output.toError ? std::cerr : std::cout;
+        stream.write(output.bytes.data(), static_cast<std::streamsize>(output.bytes.size()));
+        stream.flush();
     }
 }
 

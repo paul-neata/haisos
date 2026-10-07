@@ -55,11 +55,31 @@ Manages LLM conversations with parent/child agent relationships. Supports subage
 - **A failed command never ends an agent silently.** Whatever a command throws
   -- a tool, the LLM round trip, anything else -- is caught around that one
   command (`ProcessCommand`): it is logged ("Exception in RunThread"), written
-  to the agent's console and message buffer as `Error: the command failed:
+  to the agent's console's error stream (`WriteError`) and message buffer as
+  `Error: the command failed:
   ...`, and every tool call it left without a result is given an error one
   (`AnswerUnansweredToolCalls`), because the history is only a valid
   conversation with one result per tool call. An interactive agent then takes
   its next command; a non-interactive one finishes, as it would have anyway.
+- **`LastCommandFailed()` says whether the command most recently finished ended
+  badly** -- on the concrete `Agent` alone, not `IAgent`, because it is the
+  process's business (`AgentProcess` turns it into the agent process's exit
+  code, 1 or 0). Set false as each command starts, true on an LLM, HTTP or
+  parse failure, on the LLM-round cap being reached (which also writes
+  `Error: the command reached the maximum of <n> LLM rounds` to the agent's
+  error stream -- a diagnostic, nothing the history or message buffer sees),
+  and on the failed-command catch above.
+- **Replies and diagnostics are two streams on the agent's console.** What the
+  agent says -- the text of an assistant message -- goes to
+  `IAgentConsole::Write`. What goes wrong in its own running goes to
+  `WriteError` instead: an LLM, HTTP or parse failure (a response the
+  LLMCommunicator marked with done_reason `"error"`, `"parse_error"` or
+  `"http_error"`; its content is the `Error: ...` text), `Error: Unknown tool -
+  <name>`, and `Error: the command failed: ...`. A process's console
+  (`ProcessAgentConsole`) lays the first out on the process's stdout and the
+  second on its stderr. The history and the message buffer
+  (`GetConsoleOutput()`) keep an error response exactly like a reply: none of
+  what the LLM is sent changes with the stream a line lands on.
 - Tool descriptions are fetched from the tool factory once in the constructor and cached for the
   agent's lifetime, not rebuilt per LLM round. Tools registered after an agent is constructed are
   invisible to it, so tool registries must be populated before agents are created.
@@ -89,6 +109,18 @@ remaining LLM rounds refusing tool calls. Every call still gets a result, an
 error one, because the history is only well-formed with one result per tool
 call.
 
+**An agent owns its process's stop token** (`Agent::GetStopToken()`, on the
+concrete `Agent` only, not `IAgent`): `RunThread` installs it on the agent's
+thread with a `StopTokenScope`, and `TriggerStop()` signals it with
+`RequestStop()` after setting the flag and closing the queue -- so
+`self_close`, the input loop's stop at end of input and
+`AgentProcess::TriggerStop` all interrupt a blocked pipe call of the agent (a
+`ProcessAgentConsole` write to a full stdout pipe) at once: what could not be
+written is dropped. The same token is handed to the interactive process's
+`AgentInputLoop`, so a read blocked on the agent's piped stdin is likewise
+interrupted (`kIOInterrupted`, which `DescriptorLineReader` reports as end of
+input).
+
 **There is no `Kill()`.** An agent cannot be forced down, because its thread
 spends its time inside an HTTP call or a tool call that has to be allowed to
 return; a flag saying it was killed would change nothing about when it actually
@@ -113,6 +145,14 @@ destroyed on the destruction thread once its thread is done; on its own thread,
 
 `IsFinished()` is public on the concrete `Agent` only, not on `IAgent`, which
 answers the same question through `WaitToFinish(0)`.
+
+`SetFinishedHook(hook)` is likewise on the concrete `Agent` only: the hook runs
+exactly once, on the agent's own thread, when its conversation thread ends --
+before the agent reports finished through `WaitToFinish`. Set after the thread
+has already ended, it runs at once on the calling thread. Its exceptions are
+caught and logged. It exists so that the process the agent runs as can release
+its descriptor table at the end of the conversation; `AgentProcess::Create` is
+the one caller.
 
 `AddChild` is **protected** on `IAgent`, with `LLMService` as its only friend:
 an agent's children are decided by the one thing that creates agents, not by

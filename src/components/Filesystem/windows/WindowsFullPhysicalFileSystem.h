@@ -22,9 +22,8 @@ namespace Haisos {
 //    Stat say it is an empty directory; nothing waits on a "no disk" dialog
 //    (NoCriticalErrorDialogs).
 //  - Below a drive every path is PhysicalFileSystem's, taken segment by
-//    segment, each a plain name. A link is followed wherever it leads, so
-//    long as that is on a drive -- from one drive to another, too -- and
-//    never ends a path dangling.
+//    segment, each a plain name. A link is followed wherever it leads, as
+//    the host follows it.
 //  - Nothing is created or removed at the top: no drive can be made or
 //    removed there, nor can a drive's root.
 //  - A drive letter may be written in either case: /C/x is /c/x, as Windows
@@ -43,8 +42,6 @@ protected:
     // /c/x/y is C:\x\y; the top itself, and a drive there is not, lie
     // nowhere on the host.
     bool HostPathOf(const std::vector<std::string>& segments, std::filesystem::path& hostPath) const override;
-    // Anywhere on a drive.
-    bool IsWithin(const std::string& canonical) const override;
 
 private:
     WindowsFullPhysicalFileSystem();

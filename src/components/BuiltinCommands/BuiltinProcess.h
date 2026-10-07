@@ -3,14 +3,18 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
 #include "interfaces/IBuiltinCommands.h"
 #include "interfaces/IProcess.h"
+#include "src/components/libheaders/StopToken.h"
 #include "BuiltinCommand.h"
 
 namespace Haisos {
+
+class ProcessFileIO;
 
 // An ICurrentProcess whose runtime is a builtin command: the command runs on a
 // thread of its own, the process finishing when it returns. Shaped like
@@ -23,7 +27,8 @@ public:
         std::shared_ptr<IEnvironment> environment,
         std::shared_ptr<IBuiltinCommand> command,
         std::vector<std::string> args,
-        const std::string& workingDirectory);
+        const std::string& workingDirectory,
+        const StartProcessOptions& options);
     ~BuiltinProcess() override;
 
     // IProcess
@@ -36,15 +41,18 @@ public:
     // work, so this is a request, as it is for every process.
     void TriggerStop() override;
     bool WaitToFinish(uint64_t timeoutMs) override;
+    // The command's own result modulo 256 once it has returned, or 143 when it
+    // was asked to stop first (see IProcess::ExitCode).
+    std::optional<int> ExitCode() const override;
 
     // ICurrentProcess
     std::shared_ptr<IFileIO> IO() const override;
     std::shared_ptr<IAgent> AsAgent() override;
     std::shared_ptr<IHaisosOS> OS() const override;
-
-    // Internal to this component (and its tests): the command's exit status,
-    // meaningful once the process has finished. IProcess has no exit status yet.
-    int ExitStatus() const;
+    // The command's own output path (BuiltinContext::WriteAll) calls this when a
+    // write of the command's bytes hit a pipe with no reader: the command stops
+    // quietly, as it would from SIGPIPE, with exit code 141.
+    void StopForBrokenPipe() override;
 
 private:
     BuiltinProcess(
@@ -65,16 +73,25 @@ private:
     std::shared_ptr<IEnvironment> m_environment;
     // Weak: the OS owns its processes.
     std::weak_ptr<IHaisosOS> m_os;
-    std::shared_ptr<IFileIO> m_io;
-    std::shared_ptr<IAgentConsole> m_console;
+    // Concrete, so RunThread (and the tests) can reach the descriptor table's
+    // ReleaseAllDescriptors, which is not on IFileIO.
+    std::shared_ptr<ProcessFileIO> m_io;
     std::shared_ptr<IBuiltinCommand> m_command;
     std::vector<std::string> m_args;
 
     std::thread m_thread;
     std::atomic<bool> m_stopRequested{false};
+    // Set by StopForBrokenPipe, from the command's own thread as it writes:
+    // the command's pipe lost its reader. Wins over a stop (141, not 143).
+    std::atomic<bool> m_brokenPipe{false};
+    // What wakes a pipe Read/Write blocked on this process's behalf: installed
+    // on the command's thread by RunThread, signalled by TriggerStop.
+    std::shared_ptr<StopToken> m_stopToken = StopToken::Create();
     std::atomic<bool> m_finished{false};
-    std::atomic<int> m_exitStatus{0};
-    std::mutex m_finishedMutex;
+    // Set under m_finishedMutex in the same critical section that marks the
+    // process finished, so whoever sees finished finds it already in place.
+    std::optional<int> m_exitCode;
+    mutable std::mutex m_finishedMutex;
     std::condition_variable m_finishedCv;
     std::mutex m_joinMutex;
 };

@@ -1,5 +1,6 @@
 #pragma once
 #include <atomic>
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string>
@@ -9,9 +10,11 @@
 namespace Haisos {
 
 // Whether an option takes an argument: never ("-l"), always ("-w 80",
-// "--width=80"), or only when attached to a long option ("--color",
-// "--color=auto").
-enum class BuiltinArgument { None, Required, Optional };
+// "--width=80"), only when attached to a long option ("--color",
+// "--color=auto"), or attached to either spelling but never as the next word
+// (OptionalAttached: man-db's "-Tutf8", "--troff-device=utf8"; "-T utf8" is
+// -T, then the operand utf8).
+enum class BuiltinArgument { None, Required, Optional, OptionalAttached };
 
 // An id no treated option uses: it marks an option of the real command that
 // Haisos recognizes but does not act on (see BuiltinContext::ReportNotTreated).
@@ -65,25 +68,40 @@ struct BuiltinHelp {
     // Anything else the command handles that is not an option (echo's
     // escapes, say), in a few lines; may be empty.
     std::string notes;
+    // The real command this builtin copies, when its name differs from the
+    // builtin's own: "dash" for hsh. Empty: the builtin's own name. The "Based
+    // on Linux <command>: <url>" line of --help names it and links its page.
+    std::string basedOn;
 };
 
 class IBuiltinCommand;
 
+// The block size at which a buffered (non-terminal) stdout is written out.
+constexpr size_t kBuiltinOutBufferSize = 4096;
+
 // What a running builtin command is handed: the process it runs as (the only
-// door out of it -- files through process.IO()), its arguments, and somewhere
-// to print.
+// door out of it -- files through process.IO()), its arguments, and its
+// standard streams, read once at construction from the process's descriptor
+// table: Out writes to descriptor 1, Error and the rest to descriptor 2.
 //
-// There is no stdout or stderr yet, so both kinds of output go to the process's
-// console. Output is buffered into lines, each one a single console Write; a
-// final line without a newline is written when the command ends (which is how
-// `echo -n` still shows its text).
+// The output rule:
+//   * stdout to a terminal is unbuffered: each Out(text) is written at once,
+//     as one write of text (nothing is held back, so a partial line such as a
+//     prompt shows immediately);
+//   * stdout to anything else (a file, a pipe, a device) is block-buffered:
+//     Out appends to a buffer, which is written when it reaches
+//     kBuiltinOutBufferSize, before anything is written to stderr, and when the
+//     command ends (~BuiltinContext flushes it) -- which is how `echo -n`
+//     still shows its text;
+//   * stderr is unbuffered: every message is one write.
+// Output reaches its descriptor no later than the command's end, and a
+// terminal never waits for a newline.
 class BuiltinContext {
 public:
     BuiltinContext(
         ICurrentProcess& process,
         const IBuiltinCommand& command,
         const std::vector<std::string>& args,
-        std::shared_ptr<IAgentConsole> console,
         const std::atomic<bool>& stopRequested);
     ~BuiltinContext();
 
@@ -102,8 +120,15 @@ public:
     void Out(const std::string& text);
     // Standard error: one diagnostic line, "<name>: " prepended.
     void Error(const std::string& message);
+    // Standard error, text exactly as given: no "<name>: " prefix, no newline
+    // added. For the lines GNU tools print without their name ("Valid
+    // arguments are:", man-db's "No manual entry for x").
+    void ErrorText(const std::string& text);
     // The usual tail of a usage error: "Try '<name> --help' for more information."
     void TryHelp();
+    // Whether standard output (descriptor 1) is a terminal: false when the
+    // slot is empty.
+    bool OutIsTerminal() const { return m_outIsTerminal; }
     // Says, once per spelling, that each not-treated option given was not
     // acted on: "Parameter --author is not treated by HaisosOS ls v. 1.1.0".
     void ReportNotTreated(const ParsedBuiltinArgs& parsed);
@@ -115,18 +140,34 @@ public:
     // work (a recursive ls, say) checks it and finishes early.
     bool StopRequested() const { return m_stopRequested.load(); }
 
-    // Writes out what is left of a line not ended by a newline.
+    // Writes out what is left in the stdout buffer.
     void Flush();
 
 private:
+    // The one place a builtin's bytes reach a descriptor: loops over partial
+    // writes until every byte is out; a null descriptor or a negative result
+    // stops the loop and returns false. A kIOBrokenPipe result -- the reader of
+    // the pipe is gone -- stops the process quietly with exit code 141, as
+    // SIGPIPE would, on stdout and stderr alike; everything after is dropped.
+    bool WriteAll(IFileDescriptor* descriptor, const std::string& bytes);
+
     ICurrentProcess& m_process;
     std::shared_ptr<IFileIO> m_io;
     std::string m_name;
     std::string m_version;
     const std::vector<std::string>& m_args;
-    std::shared_ptr<IAgentConsole> m_console;
+    // Slots 1 and 2 of the process's table, fetched once at construction.
+    std::shared_ptr<IFileDescriptor> m_out;
+    std::shared_ptr<IFileDescriptor> m_err;
+    bool m_outIsTerminal;
     const std::atomic<bool>& m_stopRequested;
-    std::string m_pendingLine;
+    std::string m_outBuffer;
+    // Once a write to stdout has failed, later stdout output is dropped.
+    bool m_outFailed = false;
+    // Once a write has hit a pipe with no reader, StopForBrokenPipe has been
+    // called and the program is dying quietly: every later write, stderr's
+    // included, is dropped.
+    bool m_brokenPipe = false;
     std::vector<std::string> m_reportedNotTreated;
 };
 
@@ -142,6 +183,11 @@ public:
     // are added by the parser and need not be listed).
     virtual const std::vector<BuiltinOption>& Options() const = 0;
     virtual BuiltinHelp Help() const = 0;
+    // The builtin's manual page, as `man <name>` prints it: plain text, ending
+    // in a newline. By default exactly its --help text (BuiltinHelpText), so
+    // `man <name>` and `<name> --help` print the same; a builtin with more to
+    // say (hsh) overrides it.
+    virtual std::string ManPage() const;
     // Runs the command to completion and returns its exit status, 0 meaning
     // success, as the real command's would.
     virtual int Run(BuiltinContext& context) = 0;
@@ -172,6 +218,23 @@ std::string BuiltinVersionText(const IBuiltinCommand& command);
 // Only what Haisos handles is described; the last line lists the rest, or
 // says "none".
 std::string BuiltinHelpText(const IBuiltinCommand& command);
+
+// A name as GNU tools print it in shell-escape quoting: as it is when no
+// shell would read anything in it specially, else quoted. |always| quotes
+// even a name that needs none (GNU's quoteaf, used for "cannot open 'x'"),
+// otherwise only when needed (GNU's quotef and ls on a terminal).
+// A name needs quoting when it is empty; or its first byte is '#' or '~'; or
+// it is exactly "{" or "}"; or it holds a byte below 0x20, 0x7F, or one of
+//   space ! " $ & ' ( ) * ; < = > ? [ \ ^ ` |
+// Bytes 0x80 and above are kept as they are: valid UTF-8 is printable, and an
+// invalid byte, which GNU would write as \NNN, is kept too.
+// Quoted as GNU's shell-escape style does: 'name' when it holds neither a
+// control byte nor a '; "name" when a ' but no other byte a double-quoted
+// shell string would treat specially ("it's" -> '"it's"'); otherwise the
+// name in '...' with each ' written '\'' and each run of control bytes
+// written out of the quotes as $'\a' style escapes ("\177" for bytes without
+// a letter escape) -- 'nl'$'\n''y', 'a'$'\001\002''b', 'a'$'\001'.
+std::string ShellEscapeQuoted(const std::string& name, bool always = false);
 
 // The start every getopt-style command shares: parses the arguments against
 // command.Options(), and handles --help, --version, usage errors (reported,

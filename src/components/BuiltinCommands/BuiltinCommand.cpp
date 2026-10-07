@@ -1,5 +1,6 @@
 #include "BuiltinCommand.h"
 #include <algorithm>
+#include <cstdio>
 
 namespace Haisos {
 
@@ -7,14 +8,15 @@ BuiltinContext::BuiltinContext(
     ICurrentProcess& process,
     const IBuiltinCommand& command,
     const std::vector<std::string>& args,
-    std::shared_ptr<IAgentConsole> console,
     const std::atomic<bool>& stopRequested)
     : m_process(process)
     , m_io(process.IO())
     , m_name(command.Name())
     , m_version(command.Version())
     , m_args(args)
-    , m_console(std::move(console))
+    , m_out(m_io ? m_io->GetDescriptor(IFileIO::kStdOut) : nullptr)
+    , m_err(m_io ? m_io->GetDescriptor(IFileIO::kStdErr) : nullptr)
+    , m_outIsTerminal(m_out && m_out->IsTerminal())
     , m_stopRequested(stopRequested)
 {
 }
@@ -24,15 +26,22 @@ BuiltinContext::~BuiltinContext() {
 }
 
 void BuiltinContext::Out(const std::string& text) {
-    for (char c : text) {
-        if (c == '\n') {
-            if (m_console) {
-                m_console->Write(m_pendingLine);
-            }
-            m_pendingLine.clear();
-        } else {
-            m_pendingLine += c;
+    if (!m_out || m_outFailed) {
+        return;
+    }
+    if (m_outIsTerminal) {
+        // One write per Out: a partial line -- a prompt -- shows at once.
+        if (text.empty()) {
+            return;
         }
+        if (!WriteAll(m_out.get(), text)) {
+            m_outFailed = true;
+        }
+        return;
+    }
+    m_outBuffer += text;
+    if (m_outBuffer.size() >= kBuiltinOutBufferSize) {
+        Flush();
     }
 }
 
@@ -40,16 +49,16 @@ void BuiltinContext::Error(const std::string& message) {
     // Output written so far comes first, as it would on a terminal showing
     // stdout and stderr together.
     Flush();
-    if (m_console) {
-        m_console->Write(m_name + ": " + message);
-    }
+    WriteAll(m_err.get(), m_name + ": " + message + "\n");
+}
+
+void BuiltinContext::ErrorText(const std::string& text) {
+    Flush();
+    WriteAll(m_err.get(), text);
 }
 
 void BuiltinContext::TryHelp() {
-    Flush();
-    if (m_console) {
-        m_console->Write("Try '" + m_name + " --help' for more information.");
-    }
+    ErrorText("Try '" + m_name + " --help' for more information.\n");
 }
 
 void BuiltinContext::ReportNotTreated(const ParsedBuiltinArgs& parsed) {
@@ -66,18 +75,44 @@ void BuiltinContext::NotTreated(const std::string& spelling) {
     }
     m_reportedNotTreated.push_back(spelling);
     Flush();
-    if (m_console) {
-        m_console->Write("Parameter " + spelling + " is not treated by HaisosOS " + m_name + " v. " + m_version);
-    }
+    WriteAll(m_err.get(), "Parameter " + spelling + " is not treated by HaisosOS " + m_name + " v. " + m_version + "\n");
 }
 
 void BuiltinContext::Flush() {
-    if (!m_pendingLine.empty()) {
-        if (m_console) {
-            m_console->Write(m_pendingLine);
-        }
-        m_pendingLine.clear();
+    if (!m_out || m_outFailed || m_outBuffer.empty()) {
+        m_outBuffer.clear();
+        return;
     }
+    std::string buffered;
+    buffered.swap(m_outBuffer);
+    if (!WriteAll(m_out.get(), buffered)) {
+        m_outFailed = true;
+    }
+}
+
+bool BuiltinContext::WriteAll(IFileDescriptor* descriptor, const std::string& bytes) {
+    // Once a write has hit a broken pipe the command is already dying quietly:
+    // nothing more may go out, a diagnostic least of all.
+    if (m_brokenPipe || !descriptor) {
+        return false;
+    }
+    size_t written = 0;
+    while (written < bytes.size()) {
+        const ssize_t result = descriptor->Write(bytes.data() + written, bytes.size() - written);
+        if (result == kIOBrokenPipe) {
+            // The pipe's reader is gone: the process stops as a Linux program
+            // stopped by SIGPIPE does -- quietly, exit code 141 -- whichever
+            // stream the write was on.
+            m_brokenPipe = true;
+            m_process.StopForBrokenPipe();
+            return false;
+        }
+        if (result < 0) {
+            return false;
+        }
+        written += static_cast<size_t>(result);
+    }
+    return true;
 }
 
 std::string BuiltinReferenceUrl(const std::string& name) {
@@ -107,7 +142,7 @@ std::string OptionSynopsis(const BuiltinOption& option) {
         text += option.longName;
         if (option.argument == BuiltinArgument::Required) {
             text += "=" + option.argumentName;
-        } else if (option.argument == BuiltinArgument::Optional) {
+        } else if (option.argument == BuiltinArgument::Optional || option.argument == BuiltinArgument::OptionalAttached) {
             text += "[=" + option.argumentName + "]";
         }
     } else if (option.argument != BuiltinArgument::None) {
@@ -229,6 +264,15 @@ ParsedBuiltinArgs ParseBuiltinArgs(const std::vector<std::string>& args, const s
                     parsed.options.push_back(std::move(found));
                     break;
                 }
+                if (option->argument == BuiltinArgument::OptionalAttached && j + 1 < arg.size()) {
+                    // "-Tutf8": the rest of the cluster is the argument, and
+                    // ends the cluster; "-T" alone has none ("-T utf8" takes
+                    // utf8 as an operand, never as the argument).
+                    found.argument = arg.substr(j + 1);
+                    found.hasArgument = true;
+                    parsed.options.push_back(std::move(found));
+                    break;
+                }
                 parsed.options.push_back(std::move(found));
             }
             continue;
@@ -241,8 +285,9 @@ ParsedBuiltinArgs ParseBuiltinArgs(const std::vector<std::string>& args, const s
 std::string BuiltinHelpText(const IBuiltinCommand& command) {
     const BuiltinHelp help = command.Help();
     const std::string name = command.Name();
+    const std::string& real = help.basedOn.empty() ? name : help.basedOn;
     std::string text = "HaisosOS " + name + " version " + command.Version() + " - " + help.summary + "\n";
-    text += "Based on Linux " + name + ": " + BuiltinReferenceUrl(name) + "\n\n";
+    text += "Based on Linux " + real + ": " + BuiltinReferenceUrl(real) + "\n\n";
 
     for (size_t i = 0; i < help.usage.size(); ++i) {
         text += (i == 0 ? "Usage: " : "  or:  ") + help.usage[i] + "\n";
@@ -277,6 +322,112 @@ std::string BuiltinHelpText(const IBuiltinCommand& command) {
     }
     text += "\nNot treated arguments: " + (notTreatedList.empty() ? std::string("none") : notTreatedList) + "\n";
     return text;
+}
+
+std::string IBuiltinCommand::ManPage() const {
+    return BuiltinHelpText(*this);
+}
+
+namespace {
+
+// A byte a shell would read specially in a bare word (control bytes below
+// 0x20 and 0x7F included).
+bool ShellEscapeSpecial(unsigned char c) {
+    if (c < 0x20 || c == 0x7f) {
+        return true;
+    }
+    switch (c) {
+        case ' ': case '!': case '"': case '$': case '&': case '\'': case '(': case ')':
+        case '*': case ';': case '<': case '=': case '>': case '?': case '[': case '\\':
+        case '^': case '`': case '|':
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool IsControl(unsigned char c) {
+    return c < 0x20 || c == 0x7f;
+}
+
+bool ShellEscapeNeedsQuoting(const std::string& name) {
+    if (name.empty()) {
+        return true;
+    }
+    if (name[0] == '#' || name[0] == '~') {
+        return true;
+    }
+    if (name == "{" || name == "}") {
+        return true;
+    }
+    return std::any_of(name.begin(), name.end(),
+        [](char c) { return ShellEscapeSpecial(static_cast<unsigned char>(c)); });
+}
+
+// The $'...' body of one control byte: \a \b \t \n \v \f \r for 7..13, else
+// the octal escape GNU writes (\001, \033, \177).
+void AppendControlEscape(unsigned char c, std::string& out) {
+    switch (c) {
+        case 7: out += "\\a"; return;
+        case 8: out += "\\b"; return;
+        case 9: out += "\\t"; return;
+        case 10: out += "\\n"; return;
+        case 11: out += "\\v"; return;
+        case 12: out += "\\f"; return;
+        case 13: out += "\\r"; return;
+        default: {
+            char octal[8];
+            std::snprintf(octal, sizeof(octal), "\\%03o", c);
+            out += octal;
+        }
+    }
+}
+
+} // namespace
+
+std::string ShellEscapeQuoted(const std::string& name, bool always) {
+    if (!ShellEscapeNeedsQuoting(name)) {
+        return always ? "'" + name + "'" : name;
+    }
+    const bool hasControl = std::any_of(name.begin(), name.end(),
+        [](char c) { return IsControl(static_cast<unsigned char>(c)); });
+    const bool hasQuote = name.find('\'') != std::string::npos;
+    if (!hasControl && !hasQuote) {
+        return "'" + name + "'";
+    }
+    // With a ' but nothing else a double-quoted shell string would read
+    // specially, double quotes do ("it's" -> '"it's"').
+    if (!hasControl && name.find_first_of("!\"$&()*;<=>?[\\^`|") == std::string::npos) {
+        return "\"" + name + "\"";
+    }
+    // The general form: '...', each ' written '\'', each run of control bytes
+    // taken out of the quotes and written as $'\n' style escapes.
+    std::string out = "'";
+    size_t i = 0;
+    while (i < name.size()) {
+        const unsigned char c = static_cast<unsigned char>(name[i]);
+        if (IsControl(c)) {
+            out += "'$'";
+            while (i < name.size() && IsControl(static_cast<unsigned char>(name[i]))) {
+                AppendControlEscape(static_cast<unsigned char>(name[i]), out);
+                ++i;
+            }
+            out += "'";
+            if (i < name.size()) {
+                out += "'";
+            }
+        } else if (c == '\'') {
+            out += "'\\''";
+            ++i;
+        } else {
+            out += name[i];
+            ++i;
+        }
+    }
+    if (!IsControl(static_cast<unsigned char>(name.back()))) {
+        out += "'";
+    }
+    return out;
 }
 
 std::optional<ParsedBuiltinArgs> BeginBuiltin(

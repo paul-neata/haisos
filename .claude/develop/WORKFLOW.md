@@ -17,13 +17,13 @@ parts it needs.
 
 | Skill | Runs in | Does |
 |-------|---------|------|
-| `/develop-create` | either session | cuts `develop` from `origin/master`, bumps the version, writes the `develop-plan/` skeleton |
+| `/develop-create` | either session, on Sonnet | cuts `develop` from `origin/master`, bumps the version, writes the `develop-plan/` skeleton |
 | `/develop-plan` | plan session | plan mode: `begin` ... `end`; every prompt in between edits the plan, uncommitted -- goal and clarifications, big rocks, small rocks (tasks), task plans, playbook, later amendments, answers, explorations, notes; with no argument, the mode and the uncommitted diff |
 | `/develop-update` | either session, on Sonnet | syncs `develop` both ways: commits and pushes the plan (in the plan session, by hand, whenever the user wants), rebases onto the other side (resolving conflicts), refreshes the develop PR, reports what came in |
 | `/develop-implement` | implement session | opens the develop PR, runs the loop, ends with the whole-develop review, the final tests and the PR made ready |
 | `/develop-task` | a fresh agent (helper model) | one task: container runs, gate, push, PR, CI and CI fix rounds -- `scripts/develop/task.sh` |
 | `/develop-code-review` | a fresh agent (review model) | one PR: review, fix critical/high, comment medium/low, merge; or the whole develop |
-| `/develop-status` | either session | read-only state |
+| `/develop-status` | either session, on Sonnet | read-only state |
 | `/develop-close` | either session, by the user | deletes `develop-plan/`, merges the develop PR, cleans up |
 
 Invoking a `develop-*` skill is the explicit instruction to commit, push, open
@@ -431,11 +431,35 @@ The final phase builds and tests the whole develop on Windows the same way.
   `develop` (a merge commit); a `HAISOS_VERSION` conflict resolves to
   `master`'s version plus one minor.
 
+## Git over SSH
+
+The shell Claude Code runs commands in may lack the `SSH_AUTH_SOCK` of the
+user's terminal: ssh then finds no agent, cannot ask for the key's
+passphrase, and every fetch and push fails with `Permission denied
+(publickey)`. Exporting the variable would last one command only. So the
+entry points -- `/develop-create`, `/develop-plan begin`, `/develop-update`,
+`/develop-status`, `/develop-close`, `/develop-implement` (through
+`preflight.sh`), and `/begin` -- first run `scripts/develop/git_ssh.sh`. When
+git cannot reach origin, it looks for a running ssh agent holding a key (the
+shell's own, `~/.ssh/agent.sock`, `~/.ssh/ssh-agent.sock`, the
+`$XDG_RUNTIME_DIR` ones, `/tmp/ssh-*/agent.*`) and, if one lets git reach
+origin, writes it to the clone's own config (`git config --local
+core.sshCommand "ssh -o IdentityAgent=<socket>"`; not versioned, shared by
+the clone's worktrees). Every later git command in the clone uses it, in any
+shell, the scripts' and the agents' included. Run again, it checks the
+setting and repairs it when the agent has moved. It prints `OK`, `FIXED` or
+`FAIL`; on `FAIL` (no agent with a key -- one cannot be unlocked from here)
+the skill stops and the user starts one in a terminal, or exports its
+`SSH_AUTH_SOCK` in `~/.bashrc`. Each clone fixes itself on its first entry
+point, the implement clone included. The task containers never need it: they
+have no credentials, and the host pushes for them.
+
 ## Scripts (`scripts/develop/`)
 
 | Script | Does |
 |--------|------|
-| `preflight.sh` | checks GitHub, docker, the image, ollama and the models |
+| `preflight.sh` | checks git over SSH, GitHub, docker, the image, ollama and the models |
+| `git_ssh.sh` | makes git reach origin over SSH in this clone, pointing it at a running ssh agent if needed (see "Git over SSH") |
 | `update.sh [-m <msg>] [--log <entry>]` | `/develop-update`: commits the plan, rebases, pushes, re-renders the develop PR, reports what came in |
 | `develop_pr.sh ensure\|update\|summary` | the develop PR: opens it, renders it from `develop-plan/`, prints the summary for the squash |
 | `state.sh [--pull]` | the develop, the playbook and GitHub's view, in a few lines |

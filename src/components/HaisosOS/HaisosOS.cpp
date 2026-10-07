@@ -4,7 +4,8 @@
 #include <sstream>
 #include "AgentProcess.h"
 #include "LuaProcess.h"
-#include "src/components/Console/AgentConsoleAdapter.h"
+#include "ProcessAgentConsole.h"
+#include "src/components/Console/ConsoleDescriptors.h"
 #include "interfaces/IBuiltinCommands.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
 #include "src/components/Filesystem/VirtualPath.h"
@@ -63,6 +64,7 @@ HaisosOS::HaisosOS(
     std::shared_ptr<IServicesCreator> servicesCreator,
     std::shared_ptr<INetworkService> networkService,
     std::shared_ptr<ILLMService> llmService,
+    std::shared_ptr<IPipeService> pipeService,
     std::shared_ptr<IFileSystem> rootFileSystem,
     std::shared_ptr<IBuiltinCommands> builtinCommands,
     std::shared_ptr<IPhysicalConsole> physicalConsole,
@@ -71,9 +73,16 @@ HaisosOS::HaisosOS(
     : m_servicesCreator(std::move(servicesCreator))
     , m_networkService(std::move(networkService))
     , m_llmService(std::move(llmService))
+    , m_pipeService(std::move(pipeService))
     , m_rootFileSystem(std::move(rootFileSystem))
     , m_builtinCommands(std::move(builtinCommands))
     , m_physicalConsole(std::move(physicalConsole))
+    // The descriptors a process sees; the console itself stays at the OS's
+    // edge (it creates sub-OSs with it) -- nothing inside a process gets it.
+    , m_consoleOutput(ConsoleOutputDescriptor::Create(m_physicalConsole))
+    , m_consoleError(ConsoleErrorDescriptor::Create(m_physicalConsole))
+    , m_consoleInput(ConsoleInputDescriptor::Create(m_physicalConsole))
+    , m_emptyInput(EmptyInputDescriptor::Create())
     , m_environment(std::move(environment))
     , m_osProcessId(osProcessId)
 {
@@ -168,13 +177,28 @@ void HaisosOS::CleanupFinishedProcesses() {
         m_processes.end());
 }
 
+StartProcessOptions HaisosOS::ResolveStandardStreams(const StartProcessOptions& options) const {
+    StartProcessOptions resolved = options;
+    if (!resolved.stdOut) {
+        resolved.stdOut = m_consoleOutput;
+    }
+    if (!resolved.stdErr) {
+        resolved.stdErr = m_consoleError;
+    }
+    if (!resolved.stdIn) {
+        resolved.stdIn = options.interactive ? m_consoleInput : m_emptyInput;
+    }
+    return resolved;
+}
+
 std::shared_ptr<ICurrentProcess> HaisosOS::StartAgentProcess(
     std::shared_ptr<IEnvironment> environment,
     const std::string& programPath,
     const std::vector<std::string>& args,
     const std::string& workingDirectory,
-    bool interactive)
+    const StartProcessOptions& options)
 {
+    const bool interactive = options.interactive;
     std::string content;
     if (!ReadWholeFile(*m_rootFileSystem, programPath, content)) {
         LogError("HaisosOS: failed to read process file: %s", programPath.c_str());
@@ -199,12 +223,14 @@ std::shared_ptr<ICurrentProcess> HaisosOS::StartAgentProcess(
     uint64_t pid = NextGloballyUniquePID();
     std::string name = GetStem(programPath) + "_" + std::to_string(pid);
 
-    auto console = AgentConsoleAdapter::Create(m_physicalConsole, name);
     // The OS tool set is built per process, around the process rather than
     // around this OS: ICurrentProcess is the only door out of a process (see
     // the Security section of the root CLAUDE.md). The handle exists before the
-    // process does, because the agent needs its tools first.
+    // process does, because the agent needs its tools first -- and its console:
+    // the agent writes to the process's own stdout and stderr descriptors
+    // through it, looked up on the handle at every write.
     auto processHandle = CurrentProcessHandle::Create();
+    auto console = ProcessAgentConsole::Create(processHandle);
     // A non-interactive agent answers what its program asked and then
     // finishes, which is what makes the process finish too. An interactive one
     // then goes on to answer whatever is typed on its console, until it closes
@@ -240,12 +266,11 @@ std::shared_ptr<ICurrentProcess> HaisosOS::StartAgentProcess(
     // be strong. A narrowed per-process OS would be passed here instead.
     // AgentProcess::Create posts the program only once the process exists:
     // the agent's first command may call a tool, and a tool must find the
-    // process it acts for. An interactive process is then fed from the same
-    // console the agent writes to.
+    // process it acts for. An interactive process is then fed the lines of its
+    // stdin.
     auto process = AgentProcess::Create(
         pid, /*parentPid=*/m_osProcessId, std::move(environment), programPath, workingDirectory,
-        weak_from_this(), processHandle, concreteAgent, content,
-        interactive ? std::move(console) : nullptr);
+        weak_from_this(), processHandle, concreteAgent, content, options);
     if (!process) {
         // AgentProcess::Create has already said why. The agent is dropped here
         // unstarted: nothing was posted to it, and its destructor waits out the
@@ -285,7 +310,6 @@ std::shared_ptr<IProcess> HaisosOS::StartBuiltinProcess(
     host.os = weak_from_this();
     host.programPath = programPath;
     const std::string name = builtinName + "_" + std::to_string(host.pid);
-    host.console = AgentConsoleAdapter::Create(m_physicalConsole, name);
 
     auto process = m_builtinCommands->RunCommand(host, std::move(environment), builtinName, args, workingDirectory, options);
     if (!process) {
@@ -307,7 +331,8 @@ std::shared_ptr<ICurrentProcess> HaisosOS::StartLuaProcess(
     std::shared_ptr<IEnvironment> environment,
     const std::string& programPath,
     const std::vector<std::string>& args,
-    const std::string& workingDirectory)
+    const std::string& workingDirectory,
+    const StartProcessOptions& options)
 {
     std::string content;
     if (!ReadWholeFile(*m_rootFileSystem, programPath, content)) {
@@ -318,9 +343,9 @@ std::shared_ptr<ICurrentProcess> HaisosOS::StartLuaProcess(
     uint64_t pid = NextGloballyUniquePID();
     std::string name = GetStem(programPath) + "_" + std::to_string(pid);
 
-    auto console = AgentConsoleAdapter::Create(m_physicalConsole, name);
     // As for an agent process: the tool set is built around the process, and
-    // LuaProcess::Create fills the handle in before the script's thread starts.
+    // LuaProcess::Create installs the process's standard streams and fills the
+    // handle in before the script's thread starts.
     auto processHandle = CurrentProcessHandle::Create();
     // The parent is this OS, as for an agent process above.
     auto process = LuaProcess::Create(
@@ -329,7 +354,7 @@ std::shared_ptr<ICurrentProcess> HaisosOS::StartLuaProcess(
         // The OS tool set and nothing else. The LLM tool set (get_current_date_time,
         // agent_*) belongs to agents: it is handed out by ILLMService and reaches
         // a process only through the agent running it, never through a script.
-        OSToolFactory::Create(processHandle), std::move(console));
+        OSToolFactory::Create(processHandle), options);
 
     {
         std::lock_guard<std::mutex> lock(m_processesMutex);
@@ -373,22 +398,24 @@ std::shared_ptr<IProcess> HaisosOS::StartProcess(
         }
     }
 
+    // Every process gets standard streams, whichever runtime runs it: fill in
+    // the defaults for what the caller left null. The interactive choice made
+    // here is meaningful for every runtime, not just agents.
+    const StartProcessOptions resolved = ResolveStandardStreams(options);
+
     // A builtin is known by its path, not its extension: the root filesystem
     // says which paths are builtins, and a builtin need not look like a program.
     if (auto builtinName = m_rootFileSystem->IsBuiltinCommand(NormalizeVirtualPath(programPath))) {
-        return StartBuiltinProcess(std::move(environment), programPath, *builtinName, args, workingDirectory, options);
+        return StartBuiltinProcess(std::move(environment), programPath, *builtinName, args, workingDirectory, resolved);
     }
 
     std::string extension = GetExtension(programPath);
 
     if (extension == ".md") {
-        return StartAgentProcess(std::move(environment), programPath, args, workingDirectory, options.interactiveAgent);
-    }
-    if (options.interactiveAgent) {
-        LogDebug("HaisosOS: interactiveAgent only applies to .md programs; ignoring it for '%s'", programPath.c_str());
+        return StartAgentProcess(std::move(environment), programPath, args, workingDirectory, resolved);
     }
     if (extension == ".lua") {
-        return StartLuaProcess(std::move(environment), programPath, args, workingDirectory);
+        return StartLuaProcess(std::move(environment), programPath, args, workingDirectory, resolved);
     }
     LogWarning("HaisosOS: unsupported program type: %s", programPath.c_str());
     return nullptr;
@@ -427,6 +454,10 @@ std::shared_ptr<IFileSystem> HaisosOS::GetRootFileSystem() {
 
 std::shared_ptr<IServicesCreator> HaisosOS::GetServicesCreator() {
     return m_servicesCreator;
+}
+
+std::shared_ptr<IPipeService> HaisosOS::GetPipeService() {
+    return m_pipeService;
 }
 
 std::shared_ptr<IEnvironment> HaisosOS::GetOsEnvironment() const {
@@ -469,6 +500,7 @@ std::shared_ptr<HaisosOS> HaisosOS::Create(
 
     std::shared_ptr<INetworkService> networkService = servicesCreator->CreateNetworkService();
     std::shared_ptr<ILLMService> llmService = servicesCreator->CreateLLMService(networkService, endpoint, modelName, apiKey);
+    std::shared_ptr<IPipeService> pipeService = servicesCreator->CreatePipeService();
 
     // A process's own thread can hold the last reference to its OS -- inside
     // an os_* tool call -- and the destructor waits for the processes.
@@ -477,6 +509,7 @@ std::shared_ptr<HaisosOS> HaisosOS::Create(
             std::move(servicesCreator),
             std::move(networkService),
             std::move(llmService),
+            std::move(pipeService),
             std::move(rootFileSystem),
             std::move(builtinCommands),
             std::move(physicalConsole),

@@ -1,6 +1,6 @@
 # Haisos - C++ Platform for Running Agents
 
-Haisos is a C++ platform that boots a small OS-like environment (`IHaisosOS`) from a `haisosfile` manifest and runs processes in it: LLM agents (`.md` files, sent to a local LLM like Ollama with tool-calling), embedded Lua scripts (`.lua` files), and builtin commands (`echo`, `cat`, `ls`, ... compiled into Haisos and placed on a filesystem at a path, such as `/bin/ls`).
+Haisos is a C++ platform that boots a small OS-like environment (`IHaisosOS`) from a `haisosfile` manifest and runs processes in it: LLM agents (`.md` files, sent to a local LLM like Ollama with tool-calling), embedded Lua scripts (`.lua` files), and builtin commands (`echo`, `cat`, `ls`, `wc`, ... compiled into Haisos and placed on a filesystem at a path, such as `/bin/ls`).
 
 ## Project Overview
 
@@ -28,7 +28,7 @@ haisos/
 ├── src/
 │   ├── components/        - Component implementations (each has its own CLAUDE.md)
 │   │   ├── Agent/
-│   │   ├── BuiltinCommands/ - The builtin commands (echo, cat, ls, mkdir, pwd) and what places them on filesystems
+│   │   ├── BuiltinCommands/ - The builtin commands (echo, cat, ls, man, mkdir, pwd, wc, hsh; each in commands/<name>/) and what places them on filesystems
 │   │   ├── Console/
 │   │   ├── Environment/
 │   │   ├── Factory/
@@ -41,8 +41,10 @@ haisos/
 │   │   ├── LLMService/
 │   │   ├── Logger/
 │   │   ├── NetworkService/
+│   │   ├── PipeService/
 │   │   ├── ServicesCreator/
-│   │   └── ToolFactory/
+│   │   ├── ToolFactory/
+│   │   └── Unicode/
 │   ├── tools/             - Tool implementations (each has its own CLAUDE.md)
 │   │   ├── get_current_date_time/
 │   │   ├── agent_start/
@@ -59,7 +61,7 @@ haisos/
 │   │   ├── os_start_process/
 │   │   └── os_list_processes/
 │   └── haisos/            - Entry point, CLI parser, haisosfile parser, root-filesystem builder, file-directive executor, agent traffic log (--log-agent-to-file / -L), and the re-creatable log file behind both file logs
-├── interfaces/             - Service-based interfaces (IFactory.h [IPhysicalConsole], IBuiltinCommands.h [IBuiltinConfigurator, BuiltinCommandHost], IServicesCreator.h, IHaisosOS.h, IProcess.h, IEnvironment.h [LLMIdentifier], ILLMService.h [IAgent, ITool, IToolFactory, IAgentConsole], INetworkService.h [IHTTPClient], IFileSystemService.h [IFileSystem], IProcess.h [ICurrentProcess], ILLMCommunicator.h)
+├── interfaces/             - Service-based interfaces (IFactory.h [IPhysicalConsole], IBuiltinCommands.h [IBuiltinConfigurator, BuiltinCommandHost], IServicesCreator.h, IHaisosOS.h, IProcess.h, IEnvironment.h [LLMIdentifier], ILLMService.h [IAgent, ITool, IToolFactory, IAgentConsole], INetworkService.h [IHTTPClient], IFileSystemService.h [IFileSystem], IProcess.h [ICurrentProcess], ILLMCommunicator.h, IFileDescriptor.h [IFileDescriptor, IOResult kIO*], IPipeService.h [PipeEnds])
 ├── tests/                 - All tests
 │   ├── mocks/             - Mock classes for testing
 │   ├── unit/              - Unit tests (Google Test)
@@ -178,6 +180,30 @@ after a literal `--` is parsed as `key=value` pairs fed to the haisosfile as
 | `-L`, `--log-agent-to-file <path>` | Write every agent's LLM traffic to `<path>`: each request sent (`SEND`) and response received (`RECEIVE`), headed by the agent's path (its ancestors' names then its own, joined by `>`, e.g. `main_2>aaaaer6o`) and the time. Each entry is indented by the agent's depth in its agent tree: two tabs and a `\|` per level, none for a top-level agent. Re-created if deleted while Haisos runs, starting afresh (requests in full again) |
 | `--log-agent-to-file-type <type>` | `xdiff` (default): like `diff`, JSON-like, but shorter -- unchanged fields are left out, `messages` is written `m` and shows only its new entries, `tools` lists only each tool's name with its description, a tool call is written as `m[1].tool_calls[0].function.name = "..."` lines, text is wrapped to 80 characters (line breaks kept) in `"""` blocks, and empty strings plus response timings (`model`, `created_at`, `*_duration`) are dropped; `diff`: each request as its JSON difference from the same agent's previous one, responses in full; `full`: everything in full JSON. Requires `--log-agent-to-file` |
 
+## Exit codes
+
+Every process reports an exit code, `IProcess::ExitCode()`: empty while it
+runs, then a shell-style 0-255 that never changes once set. A program's own
+code is taken modulo 256 (`exit(256)` is 0, `exit(-1)` is 255); a process
+stopped through `TriggerStop()` reports 143 (128 + SIGTERM, as a shell would
+for a killed program); and 141 (128 + SIGPIPE) when a builtin, a Lua script or
+an agent wrote to a pipe nobody reads any more -- its runtime stops it quietly,
+as SIGPIPE stops a Linux program, and 141 wins over a stop asked for
+afterwards. A `RUN` whose process never starts has no code -- as with a shell's 127,
+reporting it is the launcher's business, not the process's.
+
+haisos's own exit status is the exit code of the first `RUN` (in file order)
+that did not exit 0 -- 127 when one or no process could be started, else 0 --
+with haisos's own errors (a bad haisosfile, an unreadable `OUTCOPY` target)
+exiting 1. What a runtime counts as its code: a builtin, the command's own
+status; a Lua script, `exit([code])`'s argument (0 by default, `true` 0 and
+`false` 1, as `os.exit` -- the stock `os.exit` stays unopened), or 1 on a load
+or runtime error, which also writes `lua: <message>` to the script's stderr
+just as the standalone interpreter does; an agent, 1 when its last command
+failed (an LLM, HTTP or parse failure, the LLM-round cap, an exception), else
+0. Each runtime decides in one place, `ExitCodeFor` in
+`src/components/libheaders/ExitCodes.h`.
+
 ## The `haisosfile` DSL
 
 A small Dockerfile-style language (parsed by `HaisosFileParser` in `src/haisos/`;
@@ -217,19 +243,21 @@ ROOT rootfs                    # which declared filesystem (by name) becomes the
 # host paths are relative to this file (or absolute).
 CREATE_DIR /bin                # create a directory and any missing parents (fine if it exists)
 BUILTIN rootfs ls /bin/ls        # place a builtin on a declared FS, at each path given
+ENV PATH=/bin                  # where hsh, the shell, finds commands by name
 CREATE /notes/a.txt 'hello'    # write a file (replacing it); content is 'quoted' or "quoted"
 APPEND /notes/a.txt text: more # append (creating if missing); text: takes the rest of the line as-is
 CREATE /notes/b.md multiline END
 # a heading -- content, not a comment
 END
 COPY ./input.txt /work/in.txt  # copy a host file into the OS
-DELETE /work/stale             # remove a file, or a directory and everything in it (as rm -rf: links are removed, not followed)
+DELETE /work/stale             # remove a file, or a directory and everything in it (a link to a directory is followed: its target is emptied, the link removed)
 OUTCOPY /work/out.txt ./out.txt  # copy a file out to the host, once every RUN process has finished
 
 RUN /agent.md                  # start an initial process (.md agent, .lua script or builtin) at '/'; may repeat
 RUN /bin/ls -l /               # a builtin, placed by BUILTIN above
 RUN /tools/setup.lua ${greeting}
-RUN -i /chat.md                # an interactive agent, fed each line typed on the console
+RUN -i /chat.md                # an interactive agent, fed each line typed on the console (any program may be run with -i)
+RUN -i /bin/hsh                # an interactive shell on the console
 ```
 
 `FS <name> DEV` is a device filesystem, meant to be mounted at `/dev`: it holds
@@ -255,9 +283,9 @@ it, `\` included. On Windows `\` and `/` both separate, in any mix: `/c/x`,
 `//server/share/x`) is a UNC path, and `/` alone is the full filesystem, every
 drive in it; a drive-relative `c:x` and a `/tmp` that names no drive are
 refused. Each directory is taken with `IFactory::CreatePhysicalFileSystem`,
-jailed there -- not as a `SubFileSystem` of the full filesystem, which confines
-paths only as written, so a symbolic link inside would lead anywhere on the
-disk. `COPY`/`OUTCOPY` host paths, and the haisosfile path on the command line,
+rooted there (a `..` cannot climb above it), and symbolic links inside it are
+followed wherever they lead, as the host follows them -- whoever declares the
+filesystem vouches for the links in it. `COPY`/`OUTCOPY` host paths, and the haisosfile path on the command line,
 follow the same rules (`src/components/Filesystem/PhysicalPath.h`).
 
 Any token -- a path, a `RUN` argument -- may be quoted, `'...'` or `"..."`, to
@@ -266,10 +294,15 @@ without the quotes, with nothing inside special (no escapes: `"C:\Program
 Files\x"` is taken as written). A quote elsewhere in a token is part of it.
 
 `RUN` takes an absolute program path, and the process starts in `/`. `RUN -i`
-(only in front of the path) runs a `.md` agent interactively -- see
-`StartProcessOptions::interactiveAgent` in `interfaces/IHaisosOS.h`: after its
-program, every line typed on the console is posted to it, until it closes itself
-with the `self_close` tool (noticed when the next line arrives) or input ends.
+(only in front of the path, in front of any program) sets `interactive` -- see
+`StartProcessOptions::interactive` in `interfaces/IHaisosOS.h`: the program's
+stdin is the console's input (instead of an input that ends at once), and a
+`.md` agent run so is interactive: after its program, every line read from its
+stdin -- the console's input here, though another descriptor can feed it when
+the process is started through `StartProcessOptions` -- is posted to it, until
+it closes itself with the `self_close` tool (noticed when the next line
+arrives) or input ends. `RUN -i /bin/hsh` runs the shell interactively, its
+prompt on stderr.
 
 `CREATE`/`APPEND` content is one of `'text'` / `"text"` (up to the next quote of
 the same kind; a comment may follow), `text:<rest of line>` (taken exactly as
@@ -379,6 +412,12 @@ will need is in place: when adding a tool, a runtime, or anything else a process
 can call, route it through `ICurrentProcess` rather than giving it its own
 handle on the OS.
 
+A physical filesystem is only as narrow as the links inside it: symbolic links
+(and junctions) on the disk are followed wherever they lead, out of its
+directory included. Nothing in Haisos creates a link, and no builtin, tool or
+directive may create one on a physical filesystem unless a confinement of
+links comes back with it.
+
 How it is wired: `OSToolFactory` and every `os_*` tool are built **per process**,
 around a `CurrentProcessHandle` (`src/components/libheaders/`) rather than
 around an `IHaisosOS`. The handle exists before the process does -- an agent
@@ -393,12 +432,21 @@ given, plus the working directory they resolve against. That is what makes a
 bare name or a relative path mean anything at all -- an `IFileSystem`
 understands absolute paths alone, so `IFileIO` is the one place a path and the
 process's position are brought together. `os_start_process` also starts a child
-in the caller's directory, the way a shell would.
+in the caller's directory, the way a shell would. `IFileIO` also holds the
+process's descriptor table -- its open files by number (0 stdin, 1 stdout, 2
+stderr, then 3 and up) -- so whatever a process has open, it holds there,
+behind the same door, and every one is released when its program ends.
 
 `IFileIO` deliberately omits `Mount`/`Unmount`, which `IFileSystem` has:
 composing filesystems is how an OS is assembled, not something a program running
 inside one may do to the ground it stands on. A process that could mount could
 widen its own reach, which is what this whole arrangement exists to prevent.
+
+Pipes go through the same door: a process makes a pipe only with
+`IFileIO::CreatePipe`, which reaches the OS's pipe service through
+`ICurrentProcess::OS()` -- nothing in a process holds an `IPipeService` or an
+`IHaisosOS` of its own, and a pipe's ends land in the process's descriptor
+table like any other descriptor.
 
 ### Creating things: private constructors and `Create()`
 
@@ -440,14 +488,16 @@ under "Objects released last on their own threads".
 | **Agent** | `src/components/Agent/` | Manages LLM conversations with parent/child agent relationships; supports subagents via agent tools |
 | **LLMCommunicator** | `src/components/LLMCommunicator/` | Handles LLM API communication, request/response formatting, and tool call parsing (HTTP is handled by HTTPClient) |
 | **ToolFactory** | `src/components/ToolFactory/` | Creates tool instances by name, including context-aware tools like `agent_start` |
+| **Unicode** | `src/components/Unicode/` | UTF-8 decoding, character classes and display widths -- a compact, locale-free stand-in for glibc's, for builtins (`wc`) |
 | **Environment** | `src/components/Environment/` | An OS's or a process's environment: variables, secrets (nameable but not readable), and LLM identifiers; `Clone()`d rather than shared |
 | **Console** | `src/components/Console/` | Async physical console output and line input, plus adapters giving agents a view onto it (or onto memory only) |
 | **Logger** | `src/components/Logger/` | Thread-safe logging with configurable receivers |
 | **HTTPClient** | `src/components/HTTPClient/` | Platform-specific HTTP implementation (Curl/WinHTTP/Fetch) |
 | **Factory** | `src/components/Factory/` | Creates the root concepts: physical console, disk-backed filesystems (a directory, or the host's whole disk), the services layer, and the OS itself |
-| **Filesystem** | `src/components/Filesystem/` | Composable `IFileSystem` implementations: an unrooted passthrough, a `PhysicalFileSystem` jailed to a real disk path, the Windows-only `WindowsFullPhysicalFileSystem` (every drive under `/`, as `/c/...`), plus in-memory, read-only, sub-path and mounted/overlay ones |
-| **ServicesCreator** | `src/components/ServicesCreator/` | Factory-of-services built on `IFactory`; creates `IFileSystemService`/`INetworkService`/`ILLMService`, passing each the services it depends on |
+| **Filesystem** | `src/components/Filesystem/` | Composable `IFileSystem` implementations: an unrooted passthrough, a `PhysicalFileSystem` rooted at a real disk path, the Windows-only `WindowsFullPhysicalFileSystem` (every drive under `/`, as `/c/...`), plus in-memory, read-only, sub-path and mounted/overlay ones |
+| **ServicesCreator** | `src/components/ServicesCreator/` | Factory-of-services built on `IFactory`; creates `IFileSystemService`/`IPipeService`/`INetworkService`/`ILLMService`, passing each the services it depends on |
 | **NetworkService** | `src/components/NetworkService/` | Service-layer wrapper over network access (creates `IHTTPClient`) |
+| **PipeService** | `src/components/PipeService/` | `IPipeService`: unnamed pipes -- bounded, blocking, one-way, both ends descriptors; no threads |
 | **FileSystemService** | `src/components/FileSystemService/` | Stateless factory that composes filesystems (read-only / in-memory / sub / mount); holds no filesystem of its own |
 | **LLMService** | `src/components/LLMService/` | Service-layer entry point for creating LLM-backed agents; exposes the shared agent-management tool set |
 | **HaisosOS** | `src/components/HaisosOS/` | An OS instance: owns a rooted filesystem, physical console, and services; starts processes (`.md` agents, `.lua` scripts, builtins) and sub-OS instances |
@@ -483,7 +533,8 @@ returned by `IHaisosOS`'s `OSToolFactory` and merged with an agent's tools
 
 ## Builtin Commands
 
-Commands compiled into Haisos, implemented in `src/components/BuiltinCommands/`
+Commands compiled into Haisos (`cat`, `echo`, `hsh`, `ls`, `man`, `mkdir`,
+`pwd`, `wc`), implemented in `src/components/BuiltinCommands/`
 (see its `CLAUDE.md`). A builtin is not a file on disk: it is placed on a
 filesystem at a path (`IBuiltinConfigurator`, or the haisosfile's `BUILTIN`),
 where it lists as a file, reads as a note naming it, cannot be written, and
@@ -527,17 +578,23 @@ use a builtin with what it already knows about the real command:
   Not treated arguments: <every untreated option, on this one last line, no descriptions>
   ```
   Only what the builtin handles is described. The reference is always the
-  Linux man-pages project's page for the command (`BuiltinReferenceUrl`).
+  Linux man-pages project's page for the command (`BuiltinReferenceUrl`). A
+  builtin copying a command of another name says so
+  (`BuiltinHelp::basedOn`: hsh is based on dash, and the `Based on Linux
+  <command>:` line names dash and links its page).
   `--version` prints `<command> (HaisosOS builtin) <version>`; bump the
   version whenever a builtin's behaviour changes.
 
 | Builtin | Description |
 |---------|-------------|
-| `cat` | Concatenates files (`-A -b -e -E -n -s -t -T -u -v`); no stdin |
+| `cat` | Concatenates files and standard input (`-A -b -e -E -n -s -t -T -u -v`) |
 | `echo` | Prints its arguments (`-n -e -E`) |
-| `ls` | Lists directories as GNU ls prints them to a terminal: columns, `-l` with `total`/links/owner/group/size/time, sorting, time styles, quoting |
+| `hsh` | The Haisos shell, after dash: `-c`, scripts, stdin or interactive (`RUN -i /bin/hsh`); quoting, expansions, pipelines, redirections, heredocs, lists, control flow, functions; commands found in `PATH` |
+| `ls` | Lists directories as GNU ls prints them to a terminal: columns, `-l` with `total`/links/owner/group/size/time, sorting, time styles, quoting; to a pipe or file, one name per line, unquoted |
+| `man` | Prints a builtin's manual page (`man ls`, `man 1 ls`, `-f`, `-k`): its `--help` text, or a full page for `hsh` |
 | `mkdir` | Creates directories (`-p -v`) |
 | `pwd` | Prints the working directory (`-L -P`) |
+| `wc` | Counts lines, words, characters, bytes and the widest line (`-c -m -l -L -w`, `--files0-from`, `--total`), GNU's columns |
 
 ## Planning skills
 

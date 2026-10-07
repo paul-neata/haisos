@@ -70,37 +70,6 @@ MountPoints::Route MountPoints::Resolve(const std::string& path) const {
     return Route{};
 }
 
-int MountPoints::AllocateSyntheticFd() {
-    static std::atomic<int> nextFd{kSyntheticFdBase};
-    return nextFd.fetch_add(1);
-}
-
-int MountPoints::RegisterFd(IFileSystem* filesystem, int innerFd) {
-    if (innerFd < 0) {
-        return innerFd;
-    }
-    const int fd = AllocateSyntheticFd();
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_openFds[fd] = Handle{filesystem, innerFd};
-    return fd;
-}
-
-bool MountPoints::LookupFd(int fd, IFileSystem*& filesystem, int& innerFd) const {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto it = m_openFds.find(fd);
-    if (it == m_openFds.end()) {
-        return false;
-    }
-    filesystem = it->second.filesystem;
-    innerFd = it->second.innerFd;
-    return true;
-}
-
-void MountPoints::ReleaseFd(int fd) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_openFds.erase(fd);
-}
-
 std::vector<std::string> MountPoints::ChildSegments(const std::string& directory) const {
     const std::string base = (directory == "/") ? "" : directory;
     std::vector<std::string> segments;

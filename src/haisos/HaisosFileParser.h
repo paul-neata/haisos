@@ -8,7 +8,7 @@ namespace Haisos {
 
 // One "RUN [-i] <absolute_program_path> <args...>" directive. The program
 // starts at "/", the OS's root. interactive is set by "-i": see
-// StartProcessOptions::interactiveAgent.
+// StartProcessOptions::interactive.
 struct HaisosFileRunEntry {
     std::string programPath;
     std::vector<std::string> args;

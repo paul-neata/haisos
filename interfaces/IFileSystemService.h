@@ -5,10 +5,7 @@
 #include <vector>
 #include <cstddef>
 #include <cstdint>
-
-#ifdef _WIN32
-using ssize_t = std::ptrdiff_t;
-#endif
+#include "IFileDescriptor.h"
 
 namespace Haisos {
 
@@ -70,17 +67,6 @@ struct FileStatus {
     // 1 and 3 for null); 0 for anything else.
     uint32_t deviceMajor = 0;
     uint32_t deviceMinor = 0;
-    // Whether the path itself -- its last component, before it is followed --
-    // is a symbolic link: what lstat() would add. Everything else here
-    // describes what the link leads to, as stat() does, so a link to a
-    // directory has the type Dir; this is how a caller walking a tree (the
-    // haisosfile's DELETE) tells it apart, to remove the link instead of
-    // descending into it. On Windows a junction is a link too, as is a
-    // symbolic link WSL made. Only PhysicalFileSystem has links to report; every
-    // other filesystem leaves it false, and one composing others (read-only,
-    // sub-path, composed, mounted) passes on what the one serving the path
-    // says.
-    bool symbolicLink = false;
 };
 
 // IFileSystem is a thin abstraction over C/POSIX filesystem operations.
@@ -90,6 +76,10 @@ struct FileStatus {
 // IFileSystem is therefore resolved against the filesystem's own root, so
 // "foo" and "/foo" mean the same thing. A process that wants "relative to
 // where I am" resolves the path against its own working directory first.
+//
+// On a disk-backed filesystem symbolic links are followed wherever they lead,
+// out of the filesystem's directory included -- whoever creates the
+// filesystem vouches for the links in it.
 //
 // Paths:
 //   A path is a sequence of names separated by '/' -- and on Windows by '\'
@@ -117,36 +107,22 @@ class IFileSystem {
 public:
     virtual ~IFileSystem() = default;
 
-    // OpenFile is the IFileSystem counterpart of the C open() function.
-    virtual int OpenFile(const std::string& pathname, int flags) = 0;
+    // OpenFile is the IFileSystem counterpart of the C open() function: the open
+    // file, or null on failure. Closed when its last holder releases it.
+    virtual std::shared_ptr<IFileDescriptor> OpenFile(const std::string& pathname, int flags) = 0;
 
     // OpenFile is the IFileSystem counterpart of the C open() function (with mode).
-    virtual int OpenFile(const std::string& pathname, int flags, int mode) = 0;
-
-    // CloseFile is the IFileSystem counterpart of the C close() function.
-    virtual int CloseFile(int fd) = 0;
-
-    // ReadFile is the IFileSystem counterpart of the C read() function.
-    virtual ssize_t ReadFile(int fd, void* buf, size_t count) = 0;
-
-    // WriteFile is the IFileSystem counterpart of the C write() function.
-    virtual ssize_t WriteFile(int fd, const void* buf, size_t count) = 0;
+    virtual std::shared_ptr<IFileDescriptor> OpenFile(const std::string& pathname, int flags, int mode) = 0;
 
     // CreateDirectory is the IFileSystem counterpart of the C mkdir() function.
-    // Like it, it does not follow a symbolic link at the end of |pathname|: a
-    // link there, even a dangling one, means the path exists already.
     virtual int CreateDirectory(const std::string& pathname, int mode) = 0;
 
     // RemoveDirectory is the IFileSystem counterpart of the C rmdir() function.
-    // It never removes a directory through a symbolic link at the end of
-    // |pathname|: on POSIX it fails on one, and on Windows it removes a
-    // directory link itself, as rmdir() does there.
     virtual int RemoveDirectory(const std::string& pathname) = 0;
 
     // RemoveFile is the IFileSystem counterpart of the C unlink() function: it
-    // removes a file, never a directory (use RemoveDirectory for those). A
-    // symbolic link at the end of |pathname| is removed itself, never what it
-    // points at.
+    // removes a file, never a directory (use RemoveDirectory for those). On a
+    // disk, a symbolic link is removed itself, as unlink() does.
     virtual int RemoveFile(const std::string& pathname) = 0;
 
     // Mount makes |toBeMounted| serve every path at or under |whereToMount| on
@@ -161,7 +137,7 @@ public:
 
     // Removes the mount at exactly |mountedPath|. Unmounting a path that is not
     // a mount point does nothing. Files still open on the unmounted filesystem
-    // keep working until they are closed.
+    // keep working until their descriptors are released.
     virtual void Unmount(const std::string& mountedPath) = 0;
 
     // ReadDirectory returns the entries in the directory |path|: "." and ".."
@@ -171,14 +147,13 @@ public:
     // on POSIX and FindFirstFile/FindNextFile on Windows.
     // Note: on POSIX, when d_type is unknown, stat() is used rather than lstat(),
     // so symbolic links are followed and the target's type is reported (not the
-    // symlink type itself): a link to a directory lists as a directory. Stat
-    // tells the two apart (FileStatus::symbolicLink).
+    // symlink type itself): a link to a directory lists as a directory.
     virtual std::vector<DirectoryEntry> ReadDirectory(const std::string& path) = 0;
 
     // Stat is the IFileSystem counterpart of the C stat() function: fills
     // |out| with what is at |path| and returns 0, or returns -1 (leaving |out|
     // untouched) if nothing is there. Symbolic links on a real disk are
-    // followed, and FileStatus::symbolicLink says whether |path| was one. A
+    // followed, as by stat(). A
     // mount point, and every directory on the way down to one,
     // is a directory even where the filesystem underneath has none, timed from
     // when the mount was made; a builtin command is a file the size of its

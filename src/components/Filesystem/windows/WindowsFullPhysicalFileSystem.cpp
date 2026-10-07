@@ -101,14 +101,6 @@ bool WindowsFullPhysicalFileSystem::HostPathOf(const std::vector<std::string>& s
     return true;
 }
 
-bool WindowsFullPhysicalFileSystem::IsWithin(const std::string& canonical) const {
-    // "X:\...": on a drive. A link may lead from one to another, but not to a
-    // share (\\server\share), which no drive holds.
-    return canonical.size() >= 3 &&
-        ((canonical[0] >= 'A' && canonical[0] <= 'Z') || (canonical[0] >= 'a' && canonical[0] <= 'z')) &&
-        canonical[1] == ':' && canonical[2] == '\\';
-}
-
 std::vector<DirectoryEntry> WindowsFullPhysicalFileSystem::LocalReadDirectory(const std::string& path) {
     switch (PlaceOf(path)) {
         case Place::Top: {

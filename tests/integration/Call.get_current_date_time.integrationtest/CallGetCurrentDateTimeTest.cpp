@@ -28,7 +28,7 @@ bool TestCallGetCurrentDateTime() {
 
     auto physicalConsole = factory->CreatePhysicalConsole();
     physicalConsole->Start();
-    auto console = AgentConsoleAdapter::Create(physicalConsole, "root");
+    auto console = AgentConsoleAdapter::Create(physicalConsole);
 
     auto agent = llmService->CreateAgent(
         "root",

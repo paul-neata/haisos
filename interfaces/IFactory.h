@@ -36,8 +36,8 @@ public:
 
     virtual std::shared_ptr<IPhysicalConsole> CreatePhysicalConsole() = 0;
 
-    // Returns a filesystem jailed to (rooted at) a real disk path: every path
-    // passed to it is resolved and validated against rootPath before delegating.
+    // Returns a filesystem rooted at a real disk path: every path passed to it
+    // is placed under rootPath before delegating (a ".." above it is refused).
     // Writing through it writes straight to disk, which is the point -- mounting
     // one inside another filesystem (an in-memory one, say) keeps that property
     // for the paths it covers, because each call is routed to whichever
@@ -47,9 +47,8 @@ public:
     // it may be written with '\' or '/', and a path starting with a single
     // one is a path of CreateFullPhysicalFileSystem()'s filesystem: /c/x and
     // c:\x (or c:/x) are the same directory, and "/" is that whole filesystem.
-    // A UNC path (\\server\share\x) is taken too. A symbolic link inside the
-    // directory is followed only while it stays inside -- which a SubFileSystem
-    // of the full filesystem would not ensure. See
+    // A UNC path (\\server\share\x) is taken too. Symbolic links inside it
+    // are followed wherever they lead; the caller vouches for them. See
     // src/components/Filesystem/PhysicalPath.h for every form.
     virtual std::shared_ptr<IFileSystem> CreatePhysicalFileSystem(const std::string& rootPath) = 0;
 

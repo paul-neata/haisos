@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
@@ -9,18 +10,25 @@
 #include <iterator>
 #include <mutex>
 #include <thread>
+#include <nlohmann/json.hpp>
 #include "HaisosOS.h"
+#include "OSToolFactory.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
 #include "Factory.h"
 #include "ServicesCreator.h"
+#include "tests/mocks/MockFileDescriptor.h"
+#include "tests/mocks/ReleaseCountingDescriptor.h"
 
 using namespace Haisos;
 
 namespace {
 
 const std::string kTestRoot = (std::filesystem::temp_directory_path() / "haisos_os_test_root").u8string();
-const std::string kUnreachableEndpoint = "http://localhost:9999/api/chat";
-// Generous: every LLM call fails fast against the unreachable endpoint, so this
+// 127.0.0.1, not localhost: on Windows a refused connection takes about 2 s,
+// and localhost tries ::1 first, then 127.0.0.1 -- twice that, for every agent
+// test, which put this executable over the test runner's 30 s limit.
+const std::string kUnreachableEndpoint = "http://127.0.0.1:9999/api/chat";
+// Generous: every LLM call fails soon against the unreachable endpoint, so this
 // only bounds a hang.
 constexpr uint64_t kProcessWaitMs = 30000;
 // The file read_held.lua reads, which a GatedFileSystem root holds the open of.
@@ -32,7 +40,14 @@ class ScriptedPhysicalConsole : public IPhysicalConsole {
 public:
     explicit ScriptedPhysicalConsole(std::vector<std::string> lines) : m_lines(lines.begin(), lines.end()) {}
 
-    void Write(const std::string&) override {}
+    void Write(const std::string& bytes) override {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_written += bytes;
+    }
+    void WriteError(const std::string& bytes) override {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_writtenError += bytes;
+    }
     std::optional<std::string> ReadLine() override {
         std::lock_guard<std::mutex> lock(m_mutex);
         ++m_readLineCalls;
@@ -50,11 +65,22 @@ public:
         std::lock_guard<std::mutex> lock(m_mutex);
         return m_readLineCalls;
     }
+    // What stdout, and stderr, were given so far.
+    std::string Written() const {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_written;
+    }
+    std::string WrittenError() const {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_writtenError;
+    }
 
 private:
     mutable std::mutex m_mutex;
     std::deque<std::string> m_lines;
     int m_readLineCalls = 0;
+    std::string m_written;
+    std::string m_writtenError;
 };
 
 // A root filesystem that holds every open of one path until Release(), and
@@ -80,17 +106,14 @@ public:
         m_cv.notify_all();
     }
 
-    int OpenFile(const std::string& pathname, int flags) override {
+    std::shared_ptr<IFileDescriptor> OpenFile(const std::string& pathname, int flags) override {
         HoldIfGated(pathname);
         return m_inner->OpenFile(pathname, flags);
     }
-    int OpenFile(const std::string& pathname, int flags, int mode) override {
+    std::shared_ptr<IFileDescriptor> OpenFile(const std::string& pathname, int flags, int mode) override {
         HoldIfGated(pathname);
         return m_inner->OpenFile(pathname, flags, mode);
     }
-    int CloseFile(int fd) override { return m_inner->CloseFile(fd); }
-    ssize_t ReadFile(int fd, void* buf, size_t count) override { return m_inner->ReadFile(fd, buf, count); }
-    ssize_t WriteFile(int fd, const void* buf, size_t count) override { return m_inner->WriteFile(fd, buf, count); }
     int CreateDirectory(const std::string& pathname, int mode) override { return m_inner->CreateDirectory(pathname, mode); }
     int RemoveDirectory(const std::string& pathname) override { return m_inner->RemoveDirectory(pathname); }
     int RemoveFile(const std::string& pathname) override { return m_inner->RemoveFile(pathname); }
@@ -123,6 +146,35 @@ private:
     std::mutex m_mutex;
     std::condition_variable m_cv;
     bool m_held = false;
+    bool m_released = false;
+};
+
+// A physical console whose ReadLine stays blocked until Release() and then
+// reports end of input: an interactive agent fed from it stays alive exactly
+// as long as it blocks. Writes are discarded.
+class BlockingPhysicalConsole : public IPhysicalConsole {
+public:
+    void Write(const std::string&) override {}
+    void WriteError(const std::string&) override {}
+    std::optional<std::string> ReadLine() override {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_cv.wait(lock, [this] { return m_released; });
+        return std::nullopt;
+    }
+    void Start() override {}
+    void Stop() override {}
+
+    void Release() {
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_released = true;
+        }
+        m_cv.notify_all();
+    }
+
+private:
+    std::mutex m_mutex;
+    std::condition_variable m_cv;
     bool m_released = false;
 };
 
@@ -473,11 +525,11 @@ TEST_F(HaisosOSTest, FileIOReadsAndWritesThroughTheWorkingDirectory) {
     ASSERT_NE(process, nullptr);
     auto io = process->IO();
 
-    int fd = io->OpenFile("note.txt", kFileOpenWriteCreateTruncate, kFileCreateMode);
-    ASSERT_GE(fd, 0);
+    auto file = io->OpenFile("note.txt", kFileOpenWriteCreateTruncate, kFileCreateMode);
+    ASSERT_NE(file, nullptr);
     const std::string payload = "written from sub";
-    EXPECT_EQ(io->WriteFile(fd, payload.data(), payload.size()), static_cast<ssize_t>(payload.size()));
-    io->CloseFile(fd);
+    EXPECT_EQ(file->Write(payload.data(), payload.size()), static_cast<ssize_t>(payload.size()));
+    file.reset();
 
     // The bare name landed in the working directory, not at the root.
     EXPECT_TRUE(std::filesystem::exists(kTestRoot + "/sub/note.txt"));
@@ -496,6 +548,89 @@ TEST_F(HaisosOSTest, FileIOReadsAndWritesThroughTheWorkingDirectory) {
         }
     }
     EXPECT_TRUE(sawNote);
+}
+
+// OpenFile hands back the open file itself and puts nothing in the process's
+// descriptor table; a number is something a caller asks for with AddDescriptor.
+TEST_F(HaisosOSTest, OpenFileHandsBackAnUnnumberedDescriptor) {
+    auto os = BuildOS();
+    auto process = std::dynamic_pointer_cast<ICurrentProcess>(
+        os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"", StartProcessOptions{}));
+    ASSERT_NE(process, nullptr);
+    // The script ends at once, releasing its table as it does: wait for that
+    // first, or the release could empty slot 0 between AddDescriptor and
+    // GetDescriptor below. The table stays usable after the end.
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    auto io = process->IO();
+
+    auto file = io->OpenFile("x.txt", kFileOpenWriteCreateTruncate, kFileCreateMode);
+    ASSERT_NE(file, nullptr);
+    for (int fd = 0; fd <= 3; ++fd) {
+        EXPECT_EQ(io->GetDescriptor(fd), nullptr) << "slot " << fd << " held a descriptor after OpenFile";
+    }
+
+    EXPECT_EQ(io->AddDescriptor(file), 0);
+    file.reset();
+    EXPECT_EQ(io->GetDescriptor(0)->Write("hi", 2), 2);
+    EXPECT_EQ(io->CloseDescriptor(0), 0);
+
+    EXPECT_EQ(ReadHostFile(kTestRoot + "/x.txt"), "hi");
+}
+
+// Every descriptor a process holds is released when its program ends, before
+// it reports finished -- here, a Lua script's.
+TEST_F(HaisosOSTest, ALuaScriptsDescriptorsAreReleasedWhenItEnds) {
+    std::ofstream(kTestRoot + "/spin.lua") << "while true do end";
+    auto os = BuildOS();
+    auto process = std::dynamic_pointer_cast<ICurrentProcess>(
+        os->StartProcess(TestEnvironment(), "spin.lua", {}, /*workingDirectory=*/"", StartProcessOptions{}));
+    ASSERT_NE(process, nullptr);
+
+    auto releases = std::make_shared<std::atomic<int>>(0);
+    // Slots 0, 1 and 2 already hold the process's standard streams.
+    ASSERT_EQ(process->IO()->AddDescriptor(ReleaseCountingDescriptor::Create(releases)), 3);
+
+    // The script is still spinning, so nothing may have been released yet.
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_EQ(releases->load(), 0);
+
+    process->TriggerStop();
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    // Already released at the moment WaitToFinish returned -- not after.
+    EXPECT_EQ(releases->load(), 1);
+}
+
+// And the same for an agent's: its program is its conversation, so the table
+// is released when the conversation thread ends (through Agent::SetFinishedHook,
+// set by AgentProcess::Create).
+TEST_F(HaisosOSTest, AnAgentsDescriptorsAreReleasedWhenItsConversationEnds) {
+    auto console = std::make_shared<BlockingPhysicalConsole>();
+    // On every path out: a failed assertion must not leave the console blocked,
+    // or the input loop waits in ReadLine forever and this test hangs in
+    // teardown.
+    struct ConsoleReleaser {
+        std::shared_ptr<BlockingPhysicalConsole> console;
+        ~ConsoleReleaser() { console->Release(); }
+    } releaser{console};
+
+    auto os = BuildOS(console);
+    StartProcessOptions options;
+    options.interactive = true;
+    auto process = std::dynamic_pointer_cast<ICurrentProcess>(
+        os->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/"", options));
+    ASSERT_NE(process, nullptr);
+
+    auto releases = std::make_shared<std::atomic<int>>(0);
+    // Slots 0, 1 and 2 already hold the process's standard streams.
+    ASSERT_EQ(process->IO()->AddDescriptor(ReleaseCountingDescriptor::Create(releases)), 3);
+
+    // The input loop is blocked on the console, so the conversation is open.
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_EQ(releases->load(), 0);
+
+    console->Release();
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    EXPECT_EQ(releases->load(), 1);
 }
 
 TEST_F(HaisosOSTest, CreateHaisosOSWithoutAnEnvironmentReturnsNull) {
@@ -525,7 +660,7 @@ TEST_F(HaisosOSTest, AnInteractiveAgentIsFedConsoleLinesUntilInputEnds) {
     auto console = std::make_shared<ScriptedPhysicalConsole>(std::vector<std::string>{"typed by the user"});
     auto os = BuildOS(console);
     StartProcessOptions options;
-    options.interactiveAgent = true;
+    options.interactive = true;
 
     auto process = os->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/"", options);
     ASSERT_NE(process, nullptr);
@@ -543,16 +678,164 @@ TEST_F(HaisosOSTest, AnInteractiveAgentIsFedConsoleLinesUntilInputEnds) {
     EXPECT_TRUE(HistoryMentions(history, "typed by the user"));
 }
 
-TEST_F(HaisosOSTest, InteractiveAgentOnlyAppliesToAgentPrograms) {
+// `-i` is not agents-only: a script run with it gets the console's input as
+// its stdin (its Lua runtime does not read it yet -- that is a later task),
+// and the script still runs and finishes like any other.
+TEST_F(HaisosOSTest, AnInteractiveScriptIsNotAnAgent) {
     auto console = std::make_shared<ScriptedPhysicalConsole>(std::vector<std::string>{"never read"});
     auto os = BuildOS(console);
     StartProcessOptions options;
-    options.interactiveAgent = true;
+    options.interactive = true;
 
     auto process = os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"", options);
     ASSERT_NE(process, nullptr);
     EXPECT_TRUE(process->WaitToFinish(kProcessWaitMs));
     EXPECT_EQ(console->ReadLineCalls(), 0);
+}
+
+// A given stdin wins over the default: the console's input is never read, and
+// the interactive agent is fed the descriptor's lines instead.
+TEST_F(HaisosOSTest, AnInteractiveAgentReadsAGivenStdin) {
+    auto console = std::make_shared<ScriptedPhysicalConsole>(std::vector<std::string>{"never read"});
+    auto os = BuildOS(console);
+
+    auto input = std::make_shared<Mocks::MockFileDescriptor>();
+    input->Feed("from a pipe\n");
+    input->EndInput();
+    StartProcessOptions options;
+    options.interactive = true;
+    options.stdIn = input;
+
+    auto process = os->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/"", options);
+    ASSERT_NE(process, nullptr);
+    // End of the pipe's input stops the agent, as end of console input would.
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    EXPECT_EQ(console->ReadLineCalls(), 0);
+
+    auto agent = std::dynamic_pointer_cast<ICurrentProcess>(process)->AsAgent();
+    ASSERT_NE(agent, nullptr);
+    auto history = agent->GetHistory();
+    EXPECT_TRUE(HistoryMentions(history, "Say hello."));
+    EXPECT_TRUE(HistoryMentions(history, "from a pipe"));
+}
+
+// An LLM round trip that fails is a diagnostic, not an answer: it belongs on
+// the process's stderr, with nothing on its stdout.
+TEST_F(HaisosOSTest, AnAgentsLLMFailureGoesToStderr) {
+    auto os = BuildOS();
+
+    auto out = std::make_shared<Mocks::MockFileDescriptor>();
+    auto err = std::make_shared<Mocks::MockFileDescriptor>();
+    StartProcessOptions options;
+    options.stdOut = out;
+    options.stdErr = err;
+    auto process = os->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/"", options);
+    ASSERT_NE(process, nullptr);
+    // Wait for the agent before reading the mocks back: it writes them on its
+    // own runtime thread.
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+
+    // The endpoint is unreachable, so the one round trip failed.
+    EXPECT_NE(err->Written().find("Error: HTTP request failed"), std::string::npos);
+    EXPECT_EQ(out->Written().find("Error:"), std::string::npos);
+}
+
+// --- Exit codes ---
+
+// An agent whose (only) command failed at the LLM round trip exits 1, as a
+// shell reports its last command's outcome.
+TEST_F(HaisosOSTest, AnAgentWhoseLLMCallFailsExitsOne) {
+    auto os = BuildOS();
+    auto process = os->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/"", StartProcessOptions{});
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    ASSERT_TRUE(process->ExitCode().has_value());
+    EXPECT_EQ(*process->ExitCode(), 1);
+}
+
+// A stop asked for once the process has finished is not a stop at all: the
+// code it already earned is kept.
+TEST_F(HaisosOSTest, AStopAfterFinishingKeepsTheExitCode) {
+    auto os = BuildOS();
+    auto process = os->StartProcess(TestEnvironment(), "hello.md", {}, /*workingDirectory=*/"", StartProcessOptions{});
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    ASSERT_EQ(process->ExitCode().value_or(-1), 1);
+
+    process->TriggerStop();
+    EXPECT_EQ(process->ExitCode().value_or(-1), 1);
+}
+
+TEST_F(HaisosOSTest, AScriptExitCodeIsVisibleFromOutside) {
+    std::ofstream(kTestRoot + "/exit5.lua") << "exit(5)";
+    auto os = BuildOS();
+
+    auto process = os->StartProcess(TestEnvironment(), "exit5.lua", {}, /*workingDirectory=*/"", StartProcessOptions{});
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    ASSERT_TRUE(process->ExitCode().has_value());
+    EXPECT_EQ(*process->ExitCode(), 5);
+}
+
+TEST_F(HaisosOSTest, OsListProcessesShowsExitCodes) {
+    std::ofstream(kTestRoot + "/loop.lua") << "while true do end";
+    std::ofstream(kTestRoot + "/exit5.lua") << "exit(5)";
+    auto os = BuildOS();
+
+    auto looping = os->StartProcess(TestEnvironment(), "loop.lua", {}, /*workingDirectory=*/"", StartProcessOptions{});
+    auto exited = os->StartProcess(TestEnvironment(), "exit5.lua", {}, /*workingDirectory=*/"", StartProcessOptions{});
+    ASSERT_NE(looping, nullptr);
+    ASSERT_NE(exited, nullptr);
+    ASSERT_TRUE(exited->WaitToFinish(kProcessWaitMs));
+
+    // Build the tool as the finished process would have it (its OS() is still
+    // this OS), and call it before any further StartProcess, which would prune
+    // the finished process from the list.
+    auto handle = CurrentProcessHandle::Create();
+    handle->Set(std::dynamic_pointer_cast<ICurrentProcess>(exited));
+    auto tool = OSToolFactory::Create(handle)->CreateTool("os_list_processes");
+    ASSERT_NE(tool, nullptr);
+    const ToolResult result = tool->Call(nullptr, nlohmann::json::object());
+    ASSERT_FALSE(result.isError) << result.content;
+    const auto listed = nlohmann::json::parse(result.content);
+    ASSERT_TRUE(listed.is_array()) << result.content;
+
+    bool sawLooping = false;
+    bool sawExited = false;
+    for (const auto& entry : listed) {
+        if (entry.value("path", "") == "loop.lua") {
+            sawLooping = true;
+            // Still running: no code yet.
+            EXPECT_TRUE(entry["exit_code"].is_null()) << entry.dump();
+        } else if (entry.value("path", "") == "exit5.lua") {
+            sawExited = true;
+            EXPECT_EQ(entry["exit_code"], 5) << entry.dump();
+        }
+    }
+    EXPECT_TRUE(sawLooping) << result.content;
+    EXPECT_TRUE(sawExited) << result.content;
+
+    looping->TriggerStop();
+    ASSERT_TRUE(looping->WaitToFinish(kProcessWaitMs));
+    EXPECT_EQ(looping->ExitCode().value_or(-1), 143);
+}
+
+// A script's print goes to the process's stdout -- a given one, not the
+// console behind the default.
+TEST_F(HaisosOSTest, AScriptPrintsToAGivenStdout) {
+    std::ofstream(kTestRoot + "/greet.lua") << "print('hi')";
+    auto console = std::make_shared<ScriptedPhysicalConsole>(std::vector<std::string>{});
+    auto os = BuildOS(console);
+
+    auto out = std::make_shared<Mocks::MockFileDescriptor>();
+    StartProcessOptions options;
+    options.stdOut = out;
+    auto process = os->StartProcess(TestEnvironment(), "greet.lua", {}, /*workingDirectory=*/"", options);
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+
+    EXPECT_EQ(out->Written(), "hi\n");
+    EXPECT_EQ(console->Written(), "");
 }
 
 // --- A script and the real OS tools ---
@@ -629,6 +912,39 @@ TEST_F(HaisosOSTest, AnOSWithoutBuiltinCommandsCannotStartABuiltin) {
         m_factory->CreateServicesCreator(), m_factory->CreatePhysicalConsole(), root, /*builtinCommands=*/nullptr, TestEnvironment());
     ASSERT_NE(os, nullptr);
     EXPECT_EQ(os->StartProcess(TestEnvironment(), "/echo", {"hi"}, "", StartProcessOptions{}), nullptr);
+}
+
+// Default options mean the console: a builtin's stdout and stderr go to the
+// host's stdout and stderr through the console descriptors.
+TEST_F(HaisosOSTest, ABuiltinWithoutGivenStreamsWritesToTheConsole) {
+    auto console = std::make_shared<ScriptedPhysicalConsole>(std::vector<std::string>{});
+    auto os = BuildOS(console);
+    auto root = os->GetRootFileSystem();
+    ASSERT_EQ(root->CreateDirectory("/bin", 0755), 0);
+    ASSERT_TRUE(m_factory->CreateBuiltinConfigurator()->AddBuiltinCommand(root, "/bin/echo", "echo"));
+
+    auto process = os->StartProcess(TestEnvironment(), "/bin/echo", {"hi"}, /*workingDirectory=*/"", StartProcessOptions{});
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    EXPECT_EQ(console->Written(), "hi\n");
+}
+
+// A given stream wins over the default: stdout bypasses the console entirely.
+TEST_F(HaisosOSTest, AGivenStdoutBypassesTheConsole) {
+    auto console = std::make_shared<ScriptedPhysicalConsole>(std::vector<std::string>{});
+    auto os = BuildOS(console);
+    auto root = os->GetRootFileSystem();
+    ASSERT_EQ(root->CreateDirectory("/bin", 0755), 0);
+    ASSERT_TRUE(m_factory->CreateBuiltinConfigurator()->AddBuiltinCommand(root, "/bin/echo", "echo"));
+
+    auto out = std::make_shared<Mocks::MockFileDescriptor>();
+    StartProcessOptions options;
+    options.stdOut = out;
+    auto process = os->StartProcess(TestEnvironment(), "/bin/echo", {"hi"}, /*workingDirectory=*/"", options);
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kProcessWaitMs));
+    EXPECT_EQ(out->Written(), "hi\n");
+    EXPECT_EQ(console->Written(), "");
 }
 
 // --- Objects released last on their own threads ---

@@ -1,4 +1,6 @@
 #include "ProcessFileIO.h"
+#include <algorithm>
+
 #include "src/components/Filesystem/VirtualPath.h"
 
 namespace Haisos {
@@ -55,29 +57,172 @@ int ProcessFileIO::ChangeDirectory(const std::string& path) {
     return 0;
 }
 
-int ProcessFileIO::OpenFile(const std::string& pathname, int flags) {
+std::shared_ptr<IFileDescriptor> ProcessFileIO::OpenFile(const std::string& pathname, int flags) {
     auto fs = RootFileSystem();
-    return fs ? fs->OpenFile(ResolvePath(pathname), flags) : -1;
+    return fs ? fs->OpenFile(ResolvePath(pathname), flags) : nullptr;
 }
 
-int ProcessFileIO::OpenFile(const std::string& pathname, int flags, int mode) {
+std::shared_ptr<IFileDescriptor> ProcessFileIO::OpenFile(const std::string& pathname, int flags, int mode) {
     auto fs = RootFileSystem();
-    return fs ? fs->OpenFile(ResolvePath(pathname), flags, mode) : -1;
+    return fs ? fs->OpenFile(ResolvePath(pathname), flags, mode) : nullptr;
 }
 
-int ProcessFileIO::CloseFile(int fd) {
-    auto fs = RootFileSystem();
-    return fs ? fs->CloseFile(fd) : -1;
+// --- The descriptor table ---
+// None of these reaches the OS: a file already open works on its own. Every
+// shared_ptr dropped -- by CloseDescriptor, Dup2 replacing a slot, or
+// ReleaseAllDescriptors -- is moved into a local under the lock and let go of
+// only after unlocking: a descriptor's destructor may later block or call back
+// (a pipe end waking its peer, a console flushing), and it must never run
+// under the table's mutex.
+
+std::shared_ptr<IFileDescriptor> ProcessFileIO::GetDescriptor(int fd) const {
+    std::lock_guard<std::mutex> lock(m_descriptorsMutex);
+    if (fd < 0 || static_cast<size_t>(fd) >= m_descriptors.size()) {
+        return nullptr;
+    }
+    return m_descriptors[static_cast<size_t>(fd)];
 }
 
-ssize_t ProcessFileIO::ReadFile(int fd, void* buf, size_t count) {
-    auto fs = RootFileSystem();
-    return fs ? fs->ReadFile(fd, buf, count) : -1;
+int ProcessFileIO::NextFreeSlotLocked(size_t from) const {
+    for (size_t i = from; i < m_descriptors.size(); ++i) {
+        if (!m_descriptors[i]) {
+            return static_cast<int>(i);
+        }
+    }
+    // No hole at or past |from|: the table may still grow, one slot at a
+    // time, so the slot at |from|, |size| or beyond is free while it is below
+    // kMaxDescriptors.
+    const size_t grown = std::max(from, m_descriptors.size());
+    if (grown < static_cast<size_t>(IFileIO::kMaxDescriptors)) {
+        return static_cast<int>(grown);
+    }
+    return -1;
 }
 
-ssize_t ProcessFileIO::WriteFile(int fd, const void* buf, size_t count) {
-    auto fs = RootFileSystem();
-    return fs ? fs->WriteFile(fd, buf, count) : -1;
+int ProcessFileIO::AddDescriptorLocked(std::shared_ptr<IFileDescriptor> descriptor) {
+    const int slot = NextFreeSlotLocked(0);
+    if (slot < 0) {
+        return -1;
+    }
+    if (static_cast<size_t>(slot) == m_descriptors.size()) {
+        m_descriptors.push_back(std::move(descriptor));
+    } else {
+        m_descriptors[static_cast<size_t>(slot)] = std::move(descriptor);
+    }
+    return slot;
+}
+
+int ProcessFileIO::AddDescriptor(std::shared_ptr<IFileDescriptor> descriptor) {
+    if (!descriptor) {
+        return -1;
+    }
+    std::lock_guard<std::mutex> lock(m_descriptorsMutex);
+    return AddDescriptorLocked(std::move(descriptor));
+}
+
+int ProcessFileIO::Dup(int fd) {
+    std::lock_guard<std::mutex> lock(m_descriptorsMutex);
+    if (fd < 0 || static_cast<size_t>(fd) >= m_descriptors.size() || !m_descriptors[static_cast<size_t>(fd)]) {
+        return -1;
+    }
+    return AddDescriptorLocked(m_descriptors[static_cast<size_t>(fd)]);
+}
+
+int ProcessFileIO::Dup2(int oldFd, int newFd) {
+    std::shared_ptr<IFileDescriptor> evicted;
+    {
+        std::lock_guard<std::mutex> lock(m_descriptorsMutex);
+        if (oldFd < 0 || static_cast<size_t>(oldFd) >= m_descriptors.size() || !m_descriptors[static_cast<size_t>(oldFd)]) {
+            return -1;
+        }
+        if (newFd < 0 || static_cast<size_t>(newFd) >= static_cast<size_t>(IFileIO::kMaxDescriptors)) {
+            return -1;
+        }
+        if (oldFd == newFd) {
+            return newFd;
+        }
+        if (static_cast<size_t>(newFd) >= m_descriptors.size()) {
+            m_descriptors.resize(static_cast<size_t>(newFd) + 1);
+        }
+        evicted = std::move(m_descriptors[static_cast<size_t>(newFd)]);
+        m_descriptors[static_cast<size_t>(newFd)] = m_descriptors[static_cast<size_t>(oldFd)];
+    }
+    evicted.reset();
+    return newFd;
+}
+
+int ProcessFileIO::CloseDescriptor(int fd) {
+    std::shared_ptr<IFileDescriptor> evicted;
+    {
+        std::lock_guard<std::mutex> lock(m_descriptorsMutex);
+        if (fd < 0 || static_cast<size_t>(fd) >= m_descriptors.size() || !m_descriptors[static_cast<size_t>(fd)]) {
+            return -1;
+        }
+        evicted = std::move(m_descriptors[static_cast<size_t>(fd)]);
+        m_descriptors[static_cast<size_t>(fd)] = nullptr;
+    }
+    evicted.reset();
+    return 0;
+}
+
+bool ProcessFileIO::InstallStandardStreams(std::shared_ptr<IFileDescriptor> in,
+                                           std::shared_ptr<IFileDescriptor> out,
+                                           std::shared_ptr<IFileDescriptor> err) {
+    if (!in || !out || !err) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(m_descriptorsMutex);
+    for (const auto& slot : m_descriptors) {
+        if (slot) {
+            return false;
+        }
+    }
+    // The table is empty: three pushes land in slots 0, 1 and 2.
+    m_descriptors.clear();
+    m_descriptors.push_back(std::move(in));
+    m_descriptors.push_back(std::move(out));
+    m_descriptors.push_back(std::move(err));
+    return true;
+}
+
+std::optional<std::pair<int, int>> ProcessFileIO::CreatePipe(size_t capacity) {
+    auto os = m_os.lock();
+    if (!os) {
+        return std::nullopt;
+    }
+    auto service = os->GetPipeService();
+    if (!service) {
+        return std::nullopt;
+    }
+    PipeEnds ends = service->CreatePipe(capacity);
+    std::optional<std::pair<int, int>> slots;
+    {
+        std::lock_guard<std::mutex> lock(m_descriptorsMutex);
+        // Both of the two lowest free slots are found before either is
+        // filled: with fewer than two free the table is left untouched (no
+        // rollback) and the ends not placed close the pipe as they are
+        // released on return, outside the lock.
+        const int readSlot = NextFreeSlotLocked(0);
+        if (readSlot >= 0 && NextFreeSlotLocked(static_cast<size_t>(readSlot) + 1) >= 0) {
+            // AddDescriptorLocked takes the lowest free slot, so the two it
+            // returns are the two lowest free slots, the read end first.
+            const int placedRead = AddDescriptorLocked(std::move(ends.readEnd));
+            const int placedWrite = AddDescriptorLocked(std::move(ends.writeEnd));
+            if (placedRead >= 0 && placedWrite >= 0) {  // guaranteed above
+                slots.emplace(placedRead, placedWrite);
+            }
+        }
+    }
+    return slots;
+}
+
+void ProcessFileIO::ReleaseAllDescriptors() {
+    std::vector<std::shared_ptr<IFileDescriptor>> released;
+    {
+        std::lock_guard<std::mutex> lock(m_descriptorsMutex);
+        released.swap(m_descriptors);
+    }
+    released.clear();
 }
 
 int ProcessFileIO::CreateDirectory(const std::string& pathname, int mode) {

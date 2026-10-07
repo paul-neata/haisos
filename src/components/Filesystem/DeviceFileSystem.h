@@ -1,7 +1,5 @@
 #pragma once
-#include <mutex>
 #include <string>
-#include <unordered_map>
 #include "MountableFileSystem.h"
 #include "interfaces/IFileSystemService.h"
 
@@ -20,11 +18,8 @@ public:
     static std::shared_ptr<DeviceFileSystem> Create();
     ~DeviceFileSystem() override;
 
-    int LocalOpenFile(const std::string& pathname, int flags) override;
-    int LocalOpenFile(const std::string& pathname, int flags, int mode) override;
-    int LocalCloseFile(int fd) override;
-    ssize_t LocalReadFile(int fd, void* buf, size_t count) override;
-    ssize_t LocalWriteFile(int fd, const void* buf, size_t count) override;
+    std::shared_ptr<IFileDescriptor> LocalOpenFile(const std::string& pathname, int flags) override;
+    std::shared_ptr<IFileDescriptor> LocalOpenFile(const std::string& pathname, int flags, int mode) override;
 
     int LocalCreateDirectory(const std::string& pathname, int mode) override;
     int LocalRemoveDirectory(const std::string& pathname) override;
@@ -55,10 +50,6 @@ private:
     // When this filesystem was made: the time of its root and of every device,
     // as Linux's /dev shows the time it was populated at boot.
     const FileDateTime m_createdTime;
-
-    std::mutex m_mutex;
-    std::unordered_map<int, Device> m_openHandles;
-    int m_nextFd = 3;
 };
 
 }

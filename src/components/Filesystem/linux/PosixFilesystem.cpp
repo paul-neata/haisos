@@ -1,6 +1,7 @@
 #include "Filesystem.h"
 #include "NoCriticalErrorDialogs.h"
 #include <memory>
+#include <cerrno>
 #include <fcntl.h>
 #include <unistd.h>
 #include <dirent.h>
@@ -8,6 +9,7 @@
 #include <sys/sysmacros.h>
 #include <algorithm>
 #include <cstring>
+#include "src/components/Logger/Logger.h"
 
 namespace Haisos {
 
@@ -24,24 +26,30 @@ char TypeOf(mode_t mode) {
 
 } // namespace
 
-int FileSystem::LocalOpenFile(const std::string& pathname, int flags) {
-    return ::open(pathname.c_str(), flags);
+HostFileDescriptor::~HostFileDescriptor() {
+    if (::close(m_hostFd) != 0) {
+        LogWarning("HostFileDescriptor: closing host fd %d failed (errno %d)", m_hostFd, errno);
+    }
 }
 
-int FileSystem::LocalOpenFile(const std::string& pathname, int flags, int mode) {
-    return ::open(pathname.c_str(), flags, static_cast<mode_t>(mode));
+ssize_t HostFileDescriptor::Read(void* buf, size_t count) {
+    const ssize_t n = ::read(m_hostFd, buf, count);
+    return n < 0 ? kIOError : n;
 }
 
-int FileSystem::LocalCloseFile(int fd) {
-    return ::close(fd);
+ssize_t HostFileDescriptor::Write(const void* buf, size_t count) {
+    const ssize_t n = ::write(m_hostFd, buf, count);
+    return n < 0 ? kIOError : n;
 }
 
-ssize_t FileSystem::LocalReadFile(int fd, void* buf, size_t count) {
-    return ::read(fd, buf, count);
+std::shared_ptr<IFileDescriptor> FileSystem::LocalOpenFile(const std::string& pathname, int flags) {
+    const int fd = ::open(pathname.c_str(), flags);
+    return fd < 0 ? nullptr : HostFileDescriptor::Create(fd);
 }
 
-ssize_t FileSystem::LocalWriteFile(int fd, const void* buf, size_t count) {
-    return ::write(fd, buf, count);
+std::shared_ptr<IFileDescriptor> FileSystem::LocalOpenFile(const std::string& pathname, int flags, int mode) {
+    const int fd = ::open(pathname.c_str(), flags, static_cast<mode_t>(mode));
+    return fd < 0 ? nullptr : HostFileDescriptor::Create(fd);
 }
 
 int FileSystem::LocalCreateDirectory(const std::string& pathname, int mode) {
@@ -111,11 +119,6 @@ int FileSystem::LocalStat(const std::string& path, FileStatus& out) {
     out.modificationTime = FileDateTime{static_cast<int64_t>(st.st_mtim.tv_sec), static_cast<uint32_t>(st.st_mtim.tv_nsec)};
     out.changeTime = FileDateTime{static_cast<int64_t>(st.st_ctim.tv_sec), static_cast<uint32_t>(st.st_ctim.tv_nsec)};
     return 0;
-}
-
-bool FileSystem::IsLink(const std::string& hostPath) {
-    struct stat st;
-    return ::lstat(hostPath.c_str(), &st) == 0 && S_ISLNK(st.st_mode);
 }
 
 // A POSIX host has no device names: /dev/null is a path like any other, and

@@ -27,7 +27,53 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   by `ICurrentProcess::IO()` -- never through `GetRootFileSystem()`, which
   understands absolute paths alone. `ProcessFileIO` fetches the filesystem from
   the OS on every call rather than holding it, so a process handed a narrowed
-  OS does its I/O through that OS's root and nothing else.
+  OS does its I/O through that OS's root and nothing else. The same `IFileIO`
+  holds the process's **descriptor table**: its open files by number, as a
+  POSIX process holds them -- slots 0, 1 and 2 holding its stdin, stdout and
+  stderr (installed from the resolved `StartProcessOptions` before the program
+  runs; see below), 3 and up ordinary, at most
+  `IFileIO::kMaxDescriptors` (1024) in all. `OpenFile` hands back the
+  descriptor itself without numbering it; placing it in the table
+  (`AddDescriptor`, lowest free slot), duplicating it (`Dup`, lowest free slot;
+  `Dup2`, a chosen slot replaced atomically), looking it up (`GetDescriptor`)
+  and closing a slot (`CloseDescriptor`) are table operations, and none of them
+  needs the OS.
+- When a process's program ends, every descriptor in its table is released
+  **before the process reports finished** -- whoever sees `WaitToFinish` return
+  true finds the table already empty, which is what will let a pipe's reader
+  see end of file when its writer's program ends. Each process class calls
+  `ProcessFileIO::ReleaseAllDescriptors()` (not on `IFileIO`, so no program can
+  call it): a builtin's `Run` returning, in `BuiltinProcess::RunThread`; a
+  script's chunk ending, in `LuaProcess::RunThread`; and an agent's
+  conversation thread ending, through `Agent::SetFinishedHook`, which
+  `AgentProcess::Create` sets. Every drop happens outside the table's mutex.
+- Every process reports an **exit code** (`IProcess::ExitCode()`), empty while
+  it runs and a shell-style 0-255 once finished, latched and never changing --
+  a `TriggerStop()` landing after the finish changes nothing. The meanings are a
+  shell's: the program's own code modulo 256, 143 (128 + SIGTERM) for a stop,
+  141 (128 + SIGPIPE) for a write into a pipe whose reader is gone; the
+  constants and `ExitCodeFor` live
+  in `src/components/libheaders/ExitCodes.h`, and each runtime turns its end
+  into a code in one place, where it reports finished. A builtin reports its
+  command's status; a Lua script its `exit()` argument, 1 on an error, 143 when
+  its kill hook fired before the chunk ran out; an agent 1 when its last
+  command failed (`Agent::LastCommandFailed()`), else 0, and 143 when it was
+  stopped before finishing -- `AgentProcess::TriggerStop()` latches "stopped"
+  only while the process is still running. Every runtime also implements
+  `ICurrentProcess::StopForBrokenPipe()`, called by that runtime's own output
+  path (`BuiltinContext`, Lua's `print` and error line, `ProcessAgentConsole`)
+  when a write of the program's bytes returned `kIOBrokenPipe`: the flag it
+  latches is checked **before** "stopped" at the decision point (141 wins over
+  a `TriggerStop` asked for afterwards, and, for Lua, before `exit()` and an
+  error's 1 too), and the program is then stopped the way `TriggerStop` would
+  stop it -- quietly, nothing printed. The API stops nobody: `Write` and
+  `IFileIO` only return the error, for code (a shell's heredoc, later) that
+  would rather handle it. In Lua a broken `print` does not raise from the
+  trampoline -- it has C++ locals a `longjmp` may not cross -- but re-arms the
+  kill hook to fire on the next instruction, so the unwinding runs as for a
+  kill and no `lua:` line is written; `ProcessAgentConsole` stops the agent on
+  a broken pipe from **either** descriptor, history and message buffer
+  unchanged.
 - **`ICurrentProcess` is the only door out of a process.** Everything a running
   program reaches beyond its own memory it reaches through
   `ICurrentProcess` -- files via `IO()`, everything else via `OS()` --
@@ -64,17 +110,33 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   the root `CLAUDE.md`). `~HaisosOS` depends on it: it drains its processes --
   asks each to stop, then waits up to 5 s for it -- and on a process's own
   thread, that wait would be for itself.
-- `StartProcessOptions` says how to run a program. Its one field for now,
-  `interactiveAgent`, applies to `.md` programs only (ignored otherwise): the
-  agent is created interactive, gets an extra system prompt telling it that
-  further messages are lines typed on the console and that `self_close` ends the
-  session, and its `AgentProcess` owns an `AgentInputLoop` reading its console.
-  The loop posts each line to the agent while `WaitToFinish(0)` says it is still
-  running; it ends when a line arrives for an agent that has closed (that line
-  is dropped), or at end of input, when it asks the agent to stop. An
-  interactive process is finished only once both the agent and the loop are.
-  `os_start_process` never asks for it: the console's input belongs to whoever
-  the haisosfile gave it to.
+- `StartProcessOptions` says how to run a program: the standard streams
+  (`stdIn`/`stdOut`/`stdErr`, the process's descriptors 0/1/2) and
+  `interactive`. `StartProcess` resolves every null stream right after its
+  refusals, one place for the defaults (`ResolveStandardStreams`): stdout the
+  OS's console output, stderr its console error (console descriptors, see the
+  Console component), stdin the console's input when `interactive` is set, else
+  an empty input whose reads end at once. Every runtime then gets the three
+  streams as slots 0/1/2 of its table, installed before its program starts --
+  before the agent is given its program, the script's thread begins or the
+  builtin's thread starts, so a runtime's first output already reaches them.
+  What a runtime writes there: a builtin writes its stdout and stderr; an agent
+  writes its replies to slot 1 and its diagnostics (an LLM, HTTP or parse
+  failure, an unknown tool, a failed command) to slot 2, through
+  `ProcessAgentConsole`; a Lua script's `print` writes its line to slot 1 and a
+  load or runtime error goes to slot 2, one line `lua: <message>` where the
+  message is rendered as the standalone interpreter's does (a position prefix
+  when there is one, a non-string error object described), without a traceback. For a `.md` program,
+  `interactive` also makes the agent interactive: it gets an extra system
+  prompt telling it that further messages are lines typed on the console and
+  that `self_close` ends the session, and its `AgentProcess` owns an
+  `AgentInputLoop` reading its stdin (slot 0). The loop posts each line to the
+  agent
+  while `WaitToFinish(0)` says it is still running; it ends when a line
+  arrives for an agent that has closed (that line is dropped), or at end of
+  input, when it asks the agent to stop. An interactive process is finished
+  only once both the agent and the loop are. `os_start_process` never asks for
+  it: the console's input belongs to whoever the haisosfile gave it to.
 - `StartProcess` first asks the root filesystem `IsBuiltinCommand(path)`: a
   path naming a builtin runs it -- whatever its extension -- through the
   `IBuiltinCommands` the OS was created with (`StartBuiltinProcess` fills in a
@@ -87,8 +149,11 @@ console, and a services layer; starts processes and spawns sub-OS instances.
 - Merges the OS's own tools with an agent-backed process's LLM tools via
   `CompositeToolFactory`; a Lua process gets the OS's tools directly, each
   exposed as a Lua global function returning `(content, is_error)` (JSON
-  results are handed back as Lua tables); `print()` routes to the process's
-  console
+  results are handed back as Lua tables); `print()` writes its line plus `\n`
+  to the process's stdout (descriptor 1), and a load or runtime error goes to
+  its stderr (descriptor 2) as `lua: <path>:<line>: <message>` plus a `\n` and
+  ends the script with exit code 1 (the load refusal of precompiled bytecode
+  has no position to name, so that line is just `lua: <message>`)
 - The Lua <-> JSON bridge behind those functions (`ToJson`/`PushJson` in
   `LuaProcess.cpp`) must survive whatever a script passes or a tool returns,
   since a script is untrusted and so is any file it reads. Strings keep every
@@ -105,9 +170,14 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   `debug`) plus the file-loading globals are deliberately removed, so a script
   cannot touch the real disk, environment, or native libraries. Consequently
   **all** filesystem and process access from Lua must go through the `os_*`
-  tool globals. This is a security boundary, not an oversight -- the exact set
-  of libraries and globals is defined by the library-opening helper in
-  `LuaProcess.cpp`, which is the ground truth.
+  tool globals. The stock `os.exit` goes with `os` -- it would call C `exit()`
+  on the whole haisos process -- and the sandbox's one replacement is a global
+  `exit([code])`: it asks for the script to end (the same kill-hook machinery a
+  stop uses, so a `pcall` cannot swallow it) and the process then exits with
+  its code (no argument or `nil` 0, `true` 0, `false` 1, else an integer, as
+  `os.exit` takes them). This is a security boundary, not an oversight -- the
+  exact set of libraries and globals is defined by the library-opening helper
+  in `LuaProcess.cpp`, which is the ground truth.
 - `CreateSubOS` takes the same arguments as `IFactory::CreateHaisosOS` --
   including the `IBuiltinCommands`, right after the root filesystem, typically
   the parent's own -- because a sub-OS is an ordinary OS. What confines it is the root filesystem the caller
@@ -137,6 +207,24 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   on). An OS cannot step outside that root, but it can compose further
   filesystems on top of it, through the filesystem service that
   `GetServicesCreator()` -- this OS's own sandboxed services -- creates.
+- `GetPipeService()` is the OS's own pipe service (`IPipeService`, see the
+  PipeService component), created from its services creator when the OS is
+  created -- `HaisosOS::Create` makes one beside the network and LLM services,
+  so a sub-OS gets its own too. Nothing in the OS uses it directly: a process
+  reaches it through `ProcessFileIO::CreatePipe()`, which makes a pipe through
+  `OS()` (the one door) and places the read and write ends in the two lowest
+  free slots of the caller's descriptor table, read end first.
+- Every runtime thread -- a builtin's command, a Lua script, an agent's
+  conversation and an interactive process's input loop -- carries its
+  process's `StopToken` (`src/components/libheaders/StopToken.h`), installed
+  with a `StopTokenScope` right after its `RuntimeThreadScope` and signalled
+  by `TriggerStop()` (`BuiltinProcess::TriggerStop`, `LuaProcess::Kill`,
+  `Agent::TriggerStop`; a Lua `exit()` does not touch it -- it ends by
+  unwinding, not by blocking). So a pipe `Read`/`Write` blocked on a process's
+  behalf returns `kIOInterrupted` as soon as the process is asked to stop, and
+  a stuck pipeline never wedges `~HaisosOS`'s drain. Console input stays
+  uninterruptible: a line being read from the host's terminal cannot be
+  abandoned (see the Console component).
 
 ## Key Classes
 
@@ -148,13 +236,37 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   or environment, so the rest of the class assumes both. It also posts the
   program to the agent -- only once the process exists, so a tool can find it --
   and then starts the input loop of an interactive process
-- `AgentInputLoop` - the thread that feeds an interactive agent the lines typed
-  on its console (see `StartProcessOptions` above). Its destructor waits the
-  thread out however long it takes, since a blocked `ReadLine` cannot be
-  interrupted
+- `AgentInputLoop` - the thread that feeds an interactive agent the lines read
+  from its stdin (see `StartProcessOptions` above), line by line through a
+  `DescriptorLineReader`. Its destructor waits the
+  thread out however long it takes: a line being read cannot be abandoned, and
+  a read blocked on the console's input cannot be interrupted, though a
+  pipe's can
+- `ProcessAgentConsole` - an agent process's `IAgentConsole`: `Write` (a reply)
+  goes to the process's descriptor 1, `WriteError` (a diagnostic) to descriptor
+  2, each plus a `\n`. Created before the process, so it reaches it through the
+  same `CurrentProcessHandle` the OS tools use, and looks the descriptor up on
+  every write: a process whose table was replaced or released writes wherever
+  it says, or nowhere. A write that returns `kIOBrokenPipe` -- either
+  descriptor's pipe -- calls the process's `StopForBrokenPipe()` (the agent
+  stops, exit code 141, quietly) and drops every line after
 - `LuaProcess` - `ICurrentProcess` backed by an embedded Lua script, running on
   its own thread. Its `Kill()` aborts the script via a Lua instruction-count
   hook -- an interpreter really can be interrupted mid-instruction -- and
-  `TriggerStop()` simply calls it, since a script has no command queue to close
-- `ProcessFileIO` - the `IFileIO` behind `ICurrentProcess::IO()`: the OS's root filesystem plus this process's working directory. Built as a library of its own (`ProcessFileIO` in `CMakeLists.txt`), so a runtime living outside this component -- `BuiltinProcess` -- gives its processes the same I/O without linking all of `HaisosOS`
+  `TriggerStop()` simply calls it, since a script has no command queue to
+  close. `StopForBrokenPipe()` calls it too, after latching the flag that makes
+  the exit code 141 (checked first at the decision point: a broken pipe beats
+  `exit()`, a stop and an error); a `print` whose write hit the pipe never
+  raises from its trampoline but re-arms the hook to fire before the next
+  instruction, so the unwinding is the one a kill runs, with no `lua:` line.
+  The same hook serves the global `exit()`: the hook's C trampoline
+  re-arms it on every call, return and line, so neither a stop nor an `exit()`
+  can be caught and ignored by a `pcall`. Both also stop the script from inside
+  any coroutine: a hook set is per Lua thread, so the latch is armed on the
+  main thread as well, and `coroutine.resume`/`coroutine.wrap` are wrapped to
+  arm each resuming thread as control comes back to it (a nested resumer
+  included), so the resumer stops before its next instruction. The chunk is loaded as text with its
+  path for a name (`"@" + path`), so error messages come out `path:line:` as
+  the standalone interpreter's do
+- `ProcessFileIO` - the `IFileIO` behind `ICurrentProcess::IO()`: the OS's root filesystem plus this process's working directory, and its owner of the descriptor table (the process's open files by number; see the bullets above). Built as a library of its own (`ProcessFileIO` in `CMakeLists.txt`), so a runtime living outside this component -- `BuiltinProcess` -- gives its processes the same I/O without linking all of `HaisosOS`
 - `OSToolFactory` - the OS-level tool set (`os_read_file`, `os_write_file`, `os_list_directory`, `os_start_process`, `os_list_processes`), built once per process and bound to it

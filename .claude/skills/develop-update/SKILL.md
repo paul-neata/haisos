@@ -25,11 +25,12 @@ message, resolves rebase conflicts, and reads out what came in.
 ### 1. Be on `develop`
 
 ```bash
+bash scripts/develop/git_ssh.sh
 git rev-parse --abbrev-ref HEAD
 git status --porcelain
 ```
 
-Not on `develop`: if the working tree is clean and `origin/develop` exists,
+`git_ssh.sh` says `FAIL`: stop and show its line. Not on `develop`: if the working tree is clean and `origin/develop` exists,
 `git switch develop`; otherwise stop and say why. A rebase already in progress
 (`HEAD` detached, `git status` says "rebasing"): go to step 4.
 

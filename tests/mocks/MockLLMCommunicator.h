@@ -14,9 +14,18 @@ public:
 
     void SetMessageResponse(const std::string& message) { m_messageResponse = message; }
 
+    // Puts |doneReason| on every response, the way the real communicator marks
+    // a failure ("error", "parse_error", "http_error").
+    void SetDoneReason(const std::string& doneReason) { m_doneReason = doneReason; }
+
     // Makes the next response ask for |toolName|, so an agent's tool-calling
     // path can be exercised without a real LLM.
     void SetToolCallResponse(const std::string& toolName) { m_toolCallName = toolName; }
+
+    // Like SetToolCallResponse but on every response, not just the next one:
+    // the conversation never ends on its own, so only the agent's LLM round
+    // cap stops it.
+    void SetRepeatingToolCallResponse(const std::string& toolName) { m_repeatingToolCallName = toolName; }
 
     // Makes the next response carry exactly |toolCall|, however malformed, so
     // how an agent copes with whatever an LLM may send can be exercised.
@@ -51,6 +60,7 @@ public:
         response.message.role = "assistant";
         response.message.content = m_messageResponse;
         response.done = true;
+        response.done_reason = m_doneReason;
 
         if (!m_toolCallName.empty()) {
             nlohmann::json toolCall;
@@ -60,6 +70,13 @@ public:
             response.message.toolCallsJson.push_back(std::move(toolCall));
             // One round of tool calls is enough for any test using this.
             m_toolCallName.clear();
+        }
+        if (!m_repeatingToolCallName.empty()) {
+            nlohmann::json toolCall;
+            toolCall["id"] = "call_1";
+            toolCall["function"]["name"] = m_repeatingToolCallName;
+            toolCall["function"]["arguments"] = nlohmann::json::object();
+            response.message.toolCallsJson.push_back(std::move(toolCall));
         }
         if (!m_rawToolCall.is_null()) {
             response.message.toolCallsJson.push_back(std::move(m_rawToolCall));
@@ -74,7 +91,9 @@ public:
 
 private:
     std::string m_messageResponse;
+    std::string m_doneReason;
     std::string m_toolCallName;
+    std::string m_repeatingToolCallName;
     nlohmann::json m_rawToolCall;
     int m_throwOnCall = 0;
     std::string m_throwWhat;

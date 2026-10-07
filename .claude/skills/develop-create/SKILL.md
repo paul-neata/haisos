@@ -1,6 +1,7 @@
 ---
 name: develop-create
 description: Start a develop -- one big, user-visible feature at a time. Cuts `develop` from a fresh origin/master, bumps the minor version once for the whole develop, writes the develop-plan/ skeleton (goal with settings and metadata, rocks, playbook), commits and pushes it. Refuses while another develop exists. Next step: /develop-plan begin.
+model: sonnet
 args:
   - name: title
     description: A short title for the develop, e.g. "Pipes and redirections" (optional; /develop-plan can set it)
@@ -16,6 +17,7 @@ push the new `develop` branch.
 ### 1. Check that nothing is in the way
 
 ```bash
+bash scripts/develop/git_ssh.sh
 git status --porcelain
 git fetch origin --prune
 git rev-parse -q --verify origin/develop
@@ -23,6 +25,8 @@ git rev-parse -q --verify refs/heads/develop
 gh auth status
 ```
 
+- `git_ssh.sh` says `FAIL`: git cannot reach origin over SSH (see "Git over
+  SSH" in `WORKFLOW.md`); stop and show its line.
 - A dirty working tree: stop, list the files, and ask the user to commit or
   stash them.
 - `origin/develop` exists: a develop is in progress. Stop, and show

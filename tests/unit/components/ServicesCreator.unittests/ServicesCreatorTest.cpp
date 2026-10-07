@@ -73,17 +73,17 @@ TEST(ServicesCreatorTest, CreateEmptyInMemFileSystemIsReadWrite) {
     auto fs = filesystemService->CreateEmptyInMemFileSystem();
     ASSERT_NE(fs, nullptr);
 
-    int fd = fs->OpenFile("hello.txt", kWriteCreateTruncate, 0);
-    ASSERT_GE(fd, 0);
+    auto file = fs->OpenFile("hello.txt", kWriteCreateTruncate, 0);
+    ASSERT_NE(file, nullptr);
     const char* data = "hi";
-    EXPECT_EQ(fs->WriteFile(fd, data, 2), 2);
-    fs->CloseFile(fd);
+    EXPECT_EQ(file->Write(data, 2), 2);
+    file.reset();
 
-    fd = fs->OpenFile("hello.txt", kReadOnly);
-    ASSERT_GE(fd, 0);
+    file = fs->OpenFile("hello.txt", kReadOnly);
+    ASSERT_NE(file, nullptr);
     char buf[8] = {};
-    ssize_t n = fs->ReadFile(fd, buf, sizeof(buf));
-    fs->CloseFile(fd);
+    ssize_t n = file->Read(buf, sizeof(buf));
+    file.reset();
     EXPECT_EQ(std::string(buf, static_cast<size_t>(n)), "hi");
 }
 
@@ -95,7 +95,7 @@ TEST(ServicesCreatorTest, CreateReadOnlyFileSystemRejectsWrites) {
     auto readOnly = filesystemService->CreateReadOnlyFileSystem(inner);
     ASSERT_NE(readOnly, nullptr);
 
-    EXPECT_LT(readOnly->OpenFile("new.txt", kWriteCreateTruncate, 0), 0);
+    EXPECT_EQ(readOnly->OpenFile("new.txt", kWriteCreateTruncate, 0), nullptr);
     EXPECT_LT(readOnly->CreateDirectory("sub", 0), 0);
 }
 
@@ -105,23 +105,23 @@ TEST(ServicesCreatorTest, CreateSubFileSystemConfinesToBasePath) {
 
     auto root = filesystemService->CreateEmptyInMemFileSystem();
     ASSERT_EQ(root->CreateDirectory("sub", 0), 0);
-    int fd = root->OpenFile("sub/inner.txt", kWriteCreateTruncate, 0);
-    ASSERT_GE(fd, 0);
-    root->WriteFile(fd, "x", 1);
-    root->CloseFile(fd);
-    fd = root->OpenFile("outside.txt", kWriteCreateTruncate, 0);
-    ASSERT_GE(fd, 0);
-    root->WriteFile(fd, "y", 1);
-    root->CloseFile(fd);
+    auto file = root->OpenFile("sub/inner.txt", kWriteCreateTruncate, 0);
+    ASSERT_NE(file, nullptr);
+    file->Write("x", 1);
+    file.reset();
+    file = root->OpenFile("outside.txt", kWriteCreateTruncate, 0);
+    ASSERT_NE(file, nullptr);
+    file->Write("y", 1);
+    file.reset();
 
     auto sub = filesystemService->CreateSubFileSystem(root, "sub");
     ASSERT_NE(sub, nullptr);
 
-    EXPECT_GE(sub->OpenFile("inner.txt", kReadOnly), 0);
+    EXPECT_NE(sub->OpenFile("inner.txt", kReadOnly), nullptr);
     // "outside.txt" lives above the sub-root, so it isn't visible from here.
-    EXPECT_LT(sub->OpenFile("outside.txt", kReadOnly), 0);
+    EXPECT_EQ(sub->OpenFile("outside.txt", kReadOnly), nullptr);
     // Even an explicit escape attempt stays confined.
-    EXPECT_LT(sub->OpenFile("../outside.txt", kReadOnly), 0);
+    EXPECT_EQ(sub->OpenFile("../outside.txt", kReadOnly), nullptr);
 }
 
 TEST(ServicesCreatorTest, ComposedFileSystemOverlaysAtMountPoint) {
@@ -129,24 +129,24 @@ TEST(ServicesCreatorTest, ComposedFileSystemOverlaysAtMountPoint) {
     auto filesystemService = servicesCreator->CreateFileSystemService();
 
     auto main = filesystemService->CreateEmptyInMemFileSystem();
-    int fd = main->OpenFile("main.txt", kWriteCreateTruncate, 0);
-    ASSERT_GE(fd, 0);
-    main->WriteFile(fd, "m", 1);
-    main->CloseFile(fd);
+    auto file = main->OpenFile("main.txt", kWriteCreateTruncate, 0);
+    ASSERT_NE(file, nullptr);
+    file->Write("m", 1);
+    file.reset();
 
     auto mounted = filesystemService->CreateEmptyInMemFileSystem();
-    fd = mounted->OpenFile("mounted.txt", kWriteCreateTruncate, 0);
-    ASSERT_GE(fd, 0);
-    mounted->WriteFile(fd, "n", 1);
-    mounted->CloseFile(fd);
+    file = mounted->OpenFile("mounted.txt", kWriteCreateTruncate, 0);
+    ASSERT_NE(file, nullptr);
+    file->Write("n", 1);
+    file.reset();
 
     auto composed = filesystemService->CreateComposedFileSystem(main, "/data", mounted);
     ASSERT_NE(composed, nullptr);
 
     // Files under the mount point come from the mounted filesystem.
-    EXPECT_GE(composed->OpenFile("/data/mounted.txt", kReadOnly), 0);
+    EXPECT_NE(composed->OpenFile("/data/mounted.txt", kReadOnly), nullptr);
     // Files elsewhere still come from main.
-    EXPECT_GE(composed->OpenFile("/main.txt", kReadOnly), 0);
+    EXPECT_NE(composed->OpenFile("/main.txt", kReadOnly), nullptr);
     // The mount point is synthesized as a directory even though main never had one.
     auto rootEntries = composed->ReadDirectory("/");
     bool foundData = false;
@@ -325,4 +325,30 @@ TEST(ServicesCreatorTest, NoAgentIsCreatedOnceTheLLMServiceIsShuttingDown) {
     std::lock_guard<std::mutex> lock(gate->mutex);
     EXPECT_TRUE(gate->called);
     EXPECT_TRUE(gate->refused);
+}
+
+TEST(ServicesCreatorTest, CreatePipeServiceCreatesWorkingPipes) {
+    auto servicesCreator = CreateServicesCreator();
+
+    auto first = servicesCreator->CreatePipeService();
+    auto second = servicesCreator->CreatePipeService();
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    // Each call is a new, independent service.
+    EXPECT_NE(first, second);
+
+    auto ends = first->CreatePipe();
+    ASSERT_NE(ends.readEnd, nullptr);
+    ASSERT_NE(ends.writeEnd, nullptr);
+    EXPECT_EQ(first->OpenPipeCount(), 1u);
+    EXPECT_EQ(second->OpenPipeCount(), 0u);
+
+    EXPECT_EQ(ends.writeEnd->Write("x", 1), 1);
+    char buf[8] = {};
+    EXPECT_EQ(ends.readEnd->Read(buf, sizeof(buf)), 1);
+    EXPECT_EQ(buf[0], 'x');
+
+    ends.readEnd.reset();
+    ends.writeEnd.reset();
+    EXPECT_EQ(first->OpenPipeCount(), 0u);
 }

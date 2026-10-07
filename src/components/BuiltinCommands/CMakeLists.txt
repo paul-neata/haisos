@@ -3,15 +3,45 @@ add_library(BuiltinCommands STATIC
     BuiltinCommands.cpp
     BuiltinConfigurator.cpp
     BuiltinProcess.cpp
-    commands/Cat.cpp
-    commands/Echo.cpp
-    commands/Ls.cpp
-    commands/Mkdir.cpp
-    commands/Pwd.cpp
+    commands/cat/Cat.cpp
+    commands/echo/Echo.cpp
+    commands/ls/Ls.cpp
+    commands/man/Man.cpp
+    commands/mkdir/Mkdir.cpp
+    commands/pwd/Pwd.cpp
+    commands/wc/Wc.cpp
+    commands/hsh/HshWord.cpp
+    commands/hsh/HshLexer.cpp
+    commands/hsh/HshAst.cpp
+    commands/hsh/HshParser.cpp
+    commands/hsh/HshPattern.cpp
+    commands/hsh/HshGlob.cpp
+    commands/hsh/HshArithmetic.cpp
+    commands/hsh/HshVariables.cpp
+    commands/hsh/HshExpansion.cpp
+    commands/hsh/Hsh.cpp
+    commands/hsh/HshManPage.cpp
+    commands/hsh/HshInvocation.cpp
+    commands/hsh/HshShell.cpp
+    commands/hsh/HshDescriptors.cpp
+    commands/hsh/HshRedirection.cpp
+    commands/hsh/HshQuote.cpp
+    commands/hsh/HshNumber.cpp
+    commands/hsh/HshBuiltins.cpp
+    commands/hsh/HshBuiltinExec.cpp
+    commands/hsh/HshBuiltinWait.cpp
+    commands/hsh/HshBuiltinCd.cpp
+    commands/hsh/HshBuiltinVariables.cpp
+    commands/hsh/HshBuiltinSet.cpp
+    commands/hsh/HshBuiltinTest.cpp
+    commands/hsh/HshBuiltinFlow.cpp
+    commands/hsh/HshBuiltinRead.cpp
+    commands/hsh/HshSubshell.cpp
+    commands/hsh/HshUnboundedPipe.cpp
 )
 target_include_directories(BuiltinCommands PUBLIC
     ${CMAKE_SOURCE_DIR}/interfaces
     ${CMAKE_SOURCE_DIR}/src/components/BuiltinCommands
 )
-target_link_libraries(BuiltinCommands PUBLIC Logger Filesystem ProcessFileIO)
+target_link_libraries(BuiltinCommands PUBLIC Logger Filesystem ProcessFileIO Unicode)
 target_compile_features(BuiltinCommands PUBLIC cxx_std_17)

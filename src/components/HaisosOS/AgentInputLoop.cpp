@@ -1,5 +1,6 @@
 #include "AgentInputLoop.h"
 #include <chrono>
+#include "src/components/libheaders/DescriptorLineReader.h"
 #include "src/components/libheaders/DestroyOffRuntimeThreads.h"
 #include "src/components/Logger/Logger.h"
 
@@ -10,17 +11,18 @@ namespace Haisos {
 // never gives up.
 constexpr uint64_t INPUT_LOOP_DESTRUCTION_WAIT_INTERVAL_MS = 5000;
 
-std::shared_ptr<AgentInputLoop> AgentInputLoop::Create(std::shared_ptr<IAgent> agent, std::shared_ptr<IAgentConsole> console) {
-    if (!agent || !console) {
-        LogError("AgentInputLoop: refusing to create an input loop without %s", agent ? "a console" : "an agent");
+std::shared_ptr<AgentInputLoop> AgentInputLoop::Create(std::shared_ptr<IAgent> agent, std::shared_ptr<IFileDescriptor> input, std::shared_ptr<StopToken> stopToken) {
+    if (!agent || !input) {
+        LogError("AgentInputLoop: refusing to create an input loop without %s", agent ? "an input" : "an agent");
         return nullptr;
     }
-    return std::shared_ptr<AgentInputLoop>(new AgentInputLoop(std::move(agent), std::move(console)));
+    return std::shared_ptr<AgentInputLoop>(new AgentInputLoop(std::move(agent), std::move(input), std::move(stopToken)));
 }
 
-AgentInputLoop::AgentInputLoop(std::shared_ptr<IAgent> agent, std::shared_ptr<IAgentConsole> console)
+AgentInputLoop::AgentInputLoop(std::shared_ptr<IAgent> agent, std::shared_ptr<IFileDescriptor> input, std::shared_ptr<StopToken> stopToken)
     : m_agent(std::move(agent))
-    , m_console(std::move(console))
+    , m_input(std::move(input))
+    , m_stopToken(std::move(stopToken))
 {
 }
 
@@ -62,11 +64,19 @@ void AgentInputLoop::Run() {
     // A runtime thread too (see DestroyOffRuntimeThreads.h), since it runs for
     // the agent's process; this also names it in every log line.
     RuntimeThreadScope runtimeThread("input " + name);
+    // The process's stop token on this thread: a read blocked on a pipe stdin
+    // returns kIOInterrupted -- end of input to DescriptorLineReader -- as soon
+    // as the agent closes itself or is asked to stop. A null token installs
+    // nothing interruptible (console input, D7).
+    StopTokenScope stopTokenScope(m_stopToken);
     LogDebug("AgentInputLoop: reading input for interactive agent '%s'", name.c_str());
 
+    // The lines of the process's stdin, one at a time; reads ahead by chunks,
+    // so a line never splits two reads.
+    DescriptorLineReader lines(m_input);
     // WaitToFinish(0) does not wait; it just asks whether the agent has closed.
     while (!m_agent->WaitToFinish(0)) {
-        std::optional<std::string> line = m_console->ReadLine();
+        std::optional<std::string> line = lines.ReadLine();
         if (!line) {
             LogInfo("AgentInputLoop: end of input for interactive agent '%s', asking it to stop", name.c_str());
             m_agent->TriggerStop();

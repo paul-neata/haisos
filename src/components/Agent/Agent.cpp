@@ -39,6 +39,14 @@ std::string ToolCallName(const nlohmann::json& toolCall) {
     return StringField(toolCall, "name");
 }
 
+// Whether a response reports a failure rather than an answer: the three done
+// reasons the LLMCommunicator sets when the LLM reported an error, its reply
+// did not parse, or the HTTP round trip failed. The content of such a response
+// is the "Error: ..." text, a diagnostic -- not something the agent said.
+bool IsErrorResponse(const LLMResponse& response) {
+    return response.done_reason == "error" || response.done_reason == "parse_error" || response.done_reason == "http_error";
+}
+
 // A tool's result as it goes into the history.
 LLMMessage ToolResultMessage(const std::string& toolName, const std::string& content,
                              const std::string& toolCallId, bool isError) {
@@ -121,6 +129,10 @@ bool Agent::IsOwnThread() {
     return m_thread.get_id() == std::this_thread::get_id();
 }
 
+std::shared_ptr<StopToken> Agent::GetStopToken() const {
+    return m_stopToken;
+}
+
 Agent::~Agent() {
     LogDebug("Agent '%s': destroying", m_name.c_str());
     TriggerStop();
@@ -151,6 +163,8 @@ void Agent::TriggerStop() {
     // that keeps calling tools can be a long way off.
     m_stopRequested = true;
     m_commandQueue.Close();
+    // Wake a pipe Read/Write the agent (or its input loop) is blocked in.
+    m_stopToken->RequestStop();
 }
 
 std::shared_ptr<IAgent> Agent::GetParent() const {
@@ -242,6 +256,29 @@ std::string Agent::GetConsoleOutput() const {
 
 bool Agent::IsFinished() const {
     return m_finished.load();
+}
+
+bool Agent::LastCommandFailed() const {
+    return m_lastCommandFailed.load();
+}
+
+void Agent::SetFinishedHook(std::function<void()> hook) {
+    {
+        std::lock_guard<std::mutex> lock(m_finishedHookMutex);
+        if (!m_finishedHookTaken) {
+            m_finishedHook = std::move(hook);
+            return;
+        }
+    }
+    // The conversation thread has already ended, so the hook runs at once, on
+    // this thread, with the same catching as on the agent's own.
+    try {
+        hook();
+    } catch (const std::exception& e) {
+        LogError("Agent '%s' - its finished hook, set after the end, failed: %s", m_name.c_str(), e.what());
+    } catch (...) {
+        LogError("Agent '%s' - its finished hook, set after the end, failed with an unknown exception", m_name.c_str());
+    }
 }
 
 std::string Agent::GetStartTime() const {
@@ -355,7 +392,8 @@ std::vector<std::tuple<std::string, std::string, std::string, bool>> Agent::Exec
         } else {
             LogWarning("Agent '%s' - Unknown tool: %s", m_name.c_str(), toolName.c_str());
             if (m_console) {
-                m_console->Write("Error: Unknown tool - " + toolName);
+                // A diagnostic about the agent's own running, not a reply.
+                m_console->WriteError("Error: Unknown tool - " + toolName);
             }
             m_messageBuffer.Append("[" + m_name + "] Error: Unknown tool - " + toolName + "\n");
             toolResults.emplace_back(toolName, "Error: Unknown tool - " + toolName, toolCallId, true);
@@ -372,6 +410,10 @@ void Agent::RunThread() {
     // last is then destroyed on the destruction thread, not here. It also names
     // this thread in every log line.
     RuntimeThreadScope runtimeThread("agent " + m_name);
+    // The process's stop token on its own thread, so a blocked pipe call (a
+    // ProcessAgentConsole write to a full stdout pipe, say) notices when the
+    // agent is asked to stop.
+    StopTokenScope stopTokenScope(m_stopToken);
     for (const auto& prompt : m_systemPrompts) {
         LLMMessage systemMsg;
         systemMsg.role = "system";
@@ -421,6 +463,27 @@ void Agent::RunThread() {
             break;
         }
     }
+    // The finished hook (a process's descriptor table release, for instance)
+    // runs here, on this thread, before m_finished is set: whoever sees
+    // WaitToFinish return true must find its work already done. Taken out under
+    // the mutex and run unlocked, so it never runs under a lock and a hook set
+    // from another thread at the same time runs there instead.
+    std::function<void()> finishedHook;
+    {
+        std::lock_guard<std::mutex> lock(m_finishedHookMutex);
+        m_finishedHookTaken = true;
+        finishedHook = std::move(m_finishedHook);
+        m_finishedHook = nullptr;
+    }
+    if (finishedHook) {
+        try {
+            finishedHook();
+        } catch (const std::exception& e) {
+            LogError("Agent '%s' - its finished hook failed: %s", m_name.c_str(), e.what());
+        } catch (...) {
+            LogError("Agent '%s' - its finished hook failed with an unknown exception", m_name.c_str());
+        }
+    }
     {
         std::lock_guard<std::mutex> lock(m_finishedMutex);
         m_finished = true;
@@ -431,6 +494,9 @@ void Agent::RunThread() {
 
 void Agent::ProcessCommand(const std::string& command) {
     LogDebug("Agent '%s' processing command: %s", m_name.c_str(), command.c_str());
+    // Every command starts un-failed; how it ends is what the process's exit
+    // code reports (see AgentProcess::ExitCode).
+    m_lastCommandFailed = false;
 
     // The command goes in whole, byte for byte. It is delimited, not filtered:
     // it is the agent's program, a line its operator typed, or a prompt from
@@ -451,6 +517,13 @@ void Agent::ProcessCommand(const std::string& command) {
     while (true) {
         if (++rounds > MAX_LLM_ROUNDS) {
             LogWarning("Agent '%s' exceeded maximum LLM rounds (%d), breaking conversation loop", m_name.c_str(), MAX_LLM_ROUNDS);
+            // A failed command: reported as a diagnostic (it stays out of the
+            // history and the message buffer) and counted for the exit code.
+            m_lastCommandFailed = true;
+            if (m_console) {
+                m_console->WriteError("Error: the command reached the maximum of " +
+                    std::to_string(MAX_LLM_ROUNDS) + " LLM rounds");
+            }
             break;
         }
 
@@ -464,9 +537,22 @@ void Agent::ProcessCommand(const std::string& command) {
 
         LLMResponse response = m_llmCommunicator->Call(localHistory, m_cachedToolDescriptions);
 
+        // An error response is the command failing, as far as the exit code is
+        // concerned -- whatever the round goes on to do.
+        if (IsErrorResponse(response)) {
+            m_lastCommandFailed = true;
+        }
+
         if (!response.message.content.empty()) {
             if (m_console) {
-                m_console->Write(response.message.content);
+                // An error response's content is the failure text, to be shown
+                // as a diagnostic; anything else is what the agent said. The
+                // history and the message buffer below keep it either way.
+                if (IsErrorResponse(response)) {
+                    m_console->WriteError(response.message.content);
+                } else {
+                    m_console->Write(response.message.content);
+                }
             }
             m_messageBuffer.Append("[" + m_name + "] " + response.message.content + "\n");
         }
@@ -503,6 +589,8 @@ void Agent::ProcessCommand(const std::string& command) {
 }
 
 void Agent::OnCommandFailed(const std::string& what) {
+    // This command failed, as far as the exit code is concerned.
+    m_lastCommandFailed = true;
     // Best effort: this runs because something has already failed, and
     // nothing here may throw out of the agent's thread.
     try {
@@ -518,7 +606,8 @@ void Agent::OnCommandFailed(const std::string& what) {
         const std::string line = "Error: the command failed: " + what;
         m_messageBuffer.Append("[" + m_name + "] " + line + "\n");
         if (m_console) {
-            m_console->Write(line);
+            // A diagnostic about the agent's own running, not a reply.
+            m_console->WriteError(line);
         }
         if (m_interactive) {
             LogInfo("Agent '%s' - carrying on with its next command", m_name.c_str());

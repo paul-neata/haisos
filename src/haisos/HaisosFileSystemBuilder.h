@@ -18,8 +18,8 @@ namespace Haisos {
 // host's full physical filesystem, written in any form
 // IFactory::CreatePhysicalFileSystem takes -- on Windows /c/x, c:\x or c:/x --
 // and must be there. haisosFileDir, a host path, is the base a relative one is
-// resolved against. The directory is jailed with CreatePhysicalFileSystem, so
-// links inside it cannot lead out of it; "/" on Windows is
+// resolved against. The directory is taken with CreatePhysicalFileSystem, whose
+// links are followed wherever they lead; "/" on Windows is
 // CreateFullPhysicalFileSystem() itself.
 //
 // outNamedFileSystems, when given, receives every declared FS by name, as it

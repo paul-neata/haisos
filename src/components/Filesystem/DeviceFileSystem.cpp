@@ -28,55 +28,68 @@ const DeviceFileSystem::DeviceInfo* DeviceFileSystem::DeviceAt(const std::string
     return nullptr;
 }
 
-int DeviceFileSystem::LocalOpenFile(const std::string& pathname, int flags) {
+namespace {
+
+// An open device. Immutable, so it needs no mutex. The access mode it was
+// opened with is enforced on every call: Write on a read-only descriptor and
+// Read on a write-only one fail with kIOError, as EBADF would.
+class DeviceFileDescriptor final : public IFileDescriptor {
+public:
+    static std::shared_ptr<DeviceFileDescriptor> Create(bool readsZeros, int flags) {
+        return std::shared_ptr<DeviceFileDescriptor>(new DeviceFileDescriptor(readsZeros, flags));
+    }
+
+    ssize_t Read(void* buf, size_t count) override {
+        if (!m_readable) {
+            return kIOError;
+        }
+        if (!m_readsZeros) {
+            return 0; // null: end of file at once
+        }
+        // As read() itself, never more than a ssize_t can report.
+        const size_t filled = std::min(count, static_cast<size_t>(std::numeric_limits<ssize_t>::max()));
+        std::memset(buf, 0, filled);
+        return static_cast<ssize_t>(filled);
+    }
+
+    ssize_t Write(const void* /*buf*/, size_t count) override {
+        if (!m_writable) {
+            return kIOError;
+        }
+        // Both devices take everything, and keep none of it.
+        return static_cast<ssize_t>(std::min(count, static_cast<size_t>(std::numeric_limits<ssize_t>::max())));
+    }
+
+    bool IsTerminal() const override { return false; }
+
+private:
+    DeviceFileDescriptor(bool readsZeros, int flags)
+        : m_readsZeros(readsZeros)
+        , m_writable((flags & (kFileWriteOnlyBit | kFileReadWriteBit)) != 0)
+        , m_readable((flags & kFileWriteOnlyBit) == 0)
+    {
+    }
+
+    const bool m_readsZeros;
+    const bool m_writable;
+    const bool m_readable;
+};
+
+} // namespace
+
+std::shared_ptr<IFileDescriptor> DeviceFileSystem::LocalOpenFile(const std::string& pathname, int flags) {
     return LocalOpenFile(pathname, flags, 0);
 }
 
-int DeviceFileSystem::LocalOpenFile(const std::string& pathname, int /*flags*/, int /*mode*/) {
+std::shared_ptr<IFileDescriptor> DeviceFileSystem::LocalOpenFile(const std::string& pathname, int flags, int /*mode*/) {
     // Only a device opens: the root is a directory, and anything else would
     // have to be created. A device takes any flags -- O_CREAT finds it already
     // there, and O_TRUNC has nothing to truncate.
     const DeviceInfo* info = DeviceAt(NormalizeVirtualPath(pathname));
     if (!info) {
-        return -1;
+        return nullptr;
     }
-    std::lock_guard<std::mutex> lock(m_mutex);
-    const int fd = m_nextFd++;
-    m_openHandles[fd] = info->device;
-    return fd;
-}
-
-int DeviceFileSystem::LocalCloseFile(int fd) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    return m_openHandles.erase(fd) > 0 ? 0 : -1;
-}
-
-ssize_t DeviceFileSystem::LocalReadFile(int fd, void* buf, size_t count) {
-    Device device;
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        auto it = m_openHandles.find(fd);
-        if (it == m_openHandles.end()) {
-            return -1;
-        }
-        device = it->second;
-    }
-    if (device == Device::Null) {
-        return 0;
-    }
-    // As read() itself, never more than a ssize_t can report.
-    const size_t filled = std::min(count, static_cast<size_t>(std::numeric_limits<ssize_t>::max()));
-    std::memset(buf, 0, filled);
-    return static_cast<ssize_t>(filled);
-}
-
-ssize_t DeviceFileSystem::LocalWriteFile(int fd, const void* /*buf*/, size_t count) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if (m_openHandles.count(fd) == 0) {
-        return -1;
-    }
-    // Both devices take everything, and keep none of it.
-    return static_cast<ssize_t>(std::min(count, static_cast<size_t>(std::numeric_limits<ssize_t>::max())));
+    return DeviceFileDescriptor::Create(info->device == Device::Zero, flags);
 }
 
 int DeviceFileSystem::LocalCreateDirectory(const std::string& /*pathname*/, int /*mode*/) {

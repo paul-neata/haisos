@@ -29,7 +29,11 @@ Tell the user: "Local changes detected and stashed."
 
 ### 2. Update master
 
+First make sure git reaches origin over SSH (a `FAIL`: stop and show its line;
+see "Git over SSH" in `.claude/develop/WORKFLOW.md`):
+
 ```bash
+bash scripts/develop/git_ssh.sh
 git checkout master
 git pull
 ```

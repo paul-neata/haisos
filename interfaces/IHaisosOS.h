@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "IFileDescriptor.h"
 #include "IProcess.h"
 #include "IServicesCreator.h"
 #include "IEnvironment.h"
@@ -13,17 +14,27 @@ namespace Haisos {
 class IBuiltinCommands;
 
 // How IHaisosOS::StartProcess should run a program, beyond what to run and
-// where. Default-constructed, it asks for nothing special.
+// where. Default-constructed, it asks for nothing special: the process gets the
+// console as all three of its standard streams (an empty input, though -- see
+// interactive).
 struct StartProcessOptions {
-    // Only meaningful for an agent (.md) process, and ignored for any other
-    // runtime. When set, the agent is interactive (see IAgent::IsInteractive):
-    // once it has run its program it waits for more, and every line read from
-    // its console is posted to it as the next user message. The process
-    // finishes once the agent has closed (e.g. with the self_close tool) and
-    // the line-reading loop has noticed -- which it does when the next line
-    // arrives, since a line being read cannot be abandoned -- or once the
-    // console reaches end of input, which stops the agent.
-    bool interactiveAgent = false;
+    // The new process's standard input, output and error: its descriptors
+    // 0, 1 and 2. The same descriptor may be given twice (2>&1). Null means the
+    // default: stdout and stderr the OS's console (output / error), stdin the
+    // console's input when `interactive`, else an empty input whose reads end
+    // at once (as /dev/null).
+    std::shared_ptr<IFileDescriptor> stdIn;
+    std::shared_ptr<IFileDescriptor> stdOut;
+    std::shared_ptr<IFileDescriptor> stdErr;
+    // stdin defaults to the console's input. For an agent (.md) it also makes
+    // the agent interactive (see IAgent::IsInteractive): once it has run its
+    // program it waits for more, and every line read from its stdin is posted
+    // to it as the next user message. The process finishes once the agent has
+    // closed (e.g. with the self_close tool) and the line-reading loop has
+    // noticed -- which it does when the next line arrives, since a line being
+    // read cannot be abandoned -- or once the console reaches end of input,
+    // which stops the agent.
+    bool interactive = false;
 };
 
 // An instance of an operating system: owns a rooted filesystem, a physical
@@ -86,6 +97,13 @@ public:
     // This OS's own (sandboxed) services: the filesystem-composition service
     // and every other service comes from here.
     virtual std::shared_ptr<IServicesCreator> GetServicesCreator() = 0;
+
+    // The OS's own pipe service, created from its services creator when the OS
+    // is created (a sub-OS has its own); never null. Reached by a process
+    // through ICurrentProcess::OS() -- in practice through
+    // IFileIO::CreatePipe, which places both ends in the caller's descriptor
+    // table.
+    virtual std::shared_ptr<IPipeService> GetPipeService() = 0;
 
     // The environment this OS was created with. Clone() it before handing it to
     // a process or a sub-OS, so their edits do not reach back into this one.

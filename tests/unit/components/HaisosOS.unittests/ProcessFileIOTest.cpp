@@ -2,30 +2,13 @@
 #include <atomic>
 #include <memory>
 #include "ProcessFileIO.h"
+#include "Factory.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
+#include "tests/mocks/ReleaseCountingDescriptor.h"
 
 using namespace Haisos;
 
 namespace {
-
-// A descriptor that counts its own destructions, so a test can see exactly
-// when the table lets a file go. Reads end at once; writes take everything.
-class ReleaseCountingDescriptor : public IFileDescriptor {
-public:
-    static std::shared_ptr<ReleaseCountingDescriptor> Create(std::shared_ptr<std::atomic<int>> releases) {
-        return std::shared_ptr<ReleaseCountingDescriptor>(new ReleaseCountingDescriptor(std::move(releases)));
-    }
-    ~ReleaseCountingDescriptor() override { ++*m_releases; }
-
-    ssize_t Read(void*, size_t) override { return 0; }
-    ssize_t Write(const void*, size_t count) override { return static_cast<ssize_t>(count); }
-    bool IsTerminal() const override { return false; }
-
-private:
-    explicit ReleaseCountingDescriptor(std::shared_ptr<std::atomic<int>> releases) : m_releases(std::move(releases)) {}
-
-    std::shared_ptr<std::atomic<int>> m_releases;
-};
 
 // The table works without an OS (see ProcessFileIO): an empty weak_ptr here,
 // so these tests exercise the table alone.
@@ -150,6 +133,28 @@ TEST(HaisosOSDescriptorTableTest, ReleaseAllDescriptorsEmptiesTheTable) {
     EXPECT_EQ(io->GetDescriptor(1), nullptr);
     EXPECT_EQ(io->GetDescriptor(2), nullptr);
     EXPECT_EQ(io->AddDescriptor(ReleaseCountingDescriptor::Create(MakeCounter())), 0);
+}
+
+TEST(HaisosOSDescriptorTableTest, CreatePipeWithOneFreeSlotLeavesTheTableAsItWas) {
+    // A real OS, so CreatePipe reaches a real pipe service: one free slot is
+    // short of the two a pipe needs, and the table must come out untouched.
+    const auto factory = CreateFactory();
+    auto servicesCreator = factory->CreateServicesCreator();
+    auto fileSystemService = servicesCreator->CreateFileSystemService();
+    auto os = factory->CreateHaisosOS(std::move(servicesCreator), factory->CreatePhysicalConsole(),
+        fileSystemService->CreateEmptyInMemFileSystem(), nullptr, factory->CreateEnvironment());
+    ASSERT_NE(os, nullptr);
+    auto io = ProcessFileIO::Create(os, "/");
+
+    const auto releases = MakeCounter();
+    for (int i = 0; i < IFileIO::kMaxDescriptors - 1; ++i) {
+        ASSERT_EQ(io->AddDescriptor(ReleaseCountingDescriptor::Create(releases)), i);
+    }
+
+    EXPECT_EQ(io->CreatePipe(), std::nullopt);
+    // The last slot is still empty, and nothing was released on the way.
+    EXPECT_EQ(io->GetDescriptor(IFileIO::kMaxDescriptors - 1), nullptr);
+    EXPECT_EQ(releases->load(), 0);
 }
 
 TEST(HaisosOSDescriptorTableTest, OpenFileFailsWithoutAnOS) {

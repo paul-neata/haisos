@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-// hsh end to end through the real haisos binary: the six acceptance
-// scenarios of develop-plan/goal.md, one haisos run per check. No LLM is
+// hsh end to end through the real haisos binary: the develop's acceptance
+// scenarios, one haisos run per check. No LLM is
 // involved, so this needs no endpoint.
 
 const { spawnSync } = require('child_process');
@@ -84,8 +84,8 @@ try {
     r = runHaisos("RUN /bin/hsh -c 'exit 3'\n");
     expect(r.status, 3, "scenario 2 exit-3 status");
 
-    // 3. A script with control flow, a heredoc and $(...). goal.md runs it
-    // with `hello`, but `hello` does not match `hi*` -- dash prints `plain`
+    // 3. A script with control flow, a heredoc and $(...). The scenario runs
+    // it with `hello`, but `hello` does not match `hi*` -- dash prints `plain`
     // for it. `hi` exercises the `greeted` branch.
     r = runHaisos(
         "CREATE /count.sh multiline END\n" +

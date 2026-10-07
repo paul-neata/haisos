@@ -238,6 +238,16 @@ TEST(HshLexerTest, HereDocuments) {
         EXPECT_EQ(hd.rawBody, "body\nmore\n"); // every leading tab of a line is removed
         EXPECT_TRUE(hd.terminated);
     }
+    // ...but a line joined by a backslash-newline keeps its leading tabs: it
+    // continues the same logical line, and only a physical line's start is
+    // stripped, as dash.
+    {
+        std::vector<Token> tokens = LexTokens("cat <<-E\n\ta\\\n\tb\n\tE\n");
+        ASSERT_TRUE(tokens[2].hereDoc != nullptr);
+        const HereDocument& hd = *tokens[2].hereDoc;
+        EXPECT_EQ(hd.rawBody, "a\tb\n");
+        EXPECT_TRUE(hd.terminated);
+    }
     // Quoted delimiters: no expansion, body as one Quoted part.
     for (const char* op : {"<<'E'", "<<\"E\"", "<<\\E"}) {
         std::vector<Token> tokens = LexTokens(std::string("cat ") + op + "\n$x `y`\nE\n");

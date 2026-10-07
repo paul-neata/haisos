@@ -161,6 +161,9 @@ TEST(FilesystemDescriptorTest, WrappersPassTheInnerDescriptorUp) {
     auto readOnly = ReadOnlyFileSystem::Create(inner);
     auto read = readOnly->OpenFile("/d/f", kFileOpenReadOnly);
     ASSERT_NE(read, nullptr);
+    // A write through the read-only wrapper's descriptor fails, as EBADF...
+    EXPECT_EQ(read->Write("x", 1), kIOError);
+    EXPECT_EQ(ReadAll(*inner, "/d/f"), "xs");
     EXPECT_EQ(readOnly->OpenFile("/d/f", kFileWriteOnlyBit), nullptr);
     EXPECT_EQ(readOnly->OpenFile("/d/f", kFileOpenWriteCreateTruncate, kFileCreateMode), nullptr);
 }

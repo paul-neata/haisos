@@ -272,12 +272,16 @@ std::optional<std::string> Shell::ReadInputLine() {
     }
 }
 
+bool Shell::NoExec() const {
+    return m_state.options.noexec && !m_state.options.interactive;
+}
+
 int Shell::ExecuteList(const CommandList& list) {
     int status = m_state.lastExitStatus;
     for (const ListItem& item : list.items) {
-        // -n (noexec): dash checks it at every evaltree, so a `set -n` takes
-        // effect mid-list; an interactive shell is unaffected.
-        if (m_state.options.noexec && !m_state.options.interactive) {
+        // dash checks -n at every evaltree, so a `set -n` takes effect
+        // mid-list.
+        if (NoExec()) {
             continue;
         }
         if (item.background) {
@@ -296,9 +300,6 @@ int Shell::ExecuteAndOr(const AndOrList& andOr) {
     int status = m_state.lastExitStatus;
     // dash re-checks -n (noexec) for every branch of an &&/|| chain too
     // (evaltree recurses into them).
-    const auto noexec = [this] {
-        return m_state.options.noexec && !m_state.options.interactive;
-    };
     // For -e (errexit): every pipeline but the last, and a negated one, is a
     // tested context -- its failure never exits the shell. Only the failure
     // of the list's last pipeline (when it actually ran, was not negated and
@@ -312,13 +313,13 @@ int Shell::ExecuteAndOr(const AndOrList& andOr) {
         return ExecutePipeline(pipeline);
     };
     size_t lastRan = andOr.pipelines.size();  // none ran yet
-    if (!noexec()) {
+    if (!NoExec()) {
         status = runPipeline(0);
         lastRan = 0;
     }
     for (size_t i = 0; i < andOr.operators.size(); ++i) {
         const bool run = andOr.operators[i] == AndOrOperator::And ? status == 0 : status != 0;
-        if (run && !noexec()) {
+        if (run && !NoExec()) {
             status = runPipeline(i + 1);
             lastRan = i + 1;
         }
@@ -648,10 +649,9 @@ int Shell::ExecuteSimpleCommand(const SimpleCommand& command) {
     m_currentLine = command.line;
     const uint64_t substitutions = m_substitutionCount;
     const std::vector<std::string> fields = m_expander.ExpandWords(command.words);
-    // -n (noexec): dash re-checks it at every evaltree -- a `set -n` stops
-    // the rest even mid-list, mid-chain and mid-pipeline; an interactive
-    // shell is unaffected.
-    if (m_state.options.noexec && !m_state.options.interactive) {
+    // dash re-checks -n at every evaltree -- a `set -n` stops the rest even
+    // mid-list, mid-chain and mid-pipeline.
+    if (NoExec()) {
         return m_state.lastExitStatus;
     }
 
@@ -1028,9 +1028,9 @@ int Shell::StartBackgroundPipeline(const Pipeline& pipeline) {
 }
 
 int Shell::StartBackgroundShell(const ListItem& item) {
-    // The and-or list needs the shell itself (a builtin, &&/||, and from
-    // hsh--control-flow, compound commands and functions): a child hsh runs
-    // its text, as dash forks a subshell for it. It starts at the path this
+    // The and-or list needs the shell itself (a builtin, &&/||, compound
+    // commands and functions): a child hsh runs its text, as dash forks a
+    // subshell for it. It starts at the path this
     // shell was started from (no PATH lookup), with $0 and the positional
     // parameters passed on, the exported variables as its environment (an
     // unexported one does not reach it, where a forked subshell would see it

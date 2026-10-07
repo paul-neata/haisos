@@ -5,7 +5,7 @@ can.
 
 ## Responsibilities
 
-- Creates a physical console, a disk-backed `PhysicalFileSystem` jailed at a
+- Creates a physical console, a disk-backed `PhysicalFileSystem` rooted at a
   directory (`CreatePhysicalFileSystem`, which takes it in any form a
   physical path may have: see `src/components/Filesystem/PhysicalPath.h`),
   the host's whole disk as one filesystem (`CreateFullPhysicalFileSystem`: a

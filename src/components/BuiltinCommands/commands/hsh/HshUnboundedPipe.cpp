@@ -36,12 +36,23 @@ public:
         });
         std::unique_lock<std::mutex> lock(m_mutex);
         for (;;) {
-            if (!m_bytes.empty()) {
+            if (m_bytes.size() > m_readOffset) {
                 // Data is returned even when a stop has been requested; a read
                 // never waits for more once some is there.
-                const size_t n = std::min(count, m_bytes.size());
-                std::memcpy(buf, m_bytes.data(), n);
-                m_bytes.erase(0, n);
+                const size_t n = std::min(count, m_bytes.size() - m_readOffset);
+                std::memcpy(buf, m_bytes.data() + m_readOffset, n);
+                m_readOffset += n;
+                if (m_readOffset == m_bytes.size()) {
+                    // Drained: free the whole buffer.
+                    m_bytes.clear();
+                    m_readOffset = 0;
+                } else if (m_readOffset >= kCompactionThreshold &&
+                           m_readOffset > m_bytes.size() / 2) {
+                    // The consumed prefix dominates: drop it once, so draining
+                    // many bytes stays linear instead of quadratic in erases.
+                    m_bytes.erase(0, m_readOffset);
+                    m_readOffset = 0;
+                }
                 return static_cast<ssize_t>(n);
             }
             if (!m_writeEndOpen) {
@@ -75,6 +86,7 @@ public:
         m_readEndOpen = false;
         // Nobody can read them any more: drop the bytes.
         std::string().swap(m_bytes);
+        m_readOffset = 0;
     }
 
     void CloseWriteEnd() {
@@ -86,9 +98,15 @@ public:
 private:
     UnboundedPipeBuffer() = default;
 
+    // Read past this many consumed bytes, with the prefix over half of the
+    // buffer, and the prefix is erased once (a read below it only moves
+    // m_readOffset, an O(1) memmove-free operation).
+    static constexpr size_t kCompactionThreshold = 64 * 1024;
+
     std::mutex m_mutex;
     std::condition_variable m_canRead;
     std::string m_bytes;
+    size_t m_readOffset = 0;  // into m_bytes; bytes before it are consumed
     bool m_readEndOpen = true;
     bool m_writeEndOpen = true;
 };

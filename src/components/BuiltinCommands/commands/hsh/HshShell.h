@@ -191,6 +191,10 @@ private:
     // ShellStopped. The last line may end without '\n'.
     std::optional<std::string> ReadInputLine();
 
+    // -n (noexec): dash re-checks it at every evaltree; an interactive shell
+    // ignores it.
+    bool NoExec() const;
+
     // The compound kinds of ExecuteCommand.
     int ExecuteIf(const IfCommand& command);
     int ExecuteLoop(const LoopCommand& command);

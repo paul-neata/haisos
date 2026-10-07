@@ -223,7 +223,8 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   unwinding, not by blocking). So a pipe `Read`/`Write` blocked on a process's
   behalf returns `kIOInterrupted` as soon as the process is asked to stop, and
   a stuck pipeline never wedges `~HaisosOS`'s drain. Console input stays
-  uninterruptible (D7).
+  uninterruptible: a line being read from the host's terminal cannot be
+  abandoned (see the Console component).
 
 ## Key Classes
 
@@ -239,7 +240,7 @@ console, and a services layer; starts processes and spawns sub-OS instances.
   from its stdin (see `StartProcessOptions` above), line by line through a
   `DescriptorLineReader`. Its destructor waits the
   thread out however long it takes: a line being read cannot be abandoned, and
-  a read blocked on the console's input cannot be interrupted (D7), though a
+  a read blocked on the console's input cannot be interrupted, though a
   pipe's can
 - `ProcessAgentConsole` - an agent process's `IAgentConsole`: `Write` (a reply)
   goes to the process's descriptor 1, `WriteError` (a diagnostic) to descriptor

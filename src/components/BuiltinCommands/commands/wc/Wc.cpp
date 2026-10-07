@@ -319,7 +319,7 @@ TotalMatch MatchTotalValue(const std::string& value, TotalMode& mode) {
 class WcCommand : public IBuiltinCommand {
 public:
     std::string Name() const override { return "wc"; }
-    std::string Version() const override { return "1.0.0"; }
+    std::string Version() const override { return "1.0.1"; }
 
     const std::vector<BuiltinOption>& Options() const override {
         static const std::vector<BuiltinOption> options = {
@@ -426,7 +426,14 @@ public:
             }
             names = SplitNames(list);
             if (names.empty()) {
-                // GNU: no names at all, nothing is printed.
+                // GNU: no names at all, nothing is printed -- except the
+                // total of zero counts --total=always/--total=only asks for
+                // (width 1: there are no files to size from).
+                if (totalMode == TotalMode::Always || totalMode == TotalMode::Only) {
+                    WriteCounts(context, WcCounts{}, selection, 1,
+                        totalMode == TotalMode::Only
+                            ? std::nullopt : std::optional<std::string>("total"));
+                }
                 return 0;
             }
         } else {

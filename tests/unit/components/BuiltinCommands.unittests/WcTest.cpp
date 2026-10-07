@@ -264,6 +264,7 @@ TEST_F(BuiltinCommandsTest, WcFilesFromAFile) {
     WriteFile("/w/l2", std::string("abc.txt"));          // no trailing NUL
     WriteFile("/w/l3", std::string(""));                 // empty: no names at all
     WriteFile("/w/l4", std::string("abc.txt\0nope\0d\0", 15));
+    WriteFile("/w/l5", std::string("\0", 1));            // one zero-length name
 
     auto captured = RunCaptured("wc", {"--files0-from=l0"}, std::nullopt, "/w");
     EXPECT_EQ(captured.out, " 3  3 14 abc.txt\n 0  2 11 h.txt\n 3  5 25 total\n");
@@ -284,6 +285,35 @@ TEST_F(BuiltinCommandsTest, WcFilesFromAFile) {
     EXPECT_EQ(captured.out, "");
     EXPECT_EQ(captured.err, "");
     EXPECT_EQ(captured.status, 0);
+
+    // No names at all, but --total=always/--total=only: GNU still prints the
+    // total, of zero counts, at width 1. auto and never print nothing (above).
+    captured = RunCaptured("wc", {"--files0-from=l3", "--total=always"}, std::nullopt, "/w");
+    EXPECT_EQ(captured.out, "0 0 0 total\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    captured = RunCaptured("wc", {"--files0-from=l3", "--total=only"}, std::nullopt, "/w");
+    EXPECT_EQ(captured.out, "0 0 0\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    captured = RunCaptured("wc", {"-l", "--files0-from=l3", "--total=only"}, std::nullopt, "/w");
+    EXPECT_EQ(captured.out, "0\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    captured = RunCaptured("wc", {"-lc", "--files0-from=l3", "--total=always"}, std::nullopt, "/w");
+    EXPECT_EQ(captured.out, "0 0 total\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    // A list of one zero-length name: the error is kept (status 1) and the
+    // total asked for is still printed, of zero counts.
+    captured = RunCaptured("wc", {"--files0-from=l5", "--total=always"}, std::nullopt, "/w");
+    EXPECT_EQ(captured.out, "0 0 0 total\n");
+    EXPECT_EQ(captured.err, "wc: l5:1: invalid zero-length file name\n");
+    EXPECT_EQ(captured.status, 1);
 
     // A directory among the names sets the 7-wide minimum and adds its zeros.
     captured = RunCaptured("wc", {"--files0-from=l4"}, std::nullopt, "/w");
@@ -352,7 +382,7 @@ TEST_F(BuiltinCommandsTest, WcDebugIsNotTreated) {
     WriteFile("/w/abc.txt", "one\ntwo\nthree\n");
     const auto captured = RunCaptured("wc", {"--debug", "abc.txt"}, std::nullopt, "/w");
     EXPECT_EQ(captured.out, " 3  3 14 abc.txt\n");
-    EXPECT_EQ(captured.err, "Parameter --debug is not treated by HaisosOS wc v. 1.0.0\n");
+    EXPECT_EQ(captured.err, "Parameter --debug is not treated by HaisosOS wc v. 1.0.1\n");
     EXPECT_EQ(captured.status, 0);
 }
 

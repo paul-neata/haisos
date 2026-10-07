@@ -104,7 +104,7 @@ inline bool ReadWholeDescriptor(IFileDescriptor& file, std::string& outContent) 
 }
 
 // Reads the whole file at |path| on an IFileSystem (which may be
-// rooted/jailed, and understands absolute paths only), up to a 10 MB cap.
+// rooted, and understands absolute paths only), up to a 10 MB cap.
 // Returns false on any failure.
 inline bool ReadWholeFile(IFileSystem& fs, const std::string& path, std::string& outContent) {
     auto file = fs.OpenFile(path, kFileOpenReadOnly);

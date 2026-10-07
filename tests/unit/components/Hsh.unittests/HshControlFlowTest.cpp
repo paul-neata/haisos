@@ -247,7 +247,8 @@ TEST_F(HshShellTest, NestedEverywhere) {
 }
 
 TEST_F(HshShellTest, AcceptanceScenarioThree) {
-    // The exact text of goal.md's scenario 3: a for loop, $((...)), a heredoc
+    // The exact text of the develop's acceptance scenario 3: a for loop,
+    // $((...)), a heredoc
     // inside $(...), [, &&, if and case.
     WriteFile("/count.sh",
         "n=0\n"
@@ -259,7 +260,7 @@ TEST_F(HshShellTest, AcceptanceScenarioThree) {
         ")\n"
         "if [ \"$n\" -eq 3 ] && [ \"$lines\" -eq 2 ]; then echo \"ok $n $lines\"; else echo \"bad\"; exit 1; fi\n"
         "case \"$1\" in hi*) echo \"greeted\";; *) echo \"plain\";; esac\n");
-    // "hi" matches hi* (goal.md's run shows "hello", which dash -- the
+    // "hi" matches hi* (the scenario's run shows "hello", which dash -- the
     // reference -- does not match: it starts with "he"; so the greeting arm
     // is exercised with "hi"; "hello"/"plain" fall through to *).
     Captured captured = RunCaptured("hsh", {"/count.sh", "hi"});

@@ -1,7 +1,6 @@
 #include "commands/hsh/HshRedirection.h"
 
 #include <algorithm>
-#include <cstdlib>
 
 #include "src/components/Filesystem/FilesystemUtils.h"
 #include "commands/hsh/HshExpansion.h"
@@ -34,6 +33,7 @@ RedirectionScope::~RedirectionScope() {
 
 std::optional<std::string> RedirectionScope::Apply(const std::vector<Redirection>& redirections) {
     const size_t first = m_saved.size();
+    m_applyFirst = first;
     for (const Redirection& redirection : redirections) {
         if (std::optional<std::string> error = ApplyOne(redirection)) {
             RestoreFrom(first);
@@ -60,7 +60,11 @@ void RedirectionScope::Keep() {
 }
 
 void RedirectionScope::Save(int fd) {
-    const auto it = std::find_if(m_saved.begin(), m_saved.end(),
+    // De-duplicated within the current Apply only: a slot saved in an earlier
+    // Apply of this scope is saved again (Restore is LIFO, so a slot saved
+    // twice ends at its first saved value).
+    const auto first = m_saved.begin() + static_cast<std::ptrdiff_t>(m_applyFirst);
+    const auto it = std::find_if(first, m_saved.end(),
         [fd](const std::pair<int, std::shared_ptr<IFileDescriptor>>& saved) { return saved.first == fd; });
     if (it == m_saved.end()) {
         m_saved.emplace_back(fd, m_shell.IO().GetDescriptor(fd));
@@ -169,20 +173,19 @@ std::optional<std::string> RedirectionScope::ApplyOne(const Redirection& redirec
             return std::nullopt;
         }
         // "-" aside, the target must be exactly one digit, as in dash --
-        // strtol's endptr, not a first-char check, so "3x" is not read as 3.
-        char* end = nullptr;
-        const long source = std::strtol(target.c_str(), &end, 10);
-        if (target.empty() || *end != '\0' || source < 0 || source > 9) {
+        // so " 3" or "+1" is no fd, and neither is "3x".
+        if (target.size() != 1 || target[0] < '0' || target[0] > '9') {
             m_shell.Fail("Syntax error: Bad fd number");  // dash exits
         }
-        if (!io.GetDescriptor(static_cast<int>(source))) {
+        const int source = target[0] - '0';
+        if (!io.GetDescriptor(source)) {
             return std::to_string(source) + ": Bad file descriptor";
         }
         if (source == n) {
             return std::nullopt;  // a slot duped onto itself: nothing
         }
         Save(n);
-        io.Dup2(static_cast<int>(source), n);
+        io.Dup2(source, n);
         return std::nullopt;
     }
     case RedirectionKind::HereDoc:

@@ -1,7 +1,7 @@
 # Review: coreutils--sort (PR #47)
 - Verdict: merged
 - Merged as: 1e24d21, version 0.5.5
-- Tokens: claude 196577, ollama input 287765, ollama output 101720
+- Tokens: claude 199138, ollama input 287765, ollama output 101720
 
 | Severity | Status | Where | Finding |
 |----------|--------|-------|---------|

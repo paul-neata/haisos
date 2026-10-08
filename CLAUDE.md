@@ -42,6 +42,7 @@ haisos/
 │   │   ├── Logger/
 │   │   ├── NetworkService/
 │   │   ├── PipeService/
+│   │   ├── Regex/           - The regex engine: GNU BRE/ERE and a Perl subset
 │   │   ├── ServicesCreator/
 │   │   ├── ToolFactory/
 │   │   └── Unicode/
@@ -498,6 +499,7 @@ under "Objects released last on their own threads".
 | **ServicesCreator** | `src/components/ServicesCreator/` | Factory-of-services built on `IFactory`; creates `IFileSystemService`/`IPipeService`/`INetworkService`/`ILLMService`, passing each the services it depends on |
 | **NetworkService** | `src/components/NetworkService/` | Service-layer wrapper over network access (creates `IHTTPClient`) |
 | **PipeService** | `src/components/PipeService/` | `IPipeService`: unnamed pipes -- bounded, blocking, one-way, both ends descriptors; no threads |
+| **Regex** | `src/components/Regex/` | Haisos's own regex engine, shared by grep, sed, find, awk, rg and jq: GNU BRE and ERE (leftmost-longest) and a Perl subset (leftmost-first), on bytes |
 | **FileSystemService** | `src/components/FileSystemService/` | Stateless factory that composes filesystems (read-only / in-memory / sub / mount); holds no filesystem of its own |
 | **LLMService** | `src/components/LLMService/` | Service-layer entry point for creating LLM-backed agents; exposes the shared agent-management tool set |
 | **HaisosOS** | `src/components/HaisosOS/` | An OS instance: owns a rooted filesystem, physical console, and services; starts processes (`.md` agents, `.lua` scripts, builtins) and sub-OS instances |

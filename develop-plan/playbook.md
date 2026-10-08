@@ -15,7 +15,7 @@ Pause: no
 | 7 | [coreutils--cp](tasks/coreutils--cp.md) | done | 0.5.8 | 1, 6 | #50 | 1 | 0C 2H fixed, 3M 4L open | 3 M fit coreutils--mv-touch |
 | 8 | [coreutils--mv-touch](tasks/coreutils--mv-touch.md) | todo | | 1, 6, 7, 53 | | | | |
 | 9 | [coreutils--names-env](tasks/coreutils--names-env.md) | done | 0.5.9 | - | #51 | 1 | 0C 1H fixed, 2M 6L open | Windows green on CI re-run (HaisosOS.unittests flaky) |
-| 10 | [coreutils--chmod-paths](tasks/coreutils--chmod-paths.md) | in-review | 0.5.10 | - | #52 | 1 | | |
+| 10 | [coreutils--chmod-paths](tasks/coreutils--chmod-paths.md) | done | 0.5.10 | - | #52 | 1 | 0C 0H fixed, 1M 3L open | Windows green on CI re-run (HaisosOS.unittests flaky) |
 | 11 | [coreutils--printf-seq](tasks/coreutils--printf-seq.md) | todo | | 4 | | | | |
 | 12 | [coreutils--date](tasks/coreutils--date.md) | todo | | 8, 4 | | | | |
 | 13 | [coreutils--stat](tasks/coreutils--stat.md) | todo | | 12, 11, 4 | | | | |
@@ -64,6 +64,7 @@ Pause: no
 ## Questions
 - (implement, 2026-10-08) base--fs-rename-times review (#43): the Windows rename emulation removes an empty target directory before MoveFileExW and loses it if the move fails (e.g. `/d` -> `/d/sub`). The reviewer suggests a follow-up task before coreutils--mv-touch (row 8) relies on it: refuse a new path under the old one before removing the target, and recreate it if MoveFileExW fails. Add such a task (depends on 1, before 8)? -> answered: yes -- added base--rename-fix (#53, after row 3, depends on 1; row 8 now depends on 53). It also takes the review's two low findings (ToFileTime overflow, the misplaced HaisosOSTest comment).
 - (implement, 2026-10-08) coreutils--rm-rmdir review (#49), medium: `rm -r` stats with Stat, which follows links, so on a PHYSICAL filesystem it descends into a symlinked directory and empties its target, even outside the tree (GNU removes only the link). DELETE already does this, but rm makes it reachable from any process, and cp/mv/find -delete would reuse RemoveOperand. The reviewer suggests giving IFileIO a no-follow status (or a link entry type) before those tasks, and until then documenting it in the rm row of the BuiltinCommands CLAUDE.md. Add such a task (before coreutils--mv-touch, row 8)? I continue with coreutils--cp meanwhile.
+- (implement, 2026-10-08) HaisosOS.unittests is flaky on Windows CI: it failed on #44, #51 and #52 (on #52 killed after its 30 s limit, so a hang), none of which touch it, and passed on each re-run. Every third PR now needs a CI re-run. Add a task to find and fix the Windows hang (likely a stop/destruction timing race in HaisosOS)? With WSL interop broken on the host, it could only be verified on CI.
 
 ## Adjustments
 - 2026-10-08 05:30 (implement) base--regex-match refreshed: checked against d2f11f2; added #44 review outcomes (nesting limit 250 for the Windows stack, add the missing Regex.h Semantics doc comments)

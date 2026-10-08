@@ -34,3 +34,4 @@
 - 2026-10-08 10:28 UTC -- coreutils--names-env merged #51 as 0.5.9: 0C 1H fixed, 2M 6L open, 1 try (Windows green on CI re-run)
 - 2026-10-08 10:29 UTC -- start coreutils--chmod-paths (0.5.10)
 - 2026-10-08 10:55 UTC -- coreutils--chmod-paths: PR #52, windows-failed
+- 2026-10-08 11:07 UTC -- coreutils--chmod-paths merged #52 as 0.5.10: 0C 0H fixed, 1M 3L open, 1 try (Windows green on CI re-run); question: fix the HaisosOS Windows flake

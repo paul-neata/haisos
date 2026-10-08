@@ -1,7 +1,7 @@
 # Review: coreutils--cp (PR #50)
 - Verdict: merged
 - Merged as: b8937f4, version 0.5.8
-- Tokens: claude 172779, ollama input 146774, ollama output 106351
+- Tokens: claude 175524, ollama input 146774, ollama output 106351
 
 | Severity | Status | Where | Finding |
 |----------|--------|-------|---------|

@@ -72,3 +72,4 @@ Pause: no
 - 2026-10-08 07:54 (implement) coreutils--sort-orders refreshed against d947afa; folded in #47 review medium (-d wins over -i, error text '-dn'), with test SortDictionaryWinsOverNonprinting
 - 2026-10-08 08:31 (implement) coreutils--rm-rmdir refreshed against 74a3f56: names the shared BuiltinText helpers (ArgMatch for --interactive/--preserve-root values), list ordering after pwd and before sort
 - 2026-10-08 09:02 (implement) coreutils--cp refreshed against 57ade71: reuse RemoveOperand/RemoveFile (BuiltinRemove) and ArgMatch/GnuQuote (BuiltinText), full paths for FilesystemUtils.h and the list files
+- 2026-10-08 09:43 (implement) coreutils--names-env (row 9) runs before coreutils--mv-touch (row 8): row 8 waits for the answer to the rm -r symlink Question

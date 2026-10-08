@@ -16,6 +16,7 @@ std::shared_ptr<IBuiltinCommand> CreateBasenameCommand();
 std::shared_ptr<IBuiltinCommand> CreateCatCommand();
 std::shared_ptr<IBuiltinCommand> CreateChmodCommand();
 std::shared_ptr<IBuiltinCommand> CreateCpCommand();
+std::shared_ptr<IBuiltinCommand> CreateCutCommand();
 std::shared_ptr<IBuiltinCommand> CreateDirnameCommand();
 std::shared_ptr<IBuiltinCommand> CreateEchoCommand();
 std::shared_ptr<IBuiltinCommand> CreateEnvCommand();
@@ -34,6 +35,7 @@ std::shared_ptr<IBuiltinCommand> CreateSleepCommand();
 std::shared_ptr<IBuiltinCommand> CreateSortCommand();
 std::shared_ptr<IBuiltinCommand> CreateTestCommand();
 std::shared_ptr<IBuiltinCommand> CreateTrueCommand();
+std::shared_ptr<IBuiltinCommand> CreateUniqCommand();
 std::shared_ptr<IBuiltinCommand> CreateWcCommand();
 std::shared_ptr<IBuiltinCommand> CreateWhichCommand();
 
@@ -47,6 +49,7 @@ inline std::vector<std::shared_ptr<IBuiltinCommand>> CreateStandardBuiltinComman
         CreateCatCommand(),
         CreateChmodCommand(),
         CreateCpCommand(),
+        CreateCutCommand(),
         CreateDirnameCommand(),
         CreateEchoCommand(),
         CreateEnvCommand(),
@@ -65,6 +68,7 @@ inline std::vector<std::shared_ptr<IBuiltinCommand>> CreateStandardBuiltinComman
         CreateSortCommand(),
         CreateTestCommand(),
         CreateTrueCommand(),
+        CreateUniqCommand(),
         CreateWcCommand(),
         CreateWhichCommand(),
     };

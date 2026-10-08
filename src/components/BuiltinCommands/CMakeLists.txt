@@ -15,6 +15,7 @@ add_library(BuiltinCommands STATIC
     commands/cat/Cat.cpp
     commands/chmod/Chmod.cpp
     commands/cp/Cp.cpp
+    commands/cut/Cut.cpp
     commands/dirname/Dirname.cpp
     commands/echo/Echo.cpp
     commands/env/Env.cpp
@@ -33,6 +34,7 @@ add_library(BuiltinCommands STATIC
     commands/sort/SortKeys.cpp
     commands/test/Test.cpp
     commands/true/True.cpp
+    commands/uniq/Uniq.cpp
     commands/wc/Wc.cpp
     commands/which/Which.cpp
     commands/hsh/HshWord.cpp

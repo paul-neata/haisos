@@ -27,3 +27,4 @@
 - 2026-10-08 09:00 UTC -- coreutils--rm-rmdir merged #49 as 0.5.7: 0C 1H fixed, 1M 3L open, 1 try; question: rm -r follows dir symlinks
 - 2026-10-08 09:02 UTC -- start coreutils--cp (0.5.8)
 - 2026-10-08 09:31 UTC -- coreutils--cp: PR #50, ready
+- 2026-10-08 09:43 UTC -- coreutils--cp merged #50 as 0.5.8: 0C 2H fixed, 3M 4L open, 1 try

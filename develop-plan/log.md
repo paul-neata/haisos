@@ -31,3 +31,4 @@
 - 2026-10-08 09:43 UTC -- names-env ahead of mv-touch (waiting on the symlink question)
 - 2026-10-08 09:44 UTC -- start coreutils--names-env (0.5.9)
 - 2026-10-08 10:09 UTC -- coreutils--names-env: PR #51, ready
+- 2026-10-08 10:28 UTC -- coreutils--names-env merged #51 as 0.5.9: 0C 1H fixed, 2M 6L open, 1 try (Windows green on CI re-run)

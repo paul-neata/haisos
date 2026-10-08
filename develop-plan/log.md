@@ -17,3 +17,4 @@
 - 2026-10-08 07:11 UTC -- base--rename-fix: PR #46, ready
 - 2026-10-08 07:13 UTC -- base--rename-fix merged #46 as 0.5.4: 0C 0H fixed, 0M 1L open, 1 try
 - 2026-10-08 07:14 UTC -- start coreutils--sort (0.5.5)
+- 2026-10-08 07:40 UTC -- coreutils--sort: PR #47, ready

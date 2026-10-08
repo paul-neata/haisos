@@ -74,3 +74,4 @@ Pause: no
 - 2026-10-08 09:02 (implement) coreutils--cp refreshed against 57ade71: reuse RemoveOperand/RemoveFile (BuiltinRemove) and ArgMatch/GnuQuote (BuiltinText), full paths for FilesystemUtils.h and the list files
 - 2026-10-08 09:43 (implement) coreutils--names-env (row 9) runs before coreutils--mv-touch (row 8): row 8 waits for the answer to the rm -r symlink Question
 - 2026-10-08 09:44 (implement) coreutils--names-env refreshed against b7b1ee6: BuiltinCommands CMake, current builtin list and order, reuse of WriteFully/GnuQuote
+- 2026-10-08 10:29 (implement) coreutils--chmod-paths (row 10) also runs before coreutils--mv-touch (row 8), still waiting on the rm -r symlink Question

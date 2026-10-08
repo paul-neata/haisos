@@ -1,4 +1,5 @@
 #include "commands/sort/SortKeys.h"
+#include <cstdint>
 #include <cstring>
 #include "BuiltinCompare.h"
 #include "BuiltinText.h"
@@ -53,9 +54,62 @@ bool IgnoredByModifiers(char c, const SortKey& key) {
     return false;
 }
 
-// The comparison of one key's texts: numeric, or as text with the modifiers.
-int CompareKeyTexts(std::string_view a, std::string_view b, const SortKey& key) {
-    if (key.numeric) {
+// The key's text as -R hashes it: case folded, the bytes -d/-i ignore
+// skipped, in one owned string.
+std::string RandomTransformedText(std::string_view text, const SortKey& key) {
+    std::string out;
+    for (const char c : text) {
+        if (IgnoredByModifiers(c, key)) {
+            continue;
+        }
+        out += FoldCase(c);
+    }
+    return out;
+}
+
+// FNV-1a over the salt bytes then the key's bytes, finished with a
+// splitmix64 step: enough to scatter, and cheap per line.
+uint64_t HashKeyText(const std::string& text, const SortSettings& settings) {
+    uint64_t hash = 1469598103934665603ULL;  // FNV-1a 64 offset basis
+    const auto mixByte = [&hash](unsigned char byte) {
+        hash ^= byte;
+        hash *= 1099511628211ULL;  // FNV-1a 64 prime
+    };
+    for (const uint64_t salt : settings.randomSalt) {
+        for (int byte = 0; byte < 8; ++byte) {
+            mixByte(static_cast<unsigned char>((salt >> (8 * byte)) & 0xFF));
+        }
+    }
+    for (const unsigned char byte : text) {
+        mixByte(byte);
+    }
+    hash += 0x9E3779B97F4A7C15ULL;
+    hash = (hash ^ (hash >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    hash = (hash ^ (hash >> 27)) * 0x94D049BB133111EBULL;
+    return hash ^ (hash >> 31);
+}
+
+// sort -R: by the hash of each key's transformed text, with the run's salt;
+// equal hashes fall back to the transformed bytes, so distinct keys never
+// tie and equal keys always do.
+int CompareRandomTexts(std::string_view a, std::string_view b, const SortKey& key,
+                       const SortSettings& settings) {
+    const std::string textA = RandomTransformedText(a, key);
+    const std::string textB = RandomTransformedText(b, key);
+    const uint64_t hashA = HashKeyText(textA, settings);
+    const uint64_t hashB = HashKeyText(textB, settings);
+    if (hashA != hashB) {
+        return hashA < hashB ? -1 : 1;
+    }
+    return CompareBytes(textA, textB);
+}
+
+// The comparison of one key's texts: by its kind, or as text with the
+// modifiers. The leading blanks of the key text are skipped for n, h and M
+// (g relies on strtold, which skips whitespace itself).
+int CompareKeyTexts(std::string_view a, std::string_view b, const SortKey& key,
+                    const SortSettings& settings) {
+    if (key.numeric || key.humanNumeric || key.month) {
         size_t aStart = 0;
         size_t bStart = 0;
         while (aStart < a.size() && IsSortBlank(a[aStart])) {
@@ -64,10 +118,23 @@ int CompareKeyTexts(std::string_view a, std::string_view b, const SortKey& key) 
         while (bStart < b.size() && IsSortBlank(b[bStart])) {
             ++bStart;
         }
-        return CompareNumeric(a.substr(aStart), b.substr(bStart));
+        if (key.numeric) {
+            return CompareNumeric(a.substr(aStart), b.substr(bStart));
+        }
+        if (key.humanNumeric) {
+            return CompareHumanNumeric(a.substr(aStart), b.substr(bStart));
+        }
+        return CompareMonth(a.substr(aStart), b.substr(bStart));
     }
-    // g h M R V are stored on the key but compared by coreutils--sort-orders;
-    // until then their keys compare as plain text.
+    if (key.generalNumeric) {
+        return CompareGeneralNumeric(a, b);
+    }
+    if (key.random) {
+        return CompareRandomTexts(a, b, key, settings);
+    }
+    if (key.version) {
+        return CompareVersion(a, b);
+    }
     if (!key.dictionary && !key.ignoreNonprinting && !key.foldCase) {
         return CompareBytes(a, b);
     }
@@ -158,10 +225,19 @@ bool ApplySortModifier(char letter, SortKey& key, bool forStart) {
                 key.skipEndBlanks = true;
             }
             return true;
-        case 'd': key.dictionary = true; return true;
+        // GNU keeps only -d of -d and -i together, whichever order they
+        // came in: 'd' always sets its own mode, 'i' only when none is set.
+        case 'd':
+            key.dictionary = true;
+            key.ignoreNonprinting = false;
+            return true;
         case 'f': key.foldCase = true; return true;
         case 'g': key.generalNumeric = true; return true;
-        case 'i': key.ignoreNonprinting = true; return true;
+        case 'i':
+            if (!key.dictionary) {
+                key.ignoreNonprinting = true;
+            }
+            return true;
         case 'M': key.month = true; return true;
         case 'h': key.humanNumeric = true; return true;
         case 'n': key.numeric = true; return true;
@@ -309,7 +385,7 @@ int CompareLines(std::string_view a, std::string_view b, const SortSettings& set
     for (const auto& key : settings.keys) {
         const auto [aBegin, aEnd] = SortKeyRange(a, key, settings.tab);
         const auto [bBegin, bEnd] = SortKeyRange(b, key, settings.tab);
-        int diff = CompareKeyTexts(a.substr(aBegin, aEnd - aBegin), b.substr(bBegin, bEnd - bBegin), key);
+        int diff = CompareKeyTexts(a.substr(aBegin, aEnd - aBegin), b.substr(bBegin, bEnd - bBegin), key, settings);
         if (key.reverse) {
             diff = -diff;
         }

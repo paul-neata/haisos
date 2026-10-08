@@ -62,7 +62,11 @@ through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
   `Valid arguments are:` diagnostic), `OpenInputOperand` + `BuiltinLineReader`
   (a file operand opened, and read a delimiter at a time), and `WriteFully`.
 - `BuiltinCompare.h` - `CompareNumeric`, GNU strnumcmp's exact comparison:
-  signs first, then digits of any length, never through a float.
+  signs first, then digits of any length, never through a float;
+  `CompareGeneralNumeric` (-g, by strtold: not-a-number < NaN < numbers),
+  `CompareHumanNumeric` (-h, unit order then numeric), `CompareMonth`
+  (-M) and `CompareVersion` (-V, gnulib's filevercmp -- a later `ls -v`
+  reuses it).
 - `commands/hsh/` - `hsh`, the Haisos shell (dash reimplemented); has its own
   CLAUDE.md.
 
@@ -126,7 +130,7 @@ command and links its man page.
 | `man` | 1.0.0 | `-f -k -i -I`, a section first (`man 1 ls`), several pages | pages are compiled in (each builtin's `ManPage()`, its `--help` unless overridden), all section 1, plain text, no pager; `-k` matches names and summaries only; everything else of man-db's reported as not treated |
 | `mkdir` | 1.1.0 | `-p -v` | `-m`/`--mode`, `-Z`/`--context` not treated (no permissions or security contexts) |
 | `pwd` | 1.1.0 | `-L -P` (the same: no symlinks) | -- |
-| `sort` | 1.0.0 | `-b -d -f -i -n -r -u -s -z`, `-k KEYDEF` (with `-t SEP`), `-o FILE`, `--files0-from=F`; with no FILE, or a FILE of `-`, the standard input is read; GNU's last-resort whole-line comparison unless `-u` or `-s`; lines compared byte by byte, as GNU sort with `LC_ALL=C`; numeric comparison exact at any length (`BuiltinCompare.h`) | `-S`, `-T`, `--parallel` and `--batch-size` accepted and not acted on (Haisos sorts in memory); `-g -h -M -R -V --sort --random-source -c -C -m --compress-program --debug` not treated, and key modifiers g/h/M/R/V parsed but compared as text |
+| `sort` | 1.1.0 | `-b -d -f -g -h -i -M -n -r -R -s -u -V -z`, `--sort=WORD`, `-k KEYDEF` (with `-t SEP`), `-c`/`-C`/`--check[=WHEN]`, `-m`, `-o FILE`, `--files0-from=F`; with no FILE, or a FILE of `-`, the standard input is read; GNU's last-resort whole-line comparison unless `-u` or `-s`; lines compared byte by byte, as GNU sort with `LC_ALL=C`; the orders of `BuiltinCompare.h`: `-n` exact at any length, `-g` by strtold, `-h` by unit then numeric, `-M` by month, `-V` by gnulib's filevercmp (`CompareVersion`, for `ls -v` to reuse) | `-R` orders by a salted hash of each key, not GNU's MD5, so its order changes from run to run as GNU's does (`--random-source` not treated); `-S`, `-T`, `--parallel` and `--batch-size` accepted and not acted on (Haisos sorts in memory); `--compress-program` and `--debug` not treated |
 | `wc` | 1.0.1 | `-c -m -l -L -w`, `--files0-from`, `--total`; with no FILE, or a FILE of `-`, the standard input is read | standard input has no size, so with it the columns are at least 7 wide (GNU sizes a redirected file); character classes and display widths come from the `Unicode` component's compact tables (unassigned code points count as printable; rare scripts' widths are approximate); `--debug` not treated |
 
 `man` reaches the pages through `CreateStandardBuiltinCommands()` directly: a

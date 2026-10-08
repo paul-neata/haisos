@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <string>
 #include <vector>
 #include "BuiltinCommandsFixture.h"
@@ -84,6 +85,132 @@ TEST_F(BuiltinCommandsTest, SortNumeric) {
     EXPECT_EQ(run.status, 0);
 }
 
+TEST_F(BuiltinCommandsTest, SortGeneralNumeric) {
+    // not-a-number ('' and abc) < NaN < numbers by value; hex and exponents
+    // accepted; equal keys ('' vs abc) ordered by the last resort.
+    const auto run = RunCaptured("sort", {"-g"}, "10\n9\n1e1\n0x10\nnan\n-inf\nabc\n\n");
+    EXPECT_EQ(run.out, "\nabc\nnan\n-inf\n9\n10\n1e1\n0x10\n");
+    EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 0);
+}
+
+TEST_F(BuiltinCommandsTest, SortHumanNumeric) {
+    // First by unit (none < K < M < G), then numerically; a zero number has
+    // no unit; -1G's unit is negated.
+    const auto run = RunCaptured("sort", {"-h"}, "1K\n2M\n-1G\n0\n500\n1k\n-3\n");
+    EXPECT_EQ(run.out, "-1G\n-3\n0\n500\n1K\n1k\n2M\n");
+    EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 0);
+}
+
+TEST_F(BuiltinCommandsTest, SortMonth) {
+    // An unknown month is 0; leading blanks skipped; JANUARY is JAN; the
+    // unknown keys are equal, so the last resort orders them.
+    const auto run = RunCaptured("sort", {"-M"}, "feb\nJan x\n  dec\nfoo\n");
+    EXPECT_EQ(run.out, "foo\nJan x\nfeb\n  dec\n");
+    EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 0);
+}
+
+TEST_F(BuiltinCommandsTest, SortVersion) {
+    const std::string input = "foo-1.10\nfoo-1.9\nfoo-1.9.tar.gz\n.a\n..\n.\nfoo~\nfoo\n";
+    const std::string expected = ".\n..\n.a\nfoo~\nfoo\nfoo-1.9\nfoo-1.9.tar.gz\nfoo-1.10\n";
+    auto run = RunCaptured("sort", {"-V"}, input);
+    EXPECT_EQ(run.out, expected);
+    EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 0);
+    run = RunCaptured("sort", {"--version-sort"}, input);
+    EXPECT_EQ(run.out, expected);
+    EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 0);
+}
+
+TEST_F(BuiltinCommandsTest, SortVersionKey) {
+    // -V as a key modifier, on the second dash-separated field.
+    const auto run = RunCaptured("sort", {"-t-", "-k2V"}, "a-1.10\nb-1.9\n");
+    EXPECT_EQ(run.out, "b-1.9\na-1.10\n");
+    EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 0);
+}
+
+TEST_F(BuiltinCommandsTest, SortRandomGroupsEqualKeys) {
+    // -R shuffles by a hash of the key, equal keys kept adjacent; the salt
+    // is new each run, so only the grouping is checked, not the order.
+    const std::string input = "a\nb\na\nc\nb\na\n";
+    const auto run = RunCaptured("sort", {"-R"}, input);
+    std::vector<std::string> lines;
+    std::string line;
+    for (const char c : run.out) {
+        if (c == '\n') {
+            lines.push_back(line);
+            line.clear();
+        } else {
+            line += c;
+        }
+    }
+    // A permutation of the input, no value split across groups.
+    std::vector<std::string> sorted = lines;
+    std::sort(sorted.begin(), sorted.end());
+    EXPECT_EQ(sorted, (std::vector<std::string>{"a", "a", "a", "b", "b", "c"}));
+    std::vector<std::string> groups;
+    for (const auto& one : lines) {
+        if (groups.empty() || groups.back() != one) {
+            groups.push_back(one);
+        }
+    }
+    std::sort(groups.begin(), groups.end());
+    EXPECT_EQ(groups, (std::vector<std::string>{"a", "b", "c"}));
+    EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 0);
+
+    // With -u only one of each group is left.
+    const auto unique = RunCaptured("sort", {"-R", "-u"}, input);
+    std::vector<std::string> uniqueLines;
+    std::string rest;
+    for (const char c : unique.out) {
+        if (c == '\n') {
+            uniqueLines.push_back(rest);
+            rest.clear();
+        } else {
+            rest += c;
+        }
+    }
+    std::sort(uniqueLines.begin(), uniqueLines.end());
+    EXPECT_EQ(uniqueLines, (std::vector<std::string>{"a", "b", "c"}));
+    EXPECT_EQ(unique.status, 0);
+}
+
+TEST_F(BuiltinCommandsTest, SortSortWord) {
+    // --sort=WORD is the option it names, exact or as an unambiguous prefix.
+    auto run = RunCaptured("sort", {"--sort=numeric"}, "10\n9\n");
+    EXPECT_EQ(run.out, "9\n10\n");
+    EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 0);
+    run = RunCaptured("sort", {"--sort=num"}, "10\n9\n");
+    EXPECT_EQ(run.out, "9\n10\n");
+    EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 0);
+
+    run = RunCaptured("sort", {"--sort=foo"}, "x\n");
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err,
+        "sort: invalid argument 'foo' for '--sort'\n"
+        "Valid arguments are:\n"
+        "  - 'general-numeric'\n"
+        "  - 'human-numeric'\n"
+        "  - 'month'\n"
+        "  - 'numeric'\n"
+        "  - 'random'\n"
+        "  - 'version'\n"
+        "Try 'sort --help' for more information.\n");
+    EXPECT_EQ(run.status, 1);
+
+    run = RunCaptured("sort", {"--sort=h", "-n"}, "x\n");
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err, "sort: options '-hn' are incompatible\n");
+    EXPECT_EQ(run.status, 2);
+}
+
 TEST_F(BuiltinCommandsTest, SortKeysWithSeparator) {
     const auto run = RunCaptured("sort", {"-t:", "-k1,1", "-k2,2n"}, "b:2\na:10\nb:1\n");
     EXPECT_EQ(run.out, "a:10\nb:1\nb:2\n");
@@ -148,6 +275,31 @@ TEST_F(BuiltinCommandsTest, SortDictionaryAndNonprinting) {
     EXPECT_EQ(run.status, 0);
     run = RunCaptured("sort", {"-i"}, "a\001c\nab\n");
     EXPECT_EQ(run.out, "ab\na\001c\n");
+    EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 0);
+}
+
+TEST_F(BuiltinCommandsTest, SortDictionaryWinsOverNonprinting) {
+    // GNU keeps only -d of -d and -i together, whichever order they came
+    // in, so the incompatibility error says '-dn'.
+    auto run = RunCaptured("sort", {"-di", "-n"}, "x\n");
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err, "sort: options '-dn' are incompatible\n");
+    EXPECT_EQ(run.status, 2);
+    run = RunCaptured("sort", {"-id", "-n"}, "x\n");
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err, "sort: options '-dn' are incompatible\n");
+    EXPECT_EQ(run.status, 2);
+    run = RunCaptured("sort", {"-k1di,1n"}, "x\n");
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err, "sort: options '-dn' are incompatible\n");
+    EXPECT_EQ(run.status, 2);
+
+    // -di behaves as -d alone: the same bytes ignored either way.
+    const std::string input = "b-c\nb a\n";
+    const auto plain = RunCaptured("sort", {"-d"}, input);
+    run = RunCaptured("sort", {"-di"}, input);
+    EXPECT_EQ(run.out, plain.out);
     EXPECT_EQ(run.err, kNone);
     EXPECT_EQ(run.status, 0);
 }
@@ -338,6 +490,26 @@ TEST_F(BuiltinCommandsTest, SortIncompatibleOptions) {
     EXPECT_EQ(run.out, kNone);
     EXPECT_EQ(run.err, "sort: options '-nV' are incompatible\n");
     EXPECT_EQ(run.status, 2);
+
+    // One of n g h M each, and one of d i V R: two of either set conflict.
+    // f is listed in the message but conflicts with none of them.
+    struct Case {
+        std::vector<std::string> options;
+        std::string message;
+    };
+    const Case cases[] = {
+        {{"-gn"}, "'-gn'"},
+        {{"-Mn"}, "'-Mn'"},
+        {{"-nR"}, "'-nR'"},
+        {{"-i", "-g"}, "'-gi'"},
+        {{"-fgn"}, "'-fgn'"},
+    };
+    for (const auto& one : cases) {
+        run = RunCaptured("sort", one.options, "x\n");
+        EXPECT_EQ(run.out, kNone) << one.message;
+        EXPECT_EQ(run.err, "sort: options " + one.message + " are incompatible\n") << one.message;
+        EXPECT_EQ(run.status, 2) << one.message;
+    }
 }
 
 TEST_F(BuiltinCommandsTest, SortReadErrors) {
@@ -387,17 +559,159 @@ TEST_F(BuiltinCommandsTest, SortUsageErrors) {
     EXPECT_EQ(run.status, 2);
 }
 
-TEST_F(BuiltinCommandsTest, SortVersionIsNotVersionSort) {
-    auto run = RunCaptured("sort", {"--version"});
-    EXPECT_EQ(run.out, "sort (HaisosOS builtin) 1.0.0\n");
+// --- Checking and merging ---
+
+TEST_F(BuiltinCommandsTest, SortCheck) {
+    // The first disorder, by name, line number and the line itself, the
+    // delimiter closing the message.
+    auto run = RunCaptured("sort", {"-c", "-"}, "a\nb\n\nc");
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err, "sort: -:3: disorder: \n");
+    EXPECT_EQ(run.status, 1);
+
+    run = RunCaptured("sort", {"-c", "-"}, "a\nb\nc\n");
+    EXPECT_EQ(run.out, kNone);
     EXPECT_EQ(run.err, kNone);
     EXPECT_EQ(run.status, 0);
 
-    // The exact long name wins over the prefix: --version-sort is -V, not
-    // treated, and still sorts.
+    // -C and --check=silent check quietly.
+    run = RunCaptured("sort", {"-C", "-"}, "b\na\n");
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 1);
+    run = RunCaptured("sort", {"--check=silent", "-"}, "b\na\n");
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 1);
+
+    // -cu asks for strict ordering: an equal line is a disorder too.
+    run = RunCaptured("sort", {"-cu", "-"}, "a\na\n");
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err, "sort: -:2: disorder: a\n");
+    EXPECT_EQ(run.status, 1);
+
+    // The last resort is part of the check: folded-equal lines disordered
+    // by their raw bytes.
+    run = RunCaptured("sort", {"-c", "-f", "-"}, "a\nA\n");
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err, "sort: -:2: disorder: A\n");
+    EXPECT_EQ(run.status, 1);
+
+    // Keys decide, not whole lines.
+    run = RunCaptured("sort", {"-c", "-k2n", "-"}, "x 2\ny 10\n");
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 0);
+    run = RunCaptured("sort", {"-c", "-k2", "-"}, "x 2\ny 10\n");
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err, "sort: -:2: disorder: y 10\n");
+    EXPECT_EQ(run.status, 1);
+
+    // -z's records end the message with a NUL.
+    run = RunCaptured("sort", {"-cz", "-"}, std::string("b\0a\0", 4));
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err, std::string("sort: -:2: disorder: a\0", 23));
+    EXPECT_EQ(run.status, 1);
+
+    // A file operand is named as given.
+    WriteFile("/f.txt", "b\na\n");
+    run = RunCaptured("sort", {"-c", "f.txt"});
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err, "sort: f.txt:2: disorder: a\n");
+    EXPECT_EQ(run.status, 1);
+}
+
+TEST_F(BuiltinCommandsTest, SortCheckErrors) {
+    WriteFile("/f.txt", "a\n");
+
+    // More than one input, the second operand named; no Try line.
+    auto run = RunCaptured("sort", {"-c", "f.txt", "g"});
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err, "sort: extra operand 'g' not allowed with -c\n");
+    EXPECT_EQ(run.status, 2);
+
+    // -C names itself in the extra-operand error.
+    run = RunCaptured("sort", {"-C", "f.txt", "g"});
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err, "sort: extra operand 'g' not allowed with -C\n");
+    EXPECT_EQ(run.status, 2);
+
+    run = RunCaptured("sort", {"-c", "-o", "z", "f.txt"});
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err, "sort: options '-co' are incompatible\n");
+    EXPECT_EQ(run.status, 2);
+
+    // Either order of the two check modes says '-cC'.
+    run = RunCaptured("sort", {"-C", "-c", "f.txt"});
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err, "sort: options '-cC' are incompatible\n");
+    EXPECT_EQ(run.status, 2);
+    run = RunCaptured("sort", {"-c", "-C", "f.txt"});
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err, "sort: options '-cC' are incompatible\n");
+    EXPECT_EQ(run.status, 2);
+
+    run = RunCaptured("sort", {"--check=foo", "f.txt"});
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err,
+        "sort: invalid argument 'foo' for '--check'\n"
+        "Valid arguments are:\n"
+        "  - 'quiet', 'silent'\n"
+        "  - 'diagnose-first'\n"
+        "Try 'sort --help' for more information.\n");
+    EXPECT_EQ(run.status, 1);
+
+    // An input that cannot be opened is an "open failed", not a "cannot
+    // read" as a sorting run's is.
+    run = RunCaptured("sort", {"-c", "nofile"});
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err, "sort: open failed: nofile: No such file or directory\n");
+    EXPECT_EQ(run.status, 2);
+}
+
+TEST_F(BuiltinCommandsTest, SortMerge) {
+    ASSERT_EQ(root->CreateDirectory("/w", kDirMode), 0);
+    WriteFile("/w/x", "a\nb\n");
+    WriteFile("/w/y", "a\nc\n");
+    WriteFile("/w/u", "b\na\n");
+
+    // The inputs merged as they stand, equal head lines going to the
+    // earlier input.
+    auto run = RunCaptured("sort", {"-m", "/w/x", "/w/y"});
+    EXPECT_EQ(run.out, "a\na\nb\nc\n");
+    EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 0);
+
+    // With -u, a line equal to the last one output is dropped.
+    run = RunCaptured("sort", {"-mu", "/w/x", "/w/y"});
+    EXPECT_EQ(run.out, "a\nb\nc\n");
+    EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 0);
+
+    // Never re-sorted: two copies of an unsorted input pass through.
+    run = RunCaptured("sort", {"-m", "/w/u", "/w/u"});
+    EXPECT_EQ(run.out, "b\na\nb\na\n");
+    EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 0);
+
+    // A missing input is a read error, as in a sorting run.
+    run = RunCaptured("sort", {"-m", "/w/x", "nofile"});
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err, "sort: cannot read: nofile: No such file or directory\n");
+    EXPECT_EQ(run.status, 2);
+}
+
+TEST_F(BuiltinCommandsTest, SortVersionIsNotVersionSort) {
+    auto run = RunCaptured("sort", {"--version"});
+    EXPECT_EQ(run.out, "sort (HaisosOS builtin) 1.1.0\n");
+    EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 0);
+
+    // The exact long name wins over the prefix: --version-sort is -V, and
+    // sorts by version.
     run = RunCaptured("sort", {"--version-sort"}, "b\na\n");
     EXPECT_EQ(run.out, "a\nb\n");
-    EXPECT_EQ(run.err, "Parameter --version-sort is not treated by HaisosOS sort v. 1.0.0\n");
+    EXPECT_EQ(run.err, kNone);
     EXPECT_EQ(run.status, 0);
 }
 

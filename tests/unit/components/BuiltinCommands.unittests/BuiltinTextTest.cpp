@@ -58,3 +58,106 @@ TEST(CompareNumericTest, CompareNumericCases) {
     EXPECT_EQ(CompareNumeric("0.1" + std::string(40, '0'), "0.1"), 0);
     EXPECT_EQ(CompareNumeric("0." + std::string(40, '0') + "1", "0.1"), -1);
 }
+
+// --- CompareGeneralNumeric (sort -g) ---
+
+TEST(CompareGeneralTest, CompareGeneralCases) {
+    // not-a-number < NaN < numbers, two of a kind equal.
+    EXPECT_EQ(CompareGeneralNumeric("", "abc"), 0);
+    EXPECT_EQ(CompareGeneralNumeric("abc", "nan"), -1);
+    EXPECT_EQ(CompareGeneralNumeric("nan", "NaN"), 0);
+    EXPECT_EQ(CompareGeneralNumeric("nan", "-inf"), -1);
+    EXPECT_EQ(CompareGeneralNumeric("-inf", "9"), -1);
+    EXPECT_EQ(CompareGeneralNumeric("abc", "9"), -1);
+    EXPECT_EQ(CompareGeneralNumeric("inf", "9"), 1);
+    EXPECT_EQ(CompareGeneralNumeric("-inf", "inf"), -1);
+    // Numbers by value; -0 == +0; hex and exponents as strtold reads them.
+    EXPECT_EQ(CompareGeneralNumeric("-0", "0"), 0);
+    EXPECT_EQ(CompareGeneralNumeric("9", "10"), -1);
+    EXPECT_EQ(CompareGeneralNumeric("1e1", "0x10"), -1);  // 10 < 16
+    EXPECT_EQ(CompareGeneralNumeric("0x10", "1e1"), 1);
+    // A partial conversion is a number up to where it stopped.
+    EXPECT_EQ(CompareGeneralNumeric("10abc", "9"), 1);
+    // nan with a tail parses as NaN, not as not-a-number.
+    EXPECT_EQ(CompareGeneralNumeric("nanabc", "1"), -1);
+}
+
+// --- CompareHumanNumeric (sort -h) ---
+
+TEST(CompareHumanTest, CompareHumanCases) {
+    // Unit first: none < K < M < ... < Q, negated by a '-'.
+    EXPECT_EQ(CompareHumanNumeric("1", "1K"), -1);
+    EXPECT_EQ(CompareHumanNumeric("1K", "2M"), -1);
+    EXPECT_EQ(CompareHumanNumeric("2M", "1K"), 1);
+    EXPECT_EQ(CompareHumanNumeric("-1G", "0"), -1);
+    EXPECT_EQ(CompareHumanNumeric("1M", "-1G"), 1);
+    // A number with no non-zero digit has no unit, however it ends.
+    EXPECT_EQ(CompareHumanNumeric("0K", "1"), -1);
+    EXPECT_EQ(CompareHumanNumeric("-0K", "0"), 0);
+    EXPECT_EQ(CompareHumanNumeric("3.", "3"), 0);
+    // k is K; the unit decides, the rest compares numerically.
+    EXPECT_EQ(CompareHumanNumeric("1k", "1K"), 0);
+    EXPECT_EQ(CompareHumanNumeric("2K", "2K1"), 0);
+    EXPECT_EQ(CompareHumanNumeric("1.5K", "2K"), -1);
+    // A unit byte no unit is: 'e' of "1e3" is not a unit.
+    EXPECT_EQ(CompareHumanNumeric("1e3", "2"), -1);
+    EXPECT_EQ(CompareHumanNumeric("3.5", "3.4K"), -1);
+    // No number at all: not a number, 0 against everything.
+    EXPECT_EQ(CompareHumanNumeric("K", "1"), -1);
+}
+
+// --- CompareMonth (sort -M) ---
+
+TEST(CompareMonthTest, CompareMonthCases) {
+    // The first three bytes, case-insensitively, blanks skipped; anything
+    // else 0, and two unknowns equal.
+    EXPECT_EQ(CompareMonth("JANUARY", "FEBRUARY"), -1);
+    EXPECT_EQ(CompareMonth("JANx", "FEB"), -1);
+    EXPECT_EQ(CompareMonth("JAN", "jan"), 0);
+    EXPECT_EQ(CompareMonth("jan", "FEB"), -1);
+    EXPECT_EQ(CompareMonth("  dec", "feb"), 1);
+    EXPECT_EQ(CompareMonth("foo", "Jan"), -1);
+    EXPECT_EQ(CompareMonth("foo", "bar"), 0);
+    // Fewer than three bytes name no month.
+    EXPECT_EQ(CompareMonth("J", "JAN"), -1);
+    EXPECT_EQ(CompareMonth("ja", "JAN"), -1);
+    EXPECT_EQ(CompareMonth("se", "sep"), -1);
+    EXPECT_EQ(CompareMonth("DEC", "nov"), 1);
+}
+
+// --- CompareVersion (sort -V, gnulib filevercmp) ---
+
+TEST(CompareVersionTest, CompareVersionCases) {
+    // GNU's order, verified against sort -V: '.', '..', '.a', 'foo~',
+    // 'foo', 'foo-1.9', 'foo-1.9.tar.gz', 'foo-1.10'.
+    const std::string ordered[] = {
+        ".", "..", ".a", "foo~", "foo", "foo-1.9", "foo-1.9.tar.gz", "foo-1.10",
+    };
+    for (size_t i = 0; i < 8; ++i) {
+        for (size_t j = 0; j < 8; ++j) {
+            const int expected = i < j ? -1 : (i > j ? 1 : 0);
+            EXPECT_EQ(CompareVersion(ordered[i], ordered[j]), expected)
+                << ordered[i] << " vs " << ordered[j];
+        }
+    }
+    // An empty text sorts before any other.
+    EXPECT_EQ(CompareVersion("", "a"), -1);
+    EXPECT_EQ(CompareVersion("a", ""), 1);
+    EXPECT_EQ(CompareVersion("", ""), 0);
+    // Leading zeros of a digit run are equal: 1.02 == 1.2.
+    EXPECT_EQ(CompareVersion("1.02", "1.2"), 0);
+    // '~' sorts before the end of a text.
+    EXPECT_EQ(CompareVersion("a~", "a"), -1);
+    EXPECT_EQ(CompareVersion("1~", "1"), -1);
+    // The end of a text against a digit run: "a" == "a0", shorter first
+    // against a non-digit ("a" < "ab").
+    EXPECT_EQ(CompareVersion("a", "a0"), 0);
+    EXPECT_EQ(CompareVersion("a", "ab"), -1);
+    // Version-like suffixes cut before the numbers compare; equal prefixes
+    // with suffixes compare on the whole texts.
+    EXPECT_EQ(CompareVersion("foo-1.9", "foo-1.9.tar.gz"), -1);
+    EXPECT_EQ(CompareVersion("a.gz", "a.tar"), -1);
+    EXPECT_EQ(CompareVersion("a", "a.b"), -1);
+    // A suffix chain that does not reach the end is no suffix.
+    EXPECT_EQ(CompareVersion("a.tar.gz-b", "a.tar.gz-c"), -1);
+}

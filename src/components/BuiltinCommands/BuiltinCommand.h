@@ -57,7 +57,14 @@ struct ParsedBuiltinArgs {
 // long option may be abbreviated to any unambiguous prefix ("--rec"), options
 // and operands may be mixed ("ls dir -l"), and "--" ends the options. A lone
 // "-" is an operand. --help and --version are recognized for every command.
-ParsedBuiltinArgs ParseBuiltinArgs(const std::vector<std::string>& args, const std::vector<BuiltinOption>& options);
+//
+// GNU's "+" getopt mode is |stopAtFirstOperand|: options are only those before
+// the first operand -- the first argument that is not an option ("-" alone
+// included) and every argument after it, "--" included, become operands
+// untouched. A "--" before any operand still ends the options and is dropped.
+// env (and later xargs) work this way: what follows COMMAND is never options.
+ParsedBuiltinArgs ParseBuiltinArgs(const std::vector<std::string>& args,
+    const std::vector<BuiltinOption>& options, bool stopAtFirstOperand = false);
 
 // What --help says beyond the option table.
 struct BuiltinHelp {
@@ -241,8 +248,10 @@ std::string ShellEscapeQuoted(const std::string& name, bool always = false);
 // with the Try line) and not-treated options (reported, then ignored).
 // Returns the parsed arguments to go on with, or nullopt when the command is
 // already done, with *exitStatus set -- 0 after --help/--version,
-// usageErrorStatus after a usage error.
+// usageErrorStatus after a usage error, and parses with the given
+// stopAtFirstOperand mode (see ParseBuiltinArgs).
 std::optional<ParsedBuiltinArgs> BeginBuiltin(
-    BuiltinContext& context, const IBuiltinCommand& command, int usageErrorStatus, int& exitStatus);
+    BuiltinContext& context, const IBuiltinCommand& command, int usageErrorStatus, int& exitStatus,
+    bool stopAtFirstOperand = false);
 
 } // namespace Haisos

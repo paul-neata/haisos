@@ -7,19 +7,25 @@ add_library(BuiltinCommands STATIC
     BuiltinProcess.cpp
     BuiltinPrompt.cpp
     BuiltinRemove.cpp
+    BuiltinRunProgram.cpp
     BuiltinText.cpp
     commands/cat/Cat.cpp
     commands/cp/Cp.cpp
     commands/echo/Echo.cpp
+    commands/env/Env.cpp
+    commands/false/False.cpp
     commands/ls/Ls.cpp
     commands/man/Man.cpp
     commands/mkdir/Mkdir.cpp
     commands/pwd/Pwd.cpp
     commands/rm/Rm.cpp
     commands/rmdir/Rmdir.cpp
+    commands/sleep/Sleep.cpp
     commands/sort/Sort.cpp
     commands/sort/SortKeys.cpp
+    commands/true/True.cpp
     commands/wc/Wc.cpp
+    commands/which/Which.cpp
     commands/hsh/HshWord.cpp
     commands/hsh/HshLexer.cpp
     commands/hsh/HshAst.cpp

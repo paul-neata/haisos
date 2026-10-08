@@ -28,7 +28,7 @@ haisos/
 ├── src/
 │   ├── components/        - Component implementations (each has its own CLAUDE.md)
 │   │   ├── Agent/
-│   │   ├── BuiltinCommands/ - The builtin commands (echo, cat, cp, ls, man, mkdir, pwd, rm, rmdir, sort, wc, hsh; each in commands/<name>/) and what places them on filesystems
+│   │   ├── BuiltinCommands/ - The builtin commands (cat, cp, echo, env, false, hsh, ls, man, mkdir, pwd, rm, rmdir, sleep, sort, true, wc, which; each in commands/<name>/) and what places them on filesystems
 │   │   ├── Console/
 │   │   ├── Environment/
 │   │   ├── Factory/
@@ -535,8 +535,9 @@ returned by `IHaisosOS`'s `OSToolFactory` and merged with an agent's tools
 
 ## Builtin Commands
 
-Commands compiled into Haisos (`cat`, `cp`, `echo`, `hsh`, `ls`, `man`,
-`mkdir`, `pwd`, `rm`, `rmdir`, `sort`, `wc`), implemented in `src/components/BuiltinCommands/`
+Commands compiled into Haisos (`cat`, `cp`, `echo`, `env`, `false`, `hsh`,
+`ls`, `man`, `mkdir`, `pwd`, `rm`, `rmdir`, `sleep`, `sort`, `true`, `wc`,
+`which`), implemented in `src/components/BuiltinCommands/`
 (see its `CLAUDE.md`). A builtin is not a file on disk: it is placed on a
 filesystem at a path (`IBuiltinConfigurator`, or the haisosfile's `BUILTIN`),
 where it lists as a file, reads as a note naming it, cannot be written, and
@@ -592,6 +593,8 @@ use a builtin with what it already knows about the real command:
 | `cat` | Concatenates files and standard input (`-A -b -e -E -n -s -t -T -u -v`) |
 | `cp` | Copies files and directories (`-a -b --backup[=CONTROL] -d -f -H -i -L -l -s -n -P -p --preserve[=LIST] --no-preserve=LIST --parents -R -r --remove-destination --strip-trailing-slashes -S -t -T -u --update[=UPDATE] -v`), GNU's messages, prompts, backups and the `--parents` walk |
 | `echo` | Prints its arguments (`-n -e -E`) |
+| `env` | Runs a program in a modified environment (`-i -0 -u NAME -C DIR -S STRING`), the child looked up in the new PATH; with no COMMAND, prints the variables sorted by name |
+| `false` | Does nothing, exits 1 (`--help`/`--version` only as the sole argument, and 1 even after them) |
 | `hsh` | The Haisos shell, after dash: `-c`, scripts, stdin or interactive (`RUN -i /bin/hsh`); quoting, expansions, pipelines, redirections, heredocs, lists, control flow, functions; commands found in `PATH` |
 | `ls` | Lists directories as GNU ls prints them to a terminal: columns, `-l` with `total`/links/owner/group/size/time, sorting, time styles, quoting; to a pipe or file, one name per line, unquoted |
 | `man` | Prints a builtin's manual page (`man ls`, `man 1 ls`, `-f`, `-k`): its `--help` text, or a full page for `hsh` |
@@ -599,8 +602,11 @@ use a builtin with what it already knows about the real command:
 | `pwd` | Prints the working directory (`-L -P`) |
 | `rm` | Removes files or directories (`-f -i -I --interactive[=WHEN] -r -R -d -v --no-preserve-root --preserve-root[=all]`), prompts read from standard input, entries in name order |
 | `rmdir` | Removes empty directories (`--ignore-fail-on-non-empty -p -v`) |
+| `sleep` | Sleeps for the summed NUMBERs (`s m h d` suffixes; `inf` until stopped) |
 | `sort` | Sorts lines (keys `-k`/`-t`, `-b -d -f -g -h -i -M -n -r -R -s -u -V -z`, `--sort=WORD`, `-c -C --check`, `-m`, `-o`, `--files0-from`), byte order, the numeric/general/human/month/version orders, GNU's last-resort comparison |
+| `true` | Does nothing, exits 0 (`--help`/`--version` only as the sole argument) |
 | `wc` | Counts lines, words, characters, bytes and the widest line (`-c -m -l -L -w`, `--files0-from`, `--total`), GNU's columns |
+| `which` | Locates a command in PATH (`-a -s`), as Debian's which (debianutils): exit 1 when any operand is missed, 2 on an unknown option |
 
 ## Planning skills
 

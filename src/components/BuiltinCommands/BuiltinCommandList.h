@@ -19,8 +19,11 @@ std::shared_ptr<IBuiltinCommand> CreateCpCommand();
 std::shared_ptr<IBuiltinCommand> CreateCutCommand();
 std::shared_ptr<IBuiltinCommand> CreateDirnameCommand();
 std::shared_ptr<IBuiltinCommand> CreateEchoCommand();
+std::shared_ptr<IBuiltinCommand> CreateEgrepCommand();
 std::shared_ptr<IBuiltinCommand> CreateEnvCommand();
 std::shared_ptr<IBuiltinCommand> CreateFalseCommand();
+std::shared_ptr<IBuiltinCommand> CreateFgrepCommand();
+std::shared_ptr<IBuiltinCommand> CreateGrepCommand();
 std::shared_ptr<IBuiltinCommand> CreateHshCommand();
 std::shared_ptr<IBuiltinCommand> CreateLsCommand();
 std::shared_ptr<IBuiltinCommand> CreateManCommand();
@@ -55,8 +58,11 @@ inline std::vector<std::shared_ptr<IBuiltinCommand>> CreateStandardBuiltinComman
         CreateCutCommand(),
         CreateDirnameCommand(),
         CreateEchoCommand(),
+        CreateEgrepCommand(),
         CreateEnvCommand(),
         CreateFalseCommand(),
+        CreateFgrepCommand(),
+        CreateGrepCommand(),
         CreateHshCommand(),
         CreateLsCommand(),
         CreateManCommand(),

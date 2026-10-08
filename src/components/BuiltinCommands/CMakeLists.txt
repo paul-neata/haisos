@@ -20,6 +20,9 @@ add_library(BuiltinCommands STATIC
     commands/echo/Echo.cpp
     commands/env/Env.cpp
     commands/false/False.cpp
+    commands/grep/Grep.cpp
+    commands/grep/GrepFile.cpp
+    commands/grep/GrepMatcher.cpp
     commands/ls/Ls.cpp
     commands/man/Man.cpp
     commands/mkdir/Mkdir.cpp

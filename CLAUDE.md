@@ -28,7 +28,7 @@ haisos/
 ├── src/
 │   ├── components/        - Component implementations (each has its own CLAUDE.md)
 │   │   ├── Agent/
-│   │   ├── BuiltinCommands/ - The builtin commands ([, basename, cat, chmod, cp, cut, dirname, echo, egrep, env, false, fgrep, grep, hsh, ls, man, mkdir, nl, printf, pwd, realpath, rm, rmdir, seq, sleep, sort, tee, test, tr, true, uniq, wc, which; each in commands/<name>/) and what places them on filesystems
+│   │   ├── BuiltinCommands/ - The builtin commands ([, basename, cat, chmod, cp, cut, dirname, echo, egrep, env, false, fgrep, grep, hsh, ls, man, mkdir, mv, nl, printf, pwd, realpath, rm, rmdir, seq, sleep, sort, tee, test, touch, tr, true, uniq, wc, which; each in commands/<name>/) and what places them on filesystems
 │   │   ├── Console/
 │   │   ├── Environment/
 │   │   ├── Factory/
@@ -537,9 +537,9 @@ returned by `IHaisosOS`'s `OSToolFactory` and merged with an agent's tools
 
 Commands compiled into Haisos (`[`, `basename`, `cat`, `chmod`, `cp`, `cut`,
 `dirname`, `echo`, `egrep`, `env`, `false`, `fgrep`, `grep`, `hsh`, `ls`,
-`man`, `mkdir`, `nl`, `printf`, `pwd`, `realpath`, `rm`, `rmdir`, `seq`,
-`sleep`, `sort`, `tee`, `test`, `tr`, `true`, `uniq`, `wc`, `which`),
-implemented in
+`man`, `mkdir`, `mv`, `nl`, `printf`, `pwd`, `realpath`, `rm`, `rmdir`,
+`seq`, `sleep`, `sort`, `tee`, `test`, `touch`, `tr`, `true`, `uniq`, `wc`,
+`which`), implemented in
 `src/components/BuiltinCommands/`
 (see its `CLAUDE.md`). A builtin is not a file on disk: it is placed on a
 filesystem at a path (`IBuiltinConfigurator`, or the haisosfile's `BUILTIN`),
@@ -610,6 +610,7 @@ use a builtin with what it already knows about the real command:
 | `ls` | Lists directories as GNU ls prints them to a terminal: columns, `-l` with `total`/links/owner/group/size/time, sorting, time styles, quoting; to a pipe or file, one name per line, unquoted |
 | `man` | Prints a builtin's manual page (`man ls`, `man 1 ls`, `-f`, `-k`): its `--help` text, or a full page for `hsh` |
 | `mkdir` | Creates directories (`-p -v`) |
+| `mv` | Moves (renames) files (`-b --backup[=CONTROL] -f -i -n --no-copy --strip-trailing-slashes -S -t -T -u --update[=UPDATE] -v`); across a mount, copies then removes as GNU does across devices |
 | `nl` | Numbers lines (`-b -h -f styles incl. pBRE, -d -i -l -n -p -s -v -w`) |
 | `printf` | Formats and prints data (FORMAT reused until the arguments run out; every conversion with flags, widths, precisions, `%b`, `%q`, `\` escapes, character constants; GNU's diagnostics) |
 | `pwd` | Prints the working directory (`-L -P`) |
@@ -622,6 +623,7 @@ use a builtin with what it already knows about the real command:
 | `tee` | Copies standard input to standard output and files (`-a -p --output-error`) |
 | `tr` | Translates, deletes or squeezes bytes (`-c -d -s -t`, ranges, classes, `[c*n]`) |
 | `test` | Checks file types and compares values: GNU coreutils' expression (`!`, `-a`, `-o`, parentheses, string and integer comparisons, `-l STRING` its length, the file primaries, `-t FD`); no options, syntax errors exit 2 |
+| `touch` | Changes file timestamps (`-a -c -d STRING -f -h -m -r FILE -t STAMP --time=WORD`); `-d` takes a GNU date subset |
 | `true` | Does nothing, exits 0 (`--help`/`--version` only as the sole argument) |
 | `uniq` | Filters adjacent repeated lines (`-c -d -D -u -i -f -s -w -z, --group, --all-repeated`); the obsolete `-N`/`+N` spellings work but are never documented |
 | `wc` | Counts lines, words, characters, bytes and the widest line (`-c -m -l -L -w`, `--files0-from`, `--total`), GNU's columns |

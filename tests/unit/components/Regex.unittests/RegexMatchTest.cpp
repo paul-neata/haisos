@@ -244,17 +244,19 @@ TEST(RegexMatchPerformanceTest, LongLinesDoNotOverflowTheStack) {
     ExpectFound(CompileOrDie(".*?b", RegexSyntax::Perl), textEnd, "(0,1000001)");
     ExpectFound(CompileOrDie("\\(a\\)\\1", RegexSyntax::Basic), textEnd, "(0,2)(0,1)");
     {
-        // A 30000-copy pattern: the closure must stay iterative. It matches the
-        // first 30000 a's, group 1 reporting its last iteration.
+        // A 30000-copy pattern: the closure must stay iterative. Each byte
+        // costs a walk of the 90000-instruction program, so 3000 a's (not a
+        // million) keep it fast; the last 27000 copies match empty, and group 1
+        // reports that last, empty iteration (GNU sed: (a?){5} on aaab gives []).
         std::shared_ptr<const Regex> compiled = CompileOrDie("(a?){30000}", RegexSyntax::Extended);
         if (compiled) {
             RegexMatch match;
-            ASSERT_TRUE(compiled->Search(textEnd, 0, match));
+            ASSERT_TRUE(compiled->Search(std::string(3000, 'a') + "b", 0, match));
             EXPECT_EQ(match.groups.size(), 2u);
             EXPECT_EQ(match.groups[0].first, 0);
-            EXPECT_EQ(match.groups[0].second, 30000);
-            EXPECT_EQ(match.groups[1].first, 29999);
-            EXPECT_EQ(match.groups[1].second, 30000);
+            EXPECT_EQ(match.groups[0].second, 3000);
+            EXPECT_EQ(match.groups[1].first, 3000);
+            EXPECT_EQ(match.groups[1].second, 3000);
         }
     }
     EXPECT_LT(SecondsSince(began), 10.0);

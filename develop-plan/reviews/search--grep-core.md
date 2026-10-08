@@ -1,7 +1,7 @@
 # Review: search--grep-core (PR #57)
 - Verdict: merged
 - Merged as: 1ec82ff, version 0.5.15
-- Tokens: claude 52791, ollama input 267873, ollama output 123260
+- Tokens: claude 192890, ollama input 267873, ollama output 123260
 
 | Severity | Status | Where | Finding |
 |----------|--------|-------|---------|

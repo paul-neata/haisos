@@ -46,3 +46,4 @@
 - 2026-10-08 13:42 UTC -- coreutils--uniq-cut merged #55 as 0.5.13: 0C 0H fixed, 2M 6L open, 1 try
 - 2026-10-08 13:43 UTC -- start coreutils--tr-tee-nl (0.5.14)
 - 2026-10-08 15:53 UTC -- coreutils--tr-tee-nl: PR #56, Linux CI hung in Build (93 min), cancelled and re-run
+- 2026-10-08 15:59 UTC -- coreutils--tr-tee-nl: PR #56 green on CI re-run, in review

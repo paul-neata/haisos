@@ -6,3 +6,4 @@
 - 2026-10-08 03:51 UTC -- base--fs-rename-times merged #43 as 0.5.1: 0C 0H fixed, 1M 2L open, 2 tries
 - 2026-10-08 03:52 UTC -- start base--regex-syntax (0.5.2)
 - 2026-10-08 04:03 UTC -- stopped: base--regex-syntax run killed, host critically low on memory
+- 2026-10-08 04:28 UTC -- resume base--regex-syntax (0.5.2), host memory OK

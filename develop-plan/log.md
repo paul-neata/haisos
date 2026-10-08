@@ -47,3 +47,4 @@
 - 2026-10-08 13:43 UTC -- start coreutils--tr-tee-nl (0.5.14)
 - 2026-10-08 15:53 UTC -- coreutils--tr-tee-nl: PR #56, Linux CI hung in Build (93 min), cancelled and re-run
 - 2026-10-08 15:59 UTC -- coreutils--tr-tee-nl: PR #56 green on CI re-run, in review
+- 2026-10-08 16:12 UTC -- coreutils--tr-tee-nl merged #56 as 0.5.14: 0C 3H fixed, 2M 2L open, 1 try

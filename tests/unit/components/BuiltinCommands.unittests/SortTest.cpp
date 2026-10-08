@@ -20,6 +20,15 @@ TEST_F(BuiltinCommandsTest, SortDefaultIsByteOrder) {
     EXPECT_EQ(run.status, 0);
 }
 
+TEST_F(BuiltinCommandsTest, SortReadsLinesLongerThanOneRead) {
+    // A line of 200000 bytes spans several 64 KiB reads.
+    const std::string longLine(200000, 'b');
+    const auto run = RunCaptured("sort", {}, longLine + "\nc\na\n" + longLine + "x\n");
+    EXPECT_EQ(run.out, "a\n" + longLine + "\n" + longLine + "x\nc\n");
+    EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 0);
+}
+
 TEST_F(BuiltinCommandsTest, SortAddsAMissingFinalNewline) {
     const auto run = RunCaptured("sort", {}, "b\na");
     EXPECT_EQ(run.out, "a\nb\n");
@@ -48,6 +57,11 @@ TEST_F(BuiltinCommandsTest, SortFoldCaseUniqueKeepsFirstOfRun) {
     // Without -u the last resort separates the folded equals.
     run = RunCaptured("sort", {"-f"}, "b\nB\na\nA\n");
     EXPECT_EQ(run.out, "A\na\nB\nb\n");
+    EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 0);
+    // Bytes compare unsigned: 0xC3 (of e-acute) sorts after every ASCII letter.
+    run = RunCaptured("sort", {"-f"}, "\xc3\xa9\nb\na\n");
+    EXPECT_EQ(run.out, "a\nb\n\xc3\xa9\n");
     EXPECT_EQ(run.err, kNone);
     EXPECT_EQ(run.status, 0);
 }
@@ -297,13 +311,14 @@ TEST_F(BuiltinCommandsTest, SortTabErrors) {
     EXPECT_EQ(run.err, "sort: incompatible tabs\n");
     EXPECT_EQ(run.status, 2);
 
-    // The same tab twice is fine, and '\0' is a tab of one byte.
+    // The same tab twice is fine, and '\0' (backslash, zero) is the NUL byte:
+    // the second fields x < y decide, not the whole lines.
     run = RunCaptured("sort", {"-t", "a", "-t", "a"}, "b x\na y\n");
     EXPECT_EQ(run.out, "a y\nb x\n");
     EXPECT_EQ(run.err, kNone);
     EXPECT_EQ(run.status, 0);
-    run = RunCaptured("sort", {"-t", std::string("\0", 1)}, std::string("x\0b\nb\0a\n", 8));
-    EXPECT_EQ(run.out, std::string("b\0a\nx\0b\n", 8));
+    run = RunCaptured("sort", {"-t", "\\0", "-k2,2"}, std::string("b\0x\na\0y\n", 8));
+    EXPECT_EQ(run.out, std::string("b\0x\na\0y\n", 8));
     EXPECT_EQ(run.err, kNone);
     EXPECT_EQ(run.status, 0);
 }

@@ -85,8 +85,9 @@ int CompareKeyTexts(std::string_view a, std::string_view b, const SortKey& key) 
         if (i >= a.size() || j >= b.size()) {
             break;
         }
-        const char ca = FoldCase(a[i]);
-        const char cb = FoldCase(b[j]);
+        // As unsigned bytes, as GNU's to_uchar: 0xC3 sorts after 'A'.
+        const unsigned char ca = static_cast<unsigned char>(FoldCase(a[i]));
+        const unsigned char cb = static_cast<unsigned char>(FoldCase(b[j]));
         if (ca != cb) {
             return ca < cb ? -1 : 1;
         }

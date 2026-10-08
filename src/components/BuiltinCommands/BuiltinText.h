@@ -69,6 +69,7 @@ private:
     char m_delimiter;
     std::string m_buffer;
     size_t m_pos = 0;   // where the unconsumed bytes of m_buffer start
+    size_t m_scan = 0;  // where the search for the next delimiter resumes
     bool m_atEnd = false;
 };
 

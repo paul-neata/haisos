@@ -120,11 +120,13 @@ public:
                         context.Error("empty tab");
                         return 2;
                     }
-                    if (separator.size() > 1) {
+                    // GNU takes the two characters \0 as the NUL byte.
+                    const bool nul = separator == "\\0";
+                    if (separator.size() > 1 && !nul) {
                         context.Error("multi-character tab " + GnuQuote(separator));
                         return 2;
                     }
-                    const int byte = static_cast<unsigned char>(separator[0]);
+                    const int byte = nul ? 0 : static_cast<unsigned char>(separator[0]);
                     if (haveTab && tab != byte) {
                         context.Error("incompatible tabs");
                         return 2;

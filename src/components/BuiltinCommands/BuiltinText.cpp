@@ -147,26 +147,37 @@ LineReadResult BuiltinLineReader::Fill() {
 
 LineReadResult BuiltinLineReader::Next(std::string& line, bool& delimited) {
     while (true) {
-        const size_t found = m_buffer.find(m_delimiter, m_pos);
+        // Search only the bytes not searched yet: a long line read in many
+        // chunks is scanned once, not once per chunk.
+        const size_t found = m_buffer.find(m_delimiter, m_scan);
         if (found != std::string::npos) {
             line.assign(m_buffer, m_pos, found - m_pos);
             m_pos = found + 1;
-            m_buffer.erase(0, m_pos);
-            m_pos = 0;
+            m_scan = m_pos;
             delimited = true;
             return LineReadResult::Line;
         }
+        m_scan = m_buffer.size();
         if (m_atEnd) {
             if (m_pos >= m_buffer.size()) {
                 m_buffer.clear();
                 m_pos = 0;
+                m_scan = 0;
                 return LineReadResult::End;
             }
             line.assign(m_buffer, m_pos, m_buffer.size() - m_pos);
             m_buffer.clear();
             m_pos = 0;
+            m_scan = 0;
             delimited = false;
             return LineReadResult::Line;
+        }
+        // Drop the lines already handed out once per read, not once per line:
+        // erasing after every line would move the rest of the buffer each time.
+        if (m_pos > 0) {
+            m_buffer.erase(0, m_pos);
+            m_scan -= m_pos;
+            m_pos = 0;
         }
         const LineReadResult filled = Fill();
         if (filled == LineReadResult::Line) {

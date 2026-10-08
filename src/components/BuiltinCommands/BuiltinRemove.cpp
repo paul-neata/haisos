@@ -82,64 +82,79 @@ bool RemoveEmptyDirectory(BuiltinContext& context, BuiltinPrompt* prompt,
     return true;
 }
 
+// How one entry went. Skipped is a declined "descend into directory": not a
+// failure, but GNU leaves every ancestor of it alone, silently, as it does
+// the ancestors of a failure.
+enum class Outcome { Done, Skipped, Failed };
+
+Outcome RemoveEntry(BuiltinContext& context, BuiltinPrompt* prompt,
+                    const std::string& path, const RemoveOptions& options);
+
 } // namespace
 
 bool RemoveOperand(BuiltinContext& context, BuiltinPrompt* prompt,
                    const std::string& path, const RemoveOptions& options) {
+    return RemoveEntry(context, prompt, path, options) != Outcome::Failed;
+}
+
+namespace {
+
+Outcome RemoveEntry(BuiltinContext& context, BuiltinPrompt* prompt,
+                    const std::string& path, const RemoveOptions& options) {
     IFileIO& io = context.IO();
     const std::string shown = q(path);
 
     FileStatus status;
     if (io.Stat(path, status) != 0) {
         if (options.ignoreMissing) {
-            return true;
+            return Outcome::Done;
         }
         context.Error("cannot remove " + shown + ": No such file or directory");
-        return false;
+        return Outcome::Failed;
     }
     // A trailing '/' names a directory: on anything else the system answers
     // ENOTDIR, before any question is asked.
     if (path.size() > 1 && path.back() == '/' && status.type != DirectoryEntryType::Dir) {
         context.Error("cannot remove " + shown + ": Not a directory");
-        return false;
+        return Outcome::Failed;
     }
     // "." and ".." are never removed, with -r or -d.
     const std::string lastSegment = LastSegmentOf(path);
     if ((lastSegment == "." || lastSegment == "..") && (options.recursive || options.emptyDirectories)) {
         context.Error("refusing to remove '.' or '..' directory: skipping " + shown);
-        return false;
+        return Outcome::Failed;
     }
 
     if (status.type != DirectoryEntryType::Dir) {
         if (options.interactive && prompt) {
             if (!prompt->Ask(FileQuestion(context, status) + " " + shown + "? ")) {
-                return true;
+                return Outcome::Done;
             }
         }
         if (io.RemoveFile(path) != 0) {
             // A builtin's path, a read-only filesystem: no reason is known,
             // and both are EACCES.
             context.Error("cannot remove " + shown + ": Permission denied");
-            return false;
+            return Outcome::Failed;
         }
         if (options.verbose) {
             context.Out("removed " + shown + "\n");
         }
-        return true;
+        return Outcome::Done;
     }
 
     if (!options.recursive) {
         if (!options.emptyDirectories) {
             context.Error("cannot remove " + shown + ": Is a directory");
-            return false;
+            return Outcome::Failed;
         }
-        return RemoveEmptyDirectory(context, prompt, path, shown, options);
+        return RemoveEmptyDirectory(context, prompt, path, shown, options) ? Outcome::Done : Outcome::Failed;
     }
 
     if (options.preserveRoot && io.ResolvePath(path) == "/") {
         context.Error("it is dangerous to operate recursively on '/'");
         context.Error("use --no-preserve-root to override this failsafe");
-        return false;
+        return Outcome::Failed;
     }
 
     // Recursive, post-order: the entries first, then the directory itself.
@@ -151,7 +166,7 @@ bool RemoveOperand(BuiltinContext& context, BuiltinPrompt* prompt,
     }
     if (options.interactive && prompt && !names.empty()) {
         if (!prompt->Ask(context.Name() + ": descend into directory " + shown + "? ")) {
-            return true;
+            return Outcome::Skipped;
         }
     }
     // Sorted by name, byte order -- a Haisos choice: GNU follows the disk's
@@ -159,21 +174,24 @@ bool RemoveOperand(BuiltinContext& context, BuiltinPrompt* prompt,
     std::sort(names.begin(), names.end());
     const std::string base = WithoutTrailingSlashes(path);
     bool anyFailed = false;
+    bool anySkipped = false;
     for (const auto& name : names) {
         if (context.StopRequested()) {
-            return false;
+            return Outcome::Failed;
         }
-        if (!RemoveOperand(context, prompt, base + "/" + name, options)) {
-            anyFailed = true;
-        }
+        const Outcome child = RemoveEntry(context, prompt, base + "/" + name, options);
+        anyFailed = anyFailed || child == Outcome::Failed;
+        anySkipped = anySkipped || child == Outcome::Skipped;
     }
-    if (anyFailed) {
-        // The directory holding something that failed is left alone, without
-        // a question or a message of its own (GNU marks the ancestors of a
-        // failure).
-        return false;
+    if (anyFailed || anySkipped) {
+        // The directory holding something that failed, or a directory the
+        // user would not descend into, is left alone, without a question or
+        // a message of its own (GNU marks the ancestors of both).
+        return anyFailed ? Outcome::Failed : Outcome::Skipped;
     }
-    return RemoveEmptyDirectory(context, prompt, path, shown, options);
+    return RemoveEmptyDirectory(context, prompt, path, shown, options) ? Outcome::Done : Outcome::Failed;
 }
+
+} // namespace
 
 } // namespace Haisos

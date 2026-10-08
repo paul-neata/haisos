@@ -149,6 +149,16 @@ TEST_F(BuiltinCommandsTest, RmInteractiveRecursiveTranscript) {
     EXPECT_TRUE(EntryTypeOf(*root, "/d/e/f").has_value());
     EXPECT_EQ(EntryTypeOf(*root, "/d"), DirectoryEntryType::Dir);
 
+    // Declining to descend into '/d/e' leaves its ancestors alone without a
+    // question, as GNU does, and is no failure.
+    const auto notDescended = RunCaptured("rm", {"-ri", "/d"}, "y\nn\ny\n");
+    EXPECT_EQ(notDescended.out, kNone);
+    EXPECT_EQ(notDescended.err,
+        "rm: descend into directory '/d'? "
+        "rm: descend into directory '/d/e'? ");
+    EXPECT_EQ(notDescended.status, 0);
+    EXPECT_EQ(EntryTypeOf(*root, "/d/e/f"), DirectoryEntryType::File);
+
     // The file declined, its directory accepted but not empty: it fails, and
     // its parent is skipped without a question.
     const auto failed = RunCaptured("rm", {"-ri", "/d"}, "y\ny\nn\ny\ny\n");

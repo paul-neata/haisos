@@ -40,3 +40,4 @@
 - 2026-10-08 11:50 UTC -- coreutils--printf-seq merged #53 as 0.5.11: 0C 1H fixed, 2M 3L open, 1 try
 - 2026-10-08 11:52 UTC -- start coreutils--test-program (0.5.12)
 - 2026-10-08 12:56 UTC -- coreutils--test-program: PR #54, ready
+- 2026-10-08 13:08 UTC -- coreutils--test-program merged #54 as 0.5.12: 0C 2H fixed, 1M 2L open, 1 try

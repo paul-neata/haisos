@@ -65,3 +65,4 @@
 - 2026-10-08 21:24 UTC -- coreutils--date: PR #60, windows-failed (ignored per Direction)
 - 2026-10-08 22:28 UTC -- coreutils--date merged #60 as 0.5.18: 0C 0H fixed, 6M 5L open, 1 try
 - 2026-10-08 22:31 UTC -- start coreutils--stat (0.5.19)
+- 2026-10-08 23:00 UTC -- coreutils--stat: PR #61, windows-failed (ignored per Direction)

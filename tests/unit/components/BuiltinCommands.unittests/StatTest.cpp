@@ -81,6 +81,13 @@ TEST_F(BuiltinCommandsTest, StatFormatWidthsAndPrecision) {
     EXPECT_EQ(run.err, "");
     EXPECT_EQ(run.status, 0);
 
+    // The grouping quote and I are flags too (stat.c's printf_flags), with
+    // no effect in the C locale.
+    const Captured grouped = RunCaptured("stat", {"-c", "%'s|%'5s|%I-4s|", "/notes.txt"});
+    EXPECT_EQ(grouped.out, "17|   17|17  |\n");
+    EXPECT_EQ(grouped.err, "");
+    EXPECT_EQ(grouped.status, 0);
+
     // The epoch directives' precision truncates, never rounds, '.' with no
     // digits meaning nine. A width pads the whole text, and below the text's
     // own length still pads, trailing, once it leaves room for the seconds

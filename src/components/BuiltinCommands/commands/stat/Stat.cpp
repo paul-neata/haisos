@@ -67,10 +67,11 @@ int HexDigit(char c) {
     return -1;
 }
 
-// Whether a character is one of stat's directive flags ('-+ #0I, stat.c's
-// own set: no grouping quotes, which the C locale ignores anyway).
+// Whether a character is one of stat's directive flags, stat.c's
+// printf_flags "'-+ #0I" (the grouping quote and I accepted, and without
+// effect in the C locale, as BuiltinPrintf takes them).
 bool IsStatFlag(char c) {
-    return c == '-' || c == '+' || c == ' ' || c == '#' || c == '0' || c == 'I';
+    return c == '\'' || c == '-' || c == '+' || c == ' ' || c == '#' || c == '0' || c == 'I';
 }
 
 // A run of digits as a width or precision, clamped to INT_MAX as

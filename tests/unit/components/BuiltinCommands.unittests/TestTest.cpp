@@ -36,6 +36,13 @@ TEST_F(BuiltinCommandsTest, TestProgramTruthValues) {
     EXPECT_EQ(RunCaptured("test", {"-l", "abc", "-eq", "3"}).status, 0);
     EXPECT_EQ(RunCaptured("test", {"3", "-eq", "-l", "abc"}).status, 0);
     EXPECT_EQ(RunCaptured("test", {"-l", "abc", "-eq", "-l", "xyz"}).status, 0);
+    EXPECT_EQ(RunCaptured("test", {"99999999999999999999", "-gt", "1"}).status, 0);
+    EXPECT_EQ(RunCaptured("test", {"1", "-gt", "99999999999999999999"}).status, 1);
+    EXPECT_EQ(RunCaptured("test", {"-99999999999999999999", "-lt", "-1"}).status, 0);
+    EXPECT_EQ(RunCaptured("test", {"+1", "-eq", "1"}).status, 0);
+    // A lone operator word is a non-empty string.
+    EXPECT_EQ(RunCaptured("test", {"-z"}).status, 0);
+    EXPECT_EQ(RunCaptured("test", {"-t"}).status, 0);
 
     // !, -a, -o and parentheses.
     EXPECT_EQ(RunCaptured("test", {"!", "x"}).status, 1);
@@ -48,6 +55,11 @@ TEST_F(BuiltinCommandsTest, TestProgramTruthValues) {
     EXPECT_EQ(RunCaptured("test", {"(", "x", ")", "-a", "y"}).status, 0);
     EXPECT_EQ(RunCaptured("test", {"(", "x", "-a", "y", ")"}).status, 0);
     EXPECT_EQ(RunCaptured("test", {"(", "x", "-o", "y", ")"}).status, 0);
+    EXPECT_EQ(RunCaptured("test", {"(", "-n", "a", ")", "-a", "(", "-z", "", ")"}).status, 0);
+    EXPECT_EQ(RunCaptured("test", {"a", "=", "b", "-o", "c"}).status, 0);
+    // GNU narrows only the count inside parentheses, not the window: the
+    // "!" here takes the first ")" as its operand.
+    EXPECT_EQ(RunCaptured("test", {"(", "a", "-a", "!", ")", ")"}).status, 1);
 
     // The file tests, on the fixture's files.
     EXPECT_EQ(RunCaptured("test", {"-e", "/notes.txt"}).status, 0);
@@ -71,6 +83,7 @@ TEST_F(BuiltinCommandsTest, TestProgramTruthValues) {
     EXPECT_EQ(RunCaptured("test", {"/docs/a.md", "-ef", "/docs/a.md"}).status, 0);
     EXPECT_EQ(RunCaptured("test", {"/docs/a.md", "-ef", "/docs/sub/b.md"}).status, 1);
     EXPECT_EQ(RunCaptured("test", {"/docs/a.md", "-ef", "/nosuch"}).status, 1);
+    EXPECT_EQ(RunCaptured("test", {"/notes.txt", "-ef", "./notes.txt"}).status, 0);
     // -nt/-ot: a file that is not there is never newer or older.
     EXPECT_EQ(RunCaptured("test", {"/notes.txt", "-nt", "/nosuch"}).status, 0);
     EXPECT_EQ(RunCaptured("test", {"/nosuch", "-nt", "/notes.txt"}).status, 1);
@@ -120,6 +133,27 @@ TEST_F(BuiltinCommandsTest, TestProgramSyntaxErrors) {
     EXPECT_EQ(captured.err, "test: missing argument after 'x'\n");
     captured = run({"(", "a", "b", "c", "d", ")"});
     EXPECT_EQ(captured.err, "test: ')' expected, found 'b'\n");
+    captured = run({"(", "a", "-a", "b", "c", ")"});
+    EXPECT_EQ(captured.err, "test: ')' expected, found 'c'\n");
+    captured = run({"(", "a", "-a", "!", ")", "-o", "b"});
+    EXPECT_EQ(captured.err, "test: ')' expected\n");
+    captured = run({"(", "a", "-a", "-n", ")", "-o", "x"});
+    EXPECT_EQ(captured.err, "test: ')' expected\n");
+    captured = run({"a", "-a"});
+    EXPECT_EQ(captured.err, "test: missing argument after '-a'\n");
+    captured = run({"1", "-lt"});
+    EXPECT_EQ(captured.err, "test: missing argument after '-lt'\n");
+    captured = run({"-n", "a", "b"});
+    EXPECT_EQ(captured.err, "test: 'a': binary operator expected\n");
+    captured = run({"a", "-q", "b"});
+    EXPECT_EQ(captured.err, "test: '-q': binary operator expected\n");
+    // < and > are not GNU test's operators.
+    captured = run({"b", ">", "a"});
+    EXPECT_EQ(captured.err, "test: '>': binary operator expected\n");
+    captured = run({"a", "<", "b"});
+    EXPECT_EQ(captured.err, "test: '<': binary operator expected\n");
+    captured = run({"--", "-eq", "-1"});
+    EXPECT_EQ(captured.err, "test: invalid integer '--'\n");
     for (const std::vector<std::string>& args : {std::vector<std::string>{"x", "y"},
             {"x", "="}, {"-q", "x"}, {"1", "-eq", "x"}, {"x", "y", "z", "w"}}) {
         const Captured each = run(args);

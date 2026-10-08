@@ -455,7 +455,7 @@ public:
     }
 
 private:
-    // GNU's pos... the window end, shrunk inside a parenthesized expression.
+    // GNU's pos: the word being looked at.
     size_t m_pos;
 
     [[noreturn]] void Syntax(const std::string& message) {
@@ -619,15 +619,10 @@ private:
             while (m_pos + i < m_argc && i <= 4 && m_args[m_pos + i] != ")") {
                 ++i;
             }
-            bool value = false;
-            const size_t saveArgc = m_argc;
-            if (m_pos + i < m_argc && i <= 4) {
-                m_argc = m_pos + i;
-                value = PosixTest(i);
-                m_argc = saveArgc;
-            } else {
-                value = PosixTest(saveArgc - m_pos);
-            }
+            // As GNU's, only the count is narrowed, never the window: the
+            // descent inside may read past the ")" (`( a -a ! ) )` is 1).
+            const size_t nargs = (m_pos + i < m_argc && i <= 4) ? i : m_argc - m_pos;
+            const bool value = PosixTest(nargs);
             // The closing ")": GNU reads the word at |m_pos| even one past
             // the window's end -- for "[", the "]" its caller dropped still
             // sits in the arguments, as it does in GNU's own argv, and is
@@ -772,7 +767,7 @@ private:
     IFileIO& m_io;
     const std::function<void(const std::string&)>& m_report;
     const std::vector<std::string>& m_args;
-    size_t m_argc;  // the window end
+    size_t m_argc;  // GNU's argc: the window end
     const size_t m_end;
 };
 

@@ -254,4 +254,11 @@ std::optional<ParsedBuiltinArgs> BeginBuiltin(
     BuiltinContext& context, const IBuiltinCommand& command, int usageErrorStatus, int& exitStatus,
     bool stopAtFirstOperand = false);
 
+// The same, on an argument list of the caller's rather than the context's own:
+// chmod's mode may look like an option ("chmod -w f"), so it takes the mode
+// words out of the arguments before they are parsed.
+std::optional<ParsedBuiltinArgs> BeginBuiltin(
+    BuiltinContext& context, const std::vector<std::string>& args, const IBuiltinCommand& command,
+    int usageErrorStatus, int& exitStatus, bool stopAtFirstOperand = false);
+
 } // namespace Haisos

@@ -441,7 +441,14 @@ std::optional<ParsedBuiltinArgs> BeginBuiltin(
     BuiltinContext& context, const IBuiltinCommand& command, int usageErrorStatus, int& exitStatus,
     bool stopAtFirstOperand)
 {
-    ParsedBuiltinArgs parsed = ParseBuiltinArgs(context.Args(), command.Options(), stopAtFirstOperand);
+    return BeginBuiltin(context, context.Args(), command, usageErrorStatus, exitStatus, stopAtFirstOperand);
+}
+
+std::optional<ParsedBuiltinArgs> BeginBuiltin(
+    BuiltinContext& context, const std::vector<std::string>& args, const IBuiltinCommand& command,
+    int usageErrorStatus, int& exitStatus, bool stopAtFirstOperand)
+{
+    ParsedBuiltinArgs parsed = ParseBuiltinArgs(args, command.Options(), stopAtFirstOperand);
     if (!parsed.error.empty()) {
         context.Error(parsed.error);
         context.TryHelp();

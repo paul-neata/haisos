@@ -9,8 +9,11 @@ add_library(BuiltinCommands STATIC
     BuiltinRemove.cpp
     BuiltinRunProgram.cpp
     BuiltinText.cpp
+    commands/basename/Basename.cpp
     commands/cat/Cat.cpp
+    commands/chmod/Chmod.cpp
     commands/cp/Cp.cpp
+    commands/dirname/Dirname.cpp
     commands/echo/Echo.cpp
     commands/env/Env.cpp
     commands/false/False.cpp
@@ -18,6 +21,7 @@ add_library(BuiltinCommands STATIC
     commands/man/Man.cpp
     commands/mkdir/Mkdir.cpp
     commands/pwd/Pwd.cpp
+    commands/realpath/Realpath.cpp
     commands/rm/Rm.cpp
     commands/rmdir/Rmdir.cpp
     commands/sleep/Sleep.cpp

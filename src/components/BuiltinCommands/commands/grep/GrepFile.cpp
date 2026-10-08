@@ -198,12 +198,14 @@ GrepFileResult GrepOneInput(BuiltinContext& context, const GrepSettings& setting
     };
 
     // What one line (selected or context) prints, -o included: each match on
-    // a line of its own with -o (a context line's matches too, as GNU's),
-    // the whole line otherwise; an empty match prints nothing.
+    // a line of its own with -o -- only in a line the run would select
+    // (selected XOR -v), as GNU's: with -v the context lines' matches, never
+    // those of a context line after -m -- the whole line otherwise; an empty
+    // match prints nothing.
     const auto printLine = [&](std::string_view text, uint64_t lineNo2, uint64_t offset2, bool selectedLine) {
         if (settings.onlyMatching) {
-            if (selectedLine && settings.invert) {
-                return;  // -o -v: the selected lines hold no matches
+            if (selectedLine == settings.invert) {
+                return;
             }
             size_t pos = 0;
             while (pos <= text.size()) {
@@ -258,14 +260,13 @@ GrepFileResult GrepOneInput(BuiltinContext& context, const GrepSettings& setting
     const auto processLine = [&](std::string_view line) -> bool {
         ++lineNo;
         if (limitReached) {
-            // -m with context: every further line is trailing context, but it
-            // is still matched -- a matching one prints as a match line and
-            // restarts nothing (GNU: -m1 -A4 TODO on a.c with a match at 5
-            // prints 5:five TODO and stops at 6). A binary input prints no
-            // context at all.
+            // -m with context: every further line is trailing context, a
+            // matching one too -- printed with '-', never highlighted, and
+            // restarting nothing (GNU 3.11: -n -m1 -A4 TODO on a.c prints
+            // 5-five TODO and stops at 6). A binary input prints no context
+            // at all.
             if (grepContext && !binary) {
-                const bool selectedLine = matcher.Matches(line) != settings.invert;
-                grepContext->Line(line, lineNo, offset, selectedLine, /*extendsAfter=*/false);
+                grepContext->Line(line, lineNo, offset, /*selected=*/false);
                 return !grepContext->AfterPending();
             }
             return true;

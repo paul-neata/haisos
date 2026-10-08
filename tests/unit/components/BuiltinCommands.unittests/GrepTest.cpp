@@ -458,6 +458,10 @@ TEST_F(BuiltinCommandsTest, GrepDirectoriesOption) {
     const Captured invalid = RunCaptured("grep", {"-d", "foo", "x", "t1"}, "", "/g");
     EXPECT_EQ(invalid.err, "grep: invalid argument 'foo' for '--directories'\n" + valid);
     EXPECT_EQ(invalid.status, 1);
+    // argmatch is case-sensitive.
+    const Captured upper = RunCaptured("grep", {"-d", "READ", "x", "t1"}, "", "/g");
+    EXPECT_EQ(upper.err, "grep: invalid argument 'READ' for '--directories'\n" + valid);
+    EXPECT_EQ(upper.status, 1);
     const Captured ambiguous = RunCaptured("grep", {"-d", "r", "x", "t1"}, "", "/g");
     EXPECT_EQ(ambiguous.err, "grep: ambiguous argument 'r' for '--directories'\n" + valid);
     EXPECT_EQ(ambiguous.status, 1);
@@ -513,9 +517,15 @@ TEST_F(BuiltinCommandsTest, GrepContextLines) {
 TEST_F(BuiltinCommandsTest, GrepContextWithMaxCountAndOnly) {
     MakeGrepTree(root);
     // -m1: the trailing context is still read, a matching line in it printed
-    // as a match but restarting nothing.
+    // as context, restarting nothing (GNU 3.11).
     EXPECT_EQ(RunCaptured("grep", {"-n", "-m1", "-A4", "TODO", "src/a.c"}, "", "/g").out,
-        "2:two TODO\n3-three\n4-four\n5:five TODO\n6-six\n");
+        "2:two TODO\n3-three\n4-four\n5-five TODO\n6-six\n");
+    // ... so with -o its match is not printed.
+    EXPECT_EQ(RunCaptured("grep", {"-o", "-n", "-m1", "-A4", "TODO", "src/a.c"}, "", "/g").out,
+        "2:TODO\n");
+    // -o -v: the context lines are the matching ones, their matches printed.
+    EXPECT_EQ(RunCaptured("grep", {"-o", "-v", "-n", "-A1", "TODO", "src/a.c"}, "", "/g").out,
+        "2-TODO\n5-TODO\n10-TODO\n");
     // -o prints no context lines, but the separators stay.
     EXPECT_EQ(RunCaptured("grep", {"-o", "-n", "-A1", "TODO", "src/a.c"}, "", "/g").out,
         "2:TODO\n--\n5:TODO\n--\n10:TODO\n");

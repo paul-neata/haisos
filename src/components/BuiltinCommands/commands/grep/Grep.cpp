@@ -494,7 +494,8 @@ public:
                     settings.directories = GrepDirectories::Recurse;
                     break;
                 case kDirectories: {
-                    const std::string value = LowerAscii(option.argument);
+                    // argmatch is case-sensitive: `-d READ` is invalid.
+                    const std::string& value = option.argument;
                     static const struct { const char* name; GrepDirectories action; } kActions[] = {
                         {"read", GrepDirectories::Read},
                         {"recurse", GrepDirectories::Recurse},

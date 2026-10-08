@@ -56,3 +56,4 @@
 - 2026-10-08 18:34 UTC -- restart search--grep-recursive (0.5.16) after an interrupted session; Windows checks ignored per Direction
 - 2026-10-08 19:18 UTC -- search--grep-recursive: PR #58, ready
 - 2026-10-08 19:30 UTC -- search--grep-recursive merged #58 as 0.5.16: 0C 3H fixed, 2M 3L open, 1 try
+- 2026-10-08 19:31 UTC -- start coreutils--mv-touch (0.5.17)

@@ -3,7 +3,7 @@
 - Rock: coreutils
 - Depends on: base--fs-rename-times, base--rename-fix, coreutils--rm-rmdir, coreutils--cp
 - Size: ~1000 changed lines in ~10 files (at the upper edge; see Out of scope for the fallback split)
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ 2706b1a
 - PR title: Add the mv and touch builtins and the date parser
 
 ## Goal
@@ -48,10 +48,18 @@ What earlier tasks provide, as if on develop:
   `ResolveCopyTargets(context, operands, targetDirectory, noTargetDirectory,
   parents, stripTrailingSlashes)`, `CopyPath(context, prompt, source, dest,
   options)`, `BackupPathFor(context, dest, mode, suffix)`,
-  `ParseBackupControl(context, word, out)`; and `Cp.cpp`, whose handling of
-  `-b/--backup/-S/VERSION_CONTROL/SIMPLE_BACKUP_SUFFIX`, `--update` and the
-  invalid-argument blocks mv copies (or, better, factors into `BuiltinCopy`
-  if it is not there yet).
+  `ParseBackupControl(context, word, out)` (all in `BuiltinCopy.h/.cpp`, in
+  `CMakeLists.txt` and `CreateStandardBuiltinCommands()` already; `Cp.cpp` is
+  `commands/cp/Cp.cpp`); `BuiltinPrompt.h/.cpp` and `BuiltinRemove.h/.cpp` are
+  likewise in the library. `Cp.cpp` parses `-b/--backup/-S/VERSION_CONTROL/
+  SIMPLE_BACKUP_SUFFIX` and `--update` itself (`BackupModeFromEnvironment`, an
+  option loop in `Run`): mv gets that logic from `BuiltinCopy` (see the
+  review fixes below), not by copying it. `Cp.cpp`'s anonymous namespace
+  duplicates `q`, `JoinPath` and `CreateFailedReason` (the latter two also in
+  `BuiltinCopy.cpp`'s; `q` also in `BuiltinRemove.cpp`, `Chmod.cpp`, `Rmdir.cpp`).
+- Decided (playbook Questions): `rm -r` following a symlinked directory on a
+  PHYSICAL filesystem is accepted (Haisos supports no links, as DELETE does);
+  mv and cp reuse `RemoveOperand` as is, no no-follow status is added.
 
 What exists: `commands/ls/Ls.cpp` has `LocalTime(int64_t)` (localtime_r /
 localtime_s under `CrtInvalidParameterAsError` on Windows) in an anonymous
@@ -201,7 +209,8 @@ Options (GNU mv 9.4): `--backup[=CONTROL]`, `-b`, `--debug` (not treated),
 --target-directory=DIRECTORY`, `-T, --no-target-directory`,
 `--update[=UPDATE]`, `-u`, `-v, --verbose`, `-Z, --context` (not treated).
 Of `-f`, `-i`, `-n` the last given wins. Backup and update handling as cp's
-(same words, same invalid-argument blocks, `-S` alone turns backups on).
+(same words, same invalid-argument blocks, `-S` alone turns backups on), taken
+from `BuiltinCopy` -- see "Review fixes from #50" below.
 
 Per target from `ResolveCopyTargets(..., parents=false, stripTrailingSlashes)`
 (GNU 9.4 messages; `q` as above):
@@ -250,11 +259,30 @@ Help notes (documented exceptions): across filesystems the copy keeps
 modification and access times only (no modes, owners or links exist); a
 builtin cannot be moved.
 
+### Review fixes from #50 (medium findings), in `BuiltinCopy.h/.cpp` and `Cp.cpp`
+
+1. No duplication between cp and mv: move the helpers `Cp.cpp` keeps in its
+   anonymous namespace (`q`, `JoinPath`, `CreateFailedReason`, and the shared
+   `-b/-S/VERSION_CONTROL/SIMPLE_BACKUP_SUFFIX` resolving, `BackupModeFromEnvironment`)
+   into `BuiltinCopy.h/.cpp` as declared functions (drop the copies in
+   `BuiltinCopy.cpp`'s anonymous namespace); `Cp.cpp` and `Mv.cpp` both call them.
+2. Backup mode is worked out once, at the end of option parsing, as GNU does
+   (`-b` takes `$VERSION_CONTROL`, `--backup=WORD` its word, `-S` alone turns
+   backups on): a bad `$VERSION_CONTROL` is reported with that name in the
+   error message (`invalid argument 'x' for '$VERSION_CONTROL'`), `-S`
+   included, not at the point where `-b` is met.
+3. `-n` wins over a later `--update=WORD` (GNU's rule: `cp -n --update=older`
+   still never replaces); the last of `-n`/`-u`/`--update` no longer simply
+   overwrites an earlier `-n`.
+
 ### `BuiltinCommandList.h`, `CMakeLists.txt`
 
-Declare and register `CreateMvCommand()` and `CreateTouchCommand()`
-(alphabetical); add `BuiltinDate.cpp`, `commands/mv/Mv.cpp`,
-`commands/touch/Touch.cpp` to the library.
+Declare and register `CreateMvCommand()` and `CreateTouchCommand()` in
+`BuiltinCommandList.h` (the declaration list and `CreateStandardBuiltinCommands()`;
+`Mv` goes between `Mkdir` and `Nl`, `Touch` between `Test` and `Tr`); add `BuiltinDate.cpp` (after `BuiltinCopy.cpp`),
+`commands/mv/Mv.cpp` (after `commands/mkdir/Mkdir.cpp`) and
+`commands/touch/Touch.cpp` (after `commands/test/Test.cpp`) to
+`src/components/BuiltinCommands/CMakeLists.txt`'s source list.
 
 ## Tests
 
@@ -328,6 +356,12 @@ suite name must contain `BuiltinCommands` for the script's filter):
 - `MvNoCopyAcrossAMount`: `mv --no-copy /notes.txt /mnt/n` -> `mv: cannot move
   '/notes.txt' to '/mnt/n': Invalid cross-device link\n`, 1, nothing moved.
 
+Review fixes (in `CpTest.cpp`, plus `MvTest.cpp` where mv shares them):
+`BackupModeAtTheEnd` (bad `$VERSION_CONTROL` -> the message names
+`'$VERSION_CONTROL'`, with `-S` too; same for `mv -b`), `NoClobberBeatsLaterUpdate`
+(`cp -n --update=older` and `mv -n --update=older` over an older dest: not
+replaced; `mv: not replacing` for mv), and the existing cp tests stay green after the helpers move.
+
 Update `ListsEveryBuiltinSortedWithAVersion` (add `"mv"` and `"touch"` in
 sorted position). The generic tests then check `--help`, untreated options
 (`mv --debug /docs` stops at "missing destination"; `touch` has none) and the
@@ -359,6 +393,9 @@ bash ./scripts/test_linux.sh L U
 - [ ] No POSIX-only time function (`timegm`, `localtime_r` outside `#ifdef`).
 - [ ] All file access through `context.IO()`; generic and `--init` tests pass; all unit tests green.
 - [ ] Both CLAUDE.md files updated.
+- [ ] cp's helpers live once in `BuiltinCopy.h/.cpp` and mv reuses them (no copies in `Cp.cpp`/`Mv.cpp`).
+- [ ] Backup mode is resolved once, at the end of option parsing; the `$VERSION_CONTROL` error names it, `-S` included.
+- [ ] `-n` wins over a later `--update=WORD` in cp and mv.
 
 ## Out of scope
 

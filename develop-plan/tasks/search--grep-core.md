@@ -3,7 +3,7 @@
 - Rock: search
 - Depends on: base--regex-match, coreutils--sort, coreutils--uniq-cut
 - Size: ~950 changed lines in ~11 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ 668e09a
 - PR title: Add grep, egrep, fgrep builtins: patterns, matching, output
 
 ## Goal
@@ -40,19 +40,20 @@ What exists on develop, by exact name (as if already merged):
   groups }`, `Regex::Compile(pattern, options, error)` (null + GNU's message
   on a bad pattern), `Regex::Search(text, start, match, flags)` (leftmost;
   Basic/Extended leftmost-longest, Perl leftmost-first; `match.groups[0]` is
-  the whole match), `GroupCount()`. `BuiltinCommands` already links `Regex`:
-  `#include "src/components/Regex/Regex.h"`.
+  the whole match), `GroupCount()`. `BuiltinCommands` already links `Regex` (target `Regex` in its
+  `target_link_libraries`): `#include "src/components/Regex/Regex.h"`.
 - `src/components/BuiltinCommands/BuiltinText.h` (coreutils--sort):
   `GnuQuote`, `ArgChoice`/`ArgMatch`, `InputOpenFailure { None, Missing,
   Directory, Denied, BadDescriptor }`, `OpenInputOperand(context, name,
-  failure)` ("-" is descriptor 0), `BuiltinLineReader(context, input,
+  failure)` ("-" is descriptor 0), `WriteFully`, `BuiltinLineReader(context, input,
   delimiter)` with `Next(line, delimited)` -> `LineReadResult { Line, End,
   Error, Stopped }`.
 - `BuiltinOption::hidden` (coreutils--uniq-cut): an option parsed like any
   other but never shown in `--help` (neither described nor in the "Not
   treated arguments" line).
 - `ParseBuiltinArgs(args, options, stopAtFirstOperand = false)`
-  (coreutils--names-env), `BuiltinContext` (`Out`, `Error`, `ErrorText`,
+  (coreutils--names-env), `BeginBuiltin` (also an overload taking the caller's own argument list; this
+  task does not use either), `BuiltinContext` (`Out`, `Error`, `ErrorText`,
   `TryHelp`, `Flush`, `StopRequested`, `IO()`, `Process()`,
   `OutIsTerminal`, `ReportNotTreated`, `NotTreated`), `BuiltinHelpText`,
   `BuiltinVersionText`, `kBuiltinOptionHelp`, `kBuiltinOptionVersion`.
@@ -77,7 +78,10 @@ against it; check any other with the same command before pinning it.
   `--version`; the default `ManPage()`; registered in
   `CreateStandardBuiltinCommands()` -- which also writes the `# BUILTIN
   rootfs grep /bin/grep` line of the `haisos --init` template (never by
-  hand); sources in `src/components/BuiltinCommands/CMakeLists.txt`.
+  hand); sources in `src/components/BuiltinCommands/CMakeLists.txt`
+  (`commands/<name>/` entries in its `add_library(BuiltinCommands STATIC ...)`,
+  alphabetical, `commands/grep/...` between `commands/false/False.cpp` and
+  `commands/ls/Ls.cpp`).
 - Portable C++17: no POSIX headers, no `<regex>`, no `<cctype>`
   classification (locale-dependent): write ASCII predicates.
 - Reads stop promptly on `TriggerStop()` (check `StopRequested()` per chunk;
@@ -248,8 +252,10 @@ selected > 0; `-L` -> `name\n` if selected == 0 (output terminator `\n`;
 
 Three commands sharing one implementation: `CreateGrepCommand()`,
 `CreateEgrepCommand()`, `CreateFgrepCommand()` (declared in
-`BuiltinCommandList.h`, added to `CreateStandardBuiltinCommands()` in
-alphabetical order). Names `grep`, `egrep`, `fgrep`; version `1.0.0` each.
+`BuiltinCommandList.h`, added to the list in `CreateStandardBuiltinCommands()` in
+alphabetical order: `CreateEgrepCommand` after `CreateEchoCommand`,
+`CreateFgrepCommand` after `CreateFalseCommand`, `CreateGrepCommand` before
+`CreateHshCommand`). Names `grep`, `egrep`, `fgrep`; version `1.0.0` each.
 `Help()`: summary `print lines that match patterns`; usage
 `grep [OPTION]... PATTERNS [FILE]...` (egrep/fgrep: their own name);
 egrep/fgrep `basedOn` `grep` (their `--help` links grep's man page, which
@@ -338,13 +344,13 @@ The three factories; `commands/grep/Grep.cpp`, `GrepMatcher.cpp`,
 
 ## Tests
 
-`tests/unit/components/BuiltinCommands.unittests/GrepTest.cpp` (new, in that
-directory's `CMakeLists.txt`), `TEST_F(BuiltinCommandsTest, Grep...)`, all
+`tests/unit/components/BuiltinCommands.unittests/GrepTest.cpp` (new; add `GrepTest.cpp` to the `add_executable(BuiltinCommands.unittests ...)`
+line of that directory's `CMakeLists.txt`), `TEST_F(BuiltinCommandsTest, Grep...)`, all
 with `RunCaptured` (stdout a file: not a terminal) from a directory the test
 fills, e.g. `/g` with `a.c` = `one\ntwo TODO\nthree\nfour\nfive TODO\nsix\nseven\neight\nnine\nten TODO\n`
 (64 bytes), `b.h` = `TODO sub\n`, `t1` = `TODO\n`. Also add `egrep`,
 `fgrep`, `grep` to the exact list in `ListsEveryBuiltinSortedWithAVersion`
-(`BuiltinCommandsTest.cpp`). Expected outputs (verified with GNU grep 3.11,
+(`BuiltinCommandsTest.cpp`, sorted: `"echo", "egrep", "env", "false", "fgrep", "grep", "hsh"`). Expected outputs (verified with GNU grep 3.11,
 `LC_ALL=C`):
 
 - `GrepPrintsMatchingLines`: `grep TODO a.c` -> `two TODO\nfive TODO\nten TODO\n`, status 0.
@@ -423,3 +429,8 @@ bash ./scripts/test_linux.sh L U
   (`-A -B -C -NUM`, separators), `--color`, `-Z`: `search--grep-recursive`.
 - rg: `search--rg-search`.
 - UTF-8 awareness (encoding errors making a file binary, multibyte `.`).
+- Limits on pattern size: `Regex` refuses programs over a million
+  instructions and nesting past 250 parentheses, but its Pike VM keeps a
+  copy of the capture slots per thread (`RegexPikeVM.cpp`), so memory grows
+  with threads x groups; a huge `-f` pattern list joined into one regex is
+  not guarded against here.

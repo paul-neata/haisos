@@ -24,7 +24,7 @@ Pause: no
 | 16 | [coreutils--uniq-cut](tasks/coreutils--uniq-cut.md) | done | 0.5.13 | 4 | #55 | 1 | 0C 0H fixed, 2M 6L open | |
 | 17 | [coreutils--head-tail](tasks/coreutils--head-tail.md) | todo | | 14, 4, 16 | | | | |
 | 18 | [coreutils--tr-tee-nl](tasks/coreutils--tr-tee-nl.md) | done | 0.5.14 | 4, 3 | #56 | 1 | 0C 3H fixed, 2M 2L open | Linux CI hung once in Build (runner); green on re-run |
-| 19 | [search--grep-core](tasks/search--grep-core.md) | todo | | 3, 4, 16 | | | | |
+| 19 | [search--grep-core](tasks/search--grep-core.md) | in-progress | 0.5.15 | 3, 4, 16 | | | | |
 | 20 | [search--grep-recursive](tasks/search--grep-recursive.md) | todo | | 19 | | | | |
 | 21 | [search--find-tests](tasks/search--find-tests.md) | todo | | 3, 20, 1, 8, 4 | | | | |
 | 22 | [search--find-actions](tasks/search--find-actions.md) | todo | | 21, 9, 11, 6, 12, 4 | | | | |
@@ -81,3 +81,4 @@ Pause: no
 - 2026-10-08 11:52 (implement) coreutils--test-program refreshed against 9d69b73 (BuiltinCommands CMake, list order, true/false as the Run model); runs while mv-touch (and 12-14, which depend on it) wait on the symlink Question
 - 2026-10-08 13:09 (implement) coreutils--uniq-cut refreshed against 90728a3 (BuiltinCommands CMake, list slots, current 25-name expectation)
 - 2026-10-08 13:43 (implement) coreutils--tr-tee-nl refreshed against 515f39d (Regex notes pointer, BuiltinText helpers, CMake, list order); runs before coreutils--head-tail (row 17), which waits on du-cmp via mv-touch
+- 2026-10-08 16:14 (implement) search--grep-core refreshed against 668e09a (registration slots, CMake, test list; Out of scope: Pike VM capture-slot memory from #45)

@@ -28,7 +28,7 @@ haisos/
 ├── src/
 │   ├── components/        - Component implementations (each has its own CLAUDE.md)
 │   │   ├── Agent/
-│   │   ├── BuiltinCommands/ - The builtin commands ([, basename, cat, chmod, cp, dirname, echo, env, false, hsh, ls, man, mkdir, printf, pwd, realpath, rm, rmdir, seq, sleep, sort, test, true, wc, which; each in commands/<name>/) and what places them on filesystems
+│   │   ├── BuiltinCommands/ - The builtin commands ([, basename, cat, chmod, cp, cut, dirname, echo, env, false, hsh, ls, man, mkdir, printf, pwd, realpath, rm, rmdir, seq, sleep, sort, test, true, uniq, wc, which; each in commands/<name>/) and what places them on filesystems
 │   │   ├── Console/
 │   │   ├── Environment/
 │   │   ├── Factory/
@@ -535,10 +535,10 @@ returned by `IHaisosOS`'s `OSToolFactory` and merged with an agent's tools
 
 ## Builtin Commands
 
-Commands compiled into Haisos (`[`, `basename`, `cat`, `chmod`, `cp`,
+Commands compiled into Haisos (`[`, `basename`, `cat`, `chmod`, `cp`, `cut`,
 `dirname`, `echo`, `env`, `false`, `hsh`, `ls`, `man`, `mkdir`, `printf`,
 `pwd`, `realpath`, `rm`, `rmdir`, `seq`, `sleep`, `sort`, `test`, `true`,
-`wc`, `which`),
+`uniq`, `wc`, `which`),
 implemented in
 `src/components/BuiltinCommands/`
 (see its `CLAUDE.md`). A builtin is not a file on disk: it is placed on a
@@ -598,6 +598,7 @@ use a builtin with what it already knows about the real command:
 | `cat` | Concatenates files and standard input (`-A -b -e -E -n -s -t -T -u -v`) |
 | `chmod` | Changes file mode bits (`-c -f -v --no-preserve-root --preserve-root --reference=RFILE -R`), GNU 9.4's mode grammar; Haisos has no permissions: the mode is validated and nothing changes, every mode taken as 0777, the umask as 0 |
 | `cp` | Copies files and directories (`-a -b --backup[=CONTROL] -d -f -H -i -L -l -s -n -P -p --preserve[=LIST] --no-preserve=LIST --parents -R -r --remove-destination --strip-trailing-slashes -S -t -T -u --update[=UPDATE] -v`), GNU's messages, prompts, backups and the `--parents` walk |
+| `cut` | Selects bytes or fields of each line (`-b -c -f -d -s -n, --complement, --output-delimiter, -z`), a LIST of `N`, `N-`, `N-M`, `-M` items; a line with no field delimiter is printed whole unless `-s` drops it |
 | `dirname` | Strips the last component from names (`-z`), GNU's dir_len: empty `.`, slashes-only `/` |
 | `echo` | Prints its arguments (`-n -e -E`) |
 | `env` | Runs a program in a modified environment (`-i -0 -u NAME -C DIR -S STRING`), the child looked up in the new PATH; with no COMMAND, prints the variables sorted by name |
@@ -616,6 +617,7 @@ use a builtin with what it already knows about the real command:
 | `sort` | Sorts lines (keys `-k`/`-t`, `-b -d -f -g -h -i -M -n -r -R -s -u -V -z`, `--sort=WORD`, `-c -C --check`, `-m`, `-o`, `--files0-from`), byte order, the numeric/general/human/month/version orders, GNU's last-resort comparison |
 | `test` | Checks file types and compares values: GNU coreutils' expression (`!`, `-a`, `-o`, parentheses, string and integer comparisons, `-l STRING` its length, the file primaries, `-t FD`); no options, syntax errors exit 2 |
 | `true` | Does nothing, exits 0 (`--help`/`--version` only as the sole argument) |
+| `uniq` | Filters adjacent repeated lines (`-c -d -D -u -i -f -s -w -z, --group, --all-repeated`); the obsolete `-N`/`+N` spellings work but are never documented |
 | `wc` | Counts lines, words, characters, bytes and the widest line (`-c -m -l -L -w`, `--files0-from`, `--total`), GNU's columns |
 | `which` | Locates a command in PATH (`-a -s`), as Debian's which (debianutils): exit 1 when any operand is missed, 2 on an unknown option |
 

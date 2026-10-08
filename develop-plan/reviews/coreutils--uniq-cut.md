@@ -1,7 +1,7 @@
 # Review: coreutils--uniq-cut (PR #55)
 - Verdict: merged
 - Merged as: 972338b, version 0.5.13
-- Tokens: claude 57404, ollama input 150970, ollama output 85538
+- Tokens: claude 179521, ollama input 150970, ollama output 85538
 
 | Severity | Status | Where | Finding |
 |----------|--------|-------|---------|

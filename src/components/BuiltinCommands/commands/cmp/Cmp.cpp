@@ -82,12 +82,16 @@ public:
     explicit CmpByteSource(IFileDescriptor& file)
         : m_file(file) {}
 
-    // The next byte (0-255), -1 at end of file, -2 on a read error.
+    // The next byte (0-255), -1 at end of file, -2 on a read error, -3 when
+    // the read was interrupted by a stop.
     int Next() {
         if (m_position >= m_length) {
             const ssize_t n = m_file.Read(m_buffer, sizeof(m_buffer));
             if (n == 0) {
                 return -1;
+            }
+            if (n == kIOInterrupted) {
+                return -3;
             }
             if (n < 0) {
                 return -2;
@@ -313,6 +317,9 @@ public:
             }
             const int c1 = source1->Next();
             const int c2 = source2->Next();
+            if (c1 == -3 || c2 == -3) {
+                return 1;  // a stop: quiet, the process reports 143
+            }
             if (c1 == -2 || c2 == -2) {
                 const std::string& failed = c1 == -2 ? name1 : name2;
                 if (!quiet) {

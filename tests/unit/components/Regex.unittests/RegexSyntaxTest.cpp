@@ -176,6 +176,12 @@ TEST(RegexSyntaxErrorTest, GnuMessages) {
         {RegexSyntax::Extended, "(a", "Unmatched ( or \\("},
         {RegexSyntax::Extended, "a)", "Unmatched ) or \\)"},
         {RegexSyntax::Extended, "a{1", "Unmatched \\{"},
+        // glibc reads a bad interval up to its close: none before the end is
+        // "Unmatched \{"; and it checks the order before the size.
+        {RegexSyntax::Basic, "a\\{1x", "Unmatched \\{"},
+        {RegexSyntax::Basic, "a\\{32768,1\\}", "Invalid content of \\{\\}"},
+        {RegexSyntax::Extended, "a{1,2", "Unmatched \\{"},
+        {RegexSyntax::Extended, "a{1x", "Unmatched \\{"},
     };
     RunErrorCases(cases, sizeof(cases) / sizeof(cases[0]));
     // The deeply nested pattern: built, not a literal.
@@ -186,6 +192,27 @@ TEST(RegexSyntaxErrorTest, GnuMessages) {
         EXPECT_EQ(Regex::Compile(deeplyNested, options, error), nullptr);
         EXPECT_EQ(error, "Regular expression too big");
     }
+}
+
+TEST(RegexSyntaxErrorTest, NestingLimit) {
+    // 250 levels compile; one more is refused (PCRE2's default limit).
+    auto nested = [](int depth, const char* open, const char* close) {
+        std::string pattern;
+        for (int i = 0; i < depth; ++i) pattern += open;
+        pattern += 'a';
+        for (int i = 0; i < depth; ++i) pattern += close;
+        return pattern;
+    };
+    RegexOptions options;
+    std::string error;
+    options.syntax = RegexSyntax::Basic;
+    EXPECT_NE(Regex::Compile(nested(250, "\\(", "\\)"), options, error), nullptr);
+    EXPECT_EQ(Regex::Compile(nested(251, "\\(", "\\)"), options, error), nullptr);
+    EXPECT_EQ(error, "Regular expression too big");
+    options.syntax = RegexSyntax::Perl;
+    EXPECT_NE(Regex::Compile(nested(250, "(", ")"), options, error), nullptr);
+    EXPECT_EQ(Regex::Compile(nested(251, "(", ")"), options, error), nullptr);
+    EXPECT_EQ(error, "parentheses are too deeply nested");
 }
 
 TEST(RegexSyntaxErrorTest, PerlMessages) {

@@ -8,10 +8,11 @@ namespace Haisos {
 namespace {
 
 // Parentheses nested deeper than this fail to compile: the recursive-descent
-// parser would otherwise overflow the stack on pathological patterns.
-// PCRE2's own limit, with its message; glibc has none, so Haisos reuses
-// glibc's "Regular expression too big" there.
-constexpr int kMaxNestingDepth = 1000;
+// parser would otherwise overflow the stack on pathological patterns (each
+// level costs several frames; a Windows thread has 1 MB of stack). PCRE2's
+// own default limit (PARENS_NEST_LIMIT), with its message; glibc has none, so
+// Haisos reuses glibc's "Regular expression too big" there.
+constexpr int kMaxNestingDepth = 250;
 
 // glibc's RE_DUP_MAX and PCRE2's limit on {m,n} values.
 constexpr long long kMaxGnuRepeat = 32767;
@@ -266,6 +267,10 @@ private:
     // closing '}', or kNpos. Bounds saturated at kMaxPerlRepeat + 1.
     size_t PerlQuantifierShape(long long& min, long long& max, bool& maxBounded) const;
     bool QuantifierAhead() const;
+    // Whether an interval's closing token ('\}' in Basic, '}' in Extended)
+    // follows m_pos: glibc reads a bad interval to its close, and reports
+    // "Unmatched \{" when the pattern ends first.
+    bool IntervalCloseAhead() const;
 
     void FailEscape(unsigned char c) {
         switch (c) {
@@ -1105,27 +1110,38 @@ bool Parser::ParseGnuInterval(int& min, int& max) {
         Advance();
         bool nEmpty;
         if (!ReadGnuDigits(n, nEmpty)) return false;
-        if (!HasMore()) { Fail("Unmatched \\{"); return false; }
-        if (!closeIs()) { Fail("Invalid content of \\{\\}"); return false; }
+        if (!closeIs()) { Fail(IntervalCloseAhead() ? "Invalid content of \\{\\}" : "Unmatched \\{"); return false; }
         Advance(IsBasic() ? 2 : 1);
         min = mEmpty ? 0 : static_cast<int>(m);
         max = nEmpty ? -1 : static_cast<int>(n);
     } else {
-        if (!HasMore()) { Fail("Unmatched \\{"); return false; }
-        if (!closeIs()) { Fail("Invalid content of \\{\\}"); return false; }
+        if (!closeIs()) { Fail(IntervalCloseAhead() ? "Invalid content of \\{\\}" : "Unmatched \\{"); return false; }
         Advance(IsBasic() ? 2 : 1);
         if (mEmpty) { Fail("Invalid content of \\{\\}"); return false; }
         min = max = static_cast<int>(m);
+    }
+    // glibc checks the order before the size: a\{32768,1\} is invalid content.
+    if (max != -1 && min > max) {
+        Fail("Invalid content of \\{\\}");
+        return false;
     }
     if (min > kMaxGnuRepeat || (max != -1 && max > kMaxGnuRepeat)) {
         Fail("Regular expression too big");
         return false;
     }
-    if (max != -1 && min > max) {
-        Fail("Invalid content of \\{\\}");
-        return false;
-    }
     return true;
+}
+
+bool Parser::IntervalCloseAhead() const {
+    for (size_t i = m_pos; i < m_pattern.size(); ++i) {
+        if (m_pattern[i] == '\\') {
+            if (IsBasic() && i + 1 < m_pattern.size() && m_pattern[i + 1] == '}') return true;
+            ++i;  // an escaped character is one token, never the close in Extended
+        } else if (!IsBasic() && m_pattern[i] == '}') {
+            return true;
+        }
+    }
+    return false;
 }
 
 size_t Parser::PerlQuantifierShape(long long& min, long long& max, bool& maxBounded) const {

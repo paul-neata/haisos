@@ -11,3 +11,4 @@
 - When search--rg-search (or another grep-touching task) is re-checked: fold in #58's medium -- Grep.cpp:913, `if (stopped) break;` after the recursive walk so -q stops searching later operands.
 - On this host plain `grep` is ugrep; GNU grep 3.11 is /usr/bin/grep (reference for reviews).
 - A run cut short (here by Ollama's 429) still ends `ready` when the leftovers build and pass: before the review, compare the PR's file list with the plan (tests, CMake, BuiltinCommandList.h, docs).
+- When a task touching date/BuiltinDate (coreutils--stat, du, ls -l time styles) is re-checked: #60's mediums are candidates to fold in -- date --help lists no +FORMAT conversions, set-operand docs say ParseDateString but code uses ParseTouchStamp, FormatDateTime flag edge cases (%^P, %_N/%-3N, %_:z, last of - _ 0 wins); GNU date 9.4 on the host is the reference.

@@ -66,3 +66,4 @@ Pause: no
 
 ## Adjustments
 - 2026-10-08 05:30 (implement) base--regex-match refreshed: checked against d2f11f2; added #44 review outcomes (nesting limit 250 for the Windows stack, add the missing Regex.h Semantics doc comments)
+- 2026-10-08 05:48 (implement) user: continue without the host Windows build (WSL interop broken); Windows-only reds get one CI re-run, then merge with "Windows red" noted, fixed on the host in the final phase

@@ -17,7 +17,7 @@ Pause: no
 | 9 | [coreutils--names-env](tasks/coreutils--names-env.md) | done | 0.5.9 | - | #51 | 1 | 0C 1H fixed, 2M 6L open | Windows green on CI re-run (HaisosOS.unittests flaky) |
 | 10 | [coreutils--chmod-paths](tasks/coreutils--chmod-paths.md) | done | 0.5.10 | - | #52 | 1 | 0C 0H fixed, 1M 3L open | Windows green on CI re-run (HaisosOS.unittests flaky) |
 | 11 | [coreutils--printf-seq](tasks/coreutils--printf-seq.md) | done | 0.5.11 | 4 | #53 | 1 | 0C 1H fixed, 2M 3L open | |
-| 12 | [coreutils--date](tasks/coreutils--date.md) | todo | | 8, 4 | | | | |
+| 12 | [coreutils--date](tasks/coreutils--date.md) | in-progress | 0.5.18 | 8, 4 | | | | |
 | 13 | [coreutils--stat](tasks/coreutils--stat.md) | todo | | 12, 11, 4 | | | | |
 | 14 | [coreutils--du-cmp](tasks/coreutils--du-cmp.md) | todo | | 12, 4 | | | | |
 | 15 | [coreutils--test-program](tasks/coreutils--test-program.md) | done | 0.5.12 | 4 | #54 | 1 | 0C 2H fixed, 1M 2L open | |
@@ -90,3 +90,4 @@ Pause: no
 - 2026-10-08 18:35 (implement) Direction acted on: task PRs' Windows checks are ignored for the rest of the develop.
 - 2026-10-08 (implement) coreutils--mv-touch refreshed against 2706b1a (real BuiltinCopy/BuiltinPrompt/BuiltinRemove names, CMake and list slots); folded in #50's three mediums (cp helpers moved into BuiltinCopy and reused by mv; backup mode resolved once at the end with `$VERSION_CONTROL`, -S included; -n beats a later --update=WORD) and the answered rm -r symlink decision
 - 2026-10-08 (implement) coreutils--mv-touch back in review: Ollama credits reset by the user; fix round on #59 with the review's round-1 feedback
+- 2026-10-08 (implement) coreutils--date refreshed against 7b806fb (BuiltinDate names from #59, CMake/test slots, BuiltinDateTest exists); folded in #59 medium: previousWasTime only when no zone attached (`2024-01-02T03:04Z +1 hour`)

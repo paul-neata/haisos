@@ -1,9 +1,9 @@
 # Task coreutils--date: date, and FormatDateTime shared with ls
 
 - Rock: coreutils
-- Depends on: coreutils--mv-touch (`BuiltinDate.h/.cpp`: `ParseDateString`, `ParseTouchStamp`), coreutils--sort (`GnuQuote`, `ArgMatch` in `BuiltinText.h`)
+- Depends on: coreutils--mv-touch (`BuiltinDate.h/.cpp`, done: `ParseDateString`, `ParseTouchStamp`, `LocalTimeOf`, `SecondsFromLocalTime`, `SecondsFromUtc`), coreutils--sort (`GnuQuote`, `ArgMatch` in `BuiltinText.h`)
 - Size: ~750 changed lines in ~9 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ 7b806fb
 - PR title: Add the date builtin and a GNU strftime shared with ls
 
 (This is the first half of the planned coreutils--date-stat, split because
@@ -39,8 +39,8 @@ tests `LsTimeStyles`, `LsTimeStyleWithAConversionStrftimeDoesNotKnow`,
 `LsLongFormatShowsAnOldTimeWithItsYear` in
 `tests/unit/components/BuiltinCommands.unittests/BuiltinCommandsTest.cpp`.
 
-What earlier tasks provide, as if on develop (coreutils--mv-touch,
-`src/components/BuiltinCommands/BuiltinDate.h/.cpp`, namespace `Haisos`):
+What coreutils--mv-touch (PR #59) already put on develop in
+`src/components/BuiltinCommands/BuiltinDate.h/.cpp` (namespace `Haisos`; helpers such as `DaysInMonth`, `FloorDiv` are in its anonymous namespace):
 
 ```cpp
 bool ParseDateString(std::string_view text, FileDateTime now, FileDateTime& out);   // GNU -d subset, host local time
@@ -52,9 +52,7 @@ int64_t SecondsFromUtc(int64_t year, int64_t month, int64_t day, int hour, int m
 
 
 
-What earlier tasks provide, as if on develop (coreutils--sort,
-`src/components/BuiltinCommands/BuiltinText.h`; read that plan for the exact
-API): `std::string GnuQuote(std::string_view text);` -- GNU's `quote()` in
+What coreutils--sort already put in `src/components/BuiltinCommands/BuiltinText.h`: `std::string GnuQuote(std::string_view text);` -- GNU's `quote()` in
 the C locale, which is what GNU puts around a value in a message (`'abc'`;
 `a'b` becomes `'a\'b'`) -- and `ArgMatch(context, "--opt", value, choices)`
 (GNU's `XARGMATCH` with its "Valid arguments are:" block). Every `'x'` in a
@@ -95,7 +93,7 @@ In those, with `utc` true, step 1 of `ParseDateString`'s computation breaks
 in `BuiltinDate.cpp`) and step 4 converts zone-less fields with
 `SecondsFromUtc` instead of `SecondsFromLocalTime`; `ParseTouchStamp` the
 same. Explicit zones (`Z`, `UTC`, `+hh:mm`) and `@seconds` are unaffected.
-Add a `BuiltinDateTest.cpp` case for each overload (`2020-01-01` with `utc`
+Add a case for each overload to the existing `tests/unit/components/BuiltinCommands.unittests/BuiltinDateTest.cpp` (suite `BuiltinCommandsDateTest`) (`2020-01-01` with `utc`
 true is 1577836800).
 
 `FormatDateTime`, conversion by conversion. Break `t.seconds` down with
@@ -141,9 +139,16 @@ For anything not pinned down above (unusual flag/width mixes), verify
 against `date -u -d @1700000000.123456789 '+FORMAT'` with `LC_ALL=C` in the
 task container and follow it.
 
+Also fix a bug of #59's `ParseDateItems` (`BuiltinDate.cpp`, the date branch,
+`previousWasTime = withTime;`): after `ParseDate` attached a zone to a
+`T`-time (`2024-01-02T03:04Z`), `previousWasTime` stays true, so a following
+`+1 hour` is read as a second zone and fails; GNU adds one hour. Set
+`previousWasTime = withTime && !items.hasZone` (i.e. only when `ParseDate`
+attached no zone).
+
 ### `src/components/BuiltinCommands/commands/ls/Ls.cpp`
 
-Delete `MsvcStrftimeKnows` and ls's own `FormatDateTime` (and `LocalTime`, if mv-touch left it there);
+Delete `MsvcStrftimeKnows`, ls's own `FormatDateTime` and `LocalTime` (ls 1.3.0 still has all three, a copy of `BuiltinDate`'s `LocalTimeOf`, plus a "On Windows, a --time-style=+FORMAT conversion ..." help note);
 include `BuiltinDate.h` and call `FormatDateTime(format, time, false)` in
 `FormatTimeColumn`. Bump ls's version to `1.3.1`. Its output on Linux must
 not change (the existing ls tests stay green unmodified); the Windows
@@ -247,16 +252,18 @@ user); `TZ` in the process environment is not consulted -- local time is the
 host's zone, `-u` is UTC; `-d` understands the subset `ParseDateString`
 does; `%Z` on Windows is the zone's Windows name; `--debug` not treated.
 
-### `BuiltinCommandList.h`, `CMakeLists.txt`
+### `BuiltinCommandList.h`, `src/components/BuiltinCommands/CMakeLists.txt`
 
-Declare `CreateDateCommand()`, add it to `CreateStandardBuiltinCommands()`
-(this alone puts it in the `haisos --init` template), add
-`commands/date/Date.cpp` to the library.
+Declare `CreateDateCommand()` and add it to `CreateStandardBuiltinCommands()`
+in `BuiltinCommandList.h` (this alone puts it in the `haisos --init` template);
+add `commands/date/Date.cpp` to the source list in
+`src/components/BuiltinCommands/CMakeLists.txt` (next to `commands/touch/Touch.cpp`;
+the root `CMakeLists.txt` needs nothing).
 
 ## Tests
 
-New `tests/unit/components/BuiltinCommands.unittests/DateTest.cpp` (add to
-that directory's `CMakeLists.txt`), on `RunCaptured`. Every case passes `-u`
+New `tests/unit/components/BuiltinCommands.unittests/DateTest.cpp` (add to the
+`add_executable(BuiltinCommands.unittests ...)` list in that directory's `CMakeLists.txt`), on `RunCaptured`. Every case passes `-u`
 and a fixed `-d @...` unless it says otherwise, so no test depends on the
 host's zone or clock. Expected outputs are GNU coreutils 9.4's (`LC_ALL=C`);
 verify any new one with `/usr/bin/date` in the task container.
@@ -300,6 +307,8 @@ verify any new one with `/usr/bin/date` in the task container.
   `{1700000000, 123456789}` -> `"       Tue|0000000Tue|123456789000|pm"`; with
   `utc` false, `"%z"` matches `[+-][0-9]{4}` and `"%s"` is `"1700000000"`.
 
+In `BuiltinDateTest.cpp`: `2024-01-02T03:04Z +1 hour` parses to 2024-01-02 04:04:00 UTC (also in DateTest: `-u -d '2024-01-02T03:04Z +1 hour' +%F\ %T`), while `2024-01-02T03:04 +01:00` still reads the zone.
+
 The existing ls tests (`LsTimeStyles`, `LsTimeStyleWithAConversionStrftimeDoesNotKnow`,
 `LsLongFormatShowsAnOldTimeWithItsYear`, ...) must pass unmodified; add to
 `BuiltinCommandsTest.cpp` `LsTimeStyleTakesGnuFlags`: `ls -l
@@ -326,7 +335,7 @@ order.
 ## Docs
 
 - `src/components/BuiltinCommands/CLAUDE.md`: a `date` row (version,
-  treated options, the exceptions above); the ls row's version 1.3.1 and its
+  treated options, the exceptions above); the ls row's version (1.3.0 now) becoming 1.3.1 and its
   Windows strftime exception removed; a sentence that `BuiltinDate`
   (`ParseDateString`, `ParseTouchStamp`, `FormatDateTime`) is where dates are
   parsed and formatted for every builtin.
@@ -340,7 +349,8 @@ order.
 - [ ] ls uses it; ls output on Linux unchanged; ls 1.3.1; the Windows exception gone from its help and the docs.
 - [ ] date: every GNU option in `Options()`; formats, `-I`/`--rfc-3339` argmatch with prefixes, `-d`, `-f`, `-r`, `--resolution`, `-u`, the set refusal with the date still printed and exit 1, every message above byte for byte.
 - [ ] Tests independent of the host's zone (all `-u`) and clock; build and unit tests green on Linux.
-- [ ] Registered; CMakeLists; docs rows.
+- [ ] `2024-01-02T03:04Z +1 hour` is one hour later (previousWasTime not left set by an attached zone), with a test.
+- [ ] Registered; CMakeLists (`src/components/BuiltinCommands/CMakeLists.txt`, test list); docs rows.
 
 ## Out of scope
 

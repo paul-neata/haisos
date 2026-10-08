@@ -6,7 +6,7 @@ Pause: no
 | # | Task | Status | Version | Depends | PR | Tries | Review | Notes |
 |---|------|--------|---------|---------|----|-------|--------|-------|
 | 1 | [base--fs-rename-times](tasks/base--fs-rename-times.md) | done | 0.5.1 | - | #43 | 2 | 0C 0H fixed, 1M 2L open | |
-| 2 | [base--regex-syntax](tasks/base--regex-syntax.md) | in-review | 0.5.2 | - | #44 | 1 | | first run killed: host low on memory |
+| 2 | [base--regex-syntax](tasks/base--regex-syntax.md) | done | 0.5.2 | - | #44 | 2 | 0C 3H fixed, 3M 3L open | nesting limit 250 (not 1000) for the Windows stack; Windows CI flaky in HaisosOS.unittests |
 | 3 | [base--regex-match](tasks/base--regex-match.md) | todo | | 2 | | | | |
 | 53 | [base--rename-fix](tasks/base--rename-fix.md) | todo | | 1 | | | | review #43 follow-up; before 8 |
 | 4 | [coreutils--sort](tasks/coreutils--sort.md) | todo | | - | | | | |

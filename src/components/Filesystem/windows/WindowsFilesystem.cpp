@@ -41,6 +41,19 @@ bool ToWidePath(const std::string& pathname, std::wstring& wide) {
     return true;
 }
 
+// A FileDateTime as a FILETIME: 100 ns ticks since 1601-01-01 UTC. False if
+// the time lies before that, where no FILETIME is.
+bool ToFileTime(const FileDateTime& time, FILETIME& out) {
+    constexpr int64_t kSecondsTo1601 = 11644473600;
+    if (time.seconds < -kSecondsTo1601) {
+        return false;
+    }
+    const int64_t ticks = (time.seconds + kSecondsTo1601) * 10000000 + time.nanoseconds / 100;
+    out.dwLowDateTime = static_cast<DWORD>(ticks & 0xFFFFFFFF);
+    out.dwHighDateTime = static_cast<DWORD>((static_cast<uint64_t>(ticks) >> 32) & 0xFFFFFFFF);
+    return true;
+}
+
 } // namespace
 
 HostFileDescriptor::~HostFileDescriptor() {
@@ -118,6 +131,95 @@ int FileSystem::LocalRemoveFile(const std::string& pathname) {
     CrtInvalidParameterAsError crtErrors;
     std::wstring wide;
     return ToWidePath(pathname, wide) ? ::_wunlink(wide.c_str()) : -1;
+}
+
+int FileSystem::LocalRename(const std::string& oldPath, const std::string& newPath) {
+    NoCriticalErrorDialogs noDialogs;
+    std::wstring oldWide;
+    std::wstring newWide;
+    if (!ToWidePath(oldPath, oldWide) || !ToWidePath(newPath, newWide)) {
+        return kFileSystemError;
+    }
+
+    // Renaming a path to itself does nothing and succeeds -- when it is there.
+    // Only an *identical* path returns early: a case-only rename ("a" -> "A")
+    // is a real rename on Windows, and goes straight to MoveFileExW below,
+    // without the replace steps (replacing a file with itself, or taking a
+    // directory away and putting it back, would only be in the way).
+    if (oldWide == newWide) {
+        return ::GetFileAttributesW(oldWide.c_str()) == INVALID_FILE_ATTRIBUTES
+            ? kFileSystemError : 0;
+    }
+    if (::CompareStringOrdinal(oldWide.c_str(), -1, newWide.c_str(), -1, TRUE) == CSTR_EQUAL) {
+        return ::MoveFileExW(oldWide.c_str(), newWide.c_str(), 0) ? 0 : kFileSystemError;
+    }
+
+    // POSIX rename() semantics on top of MoveFileExW: a file at the new path is
+    // replaced, a directory only by an empty directory.
+    const DWORD oldAttrs = ::GetFileAttributesW(oldWide.c_str());
+    if (oldAttrs == INVALID_FILE_ATTRIBUTES) {
+        return kFileSystemError; // rename() reports ENOENT before anything else
+    }
+    const DWORD newAttrs = ::GetFileAttributesW(newWide.c_str());
+    if (newAttrs != INVALID_FILE_ATTRIBUTES) {
+        const bool oldIsDir = (oldAttrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        const bool newIsDir = (newAttrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        if (oldIsDir != newIsDir) {
+            return kFileSystemError; // a file would replace a directory, or a directory a file
+        }
+        if (newIsDir) {
+            // RemoveDirectoryW refuses a directory that is not empty, and so
+            // does the rename -- exactly the replacement rename() allows.
+            if (!::RemoveDirectoryW(newWide.c_str())) {
+                return kFileSystemError;
+            }
+        }
+    }
+    // Never MOVEFILE_COPY_ALLOWED: copying across volumes is the caller's
+    // decision (mv's copy-then-remove), not the filesystem's.
+    if (!::MoveFileExW(oldWide.c_str(), newWide.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        return ::GetLastError() == ERROR_NOT_SAME_DEVICE ? kFileSystemCrossDevice : kFileSystemError;
+    }
+    return 0;
+}
+
+int FileSystem::LocalSetTimes(const std::string& path,
+                              const std::optional<FileDateTime>& accessTime,
+                              const std::optional<FileDateTime>& modificationTime) {
+    NoCriticalErrorDialogs noDialogs;
+    std::wstring wide;
+    if (!ToWidePath(path, wide)) {
+        return kFileSystemError;
+    }
+    // FILE_FLAG_BACKUP_SEMANTICS: a directory opens too, not only a file.
+    const HANDLE handle = ::CreateFileW(wide.c_str(), FILE_WRITE_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        return kFileSystemError;
+    }
+    FILETIME accessFt;
+    FILETIME modificationFt;
+    FILETIME* accessPtr = nullptr;
+    FILETIME* modificationPtr = nullptr;
+    if (accessTime && !ToFileTime(*accessTime, accessFt)) {
+        ::CloseHandle(handle);
+        return kFileSystemError; // before 1601-01-01, before FILETIME begins
+    }
+    if (modificationTime && !ToFileTime(*modificationTime, modificationFt)) {
+        ::CloseHandle(handle);
+        return kFileSystemError;
+    }
+    // A null pointer leaves that time alone, as utimensat's UTIME_OMIT does.
+    if (accessTime) {
+        accessPtr = &accessFt;
+    }
+    if (modificationTime) {
+        modificationPtr = &modificationFt;
+    }
+    const BOOL set = ::SetFileTime(handle, nullptr, accessPtr, modificationPtr);
+    ::CloseHandle(handle);
+    return set ? 0 : kFileSystemError;
 }
 
 int FileSystem::LocalStat(const std::string& path, FileStatus& out) {

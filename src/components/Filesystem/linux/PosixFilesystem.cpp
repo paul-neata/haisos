@@ -7,6 +7,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
+#include <sys/time.h> // utimes(), the WASM fallback for utimensat()
 #include <algorithm>
 #include <cstring>
 #include "src/components/Logger/Logger.h"
@@ -62,6 +63,43 @@ int FileSystem::LocalRemoveDirectory(const std::string& pathname) {
 
 int FileSystem::LocalRemoveFile(const std::string& pathname) {
     return ::unlink(pathname.c_str());
+}
+
+int FileSystem::LocalRename(const std::string& oldPath, const std::string& newPath) {
+    if (::rename(oldPath.c_str(), newPath.c_str()) == 0) {
+        return 0;
+    }
+    // Read errno immediately: nothing between the call and here may touch it.
+    return errno == EXDEV ? kFileSystemCrossDevice : kFileSystemError;
+}
+
+int FileSystem::LocalSetTimes(const std::string& path,
+                              const std::optional<FileDateTime>& accessTime,
+                              const std::optional<FileDateTime>& modificationTime) {
+#ifndef __EMSCRIPTEN__
+    struct timespec times[2];
+    times[0].tv_sec = accessTime ? accessTime->seconds : 0;
+    times[0].tv_nsec = accessTime ? static_cast<long>(accessTime->nanoseconds) : UTIME_OMIT;
+    times[1].tv_sec = modificationTime ? modificationTime->seconds : 0;
+    times[1].tv_nsec = modificationTime ? static_cast<long>(modificationTime->nanoseconds) : UTIME_OMIT;
+    return ::utimensat(AT_FDCWD, path.c_str(), times, 0) == 0 ? 0 : kFileSystemError;
+#else
+    // Emscripten has no utimensat; utimes stands in, with a time left alone
+    // (nullopt) filled in from stat(), as UTIME_OMIT would leave it.
+    struct stat st;
+    const bool needCurrent = !accessTime || !modificationTime;
+    if (needCurrent && ::stat(path.c_str(), &st) != 0) {
+        return kFileSystemError;
+    }
+    struct timeval times[2];
+    times[0].tv_sec = accessTime ? accessTime->seconds : st.st_atim.tv_sec;
+    times[0].tv_usec = accessTime ? static_cast<long>(accessTime->nanoseconds / 1000)
+                                  : static_cast<long>(st.st_atim.tv_nsec / 1000);
+    times[1].tv_sec = modificationTime ? modificationTime->seconds : st.st_mtim.tv_sec;
+    times[1].tv_usec = modificationTime ? static_cast<long>(modificationTime->nanoseconds / 1000)
+                                        : static_cast<long>(st.st_mtim.tv_nsec / 1000);
+    return ::utimes(path.c_str(), times) == 0 ? 0 : kFileSystemError;
+#endif
 }
 
 std::vector<DirectoryEntry> FileSystem::LocalReadDirectory(const std::string& path) {

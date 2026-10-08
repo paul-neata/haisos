@@ -46,6 +46,16 @@ int ComposedFileSystem::LocalRemoveFile(const std::string& pathname) {
     return m_main->RemoveFile(AbsolutePathFor(pathname));
 }
 
+int ComposedFileSystem::LocalRename(const std::string& oldPath, const std::string& newPath) {
+    return m_main->Rename(AbsolutePathFor(oldPath), AbsolutePathFor(newPath));
+}
+
+int ComposedFileSystem::LocalSetTimes(const std::string& path,
+                                      const std::optional<FileDateTime>& accessTime,
+                                      const std::optional<FileDateTime>& modificationTime) {
+    return m_main->SetTimes(AbsolutePathFor(path), accessTime, modificationTime);
+}
+
 std::vector<DirectoryEntry> ComposedFileSystem::LocalReadDirectory(const std::string& path) {
     return m_main->ReadDirectory(AbsolutePathFor(path));
 }

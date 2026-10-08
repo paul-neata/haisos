@@ -24,6 +24,10 @@ public:
     int CreateDirectory(const std::string& pathname, int mode) final;
     int RemoveDirectory(const std::string& pathname) final;
     int RemoveFile(const std::string& pathname) final;
+    int Rename(const std::string& oldPath, const std::string& newPath) final;
+    int SetTimes(const std::string& path,
+                 const std::optional<FileDateTime>& accessTime,
+                 const std::optional<FileDateTime>& modificationTime) final;
     std::vector<DirectoryEntry> ReadDirectory(const std::string& path) final;
     int Stat(const std::string& path, FileStatus& out) final;
 
@@ -43,6 +47,10 @@ protected:
     virtual int LocalCreateDirectory(const std::string& pathname, int mode) = 0;
     virtual int LocalRemoveDirectory(const std::string& pathname) = 0;
     virtual int LocalRemoveFile(const std::string& pathname) = 0;
+    virtual int LocalRename(const std::string& oldPath, const std::string& newPath) = 0;
+    virtual int LocalSetTimes(const std::string& path,
+                              const std::optional<FileDateTime>& accessTime,
+                              const std::optional<FileDateTime>& modificationTime) = 0;
     virtual std::vector<DirectoryEntry> LocalReadDirectory(const std::string& path) = 0;
     virtual int LocalStat(const std::string& path, FileStatus& out) = 0;
 

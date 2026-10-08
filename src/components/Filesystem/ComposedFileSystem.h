@@ -29,6 +29,10 @@ protected:
     int LocalCreateDirectory(const std::string& pathname, int mode) override;
     int LocalRemoveDirectory(const std::string& pathname) override;
     int LocalRemoveFile(const std::string& pathname) override;
+    int LocalRename(const std::string& oldPath, const std::string& newPath) override;
+    int LocalSetTimes(const std::string& path,
+                      const std::optional<FileDateTime>& accessTime,
+                      const std::optional<FileDateTime>& modificationTime) override;
     std::vector<DirectoryEntry> LocalReadDirectory(const std::string& path) override;
     int LocalStat(const std::string& path, FileStatus& out) override;
     std::optional<std::string> LocalIsBuiltinCommand(const std::string& path) override;

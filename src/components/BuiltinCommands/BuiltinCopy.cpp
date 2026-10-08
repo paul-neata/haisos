@@ -8,31 +8,12 @@
 #include "src/components/Filesystem/VirtualPath.h"
 
 namespace Haisos {
-namespace {
 
-#ifdef _WIN32
-constexpr int kDirectoryMode = _S_IREAD | _S_IWRITE;
-#else
-constexpr int kDirectoryMode = S_IRWXU | S_IRWXG | S_IRWXO;
-#endif
-
-// GNU's quoteaf: every name in a copy message, quoted even when plain.
-std::string q(const std::string& name) {
+std::string CopyQuoted(const std::string& name) {
     return ShellEscapeQuoted(name, /*always=*/true);
 }
 
-// |path| without trailing slashes: what a child of it is built from, so
-// "d/" and "d" both give "d/name". A lone "/" keeps its slash.
-std::string WithoutTrailingSlashes(const std::string& path) {
-    std::string trimmed = path;
-    while (trimmed.size() > 1 && trimmed.back() == '/') {
-        trimmed.pop_back();
-    }
-    return trimmed;
-}
-
-// dir + "/" + name, with no doubled slash ("/" + "x" is "/x").
-std::string JoinPath(const std::string& dir, const std::string& name) {
+std::string CopyJoinPath(const std::string& dir, const std::string& name) {
     std::string joined = dir;
     if (!joined.empty() && joined.back() != '/') {
         joined += '/';
@@ -40,9 +21,7 @@ std::string JoinPath(const std::string& dir, const std::string& name) {
     return joined + name;
 }
 
-// Why Stat(path) found nothing: "Not a directory" when a segment on the way is
-// a file, else "No such file or directory".
-std::string StatMissingReason(IFileIO& io, const std::string& path) {
+std::string CopyStatMissingReason(IFileIO& io, const std::string& path) {
     std::string dir = VirtualParentOf(io.ResolvePath(path));
     while (true) {
         if (auto type = EntryTypeOf(io, dir)) {
@@ -57,10 +36,7 @@ std::string StatMissingReason(IFileIO& io, const std::string& path) {
     }
 }
 
-// Why creating |path| failed: "No such file or directory" when its directory is
-// missing, "Not a directory" when that is a file, else -- a builtin's path, a
-// read-only filesystem -- "Permission denied" (IFileIO gives no reason).
-std::string CreateFailedReason(IFileIO& io, const std::string& path) {
+std::string CopyCreateFailedReason(IFileIO& io, const std::string& path) {
     const std::string parent = VirtualParentOf(io.ResolvePath(path));
     auto parentType = EntryTypeOf(io, parent);
     if (!parentType) {
@@ -72,6 +48,24 @@ std::string CreateFailedReason(IFileIO& io, const std::string& path) {
     return "Permission denied";
 }
 
+namespace {
+
+#ifdef _WIN32
+constexpr int kDirectoryMode = _S_IREAD | _S_IWRITE;
+#else
+constexpr int kDirectoryMode = S_IRWXU | S_IRWXG | S_IRWXO;
+#endif
+
+// |path| without trailing slashes: what a child of it is built from, so
+// "d/" and "d" both give "d/name". A lone "/" keeps its slash.
+std::string WithoutTrailingSlashes(const std::string& path) {
+    std::string trimmed = path;
+    while (trimmed.size() > 1 && trimmed.back() == '/') {
+        trimmed.pop_back();
+    }
+    return trimmed;
+}
+
 // The path |source|'s copy gets under |dir|: its last name, or with --parents
 // its whole path (a leading '/' dropped), as GNU builds the destination.
 std::string DestUnderDirectory(const std::string& source, const std::string& dir, bool parents) {
@@ -81,9 +75,9 @@ std::string DestUnderDirectory(const std::string& source, const std::string& dir
         if (!path.empty() && path[0] == '/') {
             path.erase(0, 1);
         }
-        return JoinPath(dir, path);
+        return CopyJoinPath(dir, path);
     }
-    return JoinPath(dir, VirtualLastSegment(trimmed));
+    return CopyJoinPath(dir, VirtualLastSegment(trimmed));
 }
 
 // cp -v, a copied file or a created directory: 'a' -> 'b', with the backup
@@ -95,12 +89,12 @@ void WriteVerboseFile(BuiltinContext& context, const std::string& source,
         return;
     }
     if (options.verbose == CopyVerbose::Mv) {
-        context.Out("copied " + q(source) + " -> " + q(dest) + "\n");
+        context.Out("copied " + CopyQuoted(source) + " -> " + CopyQuoted(dest) + "\n");
         return;
     }
-    std::string line = q(source) + " -> " + q(dest);
+    std::string line = CopyQuoted(source) + " -> " + CopyQuoted(dest);
     if (!backupPath.empty()) {
-        line += " (backup: " + q(backupPath) + ")";
+        line += " (backup: " + CopyQuoted(backupPath) + ")";
     }
     context.Out(line + "\n");
 }
@@ -111,10 +105,10 @@ void WriteVerboseDirectory(BuiltinContext& context, const std::string& source,
         return;
     }
     if (options.verbose == CopyVerbose::Mv) {
-        context.Out("created directory " + q(dest) + "\n");
+        context.Out("created directory " + CopyQuoted(dest) + "\n");
         return;
     }
-    context.Out(q(source) + " -> " + q(dest) + "\n");
+    context.Out(CopyQuoted(source) + " -> " + CopyQuoted(dest) + "\n");
 }
 
 bool CopyFile(BuiltinContext& context, BuiltinPrompt* prompt, const std::string& source,
@@ -157,7 +151,8 @@ std::string BackupPathFor(BuiltinContext& context, const std::string& dest,
     return dest + ".~" + std::to_string(largest + 1) + "~";
 }
 
-bool ParseBackupControl(BuiltinContext& context, const std::string& word, BackupMode& out) {
+bool ParseBackupControlNamed(BuiltinContext& context, const std::string& reportedName,
+                             const std::string& word, BackupMode& out) {
     static const std::vector<ArgChoice> kControls = {
         {"none", static_cast<int>(BackupMode::None)},
         {"off", static_cast<int>(BackupMode::None)},
@@ -168,11 +163,51 @@ bool ParseBackupControl(BuiltinContext& context, const std::string& word, Backup
         {"numbered", static_cast<int>(BackupMode::Numbered)},
         {"t", static_cast<int>(BackupMode::Numbered)},
     };
-    const auto matched = ArgMatch(context, "backup type", word, kControls);
+    const auto matched = ArgMatch(context, reportedName, word, kControls);
     if (!matched) {
         return false;
     }
     out = static_cast<BackupMode>(*matched);
+    return true;
+}
+
+bool ParseBackupControl(BuiltinContext& context, const std::string& word, BackupMode& out) {
+    return ParseBackupControlNamed(context, "backup type", word, out);
+}
+
+bool ParseUpdateWord(BuiltinContext& context, const std::string& word, UpdateMode& update) {
+    static const std::vector<ArgChoice> kUpdates = {
+        {"all", static_cast<int>(UpdateMode::All)},
+        {"none", static_cast<int>(UpdateMode::None)},
+        {"older", static_cast<int>(UpdateMode::Older)},
+    };
+    const auto matched = ArgMatch(context, "--update", word, kUpdates);
+    if (!matched) {
+        return false;
+    }
+    update = static_cast<UpdateMode>(*matched);
+    return true;
+}
+
+bool FinishBackupRequest(BuiltinContext& context, BackupRequest& request) {
+    if (!request.on) {
+        return true;
+    }
+    if (!request.wordSeen) {
+        // -b or --backup without a word: $VERSION_CONTROL's, else existing.
+        request.mode = BackupMode::Existing;
+        if (auto env = context.Process().GetEnvironment()->GetVariable("VERSION_CONTROL")) {
+            if (!ParseBackupControlNamed(context, "$VERSION_CONTROL", *env, request.mode)) {
+                return false;
+            }
+        }
+    }
+    if (request.suffix.empty()) {
+        request.suffix = "~";
+        if (auto env = context.Process().GetEnvironment()->GetVariable("SIMPLE_BACKUP_SUFFIX")) {
+            request.suffix = *env;
+        }
+    }
     return true;
 }
 
@@ -197,11 +232,11 @@ std::optional<std::vector<CopyTarget>> ResolveCopyTargets(
         const std::string& dir = *targetDirectory;
         const auto type = EntryTypeOf(io, dir);
         if (!type) {
-            context.Error("target directory " + q(dir) + ": No such file or directory");
+            context.Error("target directory " + CopyQuoted(dir) + ": No such file or directory");
             return std::nullopt;
         }
         if (*type != DirectoryEntryType::Dir) {
-            context.Error("target directory " + q(dir) + ": Not a directory");
+            context.Error("target directory " + CopyQuoted(dir) + ": Not a directory");
             return std::nullopt;
         }
         std::vector<CopyTarget> targets;
@@ -217,12 +252,12 @@ std::optional<std::vector<CopyTarget>> ResolveCopyTargets(
     // -T: exactly two operands, the second the destination as is.
     if (noTargetDirectory) {
         if (operands.size() < 2) {
-            context.Error("missing destination file operand after " + q(operands[0]));
+            context.Error("missing destination file operand after " + CopyQuoted(operands[0]));
             context.TryHelp();
             return std::nullopt;
         }
         if (operands.size() > 2) {
-            context.Error("extra operand " + q(operands[2]));
+            context.Error("extra operand " + CopyQuoted(operands[2]));
             context.TryHelp();
             return std::nullopt;
         }
@@ -238,7 +273,7 @@ std::optional<std::vector<CopyTarget>> ResolveCopyTargets(
     const std::string target = operands.back();
     operands.pop_back();
     if (operands.empty()) {
-        context.Error("missing destination file operand after " + q(target));
+        context.Error("missing destination file operand after " + CopyQuoted(target));
         context.TryHelp();
         return std::nullopt;
     }
@@ -249,11 +284,11 @@ std::optional<std::vector<CopyTarget>> ResolveCopyTargets(
     const auto targetType = EntryTypeOf(io, target);
     if (operands.size() > 1) {
         if (!targetType) {
-            context.Error("target " + q(target) + ": No such file or directory");
+            context.Error("target " + CopyQuoted(target) + ": No such file or directory");
             return std::nullopt;
         }
         if (*targetType != DirectoryEntryType::Dir) {
-            context.Error("target " + q(target) + ": Not a directory");
+            context.Error("target " + CopyQuoted(target) + ": Not a directory");
             return std::nullopt;
         }
         targetIsDirectory = true;
@@ -287,19 +322,19 @@ bool CopyPath(BuiltinContext& context, BuiltinPrompt* prompt,
 
     FileStatus sourceStatus;
     if (io.Stat(source, sourceStatus) != 0) {
-        context.Error("cannot stat " + q(source) + ": " + StatMissingReason(io, source));
+        context.Error("cannot stat " + CopyQuoted(source) + ": " + CopyStatMissingReason(io, source));
         return false;
     }
 
     if (sourceStatus.type == DirectoryEntryType::Dir && !options.recursive) {
-        context.Error("-r not specified; omitting directory " + q(source));
+        context.Error("-r not specified; omitting directory " + CopyQuoted(source));
         return false;
     }
 
     const std::string resolvedSource = io.ResolvePath(source);
     const std::string resolvedDest = io.ResolvePath(dest);
     if (resolvedSource == resolvedDest) {
-        context.Error(q(source) + " and " + q(dest) + " are the same file");
+        context.Error(CopyQuoted(source) + " and " + CopyQuoted(dest) + " are the same file");
         return false;
     }
 
@@ -308,7 +343,7 @@ bool CopyPath(BuiltinContext& context, BuiltinPrompt* prompt,
         const std::string below = resolvedSource == "/" ? "/" : resolvedSource + "/";
         if (resolvedDest.size() > below.size() &&
             resolvedDest.compare(0, below.size(), below) == 0) {
-            context.Error("cannot copy a directory, " + q(source) + ", into itself, " + q(dest));
+            context.Error("cannot copy a directory, " + CopyQuoted(source) + ", into itself, " + CopyQuoted(dest));
             return false;
         }
     }
@@ -317,11 +352,11 @@ bool CopyPath(BuiltinContext& context, BuiltinPrompt* prompt,
     const bool destExists = io.Stat(dest, destStatus) == 0;
     if (destExists) {
         if (sourceStatus.type == DirectoryEntryType::Dir && destStatus.type != DirectoryEntryType::Dir) {
-            context.Error("cannot overwrite non-directory " + q(dest) + " with directory " + q(source));
+            context.Error("cannot overwrite non-directory " + CopyQuoted(dest) + " with directory " + CopyQuoted(source));
             return false;
         }
         if (sourceStatus.type != DirectoryEntryType::Dir && destStatus.type == DirectoryEntryType::Dir) {
-            context.Error("cannot overwrite directory " + q(dest) + " with non-directory");
+            context.Error("cannot overwrite directory " + CopyQuoted(dest) + " with non-directory");
             return false;
         }
     }
@@ -329,7 +364,7 @@ bool CopyPath(BuiltinContext& context, BuiltinPrompt* prompt,
     // A device copied recursively would have to be created as a device, which
     // Haisos cannot; as a plain operand its contents are copied, as GNU does.
     if (sourceStatus.type == DirectoryEntryType::CharDevice && options.recursive) {
-        context.Error("cannot create special file " + q(dest) + ": Operation not permitted");
+        context.Error("cannot create special file " + CopyQuoted(dest) + ": Operation not permitted");
         return false;
     }
 
@@ -348,7 +383,7 @@ bool CopyFile(BuiltinContext& context, BuiltinPrompt* prompt, const std::string&
 
     // A trailing '/' names a directory; nothing else can be copied onto it.
     if (dest.size() > 1 && dest.back() == '/') {
-        context.Error("cannot create regular file " + q(dest) + ": Not a directory");
+        context.Error("cannot create regular file " + CopyQuoted(dest) + ": Not a directory");
         return false;
     }
 
@@ -363,7 +398,7 @@ bool CopyFile(BuiltinContext& context, BuiltinPrompt* prompt, const std::string&
             return true;
         }
         if (options.interactive && prompt) {
-            if (!prompt->Ask(context.Name() + ": overwrite " + q(dest) + "? ")) {
+            if (!prompt->Ask(context.Name() + ": overwrite " + CopyQuoted(dest) + "? ")) {
                 return false;
             }
         }
@@ -374,20 +409,20 @@ bool CopyFile(BuiltinContext& context, BuiltinPrompt* prompt, const std::string&
     if (destExists && options.backup != BackupMode::None) {
         backupPath = BackupPathFor(context, dest, options.backup, options.backupSuffix);
         if (io.Rename(dest, backupPath) != 0) {
-            context.Error("cannot backup " + q(dest) + ": Permission denied");
+            context.Error("cannot backup " + CopyQuoted(dest) + ": Permission denied");
             return false;
         }
     }
 
     if (options.removeDestination && EntryTypeOf(io, dest)) {
         if (io.RemoveFile(dest) == 0 && options.verbose == CopyVerbose::Cp) {
-            context.Out("removed " + q(dest) + "\n");
+            context.Out("removed " + CopyQuoted(dest) + "\n");
         }
     }
 
     auto in = io.OpenFile(source, kFileOpenReadOnly);
     if (!in) {
-        context.Error("cannot open " + q(source) + " for reading: Permission denied");
+        context.Error("cannot open " + CopyQuoted(source) + " for reading: Permission denied");
         return false;
     }
 
@@ -401,7 +436,7 @@ bool CopyFile(BuiltinContext& context, BuiltinPrompt* prompt, const std::string&
         out = io.OpenFile(dest, flags, kFileCreateMode);
     }
     if (!out) {
-        context.Error("cannot create regular file " + q(dest) + ": " + CreateFailedReason(io, dest));
+        context.Error("cannot create regular file " + CopyQuoted(dest) + ": " + CopyCreateFailedReason(io, dest));
         return false;
     }
 
@@ -415,14 +450,14 @@ bool CopyFile(BuiltinContext& context, BuiltinPrompt* prompt, const std::string&
             }
             const ssize_t n = in->Read(buffer, sizeof(buffer));
             if (n < 0) {
-                context.Error("error reading " + q(source));
+                context.Error("error reading " + CopyQuoted(source));
                 return false;
             }
             if (n == 0) {
                 break;
             }
             if (WriteFully(*out, std::string_view(buffer, static_cast<size_t>(n))) < 0) {
-                context.Error("error writing " + q(dest));
+                context.Error("error writing " + CopyQuoted(dest));
                 return false;
             }
         }
@@ -432,7 +467,7 @@ bool CopyFile(BuiltinContext& context, BuiltinPrompt* prompt, const std::string&
 
     if (options.preserveTimes &&
         io.SetTimes(dest, sourceStatus.accessTime, sourceStatus.modificationTime) != 0) {
-        context.Error("preserving times for " + q(dest) + ": Permission denied");
+        context.Error("preserving times for " + CopyQuoted(dest) + ": Permission denied");
         return false;
     }
 
@@ -449,7 +484,7 @@ bool CopyDirectory(BuiltinContext& context, BuiltinPrompt* prompt, const std::st
     // line of its own.
     if (!destExists) {
         if (io.CreateDirectory(dest, kDirectoryMode) != 0) {
-            context.Error("cannot create directory " + q(dest) + ": " + CreateFailedReason(io, dest));
+            context.Error("cannot create directory " + CopyQuoted(dest) + ": " + CopyCreateFailedReason(io, dest));
             return false;
         }
         WriteVerboseDirectory(context, source, dest, options);
@@ -469,7 +504,7 @@ bool CopyDirectory(BuiltinContext& context, BuiltinPrompt* prompt, const std::st
         if (context.StopRequested()) {
             return false;
         }
-        if (!CopyPath(context, prompt, JoinPath(source, name), JoinPath(dest, name), options)) {
+        if (!CopyPath(context, prompt, CopyJoinPath(source, name), CopyJoinPath(dest, name), options)) {
             ok = false;
         }
     }
@@ -477,7 +512,7 @@ bool CopyDirectory(BuiltinContext& context, BuiltinPrompt* prompt, const std::st
     // After the contents: copying them changes the directory's times again.
     if (options.preserveTimes &&
         io.SetTimes(dest, sourceStatus.accessTime, sourceStatus.modificationTime) != 0) {
-        context.Error("preserving times for " + q(dest) + ": Permission denied");
+        context.Error("preserving times for " + CopyQuoted(dest) + ": Permission denied");
         ok = false;
     }
     return ok;

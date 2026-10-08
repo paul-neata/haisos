@@ -4,6 +4,7 @@ add_library(BuiltinCommands STATIC
     BuiltinCompare.cpp
     BuiltinConfigurator.cpp
     BuiltinCopy.cpp
+    BuiltinFnmatch.cpp
     BuiltinProcess.cpp
     BuiltinPrintf.cpp
     BuiltinPrompt.cpp
@@ -21,6 +22,7 @@ add_library(BuiltinCommands STATIC
     commands/env/Env.cpp
     commands/false/False.cpp
     commands/grep/Grep.cpp
+    commands/grep/GrepContext.cpp
     commands/grep/GrepFile.cpp
     commands/grep/GrepMatcher.cpp
     commands/ls/Ls.cpp

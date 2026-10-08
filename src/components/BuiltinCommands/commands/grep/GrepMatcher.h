@@ -13,8 +13,7 @@ enum class GrepSyntax { Basic, Extended, Fixed, Perl };
 // How -w decides a match is a whole word.
 enum class GrepWholeWord {
     No,
-    NonWordNeighbours,  // GNU grep -G/-E/-F (and rg): the bytes before and after are not word bytes
-    PerlBoundaries,     // GNU grep -P: the pattern wrapped as \b(?:...)\b
+    NonWordNeighbours,  // GNU grep -G/-E/-F/-P (and rg): the bytes before and after the match are not word bytes
 };
 
 struct GrepMatcherOptions {

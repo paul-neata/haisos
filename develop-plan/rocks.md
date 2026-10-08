@@ -55,3 +55,12 @@ ustar archives (create, list, extract; no compression), and `ps`/`pgrep`/
 through `ICurrentProcess::OS()`).
 Touches: BuiltinCommands, Regex (jq's `test`/`match`).
 Tasks: tools--jq-parse, tools--jq-json, tools--jq-eval, tools--jq-paths, tools--jq-command, tools--jq-builtins, tools--jq-text, tools--tar-create-list, tools--tar-extract, tools--processes, tools--pgrep-kill
+
+## final -- Windows at the end
+For this develop the Windows checks are skipped per task: once every other
+task is merged, the whole develop is built and tested on Windows (CI), and
+one task fixes what broke -- the MSVC build, the Windows unit tests, and the
+flaky `HaisosOS.unittests` hang. Best effort: what it cannot fix is left to a
+later PR.
+Touches: whatever the Windows build reports; HaisosOS (the hang).
+Tasks: final--windows-fix

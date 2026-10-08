@@ -3,7 +3,7 @@
 - Rock: search
 - Depends on: search--grep-core
 - Size: ~900 changed lines in ~10 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ aa9ea93
 - PR title: grep: recursion, --include/--exclude, context, --color, -Z
 
 ## Goal
@@ -24,14 +24,16 @@ used later by find (`search--find-tests`), rg, diff and tar, and
 
 Read first: `develop-plan/tasks/search--grep-core.md` and what it built in
 `src/components/BuiltinCommands/commands/grep/` (`Grep.cpp`, `GrepFile.*`,
-`GrepMatcher.*`, `GrepSettings.h`), `src/components/BuiltinCommands/CLAUDE.md`,
+`GrepMatcher.*`, `GrepSettings.h`; reuse `Grep.cpp`'s private `UsageError` and
+`OpenFailureText` helpers for the new errors), `src/components/BuiltinCommands/CLAUDE.md`,
 `commands/hsh/HshPattern.cpp` (a hand-written glob matcher in the house
 style), and the root `CLAUDE.md` sections "Security", "Builtin Commands".
 
 What exists, by exact name: everything of `search--grep-core` (the three
 commands at version 1.0.0; the option table already lists every option of
 this task as `kBuiltinNotTreated`, the digits `0`-`9` as hidden options;
-`GrepOneInput`, `GrepSettings`, `GrepMatcher`); `BuiltinText.h`
+`GrepOneInput(context, settings, matcher, input, shownName, sizeForTab)` returning
+`GrepFileResult`, `GrepSettings`, `GrepMatcher`); `BuiltinText.h`
 (`GnuQuote`, `OpenInputOperand`, `BuiltinLineReader`); `IFileIO::
 ReadDirectory(path)` (`DirectoryEntry { name, type }`, `.` and `..`
 first), `IFileIO::Stat` (`FileStatus.type`: `DirectoryEntryType::File`,
@@ -52,7 +54,7 @@ ICurrentProcess is the only door out (directories listed and files opened
 through `context.IO()` only); GNU output byte for byte; the option table
 stays complete, now with these options treated (ids instead of
 `kBuiltinNotTreated`); `--help` from `BuiltinHelpText`; bump the three
-commands to version `1.1.0`; new sources in `CMakeLists.txt`; portable
+commands to version `1.1.0`; new sources in `src/components/BuiltinCommands/CMakeLists.txt` (grep's are listed there next to `commands/grep/GrepFile.cpp`; the root `CMakeLists.txt` needs nothing); portable
 C++17 (no POSIX `fnmatch`, no `<regex>`, no `<cctype>` classification); a
 recursive walk checks `StopRequested()` per entry.
 
@@ -221,6 +223,22 @@ of file filters `{ std::string pattern; bool include; }`, the
   nothing (operands filtered too); `--exclude-dir=sub TODO src/sub` ->
   nothing.
 
+### `-P -w` / `-Pxw` wrapping (`GrepMatcher.cpp`, finding of #57's review)
+
+grep-core wraps a `-P -w` pattern as `\b(?:p)\b` (the `perl` branch of
+`Compile`), then `-x` wraps again as `\A(?:...)\z`. GNU's pcresearch uses
+`(?<!\w)(?:p)(?!\w)` for `-w`, which differs for patterns starting or ending
+with a non-word byte (`printf 'a -b\n' | grep -Pw -- -b`), and with `-x` both
+wraps are applied here. `Regex` has no lookarounds (Regex CLAUDE.md, "Unsupported
+PCRE2 features") and this task does not add them: drop the `\b(?:p)\b` wrap and
+give `-P -w` the same word-constituent check around each match that the
+`-G`/`-E`/`-F` `-w` paths already use in `GrepMatcher.cpp` (the byte before the
+match and the byte after it must be a non-word byte or the line's edge; else
+retry shorter and later matches), which is what GNU's `(?<!\w)(?:p)(?!\w)` means;
+and make `-x`/`-w` combine as GNU does. The implementer first checks `printf 'a -b\n' | LC_ALL=C grep -Pw --
+-b`, `-Pxw` and a few more (`-Pw 'b-'`, `-Pw ''`) against GNU grep in the
+container if available, and matches GNU's output exactly.
+
 ### Context and `-Z` (`GrepFile.cpp`)
 
 - `GrepOneInput` drives a `GrepContext` (one per run, `BeginFile` per
@@ -280,8 +298,8 @@ sentence.
 ## Tests
 
 `tests/unit/components/BuiltinCommands.unittests/GrepTest.cpp`: replace
-`GrepReportsNotTreatedOptions`; add (fixture tree under `/g`: `src/a.c`
-(grep-core's a.c), `src/sub/b.h` = `TODO sub\n`, `src/bin.dat` =
+`GrepReportsNotTreatedOptions`; add (add a helper beside grep-core's `MakeGrepFiles` -- the flat `/g/a.c`, `b.h`, `t1`, `k`, `pat`, `empty`, `bin` -- for this tree under `/g`: `src/a.c`
+(grep-core's `kAc`), `src/sub/b.h` = `TODO sub\n`, `src/bin.dat` =
 `x\0y TODO\n`, `t1` = `TODO\n`, `.hid/h.c` = `TODO hidden\n`; run from `/g`
 with `RunCaptured`, expected verified with GNU grep 3.11):
 - `GrepRecursiveDefaultsToDot`: `-rl TODO` -> `.hid/h.c\nsrc/a.c\nsrc/bin.dat\nsrc/sub/b.h\nt1\n` (sorted; no `./`); `-rl TODO .` -> the same with `./` in front.
@@ -296,10 +314,12 @@ with `RunCaptured`, expected verified with GNU grep 3.11):
 - `GrepNullAfterNames`: `-lZ TODO src/a.c src/sub/b.h` -> `src/a.c\0src/sub/b.h\0`; `-Z -c` -> `src/a.c\0` `3\n` ...; `-Z -n TODO src/sub/b.h` (one file) -> `1:TODO sub\n`.
 - `GrepColorAlways`: every byte string of the Colour section (as `std::string` with `\x1b` and an explicit `\0` where shown).
 - `GrepColorAutoAndNever`: `RunCaptured` (not a terminal) `--color=auto` -> plain; `Run` (the console: a terminal) after `os->GetOsEnvironment()->SetVariable("TERM", "xterm")` -> coloured; with `TERM=dumb` plain; `--color=ALWAYS` coloured; `--colour=bad x t1` -> the `--help` text on stdout, 0.
+- `GrepPerlWordWrap`: `-Pw -- -b` and `-Pxw -- -b` on `a -b\n`, `-Pw 'b-'`
+  on `a b-\n`: expected output as GNU prints it (checked in the container).
 - `GrepColorEnvironment`: `GREP_COLOR=01;32` -> match `\e[01;32m\e[K...`, err `grep: warning: GREP_COLOR='01;32' is deprecated; use GREP_COLORS='mt=01;32'\n`; `GREP_COLORS=ne` and `mt=01;34` as above (pass an environment clone with the variable to `RunCaptured`).
 
 `tests/unit/components/BuiltinCommands.unittests/FnmatchTest.cpp` (new,
-listed in that CMakeLists; plain `TEST(FnmatchTest, ...)`), table-driven,
+added to the `add_executable` line of `tests/unit/components/BuiltinCommands.unittests/CMakeLists.txt`; plain `TEST(FnmatchTest, ...)`), table-driven,
 every row verified with glibc through ctypes:
 `*.c`/`a.c`/0 match; `*.c`/`dir/a.c`/0 match; same with Pathname no match;
 `*`/`.hidden`/Period no match, /0 match; `?a`/`.a`/Period no; `[.]a`/`.a`/Period no;
@@ -346,6 +366,7 @@ bash ./scripts/test_linux.sh L U
 - [ ] Colour bytes exactly as listed; `auto` needs a terminal and a usable
       `TERM`; a bad WHEN prints the help and exits 0.
 - [ ] Walk only through `context.IO()`; stops promptly when stopped.
+- [ ] `-P -w` / `-Pxw` match GNU on patterns with non-word edges.
 - [ ] Full unit suite passes; both CLAUDE.md files updated.
 
 ## Out of scope

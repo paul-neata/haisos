@@ -1,7 +1,7 @@
 # Review: coreutils--tr-tee-nl (PR #56)
 - Verdict: merged
 - Merged as: e488b55, version 0.5.14
-- Tokens: claude 195789, ollama input 241535, ollama output 197618
+- Tokens: claude 198202, ollama input 241535, ollama output 197618
 
 | Severity | Status | Where | Finding |
 |----------|--------|-------|---------|

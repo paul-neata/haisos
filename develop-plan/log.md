@@ -11,3 +11,4 @@
 - 2026-10-08 05:29 UTC -- base--regex-syntax merged #44 as 0.5.2: 0C 3H fixed, 3M 3L open, 2 tries (Windows green on CI re-run)
 - 2026-10-08 05:30 UTC -- start base--regex-match (0.5.3)
 - 2026-10-08 05:48 UTC -- user: continue without the host Windows build
+- 2026-10-08 06:30 UTC -- base--regex-match: PR #45, ready

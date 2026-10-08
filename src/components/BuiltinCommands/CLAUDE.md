@@ -1,8 +1,8 @@
 # BuiltinCommands
 
 The commands compiled into Haisos itself -- `basename`, `cat`, `chmod`, `cp`,
-`dirname`, `echo`, `env`, `false`, `hsh`, `ls`, `man`, `mkdir`, `pwd`,
-`realpath`, `rm`, `rmdir`, `sleep`, `sort`, `true`, `wc`, `which` -- and
+`dirname`, `echo`, `env`, `false`, `hsh`, `ls`, `man`, `mkdir`, `printf`, `pwd`,
+`realpath`, `rm`, `rmdir`, `seq`, `sleep`, `sort`, `true`, `wc`, `which` -- and
 what places them on filesystems. Implements `IBuiltinCommands`
 and `IBuiltinConfigurator` (`interfaces/IBuiltinCommands.h`); both are created
 through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
@@ -104,6 +104,12 @@ through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
   would not stop, and 127 with *started false when it never started --
   reporting that is the caller's business, as a shell's 127 is the
   launcher's).
+- `BuiltinPrintf.h` - the printf format engine every printf-formatted output
+  goes through: `ParsePrintfSpec` (one `%...` specification into a
+  `PrintfSpec`), `FormatPrintfSigned`/`Unsigned`/`Float`/`String` (one value
+  under it, glibc's output) and `AppendPrintfEscape` (GNU printf's backslash
+  escapes). printf and `seq -f` use it now; `find -printf` and awk's
+  `printf`/`sprintf` will reuse the same names.
 - `commands/hsh/` - `hsh`, the Haisos shell (dash reimplemented); has its own
   CLAUDE.md.
 
@@ -172,10 +178,12 @@ command and links its man page.
 | `ls` | 1.3.0 | `-a -A -B -c -C -d -f -g -G -h -k -l -m -N -o -p -r -R -s -S -t -u -U -w -x -X -1`, `--file-type --format --full-time --group-directories-first --sort --time --time-style`; off a terminal (stdout a pipe, a file, a device), one name per line unless `-C`/`-x`/`-m`/`-l` asks for a layout, and names literal with control characters written raw -- GNU's own defaults when stdout is not a terminal; `-1` after `-l` keeps the long listing | owner and group are `haisos`, permissions `rwxrwxrwx` (no users or permissions yet), so a device shows as `crwxrwxrwx`, with its major and minor numbers in the size column as GNU ls shows them; columns are padded with spaces, not tabs; the width is 80 unless `-w` says otherwise; `--sort=version/width` and `--time=birth` are reported as not treated; on Windows, a `--time-style=+FORMAT` conversion the Microsoft C runtime lacks (`%k`, `%P`, ...) prints as written, as glibc prints one it does not know |
 | `man` | 1.0.0 | `-f -k -i -I`, a section first (`man 1 ls`), several pages | pages are compiled in (each builtin's `ManPage()`, its `--help` unless overridden), all section 1, plain text, no pager; `-k` matches names and summaries only; everything else of man-db's reported as not treated |
 | `mkdir` | 1.1.0 | `-p -v` | `-m`/`--mode`, `-Z`/`--context` not treated (no permissions or security contexts) |
+| `printf` | 1.0.0 | FORMAT reused until the ARGUMENTs run out; every conversion `a A c d e E f F g G i o s u x X` with flags, widths and precisions (`*` from arguments), `%b` (escapes in the argument) and `%q` (`ShellEscapeQuoted`); `\` escapes (`\" \\ \a \b \c \e \f \n \r \t \v`, `\xHH`, octal, `\uHHHH`, `\UHHHHHHHH`); numeric arguments decimal, octal (`010`), hex (`0x1F`) or character constants (`'A`); GNU's numeric diagnostics (`expected a numeric value`, `value not completely converted`, `Numerical result out of range`) set exit 1, an invalid specification or bad escape ends the command with exit 1, excess arguments warn, `\c` ends the output with status 0; `--help`/`--version` only as the sole argument | `%q` keeps bytes >= 0x80 as they are, where GNU's shell-escape quoting writes an invalid UTF-8 byte as `$'\200'`; `\u` and `\U` always write UTF-8; `%a`/`%A` follow the platform's `long double` |
 | `pwd` | 1.1.0 | `-L -P` (the same: no symlinks) | -- |
 | `realpath` | 1.0.0 | `-e -m -L -P -q --relative-to=DIR --relative-base=DIR -s -z`; paths resolved from the working directory, `.` and `..` walked, every non-final segment an existing directory unless `-m`, the final one existing with `-e`; `--relative-to`/`--relative-base` resolved by the same rules, a path outside the base printed absolute, both dropped when `--relative-to` is outside `--relative-base` | there are no symbolic links, so `-L`, `-P` and `-s` change nothing |
 | `rm` | 1.0.0 | `-f -i -I --interactive[=WHEN] -r -R -d -v --no-preserve-root --preserve-root[=all]`; prompts on standard error, answers from standard input (end of input is no); `-I` asks once before more than three operands or a recursive removal; entries of a directory removed in name order, the last of `-f`/`-i`/`-I`/`--interactive` wins; a failed `RemoveFile` is reported as `Permission denied` | no write-protection prompts (no permissions: a builtin's path, and every write refusal, are `Permission denied`); a failed removal of an empty directory is reported as `Device or resource busy` -- no reason is known, a read-only filesystem included; entries are removed in name order, not the disk's; `--one-file-system` not treated; `--preserve-root=all` is taken as `--preserve-root` |
 | `rmdir` | 1.0.0 | `--ignore-fail-on-non-empty -p -v` | a failed removal of an empty directory is reported as `Device or resource busy` -- no reason is known, a read-only filesystem included |
+| `seq` | 1.0.0 | `-f FORMAT -s STRING -w`; LAST, FIRST LAST, FIRST INCREMENT LAST; the options split out before the operands, so a negative number (`seq -5 -1 -10`) is an operand; GNU's default format (`%.PRECf` for fixed-point decimals, padded by `-w`, `%Lg` otherwise), `-f` validated against GNU's rules, the all-digits fast path (numbers of any size, decimal-string arithmetic) and the `%.0Lf` one, the stop rule with its rounding fix; checks for a stop on every number, so an endless sequence (`seq 1 inf`) ends on `TriggerStop()` | `%a`/`%A` in `-f` follow the platform's `long double` |
 | `sleep` | 1.0.0 | NUMBER with one of the suffixes `s m h d` (or none), operands summed; `inf` sleeps until stopped | checks for a stop at least every 50 ms, so a stopped sleep ends promptly (GNU's has no such notion) |
 | `sort` | 1.1.0 | `-b -d -f -g -h -i -M -n -r -R -s -u -V -z`, `--sort=WORD`, `-k KEYDEF` (with `-t SEP`), `-c`/`-C`/`--check[=WHEN]`, `-m`, `-o FILE`, `--files0-from=F`; with no FILE, or a FILE of `-`, the standard input is read; GNU's last-resort whole-line comparison unless `-u` or `-s`; lines compared byte by byte, as GNU sort with `LC_ALL=C`; the orders of `BuiltinCompare.h`: `-n` exact at any length, `-g` by strtold, `-h` by unit then numeric, `-M` by month, `-V` by gnulib's filevercmp (`CompareVersion`, for `ls -v` to reuse) | `-R` orders by a salted hash of each key, not GNU's MD5, so its order changes from run to run as GNU's does (`--random-source` not treated); `-S`, `-T`, `--parallel` and `--batch-size` accepted and not acted on (Haisos sorts in memory); `--compress-program` and `--debug` not treated |
 | `true` | 1.0.0 | nothing; `--help`/`--version` only as the sole argument | -- |

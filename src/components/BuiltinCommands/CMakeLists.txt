@@ -5,6 +5,7 @@ add_library(BuiltinCommands STATIC
     BuiltinConfigurator.cpp
     BuiltinCopy.cpp
     BuiltinProcess.cpp
+    BuiltinPrintf.cpp
     BuiltinPrompt.cpp
     BuiltinRemove.cpp
     BuiltinRunProgram.cpp
@@ -20,10 +21,12 @@ add_library(BuiltinCommands STATIC
     commands/ls/Ls.cpp
     commands/man/Man.cpp
     commands/mkdir/Mkdir.cpp
+    commands/printf/Printf.cpp
     commands/pwd/Pwd.cpp
     commands/realpath/Realpath.cpp
     commands/rm/Rm.cpp
     commands/rmdir/Rmdir.cpp
+    commands/seq/Seq.cpp
     commands/sleep/Sleep.cpp
     commands/sort/Sort.cpp
     commands/sort/SortKeys.cpp

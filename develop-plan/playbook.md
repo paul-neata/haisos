@@ -5,7 +5,7 @@ Pause: no
 
 | # | Task | Status | Version | Depends | PR | Tries | Review | Notes |
 |---|------|--------|---------|---------|----|-------|--------|-------|
-| 1 | [base--fs-rename-times](tasks/base--fs-rename-times.md) | todo | | - | | | | |
+| 1 | [base--fs-rename-times](tasks/base--fs-rename-times.md) | in-progress | 0.5.1 | - | | | | |
 | 2 | [base--regex-syntax](tasks/base--regex-syntax.md) | todo | | - | | | | |
 | 3 | [base--regex-match](tasks/base--regex-match.md) | todo | | 2 | | | | |
 | 4 | [coreutils--sort](tasks/coreutils--sort.md) | todo | | - | | | | |

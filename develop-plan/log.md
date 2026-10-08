@@ -54,3 +54,4 @@
 - 2026-10-08 17:18 UTC -- start search--grep-recursive (0.5.16)
 - 2026-10-08 18:33 UTC -- implement session started
 - 2026-10-08 18:34 UTC -- restart search--grep-recursive (0.5.16) after an interrupted session; Windows checks ignored per Direction
+- 2026-10-08 19:18 UTC -- search--grep-recursive: PR #58, ready

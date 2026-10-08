@@ -25,7 +25,7 @@ Pause: no
 | 17 | [coreutils--head-tail](tasks/coreutils--head-tail.md) | todo | | 14, 4, 16 | | | | |
 | 18 | [coreutils--tr-tee-nl](tasks/coreutils--tr-tee-nl.md) | done | 0.5.14 | 4, 3 | #56 | 1 | 0C 3H fixed, 2M 2L open | Linux CI hung once in Build (runner); green on re-run |
 | 19 | [search--grep-core](tasks/search--grep-core.md) | done | 0.5.15 | 3, 4, 16 | #57 | 1 | 0C 3H fixed, 1M 2L open | MSVC compile errors fixed in review |
-| 20 | [search--grep-recursive](tasks/search--grep-recursive.md) | in-progress | 0.5.16 | 19 | | | | |
+| 20 | [search--grep-recursive](tasks/search--grep-recursive.md) | in-review | 0.5.16 | 19 | #58 | 1 | | Windows not checked |
 | 21 | [search--find-tests](tasks/search--find-tests.md) | todo | | 3, 20, 1, 8, 4 | | | | |
 | 22 | [search--find-actions](tasks/search--find-actions.md) | todo | | 21, 9, 11, 6, 12, 4 | | | | |
 | 23 | [search--xargs](tasks/search--xargs.md) | todo | | 22, 9, 4, 6 | | | | |

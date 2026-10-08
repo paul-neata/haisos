@@ -41,6 +41,7 @@ add_library(BuiltinCommands STATIC
     commands/sleep/Sleep.cpp
     commands/sort/Sort.cpp
     commands/sort/SortKeys.cpp
+    commands/stat/Stat.cpp
     commands/tee/Tee.cpp
     commands/test/Test.cpp
     commands/touch/Touch.cpp

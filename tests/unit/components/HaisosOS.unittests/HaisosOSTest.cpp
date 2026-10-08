@@ -560,31 +560,6 @@ TEST_F(HaisosOSTest, FileIOReadsAndWritesThroughTheWorkingDirectory) {
 
 // OpenFile hands back the open file itself and puts nothing in the process's
 // descriptor table; a number is something a caller asks for with AddDescriptor.
-TEST_F(HaisosOSTest, FileIORenamesAndSetsTimesFromTheWorkingDirectory) {
-    auto os = BuildOS();
-    auto process = std::dynamic_pointer_cast<ICurrentProcess>(
-        os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"sub", StartProcessOptions{}));
-    ASSERT_NE(process, nullptr);
-    auto io = process->IO();
-
-    auto file = io->OpenFile("a.txt", kFileOpenWriteCreateTruncate, kFileCreateMode);
-    ASSERT_NE(file, nullptr);
-    file.reset();
-
-    // Both paths are resolved against the working directory, like every other
-    // IFileIO operation.
-    EXPECT_EQ(io->Rename("a.txt", "b.txt"), 0);
-    EXPECT_TRUE(std::filesystem::exists(kTestRoot + "/sub/b.txt"));
-    EXPECT_FALSE(std::filesystem::exists(kTestRoot + "/sub/a.txt"));
-
-    EXPECT_EQ(io->SetTimes("b.txt", FileDateTime{1000000000, 0}, std::nullopt), 0);
-    FileStatus status;
-    ASSERT_EQ(io->Stat("b.txt", status), 0);
-    EXPECT_EQ(status.accessTime, (FileDateTime{1000000000, 0}));
-
-    std::filesystem::remove(kTestRoot + "/sub/b.txt");
-}
-
 TEST_F(HaisosOSTest, OpenFileHandsBackAnUnnumberedDescriptor) {
     auto os = BuildOS();
     auto process = std::dynamic_pointer_cast<ICurrentProcess>(
@@ -608,6 +583,31 @@ TEST_F(HaisosOSTest, OpenFileHandsBackAnUnnumberedDescriptor) {
     EXPECT_EQ(io->CloseDescriptor(0), 0);
 
     EXPECT_EQ(ReadHostFile(kTestRoot + "/x.txt"), "hi");
+}
+
+TEST_F(HaisosOSTest, FileIORenamesAndSetsTimesFromTheWorkingDirectory) {
+    auto os = BuildOS();
+    auto process = std::dynamic_pointer_cast<ICurrentProcess>(
+        os->StartProcess(TestEnvironment(), "script.lua", {}, /*workingDirectory=*/"sub", StartProcessOptions{}));
+    ASSERT_NE(process, nullptr);
+    auto io = process->IO();
+
+    auto file = io->OpenFile("a.txt", kFileOpenWriteCreateTruncate, kFileCreateMode);
+    ASSERT_NE(file, nullptr);
+    file.reset();
+
+    // Both paths are resolved against the working directory, like every other
+    // IFileIO operation.
+    EXPECT_EQ(io->Rename("a.txt", "b.txt"), 0);
+    EXPECT_TRUE(std::filesystem::exists(kTestRoot + "/sub/b.txt"));
+    EXPECT_FALSE(std::filesystem::exists(kTestRoot + "/sub/a.txt"));
+
+    EXPECT_EQ(io->SetTimes("b.txt", FileDateTime{1000000000, 0}, std::nullopt), 0);
+    FileStatus status;
+    ASSERT_EQ(io->Stat("b.txt", status), 0);
+    EXPECT_EQ(status.accessTime, (FileDateTime{1000000000, 0}));
+
+    std::filesystem::remove(kTestRoot + "/sub/b.txt");
 }
 
 // Every descriptor a process holds is released when its program ends, before

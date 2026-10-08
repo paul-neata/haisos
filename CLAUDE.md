@@ -28,7 +28,7 @@ haisos/
 ├── src/
 │   ├── components/        - Component implementations (each has its own CLAUDE.md)
 │   │   ├── Agent/
-│   │   ├── BuiltinCommands/ - The builtin commands ([, basename, cat, chmod, cp, cut, date, dirname, echo, egrep, env, false, fgrep, grep, hsh, ls, man, mkdir, mv, nl, printf, pwd, realpath, rm, rmdir, seq, sleep, sort, tee, test, touch, tr, true, uniq, wc, which; each in commands/<name>/) and what places them on filesystems
+│   │   ├── BuiltinCommands/ - The builtin commands ([, basename, cat, chmod, cp, cut, date, dirname, echo, egrep, env, false, fgrep, grep, hsh, ls, man, mkdir, mv, nl, printf, pwd, realpath, rm, rmdir, seq, sleep, sort, stat, tee, test, touch, tr, true, uniq, wc, which; each in commands/<name>/) and what places them on filesystems
 │   │   ├── Console/
 │   │   ├── Environment/
 │   │   ├── Factory/
@@ -538,7 +538,8 @@ returned by `IHaisosOS`'s `OSToolFactory` and merged with an agent's tools
 Commands compiled into Haisos (`[`, `basename`, `cat`, `chmod`, `cp`, `cut`,
 `date`, `dirname`, `echo`, `egrep`, `env`, `false`, `fgrep`, `grep`, `hsh`,
 `ls`, `man`, `mkdir`, `mv`, `nl`, `printf`, `pwd`, `realpath`, `rm`, `rmdir`,
-`seq`, `sleep`, `sort`, `tee`, `test`, `touch`, `tr`, `true`, `uniq`, `wc`,
+`seq`, `sleep`, `sort`, `stat`, `tee`, `test`, `touch`, `tr`, `true`, `uniq`,
+`wc`,
 `which`), implemented in
 `src/components/BuiltinCommands/`
 (see its `CLAUDE.md`). A builtin is not a file on disk: it is placed on a
@@ -621,6 +622,7 @@ use a builtin with what it already knows about the real command:
 | `seq` | Prints a sequence of numbers (`-f FORMAT -s STRING -w`), FIRST/INCREMENT/LAST, GNU's default-format and fast-path rules, negative numbers as operands |
 | `sleep` | Sleeps for the summed NUMBERs (`s m h d` suffixes; `inf` until stopped) |
 | `sort` | Sorts lines (keys `-k`/`-t`, `-b -d -f -g -h -i -M -n -r -R -s -u -V -z`, `--sort=WORD`, `-c -C --check`, `-m`, `-o`, `--files0-from`), byte order, the numeric/general/human/month/version orders, GNU's last-resort comparison |
+| `stat` | Reports file or file system status (`-L -f -c --printf -t`), GNU 9.4's format directives, each with flags, a width and a precision, `--printf` interpreting backslash escapes and adding no newline; device and inode numbers 0, permissions 0777, owner and group `haisos`, the I/O block 4096, the birth time `-`, and with `-f` fixed values (ID 0, Namelen 255, Type haisos, block sizes 4096, counts 0) |
 | `tee` | Copies standard input to standard output and files (`-a -p --output-error`) |
 | `tr` | Translates, deletes or squeezes bytes (`-c -d -s -t`, ranges, classes, `[c*n]`) |
 | `test` | Checks file types and compares values: GNU coreutils' expression (`!`, `-a`, `-o`, parentheses, string and integer comparisons, `-l STRING` its length, the file primaries, `-t FD`); no options, syntax errors exit 2 |

@@ -39,6 +39,7 @@ std::shared_ptr<IBuiltinCommand> CreateRmdirCommand();
 std::shared_ptr<IBuiltinCommand> CreateSeqCommand();
 std::shared_ptr<IBuiltinCommand> CreateSleepCommand();
 std::shared_ptr<IBuiltinCommand> CreateSortCommand();
+std::shared_ptr<IBuiltinCommand> CreateStatCommand();
 std::shared_ptr<IBuiltinCommand> CreateTeeCommand();
 std::shared_ptr<IBuiltinCommand> CreateTestCommand();
 std::shared_ptr<IBuiltinCommand> CreateTouchCommand();
@@ -81,6 +82,7 @@ inline std::vector<std::shared_ptr<IBuiltinCommand>> CreateStandardBuiltinComman
         CreateSeqCommand(),
         CreateSleepCommand(),
         CreateSortCommand(),
+        CreateStatCommand(),
         CreateTeeCommand(),
         CreateTestCommand(),
         CreateTouchCommand(),

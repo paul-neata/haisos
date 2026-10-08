@@ -62,3 +62,4 @@
 - 2026-10-08 20:24 UTC -- Ollama credits reset; coreutils--mv-touch: fix round on #59
 - 2026-10-08 20:45 UTC -- coreutils--mv-touch merged #59 as 0.5.17: 0C 5H fixed, 3M 1L open, 3 tries
 - 2026-10-08 20:47 UTC -- start coreutils--date (0.5.18)
+- 2026-10-08 21:24 UTC -- coreutils--date: PR #60, windows-failed (ignored per Direction)

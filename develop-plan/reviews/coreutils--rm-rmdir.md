@@ -1,7 +1,7 @@
 # Review: coreutils--rm-rmdir (PR #49)
 - Verdict: merged
 - Merged as: bbc8a48, version 0.5.7
-- Tokens: claude 54576, ollama input 128262, ollama output 46191
+- Tokens: claude 168262, ollama input 128262, ollama output 46191
 
 | Severity | Status | Where | Finding |
 |----------|--------|-------|---------|

@@ -20,7 +20,7 @@ Pause: no
 | 12 | [coreutils--date](tasks/coreutils--date.md) | todo | | 8, 4 | | | | |
 | 13 | [coreutils--stat](tasks/coreutils--stat.md) | todo | | 12, 11, 4 | | | | |
 | 14 | [coreutils--du-cmp](tasks/coreutils--du-cmp.md) | todo | | 12, 4 | | | | |
-| 15 | [coreutils--test-program](tasks/coreutils--test-program.md) | in-progress | 0.5.12 | 4 | | | | |
+| 15 | [coreutils--test-program](tasks/coreutils--test-program.md) | in-review | 0.5.12 | 4 | #54 | 1 | | |
 | 16 | [coreutils--uniq-cut](tasks/coreutils--uniq-cut.md) | todo | | 4 | | | | |
 | 17 | [coreutils--head-tail](tasks/coreutils--head-tail.md) | todo | | 14, 4, 16 | | | | |
 | 18 | [coreutils--tr-tee-nl](tasks/coreutils--tr-tee-nl.md) | todo | | 4, 3 | | | | |

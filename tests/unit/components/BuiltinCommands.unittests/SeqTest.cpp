@@ -149,6 +149,15 @@ TEST_F(BuiltinCommandsTest, SeqErrors) {
         "Try 'seq --help' for more information.\n");
     EXPECT_EQ(captured.status, 1);
 
+    // Out of range for strtold (GNU's xstrtold refuses an overflow): an
+    // invalid argument, never an endless sequence up to infinity.
+    captured = RunCaptured("seq", {"1e5000"});
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err,
+        "seq: invalid floating point argument: '1e5000'\n"
+        "Try 'seq --help' for more information.\n");
+    EXPECT_EQ(captured.status, 1);
+
     captured = RunCaptured("seq", {"1", "0", "3"});
     EXPECT_EQ(captured.err,
         "seq: invalid Zero increment value: '0'\n"

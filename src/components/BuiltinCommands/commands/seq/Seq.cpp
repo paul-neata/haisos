@@ -30,13 +30,17 @@ struct SeqOperand {
 };
 
 // strtold consuming the whole string (GNU's xstrtold): leading blanks are
-// fine, anything left over is not. An out-of-range value is clamped to
-// infinity or 0, as strtold reports ERANGE, and accepted.
+// fine, anything left over is not. An underflow (strtold's ERANGE with a
+// zero result) is accepted; an overflow (ERANGE with infinity) is not, so
+// `seq 1e5000` is an invalid argument, as in GNU, never an endless sequence.
 bool StrtoldAll(const std::string& text, long double& value) {
     errno = 0;
     char* end = nullptr;
     value = std::strtold(text.c_str(), &end);
-    return end != text.c_str() && *end == '\0';
+    if (end == text.c_str() || *end != '\0') {
+        return false;
+    }
+    return !(value != 0 && errno == ERANGE);
 }
 
 // GNU's scan_arg: the value of one operand, and the width and precision of

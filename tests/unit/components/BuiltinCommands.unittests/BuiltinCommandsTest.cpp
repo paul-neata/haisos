@@ -92,7 +92,7 @@ std::shared_ptr<IBuiltinCommand> FindStandardCommand(const std::string& name) {
 
 TEST_F(BuiltinCommandsTest, ListsEveryBuiltinSortedWithAVersion) {
     const auto commands = builtins->GetCommands();
-    EXPECT_EQ(commands, (Lines{"[", "basename", "cat", "chmod", "cp", "cut", "dirname", "echo",
+    EXPECT_EQ(commands, (Lines{"[", "basename", "cat", "chmod", "cp", "cut", "date", "dirname", "echo",
         "egrep", "env", "false", "fgrep", "grep", "hsh", "ls", "man", "mkdir", "mv", "nl", "printf", "pwd", "realpath", "rm",
         "rmdir", "seq", "sleep", "sort", "tee", "test", "touch", "tr", "true", "uniq", "wc", "which"}));
     for (const auto& name : commands) {
@@ -614,13 +614,24 @@ TEST_F(BuiltinCommandsTest, LsTimeStyles) {
 }
 
 // A conversion strftime does not know is printed as written, as glibc prints
-// one; on Windows, whose C runtime would end the whole program over it, ls
-// writes it out before strftime sees it. %s, a GNU extension, is the time in
-// seconds since the epoch everywhere.
+// one, everywhere -- BuiltinDate's FormatDateTime never hands one to the C
+// library. %s, a GNU extension, is the time in seconds since the epoch
+// everywhere.
 TEST_F(BuiltinCommandsTest, LsTimeStyleWithAConversionStrftimeDoesNotKnow) {
     const auto lines = Run("ls", {"-l", "--time-style=+%Q|%s|%", "/docs/a.md"});
     ASSERT_EQ(lines.size(), 1u);
     EXPECT_TRUE(std::regex_match(lines[0], std::regex("-rwxrwxrwx 1 haisos haisos 5 %Q\\|[0-9]+\\|% /docs/a\\.md")))
+        << lines[0];
+}
+
+// --time-style=+FORMAT takes GNU's flags: '-' does not pad, '_' pads with
+// spaces, so the day of month and the month come out as ls's own styles write
+// them too.
+TEST_F(BuiltinCommandsTest, LsTimeStyleTakesGnuFlags) {
+    const auto lines = Run("ls", {"-l", "--time-style=+%-d.%_m.%Y", "/docs/a.md"});
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_TRUE(std::regex_match(lines[0], std::regex(
+        "-rwxrwxrwx 1 haisos haisos 5 [1-9][0-9]?\\.[ 1][0-9]\\.[0-9]{4} /docs/a\\.md")))
         << lines[0];
 }
 
@@ -666,7 +677,7 @@ TEST_F(BuiltinCommandsTest, LsSortOrders) {
     int status = 0;
     auto lines = Run("ls", {"--sort=version", "-1", "/docs/sub"}, &status);
     EXPECT_EQ(status, 0);
-    EXPECT_EQ(lines, (Lines{"Parameter --sort=version is not treated by HaisosOS ls v. 1.3.0", "b.md"}));
+    EXPECT_EQ(lines, (Lines{"Parameter --sort=version is not treated by HaisosOS ls v. 1.3.1", "b.md"}));
 }
 
 TEST_F(BuiltinCommandsTest, LsLayouts) {

@@ -58,3 +58,4 @@
 - 2026-10-08 19:30 UTC -- search--grep-recursive merged #58 as 0.5.16: 0C 3H fixed, 2M 3L open, 1 try
 - 2026-10-08 19:31 UTC -- start coreutils--mv-touch (0.5.17)
 - 2026-10-08 19:52 UTC -- coreutils--mv-touch: PR #59, ready
+- 2026-10-08 20:00 UTC -- coreutils--mv-touch blocked: Ollama monthly usage limit (429); review 5H open; stopped

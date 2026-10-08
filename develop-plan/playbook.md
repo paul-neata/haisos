@@ -13,7 +13,7 @@ Pause: no
 | 5 | [coreutils--sort-orders](tasks/coreutils--sort-orders.md) | done | 0.5.6 | 4 | #48 | 1 | 0C 3H fixed, 1M 4L open | |
 | 6 | [coreutils--rm-rmdir](tasks/coreutils--rm-rmdir.md) | done | 0.5.7 | - | #49 | 1 | 0C 1H fixed, 1M 3L open | rm -r follows directory symlinks on PHYSICAL (see Questions) |
 | 7 | [coreutils--cp](tasks/coreutils--cp.md) | done | 0.5.8 | 1, 6 | #50 | 1 | 0C 2H fixed, 3M 4L open | 3 M fit coreutils--mv-touch |
-| 8 | [coreutils--mv-touch](tasks/coreutils--mv-touch.md) | in-review | 0.5.17 | 1, 6, 7, 53 | #59 | 2 | | fix round after Ollama limit |
+| 8 | [coreutils--mv-touch](tasks/coreutils--mv-touch.md) | done | 0.5.17 | 1, 6, 7, 53 | #59 | 3 | 0C 5H fixed, 3M 1L open | first run cut by Ollama limit; finished in a fix round; Windows not checked |
 | 9 | [coreutils--names-env](tasks/coreutils--names-env.md) | done | 0.5.9 | - | #51 | 1 | 0C 1H fixed, 2M 6L open | Windows green on CI re-run (HaisosOS.unittests flaky) |
 | 10 | [coreutils--chmod-paths](tasks/coreutils--chmod-paths.md) | done | 0.5.10 | - | #52 | 1 | 0C 0H fixed, 1M 3L open | Windows green on CI re-run (HaisosOS.unittests flaky) |
 | 11 | [coreutils--printf-seq](tasks/coreutils--printf-seq.md) | done | 0.5.11 | 4 | #53 | 1 | 0C 1H fixed, 2M 3L open | |

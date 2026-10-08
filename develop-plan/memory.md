@@ -11,3 +11,4 @@
 - When search--rg-search (or another grep-touching task) is re-checked: fold in #58's medium -- Grep.cpp:913, `if (stopped) break;` after the recursive walk so -q stops searching later operands.
 - On this host plain `grep` is ugrep; GNU grep 3.11 is /usr/bin/grep (reference for reviews).
 - A run cut short (here by Ollama's 429) still ends `ready` when the leftovers build and pass: before the review, compare the PR's file list with the plan (tests, CMake, BuiltinCommandList.h, docs).
+- When coreutils--date is re-checked: fold in #59's medium -- BuiltinDate.cpp:338, set previousWasTime only when ParseDate attached no zone (`2024-01-02T03:04Z +1 hour`).

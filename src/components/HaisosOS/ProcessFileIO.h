@@ -33,6 +33,10 @@ public:
     int CreateDirectory(const std::string& pathname, int mode) override;
     int RemoveDirectory(const std::string& pathname) override;
     int RemoveFile(const std::string& pathname) override;
+    int Rename(const std::string& oldPath, const std::string& newPath) override;
+    int SetTimes(const std::string& path,
+                 const std::optional<FileDateTime>& accessTime,
+                 const std::optional<FileDateTime>& modificationTime) override;
     std::vector<DirectoryEntry> ReadDirectory(const std::string& path) override;
     int Stat(const std::string& path, FileStatus& out) override;
     std::optional<std::string> IsBuiltinCommand(const std::string& path) override;

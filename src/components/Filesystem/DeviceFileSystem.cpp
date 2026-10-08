@@ -104,6 +104,19 @@ int DeviceFileSystem::LocalRemoveFile(const std::string& /*pathname*/) {
     return -1;
 }
 
+int DeviceFileSystem::LocalRename(const std::string& /*oldPath*/, const std::string& /*newPath*/) {
+    return kFileSystemError;
+}
+
+int DeviceFileSystem::LocalSetTimes(const std::string& path,
+                                    const std::optional<FileDateTime>& /*accessTime*/,
+                                    const std::optional<FileDateTime>& /*modificationTime*/) {
+    // A device (or the root) keeps its times: the call succeeds, changing
+    // nothing, as long as something is there to take it.
+    FileStatus status;
+    return LocalStat(path, status) == 0 ? 0 : kFileSystemError;
+}
+
 std::vector<DirectoryEntry> DeviceFileSystem::LocalReadDirectory(const std::string& path) {
     std::vector<DirectoryEntry> entries;
     if (NormalizeVirtualPath(path) != "/") {

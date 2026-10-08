@@ -50,6 +50,12 @@ void MountPoints::Unmount(const std::string& path) {
         m_mounts.end());
 }
 
+bool MountPoints::HasMountAtOrBelow(const std::string& path) const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return std::any_of(m_mounts.begin(), m_mounts.end(),
+        [&path](const Entry& entry) { return IsAtOrUnder(entry.path, path); });
+}
+
 bool MountPoints::Empty() const {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_mounts.empty();

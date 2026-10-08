@@ -43,6 +43,16 @@ int SubFileSystem::LocalRemoveFile(const std::string& pathname) {
     return m_root->RemoveFile(ResolveInRoot(pathname));
 }
 
+int SubFileSystem::LocalRename(const std::string& oldPath, const std::string& newPath) {
+    return m_root->Rename(ResolveInRoot(oldPath), ResolveInRoot(newPath));
+}
+
+int SubFileSystem::LocalSetTimes(const std::string& path,
+                                 const std::optional<FileDateTime>& accessTime,
+                                 const std::optional<FileDateTime>& modificationTime) {
+    return m_root->SetTimes(ResolveInRoot(path), accessTime, modificationTime);
+}
+
 std::vector<DirectoryEntry> SubFileSystem::LocalReadDirectory(const std::string& path) {
     return m_root->ReadDirectory(ResolveInRoot(path));
 }

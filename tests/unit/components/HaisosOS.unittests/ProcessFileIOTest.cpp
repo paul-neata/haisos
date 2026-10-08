@@ -162,3 +162,9 @@ TEST(HaisosOSDescriptorTableTest, OpenFileFailsWithoutAnOS) {
     EXPECT_EQ(io->OpenFile("/x", kFileOpenReadOnly), nullptr);
     EXPECT_EQ(io->GetDescriptor(0), nullptr);
 }
+
+TEST(HaisosOSDescriptorTableTest, RenameAndSetTimesFailWithoutAnOS) {
+    auto io = MakeIO();
+    EXPECT_EQ(io->Rename("/a", "/b"), kFileSystemError);
+    EXPECT_EQ(io->SetTimes("/a", FileDateTime{100, 0}, std::nullopt), kFileSystemError);
+}

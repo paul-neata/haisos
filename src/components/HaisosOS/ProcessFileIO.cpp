@@ -240,6 +240,18 @@ int ProcessFileIO::RemoveFile(const std::string& pathname) {
     return fs ? fs->RemoveFile(ResolvePath(pathname)) : -1;
 }
 
+int ProcessFileIO::Rename(const std::string& oldPath, const std::string& newPath) {
+    auto fs = RootFileSystem();
+    return fs ? fs->Rename(ResolvePath(oldPath), ResolvePath(newPath)) : kFileSystemError;
+}
+
+int ProcessFileIO::SetTimes(const std::string& path,
+                           const std::optional<FileDateTime>& accessTime,
+                           const std::optional<FileDateTime>& modificationTime) {
+    auto fs = RootFileSystem();
+    return fs ? fs->SetTimes(ResolvePath(path), accessTime, modificationTime) : kFileSystemError;
+}
+
 std::vector<DirectoryEntry> ProcessFileIO::ReadDirectory(const std::string& path) {
     auto fs = RootFileSystem();
     return fs ? fs->ReadDirectory(ResolvePath(path)) : std::vector<DirectoryEntry>{};

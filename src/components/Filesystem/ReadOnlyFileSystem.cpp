@@ -39,6 +39,18 @@ int ReadOnlyFileSystem::LocalRemoveFile(const std::string& /*pathname*/) {
     return -1;
 }
 
+// A read-only filesystem changes nothing: renaming and setting times are as
+// much writes as creating and removing.
+int ReadOnlyFileSystem::LocalRename(const std::string& /*oldPath*/, const std::string& /*newPath*/) {
+    return kFileSystemError;
+}
+
+int ReadOnlyFileSystem::LocalSetTimes(const std::string& /*path*/,
+                                      const std::optional<FileDateTime>& /*accessTime*/,
+                                      const std::optional<FileDateTime>& /*modificationTime*/) {
+    return kFileSystemError;
+}
+
 std::vector<DirectoryEntry> ReadOnlyFileSystem::LocalReadDirectory(const std::string& path) {
     return m_inner->ReadDirectory(NormalizeVirtualPath(path));
 }

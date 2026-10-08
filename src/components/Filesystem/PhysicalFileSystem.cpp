@@ -164,6 +164,31 @@ int PhysicalFileSystem::LocalRemoveFile(const std::string& pathname) {
     return m_inner->LocalRemoveFile(resolved);
 }
 
+int PhysicalFileSystem::LocalRename(const std::string& oldPath, const std::string& newPath) {
+    // rename(). Neither the top of the filesystem nor a drive root is renamed,
+    // nor renamed over -- the result of the inner call passes through
+    // unchanged, so a host EXDEV inside one physical directory (a host mount
+    // below it) becomes kFileSystemCrossDevice.
+    std::string oldResolved;
+    std::string newResolved;
+    if (!ResolveOnHost(oldPath, Top::Refused, oldResolved) ||
+        !ResolveOnHost(newPath, Top::Refused, newResolved)) {
+        return kFileSystemError;
+    }
+    return m_inner->LocalRename(oldResolved, newResolved);
+}
+
+int PhysicalFileSystem::LocalSetTimes(const std::string& path,
+                                     const std::optional<FileDateTime>& accessTime,
+                                     const std::optional<FileDateTime>& modificationTime) {
+    // utimensat()
+    std::string resolved;
+    if (!ResolveOnHost(path, Top::Allowed, resolved)) {
+        return kFileSystemError;
+    }
+    return m_inner->LocalSetTimes(resolved, accessTime, modificationTime);
+}
+
 std::vector<DirectoryEntry> PhysicalFileSystem::LocalReadDirectory(const std::string& path) {
     std::string resolved;
     if (!ResolveOnHost(path, Top::Allowed, resolved)) {

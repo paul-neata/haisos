@@ -138,6 +138,61 @@ int MountableFileSystem::RemoveFile(const std::string& pathname) {
     return LocalRemoveFile(pathname);
 }
 
+int MountableFileSystem::Rename(const std::string& oldPath, const std::string& newPath) {
+    const std::string absOld = AbsolutePathFor(oldPath);
+    const std::string absNew = AbsolutePathFor(newPath);
+    if (absOld == "/" || absNew == "/") {
+        return kFileSystemError;
+    }
+    // A builtin moves only by RemoveBuiltinCommand + AddBuiltinCommand, and a
+    // directory one pins cannot move either -- the same check RemoveDirectory
+    // makes, so a directory served by a mount is pinned here too.
+    if (OwnBuiltinAt(absOld) || OwnBuiltinAt(absNew) ||
+        HasOwnBuiltinAtOrUnder(absOld) || HasOwnBuiltinAtOrUnder(absNew)) {
+        return kFileSystemError;
+    }
+    // A mount point itself, or a directory with a mount inside it, stays where
+    // it is. A path strictly inside a mount is not caught by this: it is the
+    // mount's to rename (or to refuse) below.
+    if (m_mounts.HasMountAtOrBelow(absOld) || m_mounts.HasMountAtOrBelow(absNew)) {
+        return kFileSystemError;
+    }
+    auto routeOld = m_mounts.Resolve(absOld);
+    auto routeNew = m_mounts.Resolve(absNew);
+    if (routeOld.filesystem != routeNew.filesystem) {
+        // Nothing is moved. rename() reports ENOENT before EXDEV, so a missing
+        // source is an ordinary failure even across a mount.
+        FileStatus status;
+        if (Stat(oldPath, status) != 0) {
+            return kFileSystemError;
+        }
+        return kFileSystemCrossDevice;
+    }
+    if (routeOld.filesystem) {
+        // The result passes through unchanged: a nested mount inside the one
+        // resolved here may answer kFileSystemCrossDevice itself.
+        return routeOld.filesystem->Rename(routeOld.innerPath, routeNew.innerPath);
+    }
+    return LocalRename(oldPath, newPath);
+}
+
+int MountableFileSystem::SetTimes(const std::string& path,
+                                  const std::optional<FileDateTime>& accessTime,
+                                  const std::optional<FileDateTime>& modificationTime) {
+    const std::string absolute = AbsolutePathFor(path);
+    // A builtin's times are those of its placing.
+    if (OwnBuiltinAt(absolute)) {
+        return kFileSystemError;
+    }
+    auto route = m_mounts.Resolve(absolute);
+    if (route.filesystem) {
+        return route.filesystem->SetTimes(route.innerPath, accessTime, modificationTime);
+    }
+    // A directory that exists only as the way down to a mount fails here: its
+    // LocalSetTimes finds nothing underneath to set the times of.
+    return LocalSetTimes(path, accessTime, modificationTime);
+}
+
 std::vector<DirectoryEntry> MountableFileSystem::ReadDirectory(const std::string& path) {
     const std::string absolute = AbsolutePathFor(path);
     std::vector<DirectoryEntry> entries;

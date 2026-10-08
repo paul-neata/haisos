@@ -68,3 +68,4 @@
 - 2026-10-08 23:00 UTC -- coreutils--stat: PR #61, windows-failed (ignored per Direction)
 - 2026-10-08 23:14 UTC -- coreutils--stat merged #61 as 0.5.19: 0C 1H fixed, 3M 2L open, 1 try
 - 2026-10-08 23:15 UTC -- start coreutils--du-cmp (0.5.20)
+- 2026-10-08 23:56 UTC -- coreutils--du-cmp: PR #62, windows-failed (ignored per Direction)

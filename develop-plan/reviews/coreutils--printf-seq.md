@@ -1,7 +1,7 @@
 # Review: coreutils--printf-seq (PR #53)
 - Verdict: merged
 - Merged as: 69f7695, version 0.5.11
-- Tokens: claude 193274, ollama input 270978, ollama output 142877
+- Tokens: claude 196341, ollama input 270978, ollama output 142877
 
 | Severity | Status | Where | Finding |
 |----------|--------|-------|---------|

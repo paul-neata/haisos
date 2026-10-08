@@ -7,3 +7,4 @@
 - 2026-10-08 03:52 UTC -- start base--regex-syntax (0.5.2)
 - 2026-10-08 04:03 UTC -- stopped: base--regex-syntax run killed, host critically low on memory
 - 2026-10-08 04:28 UTC -- resume base--regex-syntax (0.5.2), host memory OK
+- 2026-10-08 05:07 UTC -- base--regex-syntax: PR #44, windows-failed

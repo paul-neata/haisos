@@ -303,6 +303,9 @@ std::string BuiltinHelpText(const IBuiltinCommand& command) {
     std::vector<const BuiltinOption*> treated;
     std::vector<const BuiltinOption*> notTreated;
     for (const auto& option : command.Options()) {
+        if (option.hidden) {
+            continue;  // an obsolete spelling: parsed, never documented
+        }
         (option.id == kBuiltinNotTreated ? notTreated : treated).push_back(&option);
     }
     for (const auto& option : CommonOptions()) {

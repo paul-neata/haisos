@@ -34,6 +34,9 @@ struct BuiltinOption {
     BuiltinArgument argument = BuiltinArgument::None;
     std::string argumentName; // shown in --help: "COLS" gives "-w, --width=COLS"
     std::string description;  // a few words, for --help; treated options only
+    // An obsolete spelling the real command accepts but does not document
+    // (uniq's -N): parsed like any other option, never shown in --help.
+    bool hidden = false;
 };
 
 struct ParsedBuiltinOption {

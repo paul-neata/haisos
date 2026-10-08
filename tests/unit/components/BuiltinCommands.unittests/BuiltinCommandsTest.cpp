@@ -92,9 +92,9 @@ std::shared_ptr<IBuiltinCommand> FindStandardCommand(const std::string& name) {
 
 TEST_F(BuiltinCommandsTest, ListsEveryBuiltinSortedWithAVersion) {
     const auto commands = builtins->GetCommands();
-    EXPECT_EQ(commands, (Lines{"[", "basename", "cat", "chmod", "cp", "dirname", "echo", "env",
-        "false", "hsh", "ls", "man", "mkdir", "printf", "pwd", "realpath", "rm", "rmdir", "seq",
-        "sleep", "sort", "test", "true", "wc", "which"}));
+    EXPECT_EQ(commands, (Lines{"[", "basename", "cat", "chmod", "cp", "cut", "dirname", "echo",
+        "env", "false", "hsh", "ls", "man", "mkdir", "printf", "pwd", "realpath", "rm", "rmdir",
+        "seq", "sleep", "sort", "test", "true", "uniq", "wc", "which"}));
     for (const auto& name : commands) {
         EXPECT_FALSE(builtins->GetBuiltinVersion(name).empty()) << name;
     }
@@ -152,6 +152,9 @@ TEST_F(BuiltinCommandsTest, EveryBuiltinsHelpHasTheSameShape) {
         ASSERT_EQ(last.rfind("Not treated arguments: ", 0), 0u) << name << ": " << last;
         bool anyNotTreated = false;
         for (const auto& option : command->Options()) {
+            if (option.hidden) {
+                continue;  // an obsolete spelling: parsed, never documented
+            }
             const std::string spelling = option.longName.empty()
                 ? std::string("-") + option.shortName : "--" + option.longName;
             if (option.id == kBuiltinNotTreated) {

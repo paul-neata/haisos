@@ -1,7 +1,7 @@
 # Review: base--rename-fix (PR #46)
 - Verdict: merged
 - Merged as: d7213ae, version 0.5.4
-- Tokens: claude 56431, ollama input 54918, ollama output 19168
+- Tokens: claude 136966, ollama input 54918, ollama output 19168
 
 | Severity | Status | Where | Finding |
 |----------|--------|-------|---------|

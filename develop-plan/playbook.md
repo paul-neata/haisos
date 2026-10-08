@@ -14,7 +14,7 @@ Pause: no
 | 6 | [coreutils--rm-rmdir](tasks/coreutils--rm-rmdir.md) | done | 0.5.7 | - | #49 | 1 | 0C 1H fixed, 1M 3L open | rm -r follows directory symlinks on PHYSICAL (see Questions) |
 | 7 | [coreutils--cp](tasks/coreutils--cp.md) | done | 0.5.8 | 1, 6 | #50 | 1 | 0C 2H fixed, 3M 4L open | 3 M fit coreutils--mv-touch |
 | 8 | [coreutils--mv-touch](tasks/coreutils--mv-touch.md) | todo | | 1, 6, 7, 53 | | | | |
-| 9 | [coreutils--names-env](tasks/coreutils--names-env.md) | todo | | - | | | | |
+| 9 | [coreutils--names-env](tasks/coreutils--names-env.md) | in-progress | 0.5.9 | - | | | | |
 | 10 | [coreutils--chmod-paths](tasks/coreutils--chmod-paths.md) | todo | | - | | | | |
 | 11 | [coreutils--printf-seq](tasks/coreutils--printf-seq.md) | todo | | 4 | | | | |
 | 12 | [coreutils--date](tasks/coreutils--date.md) | todo | | 8, 4 | | | | |
@@ -73,3 +73,4 @@ Pause: no
 - 2026-10-08 08:31 (implement) coreutils--rm-rmdir refreshed against 74a3f56: names the shared BuiltinText helpers (ArgMatch for --interactive/--preserve-root values), list ordering after pwd and before sort
 - 2026-10-08 09:02 (implement) coreutils--cp refreshed against 57ade71: reuse RemoveOperand/RemoveFile (BuiltinRemove) and ArgMatch/GnuQuote (BuiltinText), full paths for FilesystemUtils.h and the list files
 - 2026-10-08 09:43 (implement) coreutils--names-env (row 9) runs before coreutils--mv-touch (row 8): row 8 waits for the answer to the rm -r symlink Question
+- 2026-10-08 09:44 (implement) coreutils--names-env refreshed against b7b1ee6: BuiltinCommands CMake, current builtin list and order, reuse of WriteFully/GnuQuote

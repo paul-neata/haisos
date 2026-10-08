@@ -3,7 +3,7 @@
 - Rock: coreutils
 - Depends on: none
 - Size: ~900 changed lines in ~12 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ b7b1ee6
 - PR title: Add env, which, sleep, true and false builtins
 
 The task as first listed (with chmod, basename, dirname, realpath) came to
@@ -192,7 +192,9 @@ Steps:
    one, workingDirectory = DIR); not started -> `env: q(COMMAND): Permission
    denied`, 126; otherwise exit with the child's code.
 
-`q(x)` is `ShellEscapeQuoted(x, /*always=*/true)`.
+`q(x)` is `ShellEscapeQuoted(x, /*always=*/true)` (as rm/rmdir do); `GnuQuote`
+of `BuiltinText.h` is the same quoting in the C locale and may be used instead.
+Write with `WriteFully` (`BuiltinText.h`) where a raw descriptor is written.
 
 `-S` splitting (GNU's rules, the subset): words separated by spaces/tabs;
 `'...'` literal; `"..."` with backslash escapes inside; outside single
@@ -274,15 +276,20 @@ are ignored. `true` exits 0; `false` exits **1** -- after `--help` and
 ### Registration and build
 
 `BuiltinCommandList.h`: declare and register the five factories
-(alphabetical). `CMakeLists.txt`: `BuiltinRunProgram.cpp`,
-`commands/env/Env.cpp`, `commands/false/False.cpp`,
+(alphabetical; the list now is cat, cp, echo, hsh, ls, man, mkdir, pwd, rm,
+rmdir, sort, wc -- `env` goes after `echo`, `false` after `env`, `sleep`
+after `rmdir`... i.e. sorted: cat cp echo env false hsh ls man mkdir pwd rm
+rmdir sleep sort true wc which). `src/components/BuiltinCommands/CMakeLists.txt`
+(not the root one): add `BuiltinRunProgram.cpp` beside the other `Builtin*.cpp`,
+and `commands/env/Env.cpp`, `commands/false/False.cpp`,
 `commands/sleep/Sleep.cpp`, `commands/true/True.cpp`,
 `commands/which/Which.cpp`.
 
 ## Tests
 
 New files in `tests/unit/components/BuiltinCommands.unittests/`, added to its
-`CMakeLists.txt`: `EnvTest.cpp`, `WhichSleepTrueFalseTest.cpp`. All
+`CMakeLists.txt`: `EnvTest.cpp`, `WhichSleepTrueFalseTest.cpp` (beside the existing CpTest,
+RmTest, SortTest, WcTest, BuiltinTextTest, ManTest). All
 `TEST_F(BuiltinCommandsTest, ...)` on `RunCaptured`, exact stdout, stderr and
 status. Environments: `auto env = factory->CreateEnvironment();
 env->SetVariable("PATH", "/bin");` passed as `RunCaptured`'s last argument.
@@ -330,6 +337,7 @@ env->SetVariable("PATH", "/bin");` passed as `RunCaptured`'s last argument.
   `false --help` -> the help text, status 1; `true --help x` -> nothing, 0.
 
 Update `BuiltinCommandsTest.cpp`: `ListsEveryBuiltinSortedWithAVersion` --
+the expected list is now `cat cp echo hsh ls man mkdir pwd rm rmdir sort wc`;
 add `"env"`, `"false"`, `"sleep"`, `"true"`, `"which"` in sorted position;
 `EveryBuiltinsHelpHasTheSameShape` and `EveryBuiltinHasAVersion` expect
 status 0 for every builtin -- make them expect 1 for `false` (GNU's), 0 for
@@ -355,7 +363,10 @@ the `kDefaultPath` change.)
   `SearchPathEntries`, `RunProgramAndWait`: how a builtin runs another
   program -- only through `ICurrentProcess::OS()`, flushing its stdout
   first) and the `stopAtFirstOperand` parse mode.
-- Root `CLAUDE.md`: rows for the five commands; the command lists.
+- Root `CLAUDE.md`: rows for the five commands; the command lists (the
+  directory-structure comment, the Builtin Commands paragraph and table).
+  `BuiltinRunProgram.h` goes in the BuiltinCommands CLAUDE.md beside
+  `BuiltinText.h`/`BuiltinRemove.h`/`BuiltinCopy.h`.
 
 ## Acceptance
 

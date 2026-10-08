@@ -119,8 +119,8 @@ TEST_F(BuiltinCommandsTest, GrepInitialTab) {
     // t1 is 5 bytes: no padding at all, but the tab after the name.
     EXPECT_EQ(RunCaptured("grep", {"-T", "-H", "TODO", "t1"}, "", "/g").out, "t1:\tTODO\n");
     // A descriptor has no size, so the standard input always pads to 19.
-    const Captured stdin = RunCaptured("grep", {"-Tn", "TODO"}, "TODO\n");
-    EXPECT_EQ(stdin.out, std::string(18, ' ') + "1:\tTODO\n");
+    const Captured piped = RunCaptured("grep", {"-Tn", "TODO"}, "TODO\n");
+    EXPECT_EQ(piped.out, std::string(18, ' ') + "1:\tTODO\n");
 }
 
 TEST_F(BuiltinCommandsTest, GrepStdinAndLabel) {

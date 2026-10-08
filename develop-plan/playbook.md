@@ -10,7 +10,7 @@ Pause: no
 | 3 | [base--regex-match](tasks/base--regex-match.md) | done | 0.5.3 | 2 | #45 | 1 | 1C 4H fixed, 3M 3L open | per-thread capture slots grow threads x groups: cap before grep/sed take user patterns |
 | 53 | [base--rename-fix](tasks/base--rename-fix.md) | done | 0.5.4 | 1 | #46 | 1 | 0C 0H fixed, 0M 1L open | review #43 follow-up; before 8 |
 | 4 | [coreutils--sort](tasks/coreutils--sort.md) | done | 0.5.5 | - | #47 | 1 | 0C 3H fixed, 1M 4L open | -d/-i precedence (M) left for coreutils--sort-orders |
-| 5 | [coreutils--sort-orders](tasks/coreutils--sort-orders.md) | in-review | 0.5.6 | 4 | #48 | 1 | | |
+| 5 | [coreutils--sort-orders](tasks/coreutils--sort-orders.md) | done | 0.5.6 | 4 | #48 | 1 | 0C 3H fixed, 1M 4L open | |
 | 6 | [coreutils--rm-rmdir](tasks/coreutils--rm-rmdir.md) | todo | | - | | | | |
 | 7 | [coreutils--cp](tasks/coreutils--cp.md) | todo | | 1, 6 | | | | |
 | 8 | [coreutils--mv-touch](tasks/coreutils--mv-touch.md) | todo | | 1, 6, 7, 53 | | | | |

@@ -7,10 +7,15 @@
 
 namespace Haisos {
 
-// The date and time parsers the time-taking builtins share (contract 4,
-// shared with the `date` builtin, which adds FormatDateTime here later).
-// Both work on bytes and the host's time zone only, as GNU's do in the C
-// locale.
+// The date and time parsers and the formatter the time-taking builtins share
+// (contract 4, shared with the `date` and `ls` builtins). All work on bytes,
+// as GNU's do in the C locale.
+
+// strftime as GNU date has it (gnulib nstrftime in the C locale): |t| in the
+// host's local zone, or in UTC when |utc|. What a conversion cannot print it
+// writes out as it stands, and so does a conversion it does not know
+// (`%5J` is `  %5J`), as GNU's does. Never fails.
+std::string FormatDateTime(std::string_view format, FileDateTime t, bool utc);
 
 // GNU date -d / touch -d, this subset: items separated by whitespace, in any
 // order -- a date (YYYY-MM-DD, a `T`-joined time allowed), a time of day
@@ -21,18 +26,32 @@ namespace Haisos {
 // day is always a zone, never a relative number, as GNU's rule has it. Empty
 // |text| (or only spaces) is midnight today, as GNU's `date -d ''` prints it.
 // |now| is what relative items and "now" start from (touch -r passes the
-// reference file's time instead). False if |text| is not understood.
-bool ParseDateString(std::string_view text, FileDateTime now, FileDateTime& out);
+// reference file's time instead). Everything zone-relative is taken in the
+// host's local zone, or in UTC when |utc| (date -u; a zone given in |text|
+// wins either way). False if |text| is not understood.
+bool ParseDateString(std::string_view text, FileDateTime now, bool utc, FileDateTime& out);
 
-// touch -t [[CC]YY]MMDDhhmm[.ss], in local time: 8 digits MMDDhhmm (the year
-// from |now|), 10 YYMMDDhhmm (YY 69-99 is 19YY, 00-68 20YY), 12
-// CCYYMMDDhhmm; the day is checked against the month. False on anything
-// else.
-bool ParseTouchStamp(std::string_view text, FileDateTime now, FileDateTime& out);
+// touch -t [[CC]YY]MMDDhhmm[.ss], in the host's local zone, or in UTC when
+// |utc| (date's set-time operand): 8 digits MMDDhhmm (the year from |now|),
+// 10 YYMMDDhhmm (YY 69-99 is 19YY, 00-68 20YY), 12 CCYYMMDDhhmm; the day is
+// checked against the month. False on anything else.
+bool ParseTouchStamp(std::string_view text, FileDateTime now, bool utc, FileDateTime& out);
+
+// The zone-relative forms, in the host's local zone.
+inline bool ParseDateString(std::string_view text, FileDateTime now, FileDateTime& out) {
+    return ParseDateString(text, now, false, out);
+}
+inline bool ParseTouchStamp(std::string_view text, FileDateTime now, FileDateTime& out) {
+    return ParseTouchStamp(text, now, false, out);
+}
 
 // The calendar date and time of |seconds| in the host's time zone (what
-// Ls.cpp's LocalTime is; a copy for the date and stat builtins).
+// Ls.cpp's LocalTime was; a copy for the date and stat builtins).
 std::tm LocalTimeOf(int64_t seconds);
+
+// LocalTimeOf's counterpart: the date and time of |seconds| in UTC (gmtime,
+// which Windows too has, unlike timegm).
+std::tm UtcTimeOf(int64_t seconds);
 
 // std::mktime on a copy of |local| with tm_isdst = -1 (fields may be out of
 // range: mktime normalizes them, so Jan 31 + 1 month is Mar 2 or 3).

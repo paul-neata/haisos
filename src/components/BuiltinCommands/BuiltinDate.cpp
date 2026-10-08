@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cerrno>
 #include <cstdlib>
+#include <string>
 #include <vector>
 #include "src/components/libheaders/CrtInvalidParameterAsError.h"
 
@@ -336,7 +337,10 @@ bool ParseDateItems(const std::vector<std::string>& tokens, DateItems& items) {
                 if (!ParseDate(raw, items, withTime) || (withTime && hadTime)) {
                     return false;
                 }
-                previousWasTime = withTime;
+                // A zone attached to the time (2024-01-02T03:04Z) closes it:
+                // a signed number after it is a relative item again, not a
+                // second zone. The time alone leaves it open for one.
+                previousWasTime = withTime && !items.hasZone;
                 ++i;
                 continue;
             }
@@ -551,7 +555,7 @@ std::vector<std::string> SplitItems(std::string_view text) {
 
 } // namespace
 
-bool ParseDateString(std::string_view text, FileDateTime now, FileDateTime& out) {
+bool ParseDateString(std::string_view text, FileDateTime now, bool utc, FileDateTime& out) {
     const std::vector<std::string> tokens = SplitItems(text);
 
     // `@` seconds stand alone: any other item with them is not understood.
@@ -563,11 +567,15 @@ bool ParseDateString(std::string_view text, FileDateTime now, FileDateTime& out)
 
     // An empty string is midnight today, as GNU's `date -d ''` prints it.
     if (tokens.empty()) {
-        std::tm local = LocalTimeOf(now.seconds);
-        local.tm_hour = 0;
-        local.tm_min = 0;
-        local.tm_sec = 0;
-        const auto seconds = SecondsFromLocalTime(local);
+        std::tm broken = utc ? UtcTimeOf(now.seconds) : LocalTimeOf(now.seconds);
+        broken.tm_hour = 0;
+        broken.tm_min = 0;
+        broken.tm_sec = 0;
+        const auto seconds = utc
+            ? std::optional<int64_t>(SecondsFromUtc(static_cast<int64_t>(broken.tm_year) + 1900,
+                                                   static_cast<int64_t>(broken.tm_mon) + 1,
+                                                   broken.tm_mday, 0, 0, 0))
+            : SecondsFromLocalTime(broken);
         if (!seconds) {
             return false;
         }
@@ -580,10 +588,10 @@ bool ParseDateString(std::string_view text, FileDateTime now, FileDateTime& out)
         return false;
     }
 
-    // The calendar fields start at |now|'s local date and time; a date
-    // replaces the date and resets the time, a time of day the time (and the
-    // nanoseconds).
-    std::tm local = LocalTimeOf(now.seconds);
+    // The calendar fields start at |now|'s date and time (in the zone being
+    // worked in); a date replaces the date and resets the time, a time of day
+    // the time (and the nanoseconds).
+    std::tm local = utc ? UtcTimeOf(now.seconds) : LocalTimeOf(now.seconds);
     uint32_t nanoseconds = now.nanoseconds;
     if (items.hasDate) {
         local.tm_year = static_cast<int>(items.year - 1900);
@@ -607,10 +615,13 @@ bool ParseDateString(std::string_view text, FileDateTime now, FileDateTime& out)
     local.tm_mday += static_cast<int>(items.relDays);
 
     int64_t seconds = 0;
-    if (items.hasZone) {
+    if (items.hasZone || utc) {
+        // A zone given in |text| wins over -u's: both are UTC civil times,
+        // only the offset differs.
+        const int64_t offset = items.hasZone ? items.zoneOffsetSeconds : 0;
         seconds = SecondsFromUtc(static_cast<int64_t>(local.tm_year) + 1900,
                                  static_cast<int64_t>(local.tm_mon) + 1, local.tm_mday,
-                                 local.tm_hour, local.tm_min, local.tm_sec) - items.zoneOffsetSeconds;
+                                 local.tm_hour, local.tm_min, local.tm_sec) - offset;
     } else {
         const auto localSeconds = SecondsFromLocalTime(local);
         if (!localSeconds) {
@@ -622,7 +633,7 @@ bool ParseDateString(std::string_view text, FileDateTime now, FileDateTime& out)
     return true;
 }
 
-bool ParseTouchStamp(std::string_view text, FileDateTime now, FileDateTime& out) {
+bool ParseTouchStamp(std::string_view text, FileDateTime now, bool utc, FileDateTime& out) {
     std::string_view main = text, fraction;
     const size_t dot = text.find('.');
     if (dot != std::string_view::npos) {
@@ -654,7 +665,8 @@ bool ParseTouchStamp(std::string_view text, FileDateTime now, FileDateTime& out)
         year = yy >= 69 ? 1900 + yy : 2000 + yy;
         at = 2;
     } else {
-        year = static_cast<int64_t>(LocalTimeOf(now.seconds).tm_year) + 1900;
+        const std::tm nowBroken = utc ? UtcTimeOf(now.seconds) : LocalTimeOf(now.seconds);
+        year = static_cast<int64_t>(nowBroken.tm_year) + 1900;
     }
     int64_t month = 0, day = 0, hour = 0, minute = 0, second = 0;
     if (!DigitsTo(main.substr(at, 2), month) || !DigitsTo(main.substr(at + 2, 2), day) ||
@@ -676,7 +688,9 @@ bool ParseTouchStamp(std::string_view text, FileDateTime now, FileDateTime& out)
     local.tm_hour = static_cast<int>(hour);
     local.tm_min = static_cast<int>(minute);
     local.tm_sec = static_cast<int>(second);
-    const auto seconds = SecondsFromLocalTime(local);
+    const auto seconds = utc
+        ? std::optional<int64_t>(SecondsFromUtc(year, month, day, hour, minute, second))
+        : SecondsFromLocalTime(local);
     if (!seconds) {
         return false;
     }
@@ -698,6 +712,18 @@ std::tm LocalTimeOf(int64_t seconds) {
     localtime_r(&asTimeT, &local);
 #endif
     return local;
+}
+
+std::tm UtcTimeOf(int64_t seconds) {
+    const std::time_t asTimeT = static_cast<std::time_t>(seconds);
+    std::tm utc{};
+#ifdef _WIN32
+    CrtInvalidParameterAsError crtErrors;
+    gmtime_s(&utc, &asTimeT);
+#else
+    gmtime_r(&asTimeT, &utc);
+#endif
+    return utc;
 }
 
 std::optional<int64_t> SecondsFromLocalTime(const std::tm& local) {
@@ -729,6 +755,459 @@ int64_t SecondsFromUtc(int64_t year, int64_t month, int64_t day,
     const int64_t days = era * 146097 + dayOfEra - 719468 + day - 1;
     return days * 86400 + static_cast<int64_t>(hour) * 3600 +
            static_cast<int64_t>(minute) * 60 + second;
+}
+
+namespace {
+
+// --- strftime, as GNU date has it (gnulib nstrftime in the C locale) ---
+
+const char* const kShortWeekdays[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+const char* const kLongWeekdays[] = {"Sunday", "Monday", "Tuesday", "Wednesday",
+                                     "Thursday", "Friday", "Saturday"};
+const char* const kShortMonths[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+const char* const kLongMonths[] = {"January", "February", "March", "April", "May",
+                                   "June", "July", "August", "September", "October",
+                                   "November", "December"};
+
+// The flags a conversion may carry, from the characters between its '%' and
+// its conversion character. '_' and '0' set the padding together: the last
+// one given wins.
+struct ConversionFlags {
+    char pad = 0;         // '_' spaces, '0' zeros, 0 the conversion's own
+    bool noPad = false;   // '-': nothing padded at all
+    bool upper = false;   // '^': upper case
+    bool swap = false;    // '#': am/pm and the zone name lower case, the other names upper
+};
+
+// What the conversions read: the broken-down time in the zone being worked
+// in, the point itself (%s), its nanoseconds (%N) and its zone offset (%z).
+struct FormatTime {
+    std::tm broken;
+    int64_t seconds = 0;
+    uint32_t nanoseconds = 0;
+    int64_t zoneOffset = 0;
+    bool utc = false;
+};
+
+std::string UpperAscii(std::string text) {
+    for (char& c : text) {
+        if (c >= 'a' && c <= 'z') {
+            c = static_cast<char>(c - 'a' + 'A');
+        }
+    }
+    return text;
+}
+
+std::string LowerAscii(std::string text) {
+    for (char& c : text) {
+        if (c >= 'A' && c <= 'Z') {
+            c = static_cast<char>(c - 'A' + 'a');
+        }
+    }
+    return text;
+}
+
+// A number, padded on the left to at least max(|defaultWidth|, |width|)
+// characters, with |flags.pad| where it says one and |pad| otherwise; '-'
+// leaves it as it is. '_' pads with spaces, '0' with zeros.
+std::string PadNumber(std::string digits, const ConversionFlags& flags,
+                      size_t width, size_t defaultWidth, char pad) {
+    if (flags.noPad) {
+        return digits;
+    }
+    const char padding = flags.pad == '_' ? ' ' : flags.pad == '0' ? '0' : pad;
+    const size_t target = std::max(defaultWidth, width);
+    if (digits.size() < target) {
+        digits.insert(0, target - digits.size(), padding);
+    }
+    return digits;
+}
+
+std::string FormatNumber(int64_t value, const ConversionFlags& flags,
+                         size_t width, size_t defaultWidth, char pad) {
+    return PadNumber(std::to_string(value), flags, width, defaultWidth, pad);
+}
+
+// A signed number (%s, %z): padding zeros go between the sign and the digits
+// ('-000000100'), padding spaces before the sign ('      -100').
+std::string PadSignedNumber(const std::string& sign, std::string digits,
+                            const ConversionFlags& flags, size_t width,
+                            size_t defaultWidth, char pad) {
+    if (flags.noPad) {
+        return sign + digits;
+    }
+    const char padding = flags.pad == '_' ? ' ' : flags.pad == '0' ? '0' : pad;
+    const size_t target = std::max(defaultWidth, width);
+    const size_t have = sign.size() + digits.size();
+    if (padding == '0') {
+        if (have < target) {
+            digits.insert(0, target - have, '0');
+        }
+        return sign + digits;
+    }
+    return have < target ? std::string(target - have, padding) + sign + digits
+                         : sign + digits;
+}
+
+// A name, a fixed text or a composite's whole result: padded on the left to
+// |width| (spaces, or zeros with '0'), never when '-'.
+std::string PadText(std::string text, const ConversionFlags& flags, size_t width) {
+    if (flags.noPad || width == 0 || text.size() >= width) {
+        return text;
+    }
+    text.insert(0, width - text.size(), flags.pad == '0' ? '0' : ' ');
+    return text;
+}
+
+// '^' upper-cases a name; '#' swaps it, per conversion: the am/pm names and
+// the zone name come out lower case, the day and month names upper case.
+std::string SwapCase(std::string text, const ConversionFlags& flags, bool swapLowers) {
+    if (flags.upper) {
+        return UpperAscii(std::move(text));
+    }
+    if (flags.swap) {
+        return swapLowers ? LowerAscii(std::move(text)) : UpperAscii(std::move(text));
+    }
+    return text;
+}
+
+std::string TwoDigitsOf(int64_t value) {
+    char digits[2] = {static_cast<char>('0' + value / 10),
+                      static_cast<char>('0' + value % 10)};
+    return std::string(digits, 2);
+}
+
+// The ISO week and its year, %G %g %V: a week belongs to the year of its
+// Thursday, and is that Thursday's number from the year's first week -- its
+// day of the year divided by 7, plus one.
+struct IsoWeek {
+    int year;
+    int week;
+};
+
+IsoWeek IsoWeekOf(const FormatTime& t) {
+    const std::tm& tm = t.broken;
+    const int isoWday = tm.tm_wday == 0 ? 7 : tm.tm_wday;  // Monday 1 .. Sunday 7
+    const int64_t thursday = SecondsFromUtc(static_cast<int64_t>(tm.tm_year) + 1900,
+                                            static_cast<int64_t>(tm.tm_mon) + 1,
+                                            tm.tm_mday, 0, 0, 0) + (4 - isoWday) * 86400;
+    const std::tm iso = UtcTimeOf(thursday);
+    return IsoWeek{iso.tm_year + 1900, iso.tm_yday / 7 + 1};
+}
+
+// The zone name %Z prints: "UTC" when working in UTC, the C library's
+// abbreviation of the local time otherwise (on Windows the long name -- a
+// documented exception, as it was in ls's own code).
+std::string ZoneNameOf(const FormatTime& t) {
+    if (t.utc) {
+        return "UTC";
+    }
+    std::tm local = t.broken;
+    char buffer[64];
+#ifdef _WIN32
+    CrtInvalidParameterAsError crtErrors;
+#endif
+    const size_t written = std::strftime(buffer, sizeof(buffer), "%Z", &local);
+    return std::string(buffer, written);
+}
+
+// %N: the nanoseconds as GNU prints them -- 9 digits by default, |width|
+// under 9 takes only its first digits, over 9 pads behind the 9 (zeros,
+// spaces with '_'), never padded at all with '-'.
+std::string FormatNanoseconds(uint32_t nanoseconds, const ConversionFlags& flags, size_t width) {
+    const std::string digits = PadNumber(std::to_string(nanoseconds), {}, 0, 9, '0');
+    if (flags.noPad || width == 0) {
+        return digits;
+    }
+    if (width < 9) {
+        return digits.substr(0, width);
+    }
+    return digits + std::string(width - 9, flags.pad == '_' ? ' ' : '0');
+}
+
+// One format's text, |format| applied to |t|. The composites (%c and friends)
+// come back here with their own expansions, whose own padding stands: the
+// flags and the width of the whole conversion never reach the parts (GNU's
+// %-c keeps the " 1" of an unpadded %e, and the width pads the result).
+void AppendFormatted(std::string& out, std::string_view format, const FormatTime& t) {
+    size_t i = 0;
+    while (i < format.size()) {
+        if (format[i] != '%') {
+            out += format[i++];
+            continue;
+        }
+        const size_t start = i++;
+
+        // Flags, a width, an E/O locale modifier (parsed and ignored: no
+        // locale but the C one is ever loaded), and up to three ':'s, which
+        // only %z uses.
+        ConversionFlags flags;
+        while (i < format.size()) {
+            if (format[i] == '_') {
+                flags.pad = '_';
+            } else if (format[i] == '-') {
+                flags.noPad = true;
+            } else if (format[i] == '0') {
+                flags.pad = '0';
+            } else if (format[i] == '^') {
+                flags.upper = true;
+            } else if (format[i] == '#') {
+                flags.swap = true;
+            } else {
+                break;
+            }
+            ++i;
+        }
+        size_t width = 0;
+        while (i < format.size() && format[i] >= '0' && format[i] <= '9') {
+            width = width * 10 + static_cast<size_t>(format[i] - '0');
+            ++i;
+        }
+        const bool barePercent = i == start + 1;  // nothing between the two '%'s
+        if (i < format.size() && (format[i] == 'E' || format[i] == 'O')) {
+            ++i;
+        }
+        size_t colons = 0;
+        while (i < format.size() && colons < 3 && format[i] == ':') {
+            ++colons;
+            ++i;
+        }
+
+        // What is left is a conversion character -- or the format ran out, or
+        // another '%' stands where the conversion should be. Both are written
+        // out as they stand, as GNU's does: a bad conversion is copied from
+        // its '%' through its last understood character, padded to |width|.
+        // A '%' taken for the conversion character is left out of the copy and
+        // read again -- it may start the real conversion ('%3%N' is ' %3' and
+        // the nanoseconds).
+        const auto writeAsItStands = [&](size_t end, bool excludeLast) {
+            out += PadText(std::string(format.substr(
+                               start, end - start - (excludeLast ? 1 : 0))),
+                           flags, width);
+        };
+        if (i >= format.size()) {
+            writeAsItStands(format.size(), false);  // a trailing '%' or '%5'
+            continue;
+        }
+        if (format[i] == '%') {
+            if (barePercent) {
+                out += '%';
+                ++i;
+            } else {
+                writeAsItStands(i, true);
+            }
+            continue;
+        }
+
+        // ':'s make sense to %z alone; in front of anything else the
+        // conversion is not one, and written out as it stands.
+        if (colons != 0 && format[i] != 'z') {
+            writeAsItStands(i + 1, false);
+            ++i;
+            continue;
+        }
+
+        const char c = format[i];
+        const std::tm& tm = t.broken;
+        const int year = tm.tm_year + 1900;
+        switch (c) {
+            // The day of the week.
+            case 'a':
+            case 'A': {
+                const int wday = tm.tm_wday < 0 || tm.tm_wday > 6 ? 0 : tm.tm_wday;
+                out += PadText(SwapCase(c == 'a' ? kShortWeekdays[wday]
+                                                 : kLongWeekdays[wday],
+                                        flags, false), flags, width);
+                ++i;
+                break;
+            }
+            // The month.
+            case 'b':
+            case 'h':
+            case 'B': {
+                const int mon = tm.tm_mon < 0 || tm.tm_mon > 11 ? 0 : tm.tm_mon;
+                out += PadText(SwapCase(c == 'B' ? kLongMonths[mon] : kShortMonths[mon],
+                                        flags, false), flags, width);
+                ++i;
+                break;
+            }
+            // AM/PM, and its lower-case form %P.
+            case 'p':
+            case 'P': {
+                std::string text = tm.tm_hour < 12 ? "AM" : "PM";
+                if (c == 'P') {
+                    text = LowerAscii(text);
+                    if (flags.upper || flags.swap) {
+                        text = UpperAscii(text);
+                    }
+                    out += PadText(std::move(text), flags, width);
+                } else {
+                    out += PadText(SwapCase(std::move(text), flags, true), flags, width);
+                }
+                ++i;
+                break;
+            }
+            case 'n':
+                out += PadText("\n", flags, width);
+                ++i;
+                break;
+            case 't':
+                out += PadText("\t", flags, width);
+                ++i;
+                break;
+            // The zone name.
+            case 'Z': {
+                std::string text = ZoneNameOf(t);
+                if (flags.upper) {
+                    text = UpperAscii(text);
+                } else if (flags.swap) {
+                    text = LowerAscii(text);
+                }
+                out += PadText(std::move(text), flags, width);
+                ++i;
+                break;
+            }
+            // The composites, each a format of their own.
+            case 'c':
+            case 'D':
+            case 'x':
+            case 'F':
+            case 'r':
+            case 'R':
+            case 'T':
+            case 'X': {
+                const char* expansion = "%H:%M:%S";  // T and X
+                if (c == 'c') {
+                    expansion = "%a %b %e %H:%M:%S %Y";
+                } else if (c == 'D' || c == 'x') {
+                    expansion = "%m/%d/%y";
+                } else if (c == 'F') {
+                    expansion = "%Y-%m-%d";
+                } else if (c == 'r') {
+                    expansion = "%I:%M:%S %p";
+                } else if (c == 'R') {
+                    expansion = "%H:%M";
+                }
+                std::string text;
+                AppendFormatted(text, expansion, t);
+                // '^' upper-cases the whole result; '#' changes nothing here.
+                out += PadText(flags.upper ? UpperAscii(std::move(text)) : std::move(text),
+                               flags, width);
+                ++i;
+                break;
+            }
+            // The numbers. The default padding is the digit '0' for most,
+            // a space for %e %k %l.
+            case 'd': out += FormatNumber(tm.tm_mday, flags, width, 2, '0'); ++i; break;
+            case 'e': out += FormatNumber(tm.tm_mday, flags, width, 2, ' '); ++i; break;
+            case 'H': out += FormatNumber(tm.tm_hour, flags, width, 2, '0'); ++i; break;
+            case 'k': out += FormatNumber(tm.tm_hour, flags, width, 2, ' '); ++i; break;
+            case 'I':
+            case 'l': {
+                const int hour12 = tm.tm_hour % 12 == 0 ? 12 : tm.tm_hour % 12;
+                out += FormatNumber(hour12, flags, width, 2, c == 'I' ? '0' : ' ');
+                ++i;
+                break;
+            }
+            case 'm': out += FormatNumber(tm.tm_mon + 1, flags, width, 2, '0'); ++i; break;
+            case 'M': out += FormatNumber(tm.tm_min, flags, width, 2, '0'); ++i; break;
+            case 'S': out += FormatNumber(tm.tm_sec, flags, width, 2, '0'); ++i; break;
+            case 'j': out += FormatNumber(tm.tm_yday + 1, flags, width, 3, '0'); ++i; break;
+            case 'y': out += FormatNumber(((year % 100) + 100) % 100, flags, width, 2, '0'); ++i; break;
+            case 'C': out += FormatNumber(year / 100, flags, width, 2, '0'); ++i; break;
+            case 'Y': out += FormatNumber(year, flags, width, 4, '0'); ++i; break;
+            case 'u': out += FormatNumber(tm.tm_wday == 0 ? 7 : tm.tm_wday, flags, width, 1, '0'); ++i; break;
+            case 'w': out += FormatNumber(tm.tm_wday, flags, width, 1, '0'); ++i; break;
+            case 'q': out += FormatNumber(tm.tm_mon / 3 + 1, flags, width, 1, '0'); ++i; break;
+            // The week numbers.
+            case 'U': out += FormatNumber((tm.tm_yday + 7 - tm.tm_wday) / 7, flags, width, 2, '0'); ++i; break;
+            case 'W': out += FormatNumber((tm.tm_yday + 7 - (tm.tm_wday + 6) % 7) / 7, flags, width, 2, '0'); ++i; break;
+            case 'G':
+            case 'g':
+            case 'V': {
+                const IsoWeek iso = IsoWeekOf(t);
+                if (c == 'G') {
+                    out += FormatNumber(iso.year, flags, width, 4, '0');
+                } else if (c == 'g') {
+                    out += FormatNumber(((iso.year % 100) + 100) % 100, flags, width, 2, '0');
+                } else {
+                    out += FormatNumber(iso.week, flags, width, 2, '0');
+                }
+                ++i;
+                break;
+            }
+            // The seconds since the epoch, a signed number.
+            case 's': {
+                std::string digits = std::to_string(t.seconds);
+                std::string sign;
+                if (!digits.empty() && digits[0] == '-') {
+                    sign = "-";
+                    digits.erase(0, 1);
+                }
+                out += PadSignedNumber(sign, digits, flags, width, 1, '0');
+                ++i;
+                break;
+            }
+            case 'N':
+                out += FormatNanoseconds(t.nanoseconds, flags, width);
+                ++i;
+                break;
+            // The zone offset, +hhmm or (with ':'s) +hh:mm[:ss]. %:::z keeps
+            // only the parts the offset needs.
+            case 'z': {
+                const std::string sign(1, t.zoneOffset < 0 ? '-' : '+');
+                const int64_t magnitude = t.zoneOffset < 0 ? -t.zoneOffset : t.zoneOffset;
+                const int64_t minutes = magnitude / 60;
+                const int64_t minutesOfHour = minutes % 60;
+                const int64_t secondsOfMinute = magnitude % 60;
+                if (colons == 0) {
+                    out += PadSignedNumber(sign,
+                                            std::to_string(minutes / 60 * 100 + minutesOfHour),
+                                            flags, width, 5, '0');
+                    ++i;
+                    break;
+                }
+                std::string inner = PadNumber(std::to_string(minutes / 60), flags, 0, 2, '0');
+                if (colons == 3 && minutesOfHour == 0 && secondsOfMinute == 0) {
+                    // %:::z of a whole-hour (or UTC) offset: the hours alone.
+                } else {
+                    inner += ":" + TwoDigitsOf(minutesOfHour);
+                    if (colons == 2 || (colons == 3 && secondsOfMinute != 0)) {
+                        inner += ":" + TwoDigitsOf(secondsOfMinute);
+                    }
+                }
+                out += PadSignedNumber(sign, inner, flags, width, inner.size() + 1, '0');
+                ++i;
+                break;
+            }
+            // A conversion the C locale does not have: written out as it
+            // stands, as everything above already decided for worse cases.
+            default:
+                writeAsItStands(i + 1, false);
+                ++i;
+                break;
+        }
+    }
+}
+
+} // namespace
+
+std::string FormatDateTime(std::string_view format, FileDateTime t, bool utc) {
+    FormatTime parts;
+    parts.broken = utc ? UtcTimeOf(t.seconds) : LocalTimeOf(t.seconds);
+    parts.seconds = t.seconds;
+    parts.nanoseconds = t.nanoseconds;
+    parts.utc = utc;
+    // The offset %z prints: whatever the civil time says, minus the point
+    // itself -- right even where a std::tm does not carry its zone.
+    parts.zoneOffset = SecondsFromUtc(static_cast<int64_t>(parts.broken.tm_year) + 1900,
+                                      static_cast<int64_t>(parts.broken.tm_mon) + 1,
+                                      parts.broken.tm_mday, parts.broken.tm_hour,
+                                      parts.broken.tm_min, parts.broken.tm_sec) - t.seconds;
+    std::string out;
+    AppendFormatted(out, format, parts);
+    return out;
 }
 
 } // namespace Haisos

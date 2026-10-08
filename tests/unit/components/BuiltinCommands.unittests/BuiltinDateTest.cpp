@@ -105,6 +105,49 @@ TEST(BuiltinCommandsDateTest, LocalDatesAndRelativeItems) {
     EXPECT_EQ(out, (FileDateTime{*nowSeconds + 300, now.nanoseconds}));
 }
 
+TEST(BuiltinCommandsDateTest, UtcParsingOverload) {
+    // The four-argument forms, date -u's: what has no zone of its own is
+    // taken in UTC; a zone given in the string wins over -u, as over the
+    // local zone.
+    const FileDateTime now{1700000000, 123};
+    FileDateTime out;
+    ASSERT_TRUE(ParseDateString("2020-01-01", now, true, out));
+    EXPECT_EQ(out, (FileDateTime{1577836800, 0}));
+
+    ASSERT_TRUE(ParseDateString("2020-01-01 12:30", now, true, out));
+    EXPECT_EQ(out, (FileDateTime{1577881800, 0}));
+
+    // Relative items count from |now| in UTC -- whole days, with no summer
+    // time in UTC to fold them.
+    ASSERT_TRUE(ParseDateString("tomorrow", now, true, out));
+    EXPECT_EQ(out, (FileDateTime{now.seconds + 86400, now.nanoseconds}));
+
+    ASSERT_TRUE(ParseDateString("2024-01-02T03:04Z", now, true, out));
+    EXPECT_EQ(out, (FileDateTime{1704164640, 0}));
+
+    ASSERT_TRUE(ParseTouchStamp("202001010203.04", now, true, out));
+    EXPECT_EQ(out, (FileDateTime{SecondsFromUtc(2020, 1, 1, 2, 3, 4), 0}));
+}
+
+TEST(BuiltinCommandsDateTest, ZoneAttachedToATTimeDoesNotBlockRelativeItems) {
+    // A zone attached to a `T`-joined time (2024-01-02T03:04Z) closes it: a
+    // signed number behind it is a relative item again, not a second zone
+    // (the fix of #59's parser).
+    const FileDateTime now{1700000000, 0};
+    FileDateTime out;
+    ASSERT_TRUE(ParseDateString("2024-01-02T03:04Z +1 hour", now, out));
+    EXPECT_EQ(out, (FileDateTime{1704168240, 0}));  // 04:04 UTC
+
+    // A zone written behind the time is still the zone, GNU's rule.
+    ASSERT_TRUE(ParseDateString("2024-01-02T03:04 +01:00", now, out));
+    EXPECT_EQ(out, (FileDateTime{1704161040, 0}));  // 03:04 at +01:00
+
+    // Without a zone attached, the time stays open for one: +1 is the zone,
+    // and the bare "hour" behind it a relative item.
+    ASSERT_TRUE(ParseDateString("2024-01-02T03:04 +1 hour", now, out));
+    EXPECT_EQ(out, (FileDateTime{1704164640, 0}));  // 03:04 UTC
+}
+
 TEST(BuiltinCommandsDateTest, RejectsWhatItDoesNotKnow) {
     const FileDateTime now{1700000000, 0};
     FileDateTime out;

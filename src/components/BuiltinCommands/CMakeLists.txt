@@ -18,6 +18,7 @@ add_library(BuiltinCommands STATIC
     commands/chmod/Chmod.cpp
     commands/cp/Cp.cpp
     commands/cut/Cut.cpp
+    commands/date/Date.cpp
     commands/dirname/Dirname.cpp
     commands/echo/Echo.cpp
     commands/env/Env.cpp

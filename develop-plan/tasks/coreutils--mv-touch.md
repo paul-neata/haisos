@@ -1,7 +1,7 @@
 # Task coreutils--mv-touch: the mv and touch builtins and the shared date parser
 
 - Rock: coreutils
-- Depends on: base--fs-rename-times, coreutils--rm-rmdir, coreutils--cp
+- Depends on: base--fs-rename-times, base--rename-fix, coreutils--rm-rmdir, coreutils--cp
 - Size: ~1000 changed lines in ~10 files (at the upper edge; see Out of scope for the fallback split)
 - Plan checked against: develop @ ccb9dbe
 - PR title: Add the mv and touch builtins and the date parser

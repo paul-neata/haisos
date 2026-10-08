@@ -10,7 +10,7 @@ portable C++17 without `<regex>`: GNU BRE and ERE with GNU's extensions,
 leftmost-longest, and a Perl subset, leftmost-first -- shared by grep, sed,
 find, awk, rg and jq.
 Touches: `interfaces/`, Filesystem, HaisosOS (`ProcessFileIO`), test mocks, new Regex component.
-Tasks: base--fs-rename-times, base--regex-syntax, base--regex-match
+Tasks: base--fs-rename-times, base--regex-syntax, base--regex-match, base--rename-fix
 
 ## coreutils -- File commands, small utilities, text filters
 The everyday commands: `cp mv rm rmdir touch chmod`; `basename dirname

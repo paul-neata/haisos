@@ -8,11 +8,12 @@ Pause: no
 | 1 | [base--fs-rename-times](tasks/base--fs-rename-times.md) | done | 0.5.1 | - | #43 | 2 | 0C 0H fixed, 1M 2L open | |
 | 2 | [base--regex-syntax](tasks/base--regex-syntax.md) | in-progress | 0.5.2 | - | | | | first run killed: host low on memory |
 | 3 | [base--regex-match](tasks/base--regex-match.md) | todo | | 2 | | | | |
+| 53 | [base--rename-fix](tasks/base--rename-fix.md) | todo | | 1 | | | | review #43 follow-up; before 8 |
 | 4 | [coreutils--sort](tasks/coreutils--sort.md) | todo | | - | | | | |
 | 5 | [coreutils--sort-orders](tasks/coreutils--sort-orders.md) | todo | | 4 | | | | |
 | 6 | [coreutils--rm-rmdir](tasks/coreutils--rm-rmdir.md) | todo | | - | | | | |
 | 7 | [coreutils--cp](tasks/coreutils--cp.md) | todo | | 1, 6 | | | | |
-| 8 | [coreutils--mv-touch](tasks/coreutils--mv-touch.md) | todo | | 1, 6, 7 | | | | |
+| 8 | [coreutils--mv-touch](tasks/coreutils--mv-touch.md) | todo | | 1, 6, 7, 53 | | | | |
 | 9 | [coreutils--names-env](tasks/coreutils--names-env.md) | todo | | - | | | | |
 | 10 | [coreutils--chmod-paths](tasks/coreutils--chmod-paths.md) | todo | | - | | | | |
 | 11 | [coreutils--printf-seq](tasks/coreutils--printf-seq.md) | todo | | 4 | | | | |
@@ -61,6 +62,6 @@ Pause: no
 ## Directions
 
 ## Questions
-- (implement, 2026-10-08) base--fs-rename-times review (#43): the Windows rename emulation removes an empty target directory before MoveFileExW and loses it if the move fails (e.g. `/d` -> `/d/sub`). The reviewer suggests a follow-up task before coreutils--mv-touch (row 8) relies on it: refuse a new path under the old one before removing the target, and recreate it if MoveFileExW fails. Add such a task (depends on 1, before 8)?
+- (implement, 2026-10-08) base--fs-rename-times review (#43): the Windows rename emulation removes an empty target directory before MoveFileExW and loses it if the move fails (e.g. `/d` -> `/d/sub`). The reviewer suggests a follow-up task before coreutils--mv-touch (row 8) relies on it: refuse a new path under the old one before removing the target, and recreate it if MoveFileExW fails. Add such a task (depends on 1, before 8)? -> answered: yes -- added base--rename-fix (#53, after row 3, depends on 1; row 8 now depends on 53). It also takes the review's two low findings (ToFileTime overflow, the misplaced HaisosOSTest comment).
 
 ## Adjustments

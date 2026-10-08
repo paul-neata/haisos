@@ -33,6 +33,22 @@ void MakeGrepFiles(const std::shared_ptr<IFileSystem>& fs) {
     WriteTo(fs, "/g/bin", std::string("x\0y TODO\n", 9));
 }
 
+// /g with the plan's recursive-search tree, on its own (beside MakeGrepFiles'
+// flat files): src/a.c (kAc), src/sub/b.h, src/bin.dat (binary), t1 and a
+// hidden .hid/h.c -- so a walk of /g lists them in byte order:
+// .hid/h.c, src/a.c, src/bin.dat, src/sub/b.h, t1.
+void MakeGrepTree(const std::shared_ptr<IFileSystem>& fs) {
+    ASSERT_EQ(fs->CreateDirectory("/g", kDirMode), 0);
+    ASSERT_EQ(fs->CreateDirectory("/g/.hid", kDirMode), 0);
+    ASSERT_EQ(fs->CreateDirectory("/g/src", kDirMode), 0);
+    ASSERT_EQ(fs->CreateDirectory("/g/src/sub", kDirMode), 0);
+    WriteTo(fs, "/g/.hid/h.c", "TODO hidden\n");
+    WriteTo(fs, "/g/src/a.c", kAc);
+    WriteTo(fs, "/g/src/bin.dat", std::string("x\0y TODO\n", 9));
+    WriteTo(fs, "/g/src/sub/b.h", "TODO sub\n");
+    WriteTo(fs, "/g/t1", "TODO\n");
+}
+
 } // namespace
 
 // --- grep: matching and output ---
@@ -335,14 +351,318 @@ TEST_F(BuiltinCommandsTest, GrepAddsMissingNewline) {
     EXPECT_EQ(captured.status, 0);
 }
 
-TEST_F(BuiltinCommandsTest, GrepReportsNotTreatedOptions) {
-    MakeGrepFiles(root);
-    // -r arrives with search--grep-recursive; until then it is reported and
-    // the rest of the command works.
-    const Captured captured = RunCaptured("grep", {"-r", "TODO", "/g/t1"});
-    EXPECT_EQ(captured.err, "Parameter -r is not treated by HaisosOS grep v. 1.0.0\n");
-    EXPECT_EQ(captured.out, "TODO\n");
+TEST_F(BuiltinCommandsTest, GrepRecursiveOptionsAreTreated) {
+    MakeGrepTree(root);
+    // -r and friends were reported not treated before search--grep-recursive;
+    // now they are treated, and nothing reports them.
+    const Captured captured = RunCaptured("grep",
+        {"-r", "-n", "-m1", "--color=never", "--include=a*", "TODO", "src"}, "", "/g");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.out, "src/a.c:2:two TODO\n");
     EXPECT_EQ(captured.status, 0);
+}
+
+// --- grep: recursion, filters, context, colour, -Z ---
+
+TEST_F(BuiltinCommandsTest, GrepRecursiveDefaultsToDot) {
+    MakeGrepTree(root);
+    // No operand with -r: . is searched, its names printed without the ./.
+    const Captured captured = RunCaptured("grep", {"-rl", "TODO"}, "", "/g");
+    EXPECT_EQ(captured.out, ".hid/h.c\nsrc/a.c\nsrc/bin.dat\nsrc/sub/b.h\nt1\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+    // An explicit . keeps the ./.
+    const Captured dot = RunCaptured("grep", {"-rl", "TODO", "."}, "", "/g");
+    EXPECT_EQ(dot.out, "./.hid/h.c\n./src/a.c\n./src/bin.dat\n./src/sub/b.h\n./t1\n");
+    EXPECT_EQ(dot.status, 0);
+}
+
+TEST_F(BuiltinCommandsTest, GrepRecursivePrefixes) {
+    MakeGrepTree(root);
+    // A child's name: the operand with any run of trailing / cut to one.
+    EXPECT_EQ(RunCaptured("grep", {"-rl", "TODO sub", "src//"}, "", "/g").out, "src/sub/b.h\n");
+    EXPECT_EQ(RunCaptured("grep", {"-rl", "TODO sub", ".//src"}, "", "/g").out, ".//src/sub/b.h\n");
+    // A single operand that is a file prints no name.
+    EXPECT_EQ(RunCaptured("grep", {"-r", "ten", "src/a.c"}, "", "/g").out, "ten TODO\n");
+    EXPECT_EQ(RunCaptured("grep", {"-rh", "TODO sub", "src"}, "", "/g").out, "TODO sub\n");
+}
+
+TEST_F(BuiltinCommandsTest, GrepRecursiveLineNumbers) {
+    MakeGrepTree(root);
+    const Captured captured = RunCaptured("grep", {"-rn", "TODO", "src"}, "", "/g");
+    EXPECT_EQ(captured.out,
+        "src/a.c:2:two TODO\n"
+        "src/a.c:5:five TODO\n"
+        "src/a.c:10:ten TODO\n"
+        "src/sub/b.h:1:TODO sub\n");
+    // The binary file says so between a.c's and b.h's lines.
+    EXPECT_EQ(captured.err, "grep: src/bin.dat: binary file matches\n");
+    EXPECT_EQ(captured.status, 0);
+}
+
+TEST_F(BuiltinCommandsTest, GrepIncludeExclude) {
+    MakeGrepTree(root);
+    // Only files whose base name matches the --include.
+    const Captured include = RunCaptured("grep", {"-rl", "--include=*.c", "TODO", "src"}, "", "/g");
+    EXPECT_EQ(include.out, "src/a.c\n");
+    EXPECT_EQ(include.status, 0);
+    // The list is walked from the last given to the first, the first match
+    // deciding; none matching keeps the first given's side.
+    const Captured excludeInclude =
+        RunCaptured("grep", {"-rl", "--exclude=a*", "--include=*.h", "TODO", "src"}, "", "/g");
+    EXPECT_EQ(excludeInclude.out, "src/bin.dat\nsrc/sub/b.h\n");
+    EXPECT_EQ(excludeInclude.status, 0);
+    const Captured includeExclude =
+        RunCaptured("grep", {"-rl", "--include=*.h", "--exclude=b*", "TODO", "src"}, "", "/g");
+    EXPECT_EQ(includeExclude.out, "");
+    EXPECT_EQ(includeExclude.status, 1);
+    // Operands are filtered too, unanchored.
+    const Captured operands =
+        RunCaptured("grep", {"-l", "--include=*.h", "TODO", "src/a.c", "t1"}, "", "/g");
+    EXPECT_EQ(operands.out, "");
+    EXPECT_EQ(operands.status, 1);
+    // --exclude-dir applies to an operand directory too.
+    const Captured dir =
+        RunCaptured("grep", {"-rl", "--exclude-dir=sub", "TODO", "src/sub"}, "", "/g");
+    EXPECT_EQ(dir.out, "");
+    EXPECT_EQ(dir.status, 1);
+}
+
+TEST_F(BuiltinCommandsTest, GrepExcludeFrom) {
+    MakeGrepTree(root);
+    WriteTo(root, "/g/f", "a*\n*.dat\n");
+    const Captured captured = RunCaptured("grep", {"-rl", "--exclude-from=f", "TODO", "src"}, "", "/g");
+    EXPECT_EQ(captured.out, "src/sub/b.h\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+    // A missing file is trouble, not an empty list.
+    const Captured missing = RunCaptured("grep", {"--exclude-from=nosuch", "TODO", "t1"}, "", "/g");
+    EXPECT_EQ(missing.err, "grep: nosuch: No such file or directory\n");
+    EXPECT_EQ(missing.status, 2);
+}
+
+TEST_F(BuiltinCommandsTest, GrepDirectoriesOption) {
+    MakeGrepTree(root);
+    const Captured skip = RunCaptured("grep", {"-d", "skip", "TODO", "src"}, "", "/g");
+    EXPECT_EQ(skip.out, "");
+    EXPECT_EQ(skip.status, 1);
+    EXPECT_EQ(RunCaptured("grep", {"-d", "recurse", "-l", "TODO sub", "src"}, "", "/g").out,
+        "src/sub/b.h\n");
+    const std::string valid =
+        "Valid arguments are:\n"
+        "  - 'read'\n"
+        "  - 'recurse'\n"
+        "  - 'skip'\n"
+        "Usage: grep [OPTION]... PATTERNS [FILE]...\n"
+        "Try 'grep --help' for more information.\n";
+    const Captured invalid = RunCaptured("grep", {"-d", "foo", "x", "t1"}, "", "/g");
+    EXPECT_EQ(invalid.err, "grep: invalid argument 'foo' for '--directories'\n" + valid);
+    EXPECT_EQ(invalid.status, 1);
+    const Captured ambiguous = RunCaptured("grep", {"-d", "r", "x", "t1"}, "", "/g");
+    EXPECT_EQ(ambiguous.err, "grep: ambiguous argument 'r' for '--directories'\n" + valid);
+    EXPECT_EQ(ambiguous.status, 1);
+    const Captured devices = RunCaptured("grep", {"-D", "foo", "x", "t1"}, "", "/g");
+    EXPECT_EQ(devices.err, "grep: unknown devices method\n");
+    EXPECT_EQ(devices.status, 2);
+}
+
+TEST_F(BuiltinCommandsTest, GrepDevicesSkippedWhileRecursing) {
+    MakeGrepTree(root);
+    ASSERT_EQ(root->CreateDirectory("/g/dev", kDirMode), 0);
+    root->Mount("/g/dev",
+        factory->CreateServicesCreator()->CreateFileSystemService()->CreateDeviceFileSystem());
+    // Devices met while recursing are skipped, zero's endless bytes never read.
+    const Captured walk = RunCaptured("grep", {"-rl", "x", "dev"}, "", "/g");
+    EXPECT_EQ(walk.out, "");
+    EXPECT_EQ(walk.status, 1);
+    // A device operand is read (GNU's -D default).
+    const Captured operand = RunCaptured("grep", {"-c", "x", "dev/null"}, "", "/g");
+    EXPECT_EQ(operand.out, "0\n");
+    EXPECT_EQ(operand.status, 1);
+    const Captured skipped = RunCaptured("grep", {"-D", "skip", "-c", "x", "dev/null"}, "", "/g");
+    EXPECT_EQ(skipped.out, "");
+    EXPECT_EQ(skipped.status, 1);
+}
+
+TEST_F(BuiltinCommandsTest, GrepContextLines) {
+    MakeGrepTree(root);
+    EXPECT_EQ(RunCaptured("grep", {"-n", "-B1", "-A1", "two\\|five", "src/a.c"}, "", "/g").out,
+        "1-one\n2:two TODO\n3-three\n4-four\n5:five TODO\n6-six\n");
+    EXPECT_EQ(RunCaptured("grep", {"-2", "-n", "five", "src/a.c"}, "", "/g").out,
+        "3-three\n4-four\n5:five TODO\n6-six\n7-seven\n");
+    // -A0: context asked for, so the separators between the groups stay.
+    EXPECT_EQ(RunCaptured("grep", {"-A0", "TODO", "src/a.c"}, "", "/g").out,
+        "two TODO\n--\nfive TODO\n--\nten TODO\n");
+    EXPECT_EQ(RunCaptured("grep", {"-n", "-A1", "--group-separator=XX", "two\\|ten", "src/a.c"}, "", "/g").out,
+        "2:two TODO\n3-three\nXX\n10:ten TODO\n");
+    EXPECT_EQ(RunCaptured("grep", {"-n", "-A1", "--no-group-separator", "two\\|ten", "src/a.c"}, "", "/g").out,
+        "2:two TODO\n3-three\n10:ten TODO\n");
+    // A separator also goes between groups of different files.
+    EXPECT_EQ(RunCaptured("grep", {"-n", "-C1", "TODO", "src/a.c", "src/sub/b.h"}, "", "/g").out,
+        "src/a.c-1-one\nsrc/a.c:2:two TODO\nsrc/a.c-3-three\nsrc/a.c-4-four\n"
+        "src/a.c:5:five TODO\nsrc/a.c-6-six\n"
+        "--\n"
+        "src/a.c-9-nine\nsrc/a.c:10:ten TODO\n"
+        "--\n"
+        "src/sub/b.h:1:TODO sub\n");
+    const Captured invalid = RunCaptured("grep", {"-A", "x", "y", "t1"}, "", "/g");
+    EXPECT_EQ(invalid.err, "grep: x: invalid context length argument\n");
+    EXPECT_EQ(invalid.status, 2);
+}
+
+TEST_F(BuiltinCommandsTest, GrepContextWithMaxCountAndOnly) {
+    MakeGrepTree(root);
+    // -m1: the trailing context is still read, a matching line in it printed
+    // as a match but restarting nothing.
+    EXPECT_EQ(RunCaptured("grep", {"-n", "-m1", "-A4", "TODO", "src/a.c"}, "", "/g").out,
+        "2:two TODO\n3-three\n4-four\n5:five TODO\n6-six\n");
+    // -o prints no context lines, but the separators stay.
+    EXPECT_EQ(RunCaptured("grep", {"-o", "-n", "-A1", "TODO", "src/a.c"}, "", "/g").out,
+        "2:TODO\n--\n5:TODO\n--\n10:TODO\n");
+    // -c has no context at all.
+    EXPECT_EQ(RunCaptured("grep", {"-C1", "-c", "TODO", "src/a.c"}, "", "/g").out, "3\n");
+}
+
+TEST_F(BuiltinCommandsTest, GrepNullAfterNames) {
+    MakeGrepTree(root);
+    const Captured list = RunCaptured("grep", {"-lZ", "TODO", "src/a.c", "src/sub/b.h"}, "", "/g");
+    EXPECT_EQ(list.out, std::string("src/a.c") + '\0' + "src/sub/b.h" + '\0');
+    EXPECT_EQ(list.status, 0);
+    const Captured count = RunCaptured("grep", {"-Z", "-c", "TODO", "src/a.c", "src/sub/b.h"}, "", "/g");
+    EXPECT_EQ(count.out, std::string("src/a.c") + '\0' + "3\n" + "src/sub/b.h" + '\0' + "1\n");
+    // One file: no name, so no NUL either.
+    EXPECT_EQ(RunCaptured("grep", {"-Z", "-n", "TODO", "src/sub/b.h"}, "", "/g").out,
+        "1:TODO sub\n");
+}
+
+TEST_F(BuiltinCommandsTest, GrepColorAlways) {
+    MakeGrepFiles(root);
+    const std::string esc = "\x1b";
+    // One coloured piece: ESC [ V m ESC [ K, the text, ESC [ m ESC [ K.
+    const auto piece = [&esc](const std::string& value, const std::string& text) {
+        return esc + "[" + value + "m" + esc + "[K" + text + esc + "[m" + esc + "[K";
+    };
+    const std::string match = piece("01;31", "TODO");
+    // -n with two files: the name (fn), the separators (se), the line number
+    // (ln), the match (ms); the line itself adds nothing (sl: the default).
+    EXPECT_EQ(RunCaptured("grep", {"--color=always", "-n", "TODO", "a.c", "b.h"}, "", "/g").out,
+        piece("35", "a.c") + piece("36", ":") + piece("32", "2") + piece("36", ":") + "two " + match + "\n"
+        + piece("35", "a.c") + piece("36", ":") + piece("32", "5") + piece("36", ":") + "five " + match + "\n"
+        + piece("35", "a.c") + piece("36", ":") + piece("32", "10") + piece("36", ":") + "ten " + match + "\n"
+        + piece("35", "b.h") + piece("36", ":") + piece("32", "1") + piece("36", ":") + match + " sub\n");
+    // A context line: '-' separators, the line in cx (nothing by default).
+    // The pattern is "five", so that is the highlighted match.
+    EXPECT_EQ(RunCaptured("grep", {"--color=always", "-n", "-H", "-C1", "five", "a.c"}, "", "/g").out,
+        piece("35", "a.c") + piece("36", "-") + piece("32", "4") + piece("36", "-") + "four\n"
+        + piece("35", "a.c") + piece("36", ":") + piece("32", "5") + piece("36", ":") + piece("01;31", "five") + " TODO\n"
+        + piece("35", "a.c") + piece("36", "-") + piece("32", "6") + piece("36", "-") + "six\n");
+    // -c and -l colour the name (and -c's separator); with one operand the
+    // name needs -H to be shown at all.
+    EXPECT_EQ(RunCaptured("grep", {"--color=always", "-c", "-H", "TODO", "a.c"}, "", "/g").out,
+        piece("35", "a.c") + piece("36", ":") + "3\n");
+    EXPECT_EQ(RunCaptured("grep", {"--color=always", "-l", "-H", "TODO", "a.c"}, "", "/g").out,
+        piece("35", "a.c") + "\n");
+    // -o: the byte offset (bn), the separator, the match in ms.
+    EXPECT_EQ(RunCaptured("grep", {"--color=always", "-o", "-b", "TODO", "a.c"}, "", "/g").out,
+        piece("32", "8") + piece("36", ":") + match + "\n"
+        + piece("32", "29") + piece("36", ":") + match + "\n"
+        + piece("32", "59") + piece("36", ":") + match + "\n");
+    // -v: the selected lines hold no matches, so only the prefix is coloured.
+    EXPECT_EQ(RunCaptured("grep", {"--color=always", "-v", "-n", "TODO", "a.c"}, "", "/g").out,
+        piece("32", "1") + piece("36", ":") + "one\n"
+        + piece("32", "3") + piece("36", ":") + "three\n"
+        + piece("32", "4") + piece("36", ":") + "four\n"
+        + piece("32", "6") + piece("36", ":") + "six\n"
+        + piece("32", "7") + piece("36", ":") + "seven\n"
+        + piece("32", "8") + piece("36", ":") + "eight\n"
+        + piece("32", "9") + piece("36", ":") + "nine\n");
+    // -Z: the NUL after a name is written bare, never coloured.
+    EXPECT_EQ(RunCaptured("grep", {"-Z", "-n", "--color=always", "TODO", "t1", "b.h"}, "", "/g").out,
+        piece("35", "t1") + std::string(1, '\0') + piece("32", "1") + piece("36", ":") + match + "\n"
+        + piece("35", "b.h") + std::string(1, '\0') + piece("32", "1") + piece("36", ":") + match + " sub\n");
+    // sl colours the line around the highlighted match, restarted after it.
+    auto environment = os->GetOsEnvironment()->Clone();
+    environment->SetVariable("GREP_COLORS", "sl=1:cx=2");
+    EXPECT_EQ(RunCaptured("grep", {"--color=always", "-A1", "T"}, "TODO\n", "/", environment).out,
+        esc + "[1m" + esc + "[K" + piece("01;31", "T") + esc + "[1m" + esc + "[K" + "ODO" + esc + "[m" + esc + "[K\n");
+}
+
+TEST_F(BuiltinCommandsTest, GrepColorAutoAndNever) {
+    MakeGrepFiles(root);
+    const std::string esc = "\x1b";
+    // RunCaptured's streams are files, not terminals: auto colours nothing.
+    EXPECT_EQ(RunCaptured("grep", {"--color=auto", "TODO", "t1"}, "", "/g").out, "TODO\n");
+    EXPECT_EQ(RunCaptured("grep", {"--colour=auto", "TODO", "t1"}, "", "/g").out, "TODO\n");
+    EXPECT_EQ(RunCaptured("grep", {"--color", "TODO", "t1"}, "", "/g").out, "TODO\n");
+    // The console's output is a terminal: auto colours when TERM is usable.
+    os->GetOsEnvironment()->SetVariable("TERM", "xterm");
+    int status = -1;
+    const Lines coloured = Run("grep", {"--color=auto", "TODO", "/g/t1"}, &status);
+    EXPECT_EQ(status, 0);
+    std::string text;
+    for (const auto& line : coloured) {
+        text += line + "\n";
+    }
+    EXPECT_EQ(text, esc + "[01;31m" + esc + "[KTODO" + esc + "[m" + esc + "[K\n");
+    // A dumb terminal gets no colour, but an explicit ALWAYS does.
+    os->GetOsEnvironment()->SetVariable("TERM", "dumb");
+    EXPECT_EQ(Run("grep", {"--color=auto", "TODO", "/g/t1"}), Lines{"TODO"});
+    const Lines forced = Run("grep", {"--color=ALWAYS", "TODO", "/g/t1"});
+    std::string forcedText;
+    for (const auto& line : forced) {
+        forcedText += line + "\n";
+    }
+    EXPECT_EQ(forcedText, esc + "[01;31m" + esc + "[KTODO" + esc + "[m" + esc + "[K\n");
+    // A WHEN GNU does not know: the full --help on stdout, exit 0.
+    const Captured help = RunCaptured("grep", {"--help"});
+    const Captured bad = RunCaptured("grep", {"--colour=bad", "x", "t1"}, "", "/g");
+    EXPECT_EQ(bad.out, help.out);
+    EXPECT_EQ(bad.status, 0);
+}
+
+TEST_F(BuiltinCommandsTest, GrepPerlWordWrap) {
+    MakeGrepFiles(root);
+    // -P -w gets the same word-neighbour check as the other matchers (what
+    // GNU's (?<!\w)...(?!\w) wrap means), not the \b wrap: a pattern starting
+    // with a non-word byte matches at one.
+    const Captured flag = RunCaptured("grep", {"-Pw", "--", "-b"}, "a -b\n");
+    EXPECT_EQ(flag.out, "a -b\n");
+    EXPECT_EQ(flag.status, 0);
+    // -x and -w combine as GNU's: the line must match the pattern as a whole
+    // and be a whole word.
+    const Captured both = RunCaptured("grep", {"-Pxw", "--", "-b"}, "a -b\n");
+    EXPECT_EQ(both.out, "");
+    EXPECT_EQ(both.status, 1);
+    const Captured trailing = RunCaptured("grep", {"-Pw", "b-"}, "a b-\n");
+    EXPECT_EQ(trailing.out, "a b-\n");
+    EXPECT_EQ(trailing.status, 0);
+}
+
+TEST_F(BuiltinCommandsTest, GrepColorEnvironment) {
+    MakeGrepFiles(root);
+    const std::string esc = "\x1b";
+    const auto withEnv = [&](const std::string& name, const std::string& value) {
+        auto environment = os->GetOsEnvironment()->Clone();
+        environment->SetVariable(name, value);
+        return RunCaptured("grep", {"--color=always", "TODO"}, "TODO\n", "/", environment);
+    };
+    // The deprecated GREP_COLOR (digits and ';' only) sets ms and mc, with
+    // the warning when GREP_COLORS does not replace it.
+    const Captured grepColor = withEnv("GREP_COLOR", "01;32");
+    EXPECT_EQ(grepColor.out, esc + "[01;32m" + esc + "[KTODO" + esc + "[m" + esc + "[K\n");
+    EXPECT_EQ(grepColor.err,
+        "grep: warning: GREP_COLOR='01;32' is deprecated; use GREP_COLORS='mt=01;32'\n");
+    // ne drops both ESC [ K bytes; mt sets ms and mc together.
+    const Captured ne = withEnv("GREP_COLORS", "ne");
+    EXPECT_EQ(ne.out, esc + "[01;31mTODO" + esc + "[m\n");
+    EXPECT_EQ(ne.err, "");
+    const Captured mt = withEnv("GREP_COLORS", "mt=01;34");
+    EXPECT_EQ(mt.out, esc + "[01;34m" + esc + "[KTODO" + esc + "[m" + esc + "[K\n");
+    EXPECT_EQ(mt.err, "");
+    // Parsing stops at the first malformed entry, keeping what was read.
+    const Captured partial = withEnv("GREP_COLORS", "ms=1:junk");
+    EXPECT_EQ(partial.out, esc + "[1m" + esc + "[KTODO" + esc + "[m" + esc + "[K\n");
+    EXPECT_EQ(partial.err, "");
 }
 
 // --- GrepMatcher ---

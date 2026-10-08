@@ -138,14 +138,14 @@ std::shared_ptr<const GrepMatcher> GrepMatcher::Create(
         }
     }
 
-    // Perl: one regex per pattern, wrapped for -w/-x (GNU's
-    // PCRE2_EXTRA_MATCH_WORD/LINE).
+    // Perl: one regex per pattern, wrapped for -x (GNU's
+    // PCRE2_EXTRA_MATCH_LINE). -w is not a wrap here: GNU's -P wraps with
+    // (?<!\w)...(?!\w), which Regex cannot express (no lookarounds), so
+    // Find() gives a Perl -w match the same word-neighbour check as the
+    // other matchers -- which is what that wrap means.
     if (perl) {
         for (const auto& pattern : patterns) {
             std::string wrapped = pattern;
-            if (options.wholeWord == GrepWholeWord::PerlBoundaries) {
-                wrapped = "\\b(?:" + wrapped + ")\\b";
-            }
             if (options.wholeLine) {
                 wrapped = "\\A(?:" + wrapped + ")\\z";
             }

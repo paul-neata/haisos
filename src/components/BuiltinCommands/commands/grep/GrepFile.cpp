@@ -24,11 +24,56 @@ size_t DigitCount(uint64_t v) {
     return n;
 }
 
+// One coloured piece, GNU's SGR bytes: ESC [ V m, (ESC [ K), the text,
+// ESC [ m, (ESC [ K) -- the ESC [ K bytes dropped with GREP_COLORS' ne, and
+// nothing at all added for an empty capability value.
+std::string ColorPiece(const GrepColors& colors, const std::string& value, std::string_view text) {
+    if (value.empty()) {
+        return std::string(text);
+    }
+    std::string out = "\x1b[";
+    out += value;
+    out += 'm';
+    if (!colors.ne) {
+        out += "\x1b[K";
+    }
+    out += text;
+    out += "\x1b[m";
+    if (!colors.ne) {
+        out += "\x1b[K";
+    }
+    return out;
+}
+
+// The start and the end of the colour of a whole line (sl/cx): the start is
+// written at the line's start and again after each highlighted match, the
+// end before the line terminator; both are nothing for an empty value.
+std::string ColorStart(const GrepColors& colors, const std::string& value) {
+    if (value.empty()) {
+        return "";
+    }
+    std::string out = "\x1b[";
+    out += value;
+    out += 'm';
+    if (!colors.ne) {
+        out += "\x1b[K";
+    }
+    return out;
+}
+
+std::string ColorEnd(const GrepColors& colors) {
+    std::string out = "\x1b[m";
+    if (!colors.ne) {
+        out += "\x1b[K";
+    }
+    return out;
+}
+
 } // namespace
 
 GrepFileResult GrepOneInput(BuiltinContext& context, const GrepSettings& settings, const GrepMatcher& matcher,
                             IFileDescriptor& input, const std::string& shownName,
-                            std::optional<uint64_t> sizeForTab) {
+                            std::optional<uint64_t> sizeForTab, GrepContext* grepContext) {
     GrepFileResult result;
     const char eol = settings.nullData ? '\0' : '\n';
     const bool textMode = settings.binaryFiles == GrepBinaryFiles::Text;
@@ -51,23 +96,100 @@ GrepFileResult GrepOneInput(BuiltinContext& context, const GrepSettings& setting
         return text;
     };
 
+    // The text of one output line, coloured when colour is on: the line's
+    // own colour (sl for a selected line, cx for a context one, swapped by
+    // rv with -v) around it, restarted after each highlighted match, and
+    // the matches themselves in ms/mc. A line's matches are highlighted when
+    // the run would select it (selected XOR -v): ms in a selected line, mc
+    // in a context one; an empty match is not.
+    const auto lineText = [&](std::string_view text, bool selectedLine) -> std::string {
+        if (!settings.color) {
+            return std::string(text);
+        }
+        const GrepColors& colors = settings.colors;
+        const bool swap = colors.rv && settings.invert;
+        const std::string& lineCap = selectedLine
+            ? (swap ? colors.cx : colors.sl)
+            : (swap ? colors.sl : colors.cx);
+        std::string out = ColorStart(colors, lineCap);
+        if (selectedLine != settings.invert) {
+            const std::string& matchCap = selectedLine ? colors.ms : colors.mc;
+            size_t pos = 0;
+            size_t lastEnd = 0;
+            while (pos <= text.size()) {
+                size_t begin = 0;
+                size_t end = 0;
+                if (!matcher.Find(text, pos, begin, end)) {
+                    break;
+                }
+                if (end > begin) {
+                    out.append(text.substr(lastEnd, begin - lastEnd));
+                    out += ColorPiece(colors, matchCap, text.substr(begin, end - begin));
+                    out += ColorStart(colors, lineCap);
+                    lastEnd = end;
+                    pos = end;
+                } else {
+                    pos = begin + 1;
+                }
+            }
+            out.append(text.substr(lastEnd));
+        } else {
+            out.append(text);
+        }
+        if (!lineCap.empty()) {
+            out += ColorEnd(colors);
+        }
+        return out;
+    };
+
     // The prefix of an output line, in this order: name, line number, byte
-    // offset, then with -T a tab when anything was printed before it.
-    const auto printPrefixed = [&](const std::string_view text, uint64_t lineNo, uint64_t offsetValue) {
+    // offset, then with -T a tab when anything was printed before it. A
+    // selected line's separators are ':' (with -Z a bare NUL byte after the
+    // name), a context line's '-'.
+    const auto printPrefixed = [&](std::string_view text, uint64_t lineNo2, uint64_t offsetValue,
+                                   bool selectedLine, bool matchText) {
         std::string out;
+        const char sep = selectedLine ? ':' : '-';
+        const auto appendSep = [&]() {
+            if (settings.color) {
+                out += ColorPiece(settings.colors, settings.colors.se, std::string(1, sep));
+            } else {
+                out += sep;
+            }
+        };
         if (showName) {
-            out += shownName + ":";
+            if (settings.color) {
+                out += ColorPiece(settings.colors, settings.colors.fn, shownName);
+            } else {
+                out += shownName;
+            }
+            if (settings.nullAfterName) {
+                out += '\0';
+            } else {
+                appendSep();
+            }
         }
         if (settings.lineNumbers) {
-            out += paddedNumber(lineNo, true) + ":";
+            const std::string number = paddedNumber(lineNo2, true);
+            out += settings.color ? ColorPiece(settings.colors, settings.colors.ln, number) : number;
+            appendSep();
         }
         if (settings.byteOffsets) {
-            out += paddedNumber(offsetValue, false) + ":";
+            const std::string number = paddedNumber(offsetValue, false);
+            out += settings.color ? ColorPiece(settings.colors, settings.colors.bn, number) : number;
+            appendSep();
         }
         if (settings.initialTab && !out.empty()) {
             out += '\t';
         }
-        out += text;
+        // -o hands a match itself: coloured in the match colour (ms in a
+        // selected line, mc in a context one), not searched again.
+        if (matchText) {
+            const std::string& matchCap = selectedLine ? settings.colors.ms : settings.colors.mc;
+            out += settings.color ? ColorPiece(settings.colors, matchCap, text) : std::string(text);
+        } else {
+            out += lineText(text, selectedLine);
+        }
         out += eol;
         context.Out(out);
         if (settings.lineBuffered) {
@@ -75,58 +197,120 @@ GrepFileResult GrepOneInput(BuiltinContext& context, const GrepSettings& setting
         }
     };
 
+    // What one line (selected or context) prints, -o included: each match on
+    // a line of its own with -o (a context line's matches too, as GNU's),
+    // the whole line otherwise; an empty match prints nothing.
+    const auto printLine = [&](std::string_view text, uint64_t lineNo2, uint64_t offset2, bool selectedLine) {
+        if (settings.onlyMatching) {
+            if (selectedLine && settings.invert) {
+                return;  // -o -v: the selected lines hold no matches
+            }
+            size_t pos = 0;
+            while (pos <= text.size()) {
+                size_t begin = 0;
+                size_t end = 0;
+                if (!matcher.Find(text, pos, begin, end)) {
+                    break;
+                }
+                if (end > begin) {
+                    printPrefixed(text.substr(begin, end - begin), lineNo2, offset2 + begin,
+                                  selectedLine, /*matchText=*/true);
+                }
+                pos = end > begin ? end : begin + 1;
+            }
+            return;
+        }
+        printPrefixed(text, lineNo2, offset2, selectedLine, /*matchText=*/false);
+    };
+
+    // The group separator, as a line of its own; --no-group-separator
+    // prints none at all.
+    const auto printSeparator = [&]() {
+        if (!settings.groupSeparator) {
+            return;
+        }
+        if (settings.color) {
+            context.Out(ColorPiece(settings.colors, settings.colors.se, *settings.groupSeparator) + std::string(1, eol));
+        } else {
+            context.Out(*settings.groupSeparator + std::string(1, eol));
+        }
+        if (settings.lineBuffered) {
+            context.Flush();
+        }
+    };
+
+    // This input joins the run's context under its own name and numbering.
+    if (grepContext) {
+        grepContext->SetPrinters(printLine, printSeparator);
+        grepContext->BeginFile();
+    }
+
     uint64_t lineNo = 0;
     uint64_t offset = 0;  // the byte offset of the next line's first byte
     bool binary = false;  // this input became binary
     bool binaryMatched = false;
+    // -m with context: the count is used up but trailing context is still
+    // owed, so every further line is context, until the context runs out.
+    bool limitReached = false;
 
     // One line (without its terminator). Returns whether to stop reading
     // this input.
     const auto processLine = [&](std::string_view line) -> bool {
         ++lineNo;
+        if (limitReached) {
+            // -m with context: every further line is trailing context, but it
+            // is still matched -- a matching one prints as a match line and
+            // restarts nothing (GNU: -m1 -A4 TODO on a.c with a match at 5
+            // prints 5:five TODO and stops at 6). A binary input prints no
+            // context at all.
+            if (grepContext && !binary) {
+                const bool selectedLine = matcher.Matches(line) != settings.invert;
+                grepContext->Line(line, lineNo, offset, selectedLine, /*extendsAfter=*/false);
+                return !grepContext->AfterPending();
+            }
+            return true;
+        }
         const bool selected = matcher.Matches(line) != settings.invert;
-        if (!selected) {
+        if (selected) {
+            ++result.selected;
+            if (settings.quiet) {
+                result.stopped = true;  // -q: stop everything (the caller exits 0)
+                return true;
+            }
+            if (binary) {
+                binaryMatched = true;
+                if (!settings.count) {
+                    return true;  // the search of this input ends at its first selected line
+                }
+            }
+            if (settings.listFiles != GrepListFiles::None) {
+                return true;
+            }
+            if (settings.count) {
+                // The counted line counts towards -m too.
+            } else if (grepContext) {
+                grepContext->Line(line, lineNo, offset, true);
+            } else {
+                printLine(line, lineNo, offset, true);
+            }
+            // GNU stops reading the input after the NUMth matching line,
+            // counted and printed above -- with context still owed, it keeps
+            // reading only as far as the trailing context reaches.
+            if (settings.maxCount && result.selected >= *settings.maxCount) {
+                if (grepContext && grepContext->AfterPending()) {
+                    limitReached = true;
+                    return false;
+                }
+                return true;
+            }
             return false;
         }
-        ++result.selected;
-        if (settings.quiet) {
-            result.stopped = true;  // -q: stop everything (the caller exits 0)
-            return true;
+        // A binary input prints nothing further, its selected line's message
+        // excepted.
+        if (grepContext && !binary) {
+            grepContext->Line(line, lineNo, offset, false);
         }
-        if (binary) {
-            binaryMatched = true;
-            if (!settings.count) {
-                return true;  // the search of this input ends at its first selected line
-            }
-        }
-        if (settings.listFiles != GrepListFiles::None) {
-            return true;
-        }
-        if (settings.count) {
-            // The counted line counts towards -m too.
-        } else if (settings.onlyMatching && !settings.invert) {
-            // Each non-empty match of the line; an empty match advances one
-            // byte and prints nothing (which is why -o 'x*' is quiet).
-            size_t pos = 0;
-            while (pos <= line.size()) {
-                size_t begin = 0;
-                size_t end = 0;
-                if (!matcher.Find(line, pos, begin, end)) {
-                    break;
-                }
-                if (end > begin) {
-                    printPrefixed(line.substr(begin, end - begin), lineNo, offset + begin);
-                }
-                pos = end > begin ? end : begin + 1;
-            }
-        } else if (!settings.onlyMatching) {
-            // -o -v prints nothing, as GNU's (the matched parts of lines it
-            // did not select).
-            printPrefixed(line, lineNo, offset);
-        }
-        // GNU stops reading the input after the NUMth matching line, counted
-        // and printed above.
-        return settings.maxCount && result.selected >= *settings.maxCount;
+        return false;
     };
 
     std::string data;  // the carry: the partial line of the previous chunk
@@ -221,13 +405,34 @@ GrepFileResult GrepOneInput(BuiltinContext& context, const GrepSettings& setting
                 ? result.selected > 0
                 : result.selected == 0;
             if (list) {
-                context.Out(shownName + "\n");
+                std::string text;
+                if (settings.color) {
+                    text += ColorPiece(settings.colors, settings.colors.fn, shownName);
+                } else {
+                    text += shownName;
+                }
+                text += settings.nullAfterName ? '\0' : '\n';
+                context.Out(text);
                 if (settings.lineBuffered) {
                     context.Flush();
                 }
             }
         } else if (settings.count) {
-            std::string text = showName ? shownName + ":" : "";
+            std::string text;
+            if (showName) {
+                if (settings.color) {
+                    text += ColorPiece(settings.colors, settings.colors.fn, shownName);
+                } else {
+                    text += shownName;
+                }
+                if (settings.nullAfterName) {
+                    text += '\0';
+                } else if (settings.color) {
+                    text += ColorPiece(settings.colors, settings.colors.se, ":");
+                } else {
+                    text += ':';
+                }
+            }
             text += std::to_string(result.selected);
             text += '\n';
             context.Out(text);

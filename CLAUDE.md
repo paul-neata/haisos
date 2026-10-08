@@ -28,7 +28,7 @@ haisos/
 ├── src/
 │   ├── components/        - Component implementations (each has its own CLAUDE.md)
 │   │   ├── Agent/
-│   │   ├── BuiltinCommands/ - The builtin commands ([, basename, cat, chmod, cp, cut, dirname, echo, env, false, hsh, ls, man, mkdir, nl, printf, pwd, realpath, rm, rmdir, seq, sleep, sort, tee, test, tr, true, uniq, wc, which; each in commands/<name>/) and what places them on filesystems
+│   │   ├── BuiltinCommands/ - The builtin commands ([, basename, cat, chmod, cp, cut, dirname, echo, egrep, env, false, fgrep, grep, hsh, ls, man, mkdir, nl, printf, pwd, realpath, rm, rmdir, seq, sleep, sort, tee, test, tr, true, uniq, wc, which; each in commands/<name>/) and what places them on filesystems
 │   │   ├── Console/
 │   │   ├── Environment/
 │   │   ├── Factory/
@@ -536,9 +536,9 @@ returned by `IHaisosOS`'s `OSToolFactory` and merged with an agent's tools
 ## Builtin Commands
 
 Commands compiled into Haisos (`[`, `basename`, `cat`, `chmod`, `cp`, `cut`,
-`dirname`, `echo`, `env`, `false`, `hsh`, `ls`, `man`, `mkdir`, `nl`,
-`printf`, `pwd`, `realpath`, `rm`, `rmdir`, `seq`, `sleep`, `sort`, `tee`,
-`test`, `tr`, `true`, `uniq`, `wc`, `which`),
+`dirname`, `echo`, `egrep`, `env`, `false`, `fgrep`, `grep`, `hsh`, `ls`,
+`man`, `mkdir`, `nl`, `printf`, `pwd`, `realpath`, `rm`, `rmdir`, `seq`,
+`sleep`, `sort`, `tee`, `test`, `tr`, `true`, `uniq`, `wc`, `which`),
 implemented in
 `src/components/BuiltinCommands/`
 (see its `CLAUDE.md`). A builtin is not a file on disk: it is placed on a
@@ -601,8 +601,11 @@ use a builtin with what it already knows about the real command:
 | `cut` | Selects bytes or fields of each line (`-b -c -f -d -s -n, --complement, --output-delimiter, -z`), a LIST of `N`, `N-`, `N-M`, `-M` items; a line with no field delimiter is printed whole unless `-s` drops it |
 | `dirname` | Strips the last component from names (`-z`), GNU's dir_len: empty `.`, slashes-only `/` |
 | `echo` | Prints its arguments (`-n -e -E`) |
+| `egrep` | `grep -E`: grep with the extended matcher preselected (see `grep`) |
 | `env` | Runs a program in a modified environment (`-i -0 -u NAME -C DIR -S STRING`), the child looked up in the new PATH; with no COMMAND, prints the variables sorted by name |
 | `false` | Does nothing, exits 1 (`--help`/`--version` only as the sole argument, and 1 even after them) |
+| `fgrep` | `grep -F`: grep with fixed strings preselected (see `grep`) |
+| `grep` | Prints lines matching patterns (`-E -F -G -P -e -f -i -v -w -x -c -l -L -q -o -n -b -H -h --label -T -m -s -a -I --binary-files -U -z --line-buffered`), several patterns (one per line of an argument or file), GNU's prefixes, binary files by the first NUL, exit statuses 0/1/2; recursion, context and colour are not treated yet |
 | `hsh` | The Haisos shell, after dash: `-c`, scripts, stdin or interactive (`RUN -i /bin/hsh`); quoting, expansions, pipelines, redirections, heredocs, lists, control flow, functions; commands found in `PATH` |
 | `ls` | Lists directories as GNU ls prints them to a terminal: columns, `-l` with `total`/links/owner/group/size/time, sorting, time styles, quoting; to a pipe or file, one name per line, unquoted |
 | `man` | Prints a builtin's manual page (`man ls`, `man 1 ls`, `-f`, `-k`): its `--help` text, or a full page for `hsh` |

@@ -423,3 +423,51 @@ TEST_F(BuiltinCommandsTest, CpUpdateWordAndDereferenceNoOps) {
     EXPECT_EQ(prompted.err, "cp: warning: behavior of -n is non-portable and may change in future; use --update=none instead\ncp: overwrite '/x'? ");
     EXPECT_EQ(prompted.status, 0);
 }
+TEST_F(BuiltinCommandsTest, CpBackupModeAtTheEnd) {
+    auto environment = factory->CreateEnvironment();
+    environment->SetVariable("VERSION_CONTROL", "bogus");
+
+    // -b takes $VERSION_CONTROL's word, and a bad one is reported under that
+    // name -- after the option parsing, not where -b was met.
+    const std::string badVersionControl =
+        "cp: invalid argument 'bogus' for '$VERSION_CONTROL'\n"
+        "Valid arguments are:\n"
+        "  - 'none', 'off'\n"
+        "  - 'simple', 'never'\n"
+        "  - 'existing', 'nil'\n"
+        "  - 'numbered', 't'\n" + kTryCp;
+    auto run = RunCaptured("cp", {"-b", "/notes.txt", "/x"}, std::nullopt, "/", environment);
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err, badVersionControl);
+    EXPECT_EQ(run.status, 1);
+
+    // -S alone turns backups on too, so it is checked then as well.
+    run = RunCaptured("cp", {"-S", ".bak", "/notes.txt", "/x"}, std::nullopt, "/", environment);
+    EXPECT_EQ(run.err, badVersionControl);
+    EXPECT_EQ(run.status, 1);
+
+    // --backup=WORD is its own word: $VERSION_CONTROL is not looked at.
+    environment->SetVariable("VERSION_CONTROL", "numbered");
+    WriteFile("/x", "here");
+    run = RunCaptured("cp", {"-v", "--backup=simple", "/notes.txt", "/x"},
+                      std::nullopt, "/", environment);
+    EXPECT_EQ(run.out, "'/notes.txt' -> '/x' (backup: '/x~')\n");
+    EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 0);
+}
+
+TEST_F(BuiltinCommandsTest, CpNoClobberBeatsLaterUpdate) {
+    // -n wins over a later --update=WORD: an older destination is still not
+    // replaced.
+    const FileDateTime oldTime{1704164645, 0};
+    WriteFile("/dest", "old");
+    ASSERT_EQ(root->SetTimes("/dest", oldTime, oldTime), 0);
+
+    const auto run = RunCaptured("cp", {"-n", "--update=older", "/notes.txt", "/dest"});
+    EXPECT_EQ(run.out, kNone);
+    EXPECT_EQ(run.err, "cp: warning: behavior of -n is non-portable and may change in future; use --update=none instead\n");
+    EXPECT_EQ(run.status, 0);
+    std::string content;
+    ASSERT_TRUE(ReadWholeFile(*root, "/dest", content));
+    EXPECT_EQ(content, "old");
+}

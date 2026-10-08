@@ -94,8 +94,10 @@ bool ParseOneOrTwoDigits(std::string_view text, size_t at, int64_t& out, size_t&
 
 // A time of day, HH:MM[:SS[.frac]]: 1-2 digit hour and minute, then an
 // optional 1-2 digit second with a fraction. Ranges checked (second 0-60,
-// the leap second, as GNU's).
-bool ParseTimeOfDay(std::string_view text, int& hour, int& minute, int& second, uint32_t& nanoseconds) {
+// the leap second, as GNU's). |consumed| is set to the bytes of |text| the
+// time took, so a caller can take what follows it (an attached zone).
+bool ParseTimeOfDay(std::string_view text, int& hour, int& minute, int& second,
+                    uint32_t& nanoseconds, size_t& consumed) {
     int64_t h = 0, m = 0, s = 0;
     uint32_t ns = 0;
     size_t i = 0;
@@ -120,9 +122,10 @@ bool ParseTimeOfDay(std::string_view text, int& hour, int& minute, int& second, 
             i = end;
         }
     }
-    if (i != text.size() || h > 23 || m > 59 || s > 60) {
+    if (h > 23 || m > 59 || s > 60) {
         return false;
     }
+    consumed = i;
     hour = static_cast<int>(h);
     minute = static_cast<int>(m);
     second = static_cast<int>(s);
@@ -191,6 +194,11 @@ void ApplyRelative(DateItems& items, int64_t count, const RelativeUnit& unit) {
     }
 }
 
+// A numeric zone, +hh, +hhmm or +hh:mm (- too), |digits| without the sign:
+// minutes east of UTC into |offsetSeconds|. Defined below ParseDate, which
+// takes a zone attached to a `T`-joined time.
+bool ParseZoneDigits(char sign, std::string_view digits, int64_t& offsetSeconds);
+
 // One date item, YYYY-M-D, with a `T`-joined time of day allowed
 // (2024-01-02T03:04:05). Sets |withTime| when the time is there.
 bool ParseDate(std::string_view text, DateItems& items, bool& withTime) {
@@ -237,8 +245,27 @@ bool ParseDate(std::string_view text, DateItems& items, bool& withTime) {
     if (k < text.size() && (text[k] == 'T' || text[k] == 't')) {
         int hour = 0, minute = 0, second = 0;
         uint32_t nanoseconds = 0;
-        if (!ParseTimeOfDay(text.substr(k + 1), hour, minute, second, nanoseconds)) {
+        size_t consumed = 0;
+        const std::string_view rest = text.substr(k + 1);
+        if (!ParseTimeOfDay(rest, hour, minute, second, nanoseconds, consumed)) {
             return false;
+        }
+        // A zone may be attached directly, as ISO 8601 writes it:
+        // 2024-01-02T03:04:05Z, 2024-01-02T03:04:05+01:00.
+        const std::string_view zone = rest.substr(consumed);
+        if (!zone.empty()) {
+            if (items.hasZone) {
+                return false;
+            }
+            if (zone.size() == 1 && (zone[0] == 'Z' || zone[0] == 'z')) {
+                items.zoneOffsetSeconds = 0;
+            } else if ((zone[0] == '+' || zone[0] == '-') &&
+                       ParseZoneDigits(zone[0], zone.substr(1), items.zoneOffsetSeconds)) {
+                // the offset, sign included, set by ParseZoneDigits
+            } else {
+                return false;
+            }
+            items.hasZone = true;
         }
         items.hour = hour;
         items.minute = minute;
@@ -319,7 +346,9 @@ bool ParseDateItems(const std::vector<std::string>& tokens, DateItems& items) {
                 }
                 int hour = 0, minute = 0, second = 0;
                 uint32_t nanoseconds = 0;
-                if (!ParseTimeOfDay(raw, hour, minute, second, nanoseconds)) {
+                size_t consumed = 0;
+                if (!ParseTimeOfDay(raw, hour, minute, second, nanoseconds, consumed) ||
+                    consumed != raw.size()) {
                     return false;
                 }
                 items.hour = hour;

@@ -2,9 +2,9 @@
 
 The commands compiled into Haisos itself -- `[`, `basename`, `cat`, `chmod`,
 `cp`, `cut`, `dirname`, `echo`, `egrep`, `env`, `false`, `fgrep`, `grep`,
-`hsh`, `ls`, `man`, `mkdir`, `nl`, `printf`, `pwd`, `realpath`, `rm`,
-`rmdir`, `seq`, `sleep`, `sort`, `tee`, `test`, `tr`, `true`, `uniq`, `wc`,
-`which` -- and what places them on filesystems. Implements `IBuiltinCommands`
+`hsh`, `ls`, `man`, `mkdir`, `mv`, `nl`, `printf`, `pwd`, `realpath`, `rm`,
+`rmdir`, `seq`, `sleep`, `sort`, `tee`, `test`, `touch`, `tr`, `true`,
+`uniq`, `wc`, `which` -- and what places them on filesystems. Implements `IBuiltinCommands`
 and `IBuiltinConfigurator` (`interfaces/IBuiltinCommands.h`); both are created
 through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
 
@@ -88,12 +88,21 @@ through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
   standard error exactly as given, reads one line from standard input, and
   answers yes only when its first byte is 'y' or 'Y' (end of input, a failed
   read and a stop while waiting are all no). One instance per run of a
-  command, so lines read ahead stay for the next question; rm and cp -i use
-  it, and mv -i will too.
+  command, so lines read ahead stay for the next question; rm, cp -i and
+  mv -i use it.
 - `BuiltinRemove.h` - `RemoveOperand`, removing one operand as GNU rm does:
   the messages and prompts of every mode (-r, -d, -i, -v, the root
   failsafe), one function for rm and for mv to call on a source it copied
   across filesystems.
+- `BuiltinDate.h` - the date and time parsers the time-taking builtins share
+  (contract 4, shared with the `date` builtin, which adds `FormatDateTime`
+  here later): `ParseDateString` (GNU date -d's subset: dates
+  `YYYY-MM-DD` with a `T`-joined time and an attached zone, times of day,
+  the zone words and offsets, relative items and `@` seconds),
+  `ParseTouchStamp` (touch -t's `[[CC]YY]MMDDhhmm[.ss]`), and the helpers
+  `LocalTimeOf`, `SecondsFromLocalTime` and `SecondsFromUtc` (Howard
+  Hinnant's days_from_civil: no POSIX-only `timegm`). touch uses all of
+  them now.
 - `BuiltinCopy.h` - the copying cp is made of, for mv to reuse on a source
   on another filesystem: `CopyPath` (one source/destination pair through
   GNU cp's checks -- stat, -r, same file, into-itself, type mismatch -- and
@@ -101,7 +110,13 @@ through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
   --attributes-only, --remove-destination, -p's timestamps, -v's lines),
   `ResolveCopyTargets` (the operand rules, `-t`, `-T`, `--parents`,
   `--strip-trailing-slashes`), `BackupPathFor` and `ParseBackupControl`
-  (GNU's backup controls, `VERSION_CONTROL` and `SIMPLE_BACKUP_SUFFIX`).
+  (GNU's backup controls, `VERSION_CONTROL` and `SIMPLE_BACKUP_SUFFIX`),
+  `BackupRequest`/`FinishBackupRequest` (the backup options resolved once,
+  after the option parsing as GNU does: -b and -S take $VERSION_CONTROL's
+  word, --backup=WORD its own), `ParseUpdateWord` (--update's words), and
+  the message helpers `CopyQuoted` (GNU's quoteaf), `CopyJoinPath`,
+  `CopyStatMissingReason` and `CopyCreateFailedReason` -- each declared
+  here once, so cp and mv share them with no copies of their own.
 - `BuiltinRunProgram.h` - how a builtin runs another program, for env now and
   for xargs, find -exec and awk's `system()` later: `SearchPathEntries` (a
   PATH split at ':' keeping empty entries, `kBuiltinDefaultSearchPath` when
@@ -222,6 +237,7 @@ command and links its man page.
 | `ls` | 1.3.0 | `-a -A -B -c -C -d -f -g -G -h -k -l -m -N -o -p -r -R -s -S -t -u -U -w -x -X -1`, `--file-type --format --full-time --group-directories-first --sort --time --time-style`; off a terminal (stdout a pipe, a file, a device), one name per line unless `-C`/`-x`/`-m`/`-l` asks for a layout, and names literal with control characters written raw -- GNU's own defaults when stdout is not a terminal; `-1` after `-l` keeps the long listing | owner and group are `haisos`, permissions `rwxrwxrwx` (no users or permissions yet), so a device shows as `crwxrwxrwx`, with its major and minor numbers in the size column as GNU ls shows them; columns are padded with spaces, not tabs; the width is 80 unless `-w` says otherwise; `--sort=version/width` and `--time=birth` are reported as not treated; on Windows, a `--time-style=+FORMAT` conversion the Microsoft C runtime lacks (`%k`, `%P`, ...) prints as written, as glibc prints one it does not know |
 | `man` | 1.0.0 | `-f -k -i -I`, a section first (`man 1 ls`), several pages | pages are compiled in (each builtin's `ManPage()`, its `--help` unless overridden), all section 1, plain text, no pager; `-k` matches names and summaries only; everything else of man-db's reported as not treated |
 | `mkdir` | 1.1.0 | `-p -v` | `-m`/`--mode`, `-Z`/`--context` not treated (no permissions or security contexts) |
+| `mv` | 1.0.0 | `--backup[=CONTROL] -b -f -i -n --no-copy --strip-trailing-slashes -S -t -T --update[=UPDATE] -u -v`; GNU 9.4's messages, prompts, backups, `-n`/`-u`/`--update` interplay (the last of `-f`/`-i`/`-n` wins, `-n` keeping a later `--update` safe) and operand rules; one step through `IFileIO::Rename`, across a mount (EXDEV) by copy-then-remove as GNU mv does across devices: `CopyPath` keeping times, then `RemoveOperand`, its `-v` lines cp's then rm's | `--debug` and `-Z`/`--context` not treated; across filesystems the copy keeps modification and access times only (no modes, owners or links exist); a builtin cannot be moved; `.`/`..` are refused as a source, as GNU's EBUSY; a failed `Rename` whose reason `IFileIO` does not give is worded from the destination's parent |
 | `nl` | 1.0.0 | `-b -d -f -h -i -l -n -p -s -v -w`; the body/header/footer styles `a` (all lines), `t` (non-empty, the body's default), `n` (none, the header's and footer's) and `pBRE` (a basic regular expression, compiled by the `Regex` component), the formats `ln`/`rn`/`rz` (`rn` the default), the logical page delimiters (`\:\:\:` header, `\:\:` body, `\:` footer; `-d CC` builds them, a one-character CC gaining `:`, an empty one turning the sections off), `-l N` numbering only every Nth blank, `-v`/`-i` intmax arithmetic that stops with `line number overflow` (a section start clearing it unless `-p`); the numbering carries across FILE operands, and `-` is the standard input | `pBRE` is Haisos's own regex engine, which follows glibc's BRE but may part from it on an exotic pattern |
 | `printf` | 1.0.0 | FORMAT reused until the ARGUMENTs run out; every conversion `a A c d e E f F g G i o s u x X` with flags, widths and precisions (`*` from arguments), `%b` (escapes in the argument) and `%q` (`ShellEscapeQuoted`); `\` escapes (`\" \\ \a \b \c \e \f \n \r \t \v`, `\xHH`, octal, `\uHHHH`, `\UHHHHHHHH`); numeric arguments decimal, octal (`010`), hex (`0x1F`) or character constants (`'A`); GNU's numeric diagnostics (`expected a numeric value`, `value not completely converted`, `Numerical result out of range`) set exit 1, an invalid specification or bad escape ends the command with exit 1, excess arguments warn, `\c` ends the output with status 0; `--help`/`--version` only as the sole argument | `%q` keeps bytes >= 0x80 as they are, where GNU's shell-escape quoting writes an invalid UTF-8 byte as `$'\200'`; `\u` and `\U` always write UTF-8; `%a`/`%A` follow the platform's `long double` |
 | `pwd` | 1.1.0 | `-L -P` (the same: no symlinks) | -- |
@@ -233,6 +249,7 @@ command and links its man page.
 | `sort` | 1.1.0 | `-b -d -f -g -h -i -M -n -r -R -s -u -V -z`, `--sort=WORD`, `-k KEYDEF` (with `-t SEP`), `-c`/`-C`/`--check[=WHEN]`, `-m`, `-o FILE`, `--files0-from=F`; with no FILE, or a FILE of `-`, the standard input is read; GNU's last-resort whole-line comparison unless `-u` or `-s`; lines compared byte by byte, as GNU sort with `LC_ALL=C`; the orders of `BuiltinCompare.h`: `-n` exact at any length, `-g` by strtold, `-h` by unit then numeric, `-M` by month, `-V` by gnulib's filevercmp (`CompareVersion`, for `ls -v` to reuse) | `-R` orders by a salted hash of each key, not GNU's MD5, so its order changes from run to run as GNU's does (`--random-source` not treated); `-S`, `-T`, `--parallel` and `--batch-size` accepted and not acted on (Haisos sorts in memory); `--compress-program` and `--debug` not treated |
 | `tee` | 1.0.0 | `-a --append`, `-p` (the same as `--output-error=warn-nopipe`), `--output-error[=MODE]` (warn, warn-nopipe, exit, exit-nopipe; GNU's prefix matching); every FILE opened up front, an unopenable one reported and gone past, the standard output written first and then the files, each read chunk copied to them all; the modes decide what a failed write does: default stops quietly (141, as SIGPIPE), the warn modes diagnose and go on (status 1), the nopipe ones go past a broken pipe silently, the exit modes stop (status 1) | `-i`/`--ignore-interrupts` not treated (no signals); the standard output is written chunk by chunk as input arrives, not stdio-buffered |
 | `test` | 1.0.0 | GNU coreutils 9.4's expression, no options: the POSIX 1-4-operand reductions, then `-o`/`-a`/`!`/parentheses, string comparisons `= == !=`, integers of any length `-eq -ne -lt -le -gt -ge` (blanks and a sign around the digits), `-l STRING` its length as an operand, the file primaries and `-t FD`; syntax errors GNU's messages and status 2, GNU's quirks kept (an operator that is not one of its is an error with its operand there or not; a string comparison with a right `-l` shifts both operands past it, so the operator's word is what is compared); `--help`/`--version` are ordinary non-empty strings (true, as GNU's test) | `-r`/`-w`/`-x`/`-O`/`-G` only test that the file is there (no permissions or users); `-h`/`-L`/`-b`/`-p`/`-S`/`-u`/`-g`/`-k` never match (no links, block devices, fifos, sockets or set-id bits); `-ef` compares the paths as `ResolvePath` resolves them (no inode numbers); `-t FD` is false past the descriptor table's size |
+| `touch` | 1.0.0 | `-a -c -d STRING -f -h -m -r FILE -t STAMP --time=WORD`; GNU 9.4's messages, `-d`/`-t`/`-r` as time sources (`-d` with `-r` the one combination of two, the string parsed against each of the reference's times), `--time` as `-a`/`-m`'s word form; a missing file is created (never truncating), `-c` leaves it alone, the times set through `IFileIO::SetTimes`, now taken once without a source | `-` changes nothing (GNU touches the file open on standard output; HaisosOS has none); `-h` is the same as without it (no links); `-f` is accepted and ignored; times are set to the second |
 | `tr` | 1.0.0 | `-c -C --complement -d --delete -s --squeeze-repeats -t --truncate-set1`; SETs of backslash escapes, octal `\NNN` (GNU's ambiguous-octal warning), ranges, `[:class:]`, `[=c=]` and the `[c*n]`/`[c*]` repeats; translation with set2 padded by set1's last byte, `-t` truncating set1 to set2's length, `-d`, `-s` and their combinations (`-c` flipping either's set), GNU's every operand-count and set error message; streamed in 64 KiB chunks, so the translation's state (a squeeze run) carries across a chunk | works on bytes, as GNU tr does with `LC_ALL=C` (no multibyte characters) |
 | `true` | 1.0.0 | nothing; `--help`/`--version` only as the sole argument | -- |
 | `uniq` | 1.0.0 | `-c --count -d --repeated -D --all-repeated[=METHOD] -f --skip-fields=N -s --skip-chars=N -u --unique -i --ignore-case -w --check-chars=N -z --zero-terminated --group[=METHOD]`; adjacent lines compared after the skipped fields (blanks then non-blanks each) and chars, limited to `-w` bytes, `-c`'s count right-aligned in seven columns; streamed one group at a time, so a file bigger than memory reads a line at a time; an OUTPUT operand is opened before the input is read | the obsolete `-N` (skip N fields) and `+N` (skip N chars) spellings work as GNU's but are never documented (`BuiltinOption::hidden`); `-i` folds ASCII case only, there being no locale |

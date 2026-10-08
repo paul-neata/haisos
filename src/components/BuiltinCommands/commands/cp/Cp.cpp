@@ -45,36 +45,6 @@ constexpr int kDirMode = _S_IREAD | _S_IWRITE;
 constexpr int kDirMode = S_IRWXU | S_IRWXG | S_IRWXO;
 #endif
 
-// GNU's quoteaf: every name in a message, quoted even when plain.
-std::string q(const std::string& name) {
-    return ShellEscapeQuoted(name, /*always=*/true);
-}
-
-// Joins |dir| and |name| with no doubled slash ("/" + "x" is "/x").
-std::string JoinPath(const std::string& dir, const std::string& name) {
-    std::string joined = dir;
-    if (!joined.empty() && joined.back() != '/') {
-        joined += '/';
-    }
-    return joined + name;
-}
-
-// Why creating |path| failed (BuiltinCopy's rule): "No such file or
-// directory" when its directory is missing, "Not a directory" when that is a
-// file, else -- a builtin's path, a read-only filesystem -- "Permission
-// denied" (IFileIO gives no reason).
-std::string CreateFailedReason(IFileIO& io, const std::string& path) {
-    const std::string parent = VirtualParentOf(io.ResolvePath(path));
-    auto parentType = EntryTypeOf(io, parent);
-    if (!parentType) {
-        return "No such file or directory";
-    }
-    if (*parentType != DirectoryEntryType::Dir) {
-        return "Not a directory";
-    }
-    return "Permission denied";
-}
-
 // The segments of |path| split on '/', as written: empty segments dropped,
 // "." and ".." kept (the destination is built from the source literally).
 std::vector<std::string> LiteralSegments(const std::string& path) {
@@ -114,20 +84,20 @@ bool MakeParents(BuiltinContext& context, const CopyTarget& target, bool verbose
     std::string sourcePrefix = target.source[0] == '/' ? "/" : "";
     std::string destPrefix = target.dest[0] == '/' ? "/" : "";
     for (size_t j = 0; j < extra; ++j) {
-        destPrefix = destPrefix.empty() ? dest[j] : JoinPath(destPrefix, dest[j]);
+        destPrefix = destPrefix.empty() ? dest[j] : CopyJoinPath(destPrefix, dest[j]);
     }
     for (size_t i = 0; i + 1 < source.size(); ++i) {
-        sourcePrefix = sourcePrefix.empty() ? source[i] : JoinPath(sourcePrefix, source[i]);
-        destPrefix = destPrefix.empty() ? dest[extra + i] : JoinPath(destPrefix, dest[extra + i]);
+        sourcePrefix = sourcePrefix.empty() ? source[i] : CopyJoinPath(sourcePrefix, source[i]);
+        destPrefix = destPrefix.empty() ? dest[extra + i] : CopyJoinPath(destPrefix, dest[extra + i]);
         const auto type = EntryTypeOf(io, destPrefix);
         if (type && *type != DirectoryEntryType::Dir) {
-            context.Error(q(destPrefix) + " exists but is not a directory");
+            context.Error(CopyQuoted(destPrefix) + " exists but is not a directory");
             return false;
         }
         if (!type) {
             if (io.CreateDirectory(destPrefix, kDirMode) != 0) {
-                context.Error("cannot create directory " + q(destPrefix)
-                    + ": " + CreateFailedReason(io, destPrefix));
+                context.Error("cannot create directory " + CopyQuoted(destPrefix)
+                    + ": " + CopyCreateFailedReason(io, destPrefix));
                 return false;
             }
             if (verbose) {
@@ -267,10 +237,8 @@ public:
         bool stripTrailingSlashes = false;
         bool link = false;
         bool symbolicLink = false;
-        bool backupOn = false;
+        BackupRequest backup;
         bool noClobbered = false;   // -n set options.update to None
-        BackupMode backupMode = BackupMode::Existing;
-        std::string backupSuffix;
 
         for (const auto& option : parsed->options) {
             switch (option.id) {
@@ -279,23 +247,16 @@ public:
                     options.preserveTimes = true;
                     break;
                 case kOptionAttributesOnly: options.attributesOnly = true; break;
-                case kOptionBackup: {
-                    backupOn = true;
+                case kOptionBackup:
+                    backup.on = true;
                     if (option.hasArgument) {
-                        if (!ParseBackupControl(context, option.argument, backupMode)) {
+                        if (!ParseBackupControl(context, option.argument, backup.mode)) {
                             return 1;
                         }
-                    } else if (!BackupModeFromEnvironment(context, backupMode)) {
-                        return 1;
+                        backup.wordSeen = true;
                     }
                     break;
-                }
-                case kOptionBackupShort:
-                    backupOn = true;
-                    if (!BackupModeFromEnvironment(context, backupMode)) {
-                        return 1;
-                    }
-                    break;
+                case kOptionBackupShort: backup.on = true; break;
                 case kOptionNoDereference:
                 case kOptionFollowCommandLine:
                 case kOptionDereference:
@@ -305,7 +266,10 @@ public:
                 case kOptionInteractive:
                     options.interactive = true;
                     if (noClobbered) {
+                        // -i after -n prompts again, as GNU: the last of
+                        // -n/-i wins.
                         options.update = UpdateMode::All;
+                        noClobbered = false;
                     }
                     break;
                 case kOptionLink: link = true; break;
@@ -339,44 +303,40 @@ public:
                 case kOptionStripTrailingSlashes: stripTrailingSlashes = true; break;
                 case kOptionSymbolicLink: symbolicLink = true; break;
                 case kOptionSuffix:
-                    backupOn = true;  // a suffix alone backs up, as GNU 9.4
-                    backupSuffix = option.argument;
+                    backup.on = true;  // a suffix alone backs up, as GNU 9.4
+                    backup.suffix = option.argument;
                     break;
                 case kOptionTargetDirectory: targetDirectory = option.argument; break;
                 case kOptionNoTargetDirectory: noTargetDirectory = true; break;
                 case kOptionUpdate: {
-                    if (!option.hasArgument) {
-                        options.update = UpdateMode::Older;
-                        break;
-                    }
-                    static const std::vector<ArgChoice> kUpdates = {
-                        {"all", static_cast<int>(UpdateMode::All)},
-                        {"none", static_cast<int>(UpdateMode::None)},
-                        {"older", static_cast<int>(UpdateMode::Older)},
-                    };
-                    const auto matched = ArgMatch(context, "--update", option.argument, kUpdates);
-                    if (!matched) {
+                    UpdateMode update = UpdateMode::Older;
+                    if (option.hasArgument && !ParseUpdateWord(context, option.argument, update)) {
                         return 1;
                     }
-                    options.update = static_cast<UpdateMode>(*matched);
+                    // -n wins over a later --update=WORD, as GNU's: a -n on
+                    // the line keeps the destination safe from it.
+                    if (!noClobbered) {
+                        options.update = update;
+                    }
                     break;
                 }
-                case kOptionUpdateShort: options.update = UpdateMode::Older; break;
+                case kOptionUpdateShort:
+                    if (!noClobbered) {
+                        options.update = UpdateMode::Older;
+                    }
+                    break;
                 case kOptionVerbose: options.verbose = CopyVerbose::Cp; break;
                 default: break;  // not treated (already reported)
             }
         }
 
-        if (backupOn) {
-            options.backup = backupMode;
-            if (backupSuffix.empty()) {
-                backupSuffix = "~";
-                if (auto env = context.Process().GetEnvironment()->GetVariable("SIMPLE_BACKUP_SUFFIX")) {
-                    backupSuffix = *env;
-                }
-            }
-            options.backupSuffix = backupSuffix;
+        // The backup mode is worked out here, once, as GNU does: -b and -S
+        // take $VERSION_CONTROL's word, --backup=WORD its own.
+        if (!FinishBackupRequest(context, backup)) {
+            return 1;
         }
+        options.backup = backup.on ? backup.mode : BackupMode::None;
+        options.backupSuffix = backup.suffix;
 
         const auto targets = ResolveCopyTargets(context, parsed->operands, targetDirectory,
                                                 noTargetDirectory, parents, stripTrailingSlashes);
@@ -408,18 +368,6 @@ public:
     }
 
 private:
-    // --backup/-b without a word: the mode from the environment's
-    // VERSION_CONTROL, else existing. |mode| keeps its value on an absent
-    // variable.
-    static bool BackupModeFromEnvironment(BuiltinContext& context, BackupMode& mode) {
-        auto env = context.Process().GetEnvironment()->GetVariable("VERSION_CONTROL");
-        if (!env) {
-            mode = BackupMode::Existing;
-            return true;
-        }
-        return ParseBackupControl(context, *env, mode);
-    }
-
     static int RunLinks(BuiltinContext& context, const std::vector<CopyTarget>& targets,
                         bool symbolicLink, bool recursive) {
         IFileIO& io = context.IO();
@@ -427,38 +375,22 @@ private:
         for (const auto& target : targets) {
             FileStatus sourceStatus;
             if (io.Stat(target.source, sourceStatus) != 0) {
-                context.Error("cannot stat " + q(target.source)
-                    + ": " + StatMissingReasonOf(io, target.source));
+                context.Error("cannot stat " + CopyQuoted(target.source)
+                    + ": " + CopyStatMissingReason(io, target.source));
                 status = 1;
                 continue;
             }
             if (sourceStatus.type == DirectoryEntryType::Dir && !recursive) {
-                context.Error("-r not specified; omitting directory " + q(target.source));
+                context.Error("-r not specified; omitting directory " + CopyQuoted(target.source));
                 status = 1;
                 continue;
             }
             context.Error(std::string("cannot create ")
-                + (symbolicLink ? "symbolic link " : "hard link ") + q(target.dest)
-                + " to " + q(target.source) + ": Operation not permitted");
+                + (symbolicLink ? "symbolic link " : "hard link ") + CopyQuoted(target.dest)
+                + " to " + CopyQuoted(target.source) + ": Operation not permitted");
             status = 1;
         }
         return status;
-    }
-
-    // BuiltinCopy's rule for a failed Stat.
-    static std::string StatMissingReasonOf(IFileIO& io, const std::string& path) {
-        std::string dir = VirtualParentOf(io.ResolvePath(path));
-        while (true) {
-            if (auto type = EntryTypeOf(io, dir)) {
-                return *type == DirectoryEntryType::Dir
-                    ? "No such file or directory"
-                    : "Not a directory";
-            }
-            if (dir == "/") {
-                return "No such file or directory";
-            }
-            dir = VirtualParentOf(dir);
-        }
     }
 };
 

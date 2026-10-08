@@ -24,6 +24,11 @@ TEST_F(BuiltinCommandsTest, ManPrintsEachBuiltinsHelp) {
         if (name == "hsh") {
             continue;  // hsh overrides ManPage(): its page is not its help
         }
+        if (name == "test") {
+            continue;  // test takes no options: `test --help` is a true
+                       // expression that prints nothing; `man test` is the
+                       // pair's help, as `[ --help` is
+        }
         const Captured man = RunCaptured("man", {name});
         const Captured help = RunCaptured(name, {"--help"});
         EXPECT_EQ(man.out, help.out) << name;

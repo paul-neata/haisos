@@ -9,6 +9,7 @@ add_library(BuiltinCommands STATIC
     BuiltinPrompt.cpp
     BuiltinRemove.cpp
     BuiltinRunProgram.cpp
+    BuiltinTestExpression.cpp
     BuiltinText.cpp
     commands/basename/Basename.cpp
     commands/cat/Cat.cpp
@@ -30,6 +31,7 @@ add_library(BuiltinCommands STATIC
     commands/sleep/Sleep.cpp
     commands/sort/Sort.cpp
     commands/sort/SortKeys.cpp
+    commands/test/Test.cpp
     commands/true/True.cpp
     commands/wc/Wc.cpp
     commands/which/Which.cpp

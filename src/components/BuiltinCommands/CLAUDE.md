@@ -1,8 +1,9 @@
 # BuiltinCommands
 
-The commands compiled into Haisos itself -- `basename`, `cat`, `chmod`, `cp`,
-`dirname`, `echo`, `env`, `false`, `hsh`, `ls`, `man`, `mkdir`, `printf`, `pwd`,
-`realpath`, `rm`, `rmdir`, `seq`, `sleep`, `sort`, `true`, `wc`, `which` -- and
+The commands compiled into Haisos itself -- `[`, `basename`, `cat`, `chmod`,
+`cp`, `dirname`, `echo`, `env`, `false`, `hsh`, `ls`, `man`, `mkdir`,
+`printf`, `pwd`, `realpath`, `rm`, `rmdir`, `seq`, `sleep`, `sort`, `test`,
+`true`, `wc`, `which` -- and
 what places them on filesystems. Implements `IBuiltinCommands`
 and `IBuiltinConfigurator` (`interfaces/IBuiltinCommands.h`); both are created
 through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
@@ -66,6 +67,17 @@ through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
   `quote()` byte for byte), `ArgMatch` (XARGMATCH value matching with its
   `Valid arguments are:` diagnostic), `OpenInputOperand` + `BuiltinLineReader`
   (a file operand opened, and read a delimiter at a time), and `WriteFully`.
+- `BuiltinTestExpression.h/.cpp` - the one test/[ expression evaluator
+  (`EvaluateTestExpression`), shared by hsh's `test` and `[` builtins (its
+  Dash dialect, dash's `bltin/test.c`) and the `test` and `[` commands (its
+  Gnu dialect, GNU coreutils 9.4's `src/test.c`): the POSIX reductions over
+  an operand window, `-o`/`-a`/`!`/parentheses, the string and integer
+  comparisons, and the file primaries over the process's `IFileIO` -- the one
+  place every file test reads through, with the same semantics for both
+  dialects (`-r`/`-w`/`-x`/`-O`/`-G` existence only, `-h`/`-L`/`-b`/`-p`/`-S`/
+  `-u`/`-g`/`-k` never matching, `-ef` comparing resolved paths). Syntax
+  errors are reported once through a caller-given callback (without the
+  `<command>: ` prefix) and give status 2.
 - `BuiltinCompare.h` - `CompareNumeric`, GNU strnumcmp's exact comparison:
   signs first, then digits of any length, never through a float;
   `CompareGeneralNumeric` (-g, by strtold: not-a-number < NaN < numbers),
@@ -166,6 +178,7 @@ command and links its man page.
 
 | Command | Version | Treated | Documented exceptions |
 |---------|---------|---------|-----------------------|
+| `[` | 1.0.0 | one program with `test` (`BuiltinHelp::basedOn` names test): `--help`/`--version` only as its sole argument, then the last argument must be exactly `]` (`[: missing ']'`, status 2); the `]` dropped, the rest is `test`'s expression, errors named after `[`. The dropped `]` stays in the argument vector GNU's way, so a missing closing `)` is reported `')' expected, found ']'` | see `test` |
 | `basename` | 1.0.0 | `-a -s SUFFIX -z`; one NAME with an optional SUFFIX operand, several with `-a` or `-s` (a suffix removed only when the base is longer than it), GNU's trailing-slash and all-slash rules | -- |
 | `cat` | 1.2.0 | every option of GNU cat; with no FILE, or a FILE of `-`, the standard input is read | -- |
 | `chmod` | 1.0.0 | `-c -f -v --no-preserve-root --preserve-root --reference=RFILE -R`; GNU 9.4's mode grammar, octal and symbolic (`ugoa`, `+-=`, `rwxXst`, `u`/`g`/`o` copies, clauses split on `,`), the mode words taken out of the arguments before the options are parsed (so `chmod -w f` works), GNU's messages, exit statuses and the `--preserve-root` failsafe (off by default, as 9.4) | Haisos has no permissions: the mode is parsed and validated and nothing changes; every file's mode is taken as 0777 (as `ls -l` shows `rwxrwxrwx`), the umask as 0; `--reference` takes the RFILE's mode as 0777 too; entries of a directory are changed in name order, not the disk's |
@@ -186,6 +199,7 @@ command and links its man page.
 | `seq` | 1.0.0 | `-f FORMAT -s STRING -w`; LAST, FIRST LAST, FIRST INCREMENT LAST; the options split out before the operands, so a negative number (`seq -5 -1 -10`) is an operand; GNU's default format (`%.PRECf` for fixed-point decimals, padded by `-w`, `%Lg` otherwise), `-f` validated against GNU's rules, the all-digits fast path (numbers of any size, decimal-string arithmetic) and the `%.0Lf` one, the stop rule with its rounding fix; checks for a stop on every number, so an endless sequence (`seq 1 inf`) ends on `TriggerStop()` | `%a`/`%A` in `-f` follow the platform's `long double` |
 | `sleep` | 1.0.0 | NUMBER with one of the suffixes `s m h d` (or none), operands summed; `inf` sleeps until stopped | checks for a stop at least every 50 ms, so a stopped sleep ends promptly (GNU's has no such notion) |
 | `sort` | 1.1.0 | `-b -d -f -g -h -i -M -n -r -R -s -u -V -z`, `--sort=WORD`, `-k KEYDEF` (with `-t SEP`), `-c`/`-C`/`--check[=WHEN]`, `-m`, `-o FILE`, `--files0-from=F`; with no FILE, or a FILE of `-`, the standard input is read; GNU's last-resort whole-line comparison unless `-u` or `-s`; lines compared byte by byte, as GNU sort with `LC_ALL=C`; the orders of `BuiltinCompare.h`: `-n` exact at any length, `-g` by strtold, `-h` by unit then numeric, `-M` by month, `-V` by gnulib's filevercmp (`CompareVersion`, for `ls -v` to reuse) | `-R` orders by a salted hash of each key, not GNU's MD5, so its order changes from run to run as GNU's does (`--random-source` not treated); `-S`, `-T`, `--parallel` and `--batch-size` accepted and not acted on (Haisos sorts in memory); `--compress-program` and `--debug` not treated |
+| `test` | 1.0.0 | GNU coreutils 9.4's expression, no options: the POSIX 1-4-operand reductions, then `-o`/`-a`/`!`/parentheses, string comparisons `= == !=`, integers of any length `-eq -ne -lt -le -gt -ge` (blanks and a sign around the digits), `-l STRING` its length as an operand, the file primaries and `-t FD`; syntax errors GNU's messages and status 2, GNU's quirks kept (an operator that is not one of its is an error with its operand there or not; a string comparison with a right `-l` shifts both operands past it, so the operator's word is what is compared); `--help`/`--version` are ordinary non-empty strings (true, as GNU's test) | `-r`/`-w`/`-x`/`-O`/`-G` only test that the file is there (no permissions or users); `-h`/`-L`/`-b`/`-p`/`-S`/`-u`/`-g`/`-k` never match (no links, block devices, fifos, sockets or set-id bits); `-ef` compares the paths as `ResolvePath` resolves them (no inode numbers); `-t FD` is false past the descriptor table's size |
 | `true` | 1.0.0 | nothing; `--help`/`--version` only as the sole argument | -- |
 | `wc` | 1.0.1 | `-c -m -l -L -w`, `--files0-from`, `--total`; with no FILE, or a FILE of `-`, the standard input is read | standard input has no size, so with it the columns are at least 7 wide (GNU sizes a redirected file); character classes and display widths come from the `Unicode` component's compact tables (unassigned code points count as printable; rare scripts' widths are approximate); `--debug` not treated |
 | `which` | 1.0.0 | `-a -s`; a name with a `/` taken as it is when a file is there, otherwise each PATH entry in order, an empty one the working directory, the candidate printed as built; exit 1 when any operand is missed or there is none, 2 on an unknown option | Debian's which (debianutils), not GNU's: `Illegal option -x` on stderr and `Usage: <path> [-as] args` on stdout, its own shape; `--help`/`--version` are Haisos's (Debian's which has none) |

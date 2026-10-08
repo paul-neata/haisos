@@ -28,7 +28,7 @@ haisos/
 ├── src/
 │   ├── components/        - Component implementations (each has its own CLAUDE.md)
 │   │   ├── Agent/
-│   │   ├── BuiltinCommands/ - The builtin commands (basename, cat, chmod, cp, dirname, echo, env, false, hsh, ls, man, mkdir, printf, pwd, realpath, rm, rmdir, seq, sleep, sort, true, wc, which; each in commands/<name>/) and what places them on filesystems
+│   │   ├── BuiltinCommands/ - The builtin commands ([, basename, cat, chmod, cp, dirname, echo, env, false, hsh, ls, man, mkdir, printf, pwd, realpath, rm, rmdir, seq, sleep, sort, test, true, wc, which; each in commands/<name>/) and what places them on filesystems
 │   │   ├── Console/
 │   │   ├── Environment/
 │   │   ├── Factory/
@@ -535,9 +535,10 @@ returned by `IHaisosOS`'s `OSToolFactory` and merged with an agent's tools
 
 ## Builtin Commands
 
-Commands compiled into Haisos (`basename`, `cat`, `chmod`, `cp`, `dirname`,
-`echo`, `env`, `false`, `hsh`, `ls`, `man`, `mkdir`, `printf`, `pwd`,
-`realpath`, `rm`, `rmdir`, `seq`, `sleep`, `sort`, `true`, `wc`, `which`),
+Commands compiled into Haisos (`[`, `basename`, `cat`, `chmod`, `cp`,
+`dirname`, `echo`, `env`, `false`, `hsh`, `ls`, `man`, `mkdir`, `printf`,
+`pwd`, `realpath`, `rm`, `rmdir`, `seq`, `sleep`, `sort`, `test`, `true`,
+`wc`, `which`),
 implemented in
 `src/components/BuiltinCommands/`
 (see its `CLAUDE.md`). A builtin is not a file on disk: it is placed on a
@@ -592,6 +593,7 @@ use a builtin with what it already knows about the real command:
 
 | Builtin | Description |
 |---------|-------------|
+| `[` | The `[ EXPRESSION ]` program, one with `test`: its last argument must be exactly `]`, `--help`/`--version` only as its sole argument; the expression is `test`'s |
 | `basename` | Strips directories and a suffix from names (`-a -s SUFFIX -z`), GNU's trailing-slash rules |
 | `cat` | Concatenates files and standard input (`-A -b -e -E -n -s -t -T -u -v`) |
 | `chmod` | Changes file mode bits (`-c -f -v --no-preserve-root --preserve-root --reference=RFILE -R`), GNU 9.4's mode grammar; Haisos has no permissions: the mode is validated and nothing changes, every mode taken as 0777, the umask as 0 |
@@ -612,6 +614,7 @@ use a builtin with what it already knows about the real command:
 | `seq` | Prints a sequence of numbers (`-f FORMAT -s STRING -w`), FIRST/INCREMENT/LAST, GNU's default-format and fast-path rules, negative numbers as operands |
 | `sleep` | Sleeps for the summed NUMBERs (`s m h d` suffixes; `inf` until stopped) |
 | `sort` | Sorts lines (keys `-k`/`-t`, `-b -d -f -g -h -i -M -n -r -R -s -u -V -z`, `--sort=WORD`, `-c -C --check`, `-m`, `-o`, `--files0-from`), byte order, the numeric/general/human/month/version orders, GNU's last-resort comparison |
+| `test` | Checks file types and compares values: GNU coreutils' expression (`!`, `-a`, `-o`, parentheses, string and integer comparisons, `-l STRING` its length, the file primaries, `-t FD`); no options, syntax errors exit 2 |
 | `true` | Does nothing, exits 0 (`--help`/`--version` only as the sole argument) |
 | `wc` | Counts lines, words, characters, bytes and the widest line (`-c -m -l -L -w`, `--files0-from`, `--total`), GNU's columns |
 | `which` | Locates a command in PATH (`-a -s`), as Debian's which (debianutils): exit 1 when any operand is missed, 2 on an unknown option |

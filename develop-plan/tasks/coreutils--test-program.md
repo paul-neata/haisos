@@ -3,7 +3,7 @@
 - Rock: coreutils
 - Depends on: coreutils--sort (`GnuQuote` in `BuiltinText.h`)
 - Size: ~650 changed lines in ~9 files (of which ~330 a move out of `HshBuiltinTest.cpp`)
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ 9d69b73
 - PR title: Add /bin/test and /bin/[ sharing hsh's test evaluator
 
 (Split off the planned coreutils--du-cmp-test, which came to ~1250 changed
@@ -39,7 +39,7 @@ Also `tests/unit/components/BuiltinCommands.unittests/BuiltinCommandsTest.cpp`
 `EveryBuiltinsHelpHasTheSameShape` and `EveryBuiltinHasAVersion`.
 
 What earlier tasks provide, as if on develop: coreutils--sort's
-`std::string GnuQuote(std::string_view text);` (`BuiltinText.h`) -- GNU's
+`std::string GnuQuote(std::string_view text);` (`BuiltinText.h`, present on develop) -- GNU's
 `quote()` in the C locale, which coreutils' test uses around every word in
 its messages.
 
@@ -138,7 +138,9 @@ empty for `test` and `"test"` for `[` (man7 has no `[` page); notes: the
 operators in a few lines, `--help`/`--version` only as `[`'s sole argument,
 and the exceptions.
 
-`Run` (test.c `main`), not `BeginBuiltin` -- test takes no options:
+Model it on `commands/true/True.cpp` (sole-argument `--help`/`--version` via
+`BuiltinHelpText(*this)` / `BuiltinVersionText(*this)`, empty `Options()`).
+`Run` (test.c `main`), not `BeginBuiltin` (neither overload) -- test takes no options:
 1. `[` only: exactly one argument `--help` / `--version` -> help / version
    text, exit 0. The last argument must be exactly `]` (unlike dash, which
    accepts any word starting with `]`), else `[: missing ']'` on stderr,
@@ -156,12 +158,18 @@ Declare `CreateTestCommand()` and `CreateBracketCommand()`; add both to
 `CreateStandardBuiltinCommands()` (the `haisos --init` template then shows
 `# BUILTIN rootfs [ /bin/[` and the test line; make sure
 `TheInitTemplatesBuiltinsAllApplyOnceUncommented` passes with the name `[`).
-Add `BuiltinTestExpression.cpp` and `commands/test/Test.cpp` to the library.
+Add `BuiltinTestExpression.cpp` and `commands/test/Test.cpp` to the library
+sources list in `src/components/BuiltinCommands/CMakeLists.txt` (not the root
+`CMakeLists.txt`). Keep `CreateStandardBuiltinCommands()` in byte order, which
+is also `GetCommands()` order: `CreateBracketCommand()` goes first (before
+`CreateBasenameCommand()`; `[` sorts before lowercase letters), and
+`CreateTestCommand()` between `CreateSortCommand()` and `CreateTrueCommand()`.
 
 ### `tests/unit/components/BuiltinCommands.unittests/BuiltinCommandsTest.cpp`
 
 `EveryBuiltinsHelpHasTheSameShape` and `EveryBuiltinHasAVersion` run every
-builtin with `--help`/`--version`; GNU `test` takes neither. Skip `test`
+builtin with `--help`/`--version` and already special-case `false` (status 1)
+in their `EXPECT_EQ(status, ...)`; GNU `test` takes neither. Skip `test`
 there with a comment (as `EveryBuiltinsManPageIsItsHelp` skips hsh), and in
 `EveryBuiltinsHelpHasTheSameShape` check `test`'s help text through
 `BuiltinHelpText` directly instead of running it, so its shape is still
@@ -223,9 +231,12 @@ bash ./scripts/test_linux.sh L U
 (The script's filter matches test executable names, so `BuiltinCommands`
 is the narrowest it takes; the direct run narrows to this task's tests.
 `TheInitTemplatesBuiltinsAllApplyOnceUncommented` lives in
-`CliParser.unittests`.) Add the new builtin names to the exact list in
-`ListsEveryBuiltinSortedWithAVersion` (`BuiltinCommandsTest.cpp`), in byte
-order.
+`CliParser.unittests`.) The exact list in `ListsEveryBuiltinSortedWithAVersion`
+(`BuiltinCommandsTest.cpp`) is now `basename cat chmod cp dirname echo env
+false hsh ls man mkdir printf pwd realpath rm rmdir seq sleep sort true wc
+which`; add `"["` first and `"test"` between `"sort"` and `"true"` (byte
+order). Add `TestTest.cpp` to the `add_executable` list in
+`tests/unit/components/BuiltinCommands.unittests/CMakeLists.txt`.
 
 ## Docs
 

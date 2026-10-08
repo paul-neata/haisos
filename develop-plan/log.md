@@ -38,3 +38,4 @@
 - 2026-10-08 11:08 UTC -- start coreutils--printf-seq (0.5.11)
 - 2026-10-08 11:36 UTC -- coreutils--printf-seq: PR #53, windows-failed
 - 2026-10-08 11:50 UTC -- coreutils--printf-seq merged #53 as 0.5.11: 0C 1H fixed, 2M 3L open, 1 try
+- 2026-10-08 11:52 UTC -- start coreutils--test-program (0.5.12)

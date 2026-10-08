@@ -20,7 +20,7 @@ Pause: no
 | 12 | [coreutils--date](tasks/coreutils--date.md) | todo | | 8, 4 | | | | |
 | 13 | [coreutils--stat](tasks/coreutils--stat.md) | todo | | 12, 11, 4 | | | | |
 | 14 | [coreutils--du-cmp](tasks/coreutils--du-cmp.md) | todo | | 12, 4 | | | | |
-| 15 | [coreutils--test-program](tasks/coreutils--test-program.md) | todo | | 4 | | | | |
+| 15 | [coreutils--test-program](tasks/coreutils--test-program.md) | in-progress | 0.5.12 | 4 | | | | |
 | 16 | [coreutils--uniq-cut](tasks/coreutils--uniq-cut.md) | todo | | 4 | | | | |
 | 17 | [coreutils--head-tail](tasks/coreutils--head-tail.md) | todo | | 14, 4, 16 | | | | |
 | 18 | [coreutils--tr-tee-nl](tasks/coreutils--tr-tee-nl.md) | todo | | 4, 3 | | | | |
@@ -78,3 +78,4 @@ Pause: no
 - 2026-10-08 10:29 (implement) coreutils--chmod-paths (row 10) also runs before coreutils--mv-touch (row 8), still waiting on the rm -r symlink Question
 - 2026-10-08 10:29 (implement) coreutils--chmod-paths refreshed against c7d53a1: BuiltinCommands CMake, list slots, current 17-name expectation, reuse of GnuQuote/WriteFully
 - 2026-10-08 11:08 (implement) coreutils--printf-seq refreshed against 3ea5b35 (BuiltinCommands CMake, list slots, GnuQuote already present, BeginBuiltin overload for seq); runs before coreutils--mv-touch, still waiting on the symlink Question
+- 2026-10-08 11:52 (implement) coreutils--test-program refreshed against 9d69b73 (BuiltinCommands CMake, list order, true/false as the Run model); runs while mv-touch (and 12-14, which depend on it) wait on the symlink Question

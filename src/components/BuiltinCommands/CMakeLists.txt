@@ -3,11 +3,13 @@ add_library(BuiltinCommands STATIC
     BuiltinCommands.cpp
     BuiltinCompare.cpp
     BuiltinConfigurator.cpp
+    BuiltinCopy.cpp
     BuiltinProcess.cpp
     BuiltinPrompt.cpp
     BuiltinRemove.cpp
     BuiltinText.cpp
     commands/cat/Cat.cpp
+    commands/cp/Cp.cpp
     commands/echo/Echo.cpp
     commands/ls/Ls.cpp
     commands/man/Man.cpp

@@ -1,7 +1,7 @@
 # BuiltinCommands
 
-The commands compiled into Haisos itself -- `cat`, `echo`, `hsh`, `ls`, `man`,
-`mkdir`, `pwd`, `rm`, `rmdir`, `sort`, `wc` -- and what places them on filesystems. Implements `IBuiltinCommands`
+The commands compiled into Haisos itself -- `cat`, `cp`, `echo`, `hsh`, `ls`,
+`man`, `mkdir`, `pwd`, `rm`, `rmdir`, `sort`, `wc` -- and what places them on filesystems. Implements `IBuiltinCommands`
 and `IBuiltinConfigurator` (`interfaces/IBuiltinCommands.h`); both are created
 through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
 
@@ -71,12 +71,20 @@ through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
   standard error exactly as given, reads one line from standard input, and
   answers yes only when its first byte is 'y' or 'Y' (end of input, a failed
   read and a stop while waiting are all no). One instance per run of a
-  command, so lines read ahead stay for the next question; rm uses it, and
-  cp -i and mv -i will too.
+  command, so lines read ahead stay for the next question; rm and cp -i use
+  it, and mv -i will too.
 - `BuiltinRemove.h` - `RemoveOperand`, removing one operand as GNU rm does:
   the messages and prompts of every mode (-r, -d, -i, -v, the root
   failsafe), one function for rm and for mv to call on a source it copied
   across filesystems.
+- `BuiltinCopy.h` - the copying cp is made of, for mv to reuse on a source
+  on another filesystem: `CopyPath` (one source/destination pair through
+  GNU cp's checks -- stat, -r, same file, into-itself, type mismatch -- and
+  the messages and prompts of every mode: -i, -n/--update, backups,
+  --attributes-only, --remove-destination, -p's timestamps, -v's lines),
+  `ResolveCopyTargets` (the operand rules, `-t`, `-T`, `--parents`,
+  `--strip-trailing-slashes`), `BackupPathFor` and `ParseBackupControl`
+  (GNU's backup controls, `VERSION_CONTROL` and `SIMPLE_BACKUP_SUFFIX`).
 - `commands/hsh/` - `hsh`, the Haisos shell (dash reimplemented); has its own
   CLAUDE.md.
 
@@ -134,6 +142,7 @@ command and links its man page.
 | Command | Version | Treated | Documented exceptions |
 |---------|---------|---------|-----------------------|
 | `cat` | 1.2.0 | every option of GNU cat; with no FILE, or a FILE of `-`, the standard input is read | -- |
+| `cp` | 1.0.0 | `-a -b --backup[=CONTROL] -d -f -H -i -L -l -s -n -P -p --preserve[=ATTR_LIST] --no-preserve=ATTR_LIST --parents -R -r --remove-destination --strip-trailing-slashes -S -t -T -u --update[=UPDATE] -v --attributes-only`; GNU 9.4's messages, prompts, exit statuses and operand rules; backups (simple, numbered, existing; `VERSION_CONTROL`, `SIMPLE_BACKUP_SUFFIX`), the `--parents` walk, `--attributes-only` keeping the destination's data, the `-n` warning | `-l` and `-s` fail: HaisosOS creates no links; `-d`, `-H`, `-L` and `-P` change nothing (no links); `--preserve` keeps timestamps only (no modes, owners or links; `context` and `xattr` accepted and reported as not treated); entries of a directory are copied in name order, not the disk's; a directory copied into itself is refused before anything is copied; a failed backup, open, create or `SetTimes` whose reason `IFileIO` does not give is `Permission denied` |
 | `echo` | 1.1.0 | `-n -e -E`, the `-e` escapes; `--help`/`--version` only as the sole argument, as GNU echo | -- |
 | `hsh` | 1.0.1 | dash's invocation (`-c`, a script file, standard input, interactive with `-i` or when both standard input and standard error are terminals, `-a -c -C -e -f -i -n -o -s -u -x`), simple commands and `;` `&&` `||` `!` lists, pipelines (`a \| b`, `! a \| b`; a stage that must run in the shell runs in an in-process subshell), background lists (`&`, `$!`) with `wait`, command substitution (`$(...)`, `` `...` ``), every redirection (`<` `>` `>|` `>>` `<>` `n>&m` `n<&m` `n>&-` `&>`, heredocs `<<`-`<<-`, here-strings `<<<`, noclobber `-C` with `>|` overriding it), the compound commands `{ ...; }` `( ... )` `if`/`elif`/`else` `while` `until` `for` `case` and functions `f() { ...; }` with `return`, the shell builtins `.` `:` `[` `break` `cd` `continue` `eval` `exec` `exit` `export` `false` `read` `readonly` `return` `set` `shift` `test` `true` `unset` `wait`, with the option behaviours `-e` (errexit with dash's tested-context exceptions), `-x` (xtrace), `-a` (allexport) and `-n` (noexec) | the reference command is dash, not hsh (`BuiltinHelp::basedOn`); `ManPage()` is overridden: a full manual page (`man hsh`), not the `--help` text; `&>` and `<<<` are bash's operators; `--help`/`--version` only as the first argument; `$0` is `hsh` unless a script or `-c` command_name names it; a background (`&`) builtin, function or compound command runs in a child hsh, which sees only exported variables; PS1/PS2/PS4 are not expanded and `-v` is accepted, not acted on; `test`'s `-r`/`-w`/`-x`/`-O`/`-G` only test existence (no permissions or users), `-h`/`-L` are always false (no links) and `-ef` compares resolved paths (no inode numbers); two in-shell pipeline stages run one after the other, so an endless one written into another in-shell stage never ends (its output held in memory) where dash ends at once -- a child stage (a program) has no such limit |
 | `ls` | 1.3.0 | `-a -A -B -c -C -d -f -g -G -h -k -l -m -N -o -p -r -R -s -S -t -u -U -w -x -X -1`, `--file-type --format --full-time --group-directories-first --sort --time --time-style`; off a terminal (stdout a pipe, a file, a device), one name per line unless `-C`/`-x`/`-m`/`-l` asks for a layout, and names literal with control characters written raw -- GNU's own defaults when stdout is not a terminal; `-1` after `-l` keeps the long listing | owner and group are `haisos`, permissions `rwxrwxrwx` (no users or permissions yet), so a device shows as `crwxrwxrwx`, with its major and minor numbers in the size column as GNU ls shows them; columns are padded with spaces, not tabs; the width is 80 unless `-w` says otherwise; `--sort=version/width` and `--time=birth` are reported as not treated; on Windows, a `--time-style=+FORMAT` conversion the Microsoft C runtime lacks (`%k`, `%P`, ...) prints as written, as glibc prints one it does not know |

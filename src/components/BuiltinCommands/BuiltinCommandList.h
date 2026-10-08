@@ -12,6 +12,7 @@ namespace Haisos {
 // without breaking the ICurrentProcess rule) and tests need this list; any
 // other command itself needs only BuiltinCommand.h.
 std::shared_ptr<IBuiltinCommand> CreateCatCommand();
+std::shared_ptr<IBuiltinCommand> CreateCpCommand();
 std::shared_ptr<IBuiltinCommand> CreateEchoCommand();
 std::shared_ptr<IBuiltinCommand> CreateHshCommand();
 std::shared_ptr<IBuiltinCommand> CreateLsCommand();
@@ -29,6 +30,7 @@ std::shared_ptr<IBuiltinCommand> CreateWcCommand();
 inline std::vector<std::shared_ptr<IBuiltinCommand>> CreateStandardBuiltinCommands() {
     return {
         CreateCatCommand(),
+        CreateCpCommand(),
         CreateEchoCommand(),
         CreateHshCommand(),
         CreateLsCommand(),

@@ -12,7 +12,7 @@ Pause: no
 | 4 | [coreutils--sort](tasks/coreutils--sort.md) | done | 0.5.5 | - | #47 | 1 | 0C 3H fixed, 1M 4L open | -d/-i precedence (M) left for coreutils--sort-orders |
 | 5 | [coreutils--sort-orders](tasks/coreutils--sort-orders.md) | done | 0.5.6 | 4 | #48 | 1 | 0C 3H fixed, 1M 4L open | |
 | 6 | [coreutils--rm-rmdir](tasks/coreutils--rm-rmdir.md) | done | 0.5.7 | - | #49 | 1 | 0C 1H fixed, 1M 3L open | rm -r follows directory symlinks on PHYSICAL (see Questions) |
-| 7 | [coreutils--cp](tasks/coreutils--cp.md) | in-progress | 0.5.8 | 1, 6 | | | | |
+| 7 | [coreutils--cp](tasks/coreutils--cp.md) | in-review | 0.5.8 | 1, 6 | #50 | 1 | | |
 | 8 | [coreutils--mv-touch](tasks/coreutils--mv-touch.md) | todo | | 1, 6, 7, 53 | | | | |
 | 9 | [coreutils--names-env](tasks/coreutils--names-env.md) | todo | | - | | | | |
 | 10 | [coreutils--chmod-paths](tasks/coreutils--chmod-paths.md) | todo | | - | | | | |

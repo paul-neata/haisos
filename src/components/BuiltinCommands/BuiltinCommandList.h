@@ -18,6 +18,8 @@ std::shared_ptr<IBuiltinCommand> CreateLsCommand();
 std::shared_ptr<IBuiltinCommand> CreateManCommand();
 std::shared_ptr<IBuiltinCommand> CreateMkdirCommand();
 std::shared_ptr<IBuiltinCommand> CreatePwdCommand();
+std::shared_ptr<IBuiltinCommand> CreateRmCommand();
+std::shared_ptr<IBuiltinCommand> CreateRmdirCommand();
 std::shared_ptr<IBuiltinCommand> CreateSortCommand();
 std::shared_ptr<IBuiltinCommand> CreateWcCommand();
 
@@ -33,6 +35,8 @@ inline std::vector<std::shared_ptr<IBuiltinCommand>> CreateStandardBuiltinComman
         CreateManCommand(),
         CreateMkdirCommand(),
         CreatePwdCommand(),
+        CreateRmCommand(),
+        CreateRmdirCommand(),
         CreateSortCommand(),
         CreateWcCommand(),
     };

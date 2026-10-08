@@ -28,7 +28,7 @@ haisos/
 ├── src/
 │   ├── components/        - Component implementations (each has its own CLAUDE.md)
 │   │   ├── Agent/
-│   │   ├── BuiltinCommands/ - The builtin commands (cat, cp, echo, env, false, hsh, ls, man, mkdir, pwd, rm, rmdir, sleep, sort, true, wc, which; each in commands/<name>/) and what places them on filesystems
+│   │   ├── BuiltinCommands/ - The builtin commands (basename, cat, chmod, cp, dirname, echo, env, false, hsh, ls, man, mkdir, pwd, realpath, rm, rmdir, sleep, sort, true, wc, which; each in commands/<name>/) and what places them on filesystems
 │   │   ├── Console/
 │   │   ├── Environment/
 │   │   ├── Factory/
@@ -535,9 +535,10 @@ returned by `IHaisosOS`'s `OSToolFactory` and merged with an agent's tools
 
 ## Builtin Commands
 
-Commands compiled into Haisos (`cat`, `cp`, `echo`, `env`, `false`, `hsh`,
-`ls`, `man`, `mkdir`, `pwd`, `rm`, `rmdir`, `sleep`, `sort`, `true`, `wc`,
-`which`), implemented in `src/components/BuiltinCommands/`
+Commands compiled into Haisos (`basename`, `cat`, `chmod`, `cp`, `dirname`,
+`echo`, `env`, `false`, `hsh`, `ls`, `man`, `mkdir`, `pwd`, `realpath`, `rm`,
+`rmdir`, `sleep`, `sort`, `true`, `wc`, `which`), implemented in
+`src/components/BuiltinCommands/`
 (see its `CLAUDE.md`). A builtin is not a file on disk: it is placed on a
 filesystem at a path (`IBuiltinConfigurator`, or the haisosfile's `BUILTIN`),
 where it lists as a file, reads as a note naming it, cannot be written, and
@@ -590,8 +591,11 @@ use a builtin with what it already knows about the real command:
 
 | Builtin | Description |
 |---------|-------------|
+| `basename` | Strips directories and a suffix from names (`-a -s SUFFIX -z`), GNU's trailing-slash rules |
 | `cat` | Concatenates files and standard input (`-A -b -e -E -n -s -t -T -u -v`) |
+| `chmod` | Changes file mode bits (`-c -f -v --no-preserve-root --preserve-root --reference=RFILE -R`), GNU 9.4's mode grammar; Haisos has no permissions: the mode is validated and nothing changes, every mode taken as 0777, the umask as 0 |
 | `cp` | Copies files and directories (`-a -b --backup[=CONTROL] -d -f -H -i -L -l -s -n -P -p --preserve[=LIST] --no-preserve=LIST --parents -R -r --remove-destination --strip-trailing-slashes -S -t -T -u --update[=UPDATE] -v`), GNU's messages, prompts, backups and the `--parents` walk |
+| `dirname` | Strips the last component from names (`-z`), GNU's dir_len: empty `.`, slashes-only `/` |
 | `echo` | Prints its arguments (`-n -e -E`) |
 | `env` | Runs a program in a modified environment (`-i -0 -u NAME -C DIR -S STRING`), the child looked up in the new PATH; with no COMMAND, prints the variables sorted by name |
 | `false` | Does nothing, exits 1 (`--help`/`--version` only as the sole argument, and 1 even after them) |
@@ -600,6 +604,7 @@ use a builtin with what it already knows about the real command:
 | `man` | Prints a builtin's manual page (`man ls`, `man 1 ls`, `-f`, `-k`): its `--help` text, or a full page for `hsh` |
 | `mkdir` | Creates directories (`-p -v`) |
 | `pwd` | Prints the working directory (`-L -P`) |
+| `realpath` | Resolves names to absolute paths (`-e -m -L -P -q --relative-to=DIR --relative-base=DIR -s -z`) from the working directory, with existence checks; no symbolic links, so `-L`, `-P` and `-s` change nothing |
 | `rm` | Removes files or directories (`-f -i -I --interactive[=WHEN] -r -R -d -v --no-preserve-root --preserve-root[=all]`), prompts read from standard input, entries in name order |
 | `rmdir` | Removes empty directories (`--ignore-fail-on-non-empty -p -v`) |
 | `sleep` | Sleeps for the summed NUMBERs (`s m h d` suffixes; `inf` until stopped) |

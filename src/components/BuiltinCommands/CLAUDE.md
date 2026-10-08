@@ -1,8 +1,9 @@
 # BuiltinCommands
 
-The commands compiled into Haisos itself -- `cat`, `cp`, `echo`, `env`,
-`false`, `hsh`, `ls`, `man`, `mkdir`, `pwd`, `rm`, `rmdir`, `sleep`, `sort`,
-`true`, `wc`, `which` -- and what places them on filesystems. Implements `IBuiltinCommands`
+The commands compiled into Haisos itself -- `basename`, `cat`, `chmod`, `cp`,
+`dirname`, `echo`, `env`, `false`, `hsh`, `ls`, `man`, `mkdir`, `pwd`,
+`realpath`, `rm`, `rmdir`, `sleep`, `sort`, `true`, `wc`, `which` -- and
+what places them on filesystems. Implements `IBuiltinCommands`
 and `IBuiltinConfigurator` (`interfaces/IBuiltinCommands.h`); both are created
 through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
 
@@ -159,8 +160,11 @@ command and links its man page.
 
 | Command | Version | Treated | Documented exceptions |
 |---------|---------|---------|-----------------------|
+| `basename` | 1.0.0 | `-a -s SUFFIX -z`; one NAME with an optional SUFFIX operand, several with `-a` or `-s` (a suffix removed only when the base is longer than it), GNU's trailing-slash and all-slash rules | -- |
 | `cat` | 1.2.0 | every option of GNU cat; with no FILE, or a FILE of `-`, the standard input is read | -- |
+| `chmod` | 1.0.0 | `-c -f -v --no-preserve-root --preserve-root --reference=RFILE -R`; GNU 9.4's mode grammar, octal and symbolic (`ugoa`, `+-=`, `rwxXst`, `u`/`g`/`o` copies, clauses split on `,`), the mode words taken out of the arguments before the options are parsed (so `chmod -w f` works), GNU's messages, exit statuses and the `--preserve-root` failsafe (off by default, as 9.4) | Haisos has no permissions: the mode is parsed and validated and nothing changes; every file's mode is taken as 0777 (as `ls -l` shows `rwxrwxrwx`), the umask as 0; `--reference` takes the RFILE's mode as 0777 too; entries of a directory are changed in name order, not the disk's |
 | `cp` | 1.0.0 | `-a -b --backup[=CONTROL] -d -f -H -i -L -l -s -n -P -p --preserve[=ATTR_LIST] --no-preserve=ATTR_LIST --parents -R -r --remove-destination --strip-trailing-slashes -S -t -T -u --update[=UPDATE] -v --attributes-only`; GNU 9.4's messages, prompts, exit statuses and operand rules; backups (simple, numbered, existing; `VERSION_CONTROL`, `SIMPLE_BACKUP_SUFFIX`), the `--parents` walk, `--attributes-only` keeping the destination's data, the `-n` warning | `-l` and `-s` fail: HaisosOS creates no links; `-d`, `-H`, `-L` and `-P` change nothing (no links); `--preserve` keeps timestamps only (no modes, owners or links; `context` and `xattr` accepted and reported as not treated); entries of a directory are copied in name order, not the disk's; a directory copied into itself is refused before anything is copied; a failed backup, open, create or `SetTimes` whose reason `IFileIO` does not give is `Permission denied` |
+| `dirname` | 1.0.0 | `-z`; GNU's dir_len: the last component dropped, trailing slashes stripped, an empty name `.` and a name of only slashes `/`, as GNU's does | -- |
 | `echo` | 1.1.0 | `-n -e -E`, the `-e` escapes; `--help`/`--version` only as the sole argument, as GNU echo | -- |
 | `env` | 1.0.0 | `-i -0 -u NAME -C DIR -S STRING`; a leading `-` operand as `-i`, then NAME=VALUE operands until COMMAND; the child gets the edited environment and COMMAND is looked up in the new PATH, as execvp does; `-S` splits GNU split-string's way (quotes, escapes, `${NAME}`, `#` comments, `\_` a word separator outside quotes and a space inside); usage errors 125, a not-runnable COMMAND 126, not found 127 | the signal options, `-v/--debug` and `--list-signal-handling` are not treated (no signals); with no COMMAND the variables print sorted by name -- `IEnvironment` keeps no order, where GNU prints the environment's own; `-i` empties the variables only (secrets and LLM identifiers stay); `${NAME}` in `-S` expands from the starting environment, as GNU's `getenv` does |
 | `false` | 1.0.0 | nothing; `--help`/`--version` only as the sole argument | exits 1 even after `--help`/`--version`, as GNU's does |
@@ -169,6 +173,7 @@ command and links its man page.
 | `man` | 1.0.0 | `-f -k -i -I`, a section first (`man 1 ls`), several pages | pages are compiled in (each builtin's `ManPage()`, its `--help` unless overridden), all section 1, plain text, no pager; `-k` matches names and summaries only; everything else of man-db's reported as not treated |
 | `mkdir` | 1.1.0 | `-p -v` | `-m`/`--mode`, `-Z`/`--context` not treated (no permissions or security contexts) |
 | `pwd` | 1.1.0 | `-L -P` (the same: no symlinks) | -- |
+| `realpath` | 1.0.0 | `-e -m -L -P -q --relative-to=DIR --relative-base=DIR -s -z`; paths resolved from the working directory, `.` and `..` walked, every non-final segment an existing directory unless `-m`, the final one existing with `-e`; `--relative-to`/`--relative-base` resolved by the same rules, a path outside the base printed absolute, both dropped when `--relative-to` is outside `--relative-base` | there are no symbolic links, so `-L`, `-P` and `-s` change nothing |
 | `rm` | 1.0.0 | `-f -i -I --interactive[=WHEN] -r -R -d -v --no-preserve-root --preserve-root[=all]`; prompts on standard error, answers from standard input (end of input is no); `-I` asks once before more than three operands or a recursive removal; entries of a directory removed in name order, the last of `-f`/`-i`/`-I`/`--interactive` wins; a failed `RemoveFile` is reported as `Permission denied` | no write-protection prompts (no permissions: a builtin's path, and every write refusal, are `Permission denied`); a failed removal of an empty directory is reported as `Device or resource busy` -- no reason is known, a read-only filesystem included; entries are removed in name order, not the disk's; `--one-file-system` not treated; `--preserve-root=all` is taken as `--preserve-root` |
 | `rmdir` | 1.0.0 | `--ignore-fail-on-non-empty -p -v` | a failed removal of an empty directory is reported as `Device or resource busy` -- no reason is known, a read-only filesystem included |
 | `sleep` | 1.0.0 | NUMBER with one of the suffixes `s m h d` (or none), operands summed; `inf` sleeps until stopped | checks for a stop at least every 50 ms, so a stopped sleep ends promptly (GNU's has no such notion) |

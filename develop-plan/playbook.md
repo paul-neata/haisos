@@ -61,7 +61,7 @@ Pause: no
 | 54 | [final--windows-fix](tasks/final--windows-fix.md) | todo | | all | | | | last; Windows fixed on the host and checked on CI, best effort |
 
 ## Directions
-- (plan, 2026-10-08) For the rest of this develop, ignore the Windows checks of task PRs: do not wait on them, re-run them or fix them (no `windows.sh`, no Windows fix agent); a PR green on Linux is reviewed and merged, with "Windows not checked" in its Notes. Windows is built and tested only once, in the final phase, on the whole develop; then run final--windows-fix (#54) as the last task.
+- (plan, 2026-10-08) For the rest of this develop, ignore the Windows checks of task PRs: do not wait on them, re-run them or fix them (no `windows.sh`, no Windows fix agent); a PR green on Linux is reviewed and merged, with "Windows not checked" in its Notes. Windows is built and tested only once, in the final phase, on the whole develop; then run final--windows-fix (#54) as the last task. -> done: from search--grep-recursive on, Windows checks of task PRs are ignored; Windows only in the final phase, final--windows-fix last.
 
 ## Questions
 - (implement, 2026-10-08) base--fs-rename-times review (#43): the Windows rename emulation removes an empty target directory before MoveFileExW and loses it if the move fails (e.g. `/d` -> `/d/sub`). The reviewer suggests a follow-up task before coreutils--mv-touch (row 8) relies on it: refuse a new path under the old one before removing the target, and recreate it if MoveFileExW fails. Add such a task (depends on 1, before 8)? -> answered: yes -- added base--rename-fix (#53, after row 3, depends on 1; row 8 now depends on 53). It also takes the review's two low findings (ToFileTime overflow, the misplaced HaisosOSTest comment).
@@ -85,3 +85,5 @@ Pause: no
 - 2026-10-08 13:43 (implement) coreutils--tr-tee-nl refreshed against 515f39d (Regex notes pointer, BuiltinText helpers, CMake, list order); runs before coreutils--head-tail (row 17), which waits on du-cmp via mv-touch
 - 2026-10-08 16:14 (implement) search--grep-core refreshed against 668e09a (registration slots, CMake, test list; Out of scope: Pike VM capture-slot memory from #45)
 - 2026-10-08 17:18 (implement) search--grep-recursive refreshed against aa9ea93 (real GrepOneInput/GrepFileResult, CMake, test fixture); folded in #57 medium: -P -w gets the boundary check grep already uses for -G/-E/-F -w (Regex has no lookarounds, not added here), test GrepPerlWordWrap
+- 2026-10-08 18:35 (implement) search--grep-recursive: its first container run (17:19 UTC) was interrupted with the previous implement session; restarted, version 0.5.16 kept.
+- 2026-10-08 18:35 (implement) Direction acted on: task PRs' Windows checks are ignored for the rest of the develop.

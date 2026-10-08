@@ -53,3 +53,4 @@
 - 2026-10-08 17:17 UTC -- search--grep-core merged #57 as 0.5.15: 0C 3H fixed, 1M 2L open, 1 try (MSVC errors fixed in review)
 - 2026-10-08 17:18 UTC -- start search--grep-recursive (0.5.16)
 - 2026-10-08 18:33 UTC -- implement session started
+- 2026-10-08 18:34 UTC -- restart search--grep-recursive (0.5.16) after an interrupted session; Windows checks ignored per Direction

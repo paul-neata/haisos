@@ -30,3 +30,4 @@
 - 2026-10-08 09:43 UTC -- coreutils--cp merged #50 as 0.5.8: 0C 2H fixed, 3M 4L open, 1 try
 - 2026-10-08 09:43 UTC -- names-env ahead of mv-touch (waiting on the symlink question)
 - 2026-10-08 09:44 UTC -- start coreutils--names-env (0.5.9)
+- 2026-10-08 10:09 UTC -- coreutils--names-env: PR #51, ready

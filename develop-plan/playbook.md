@@ -14,7 +14,7 @@ Pause: no
 | 6 | [coreutils--rm-rmdir](tasks/coreutils--rm-rmdir.md) | done | 0.5.7 | - | #49 | 1 | 0C 1H fixed, 1M 3L open | rm -r follows directory symlinks on PHYSICAL (see Questions) |
 | 7 | [coreutils--cp](tasks/coreutils--cp.md) | done | 0.5.8 | 1, 6 | #50 | 1 | 0C 2H fixed, 3M 4L open | 3 M fit coreutils--mv-touch |
 | 8 | [coreutils--mv-touch](tasks/coreutils--mv-touch.md) | todo | | 1, 6, 7, 53 | | | | |
-| 9 | [coreutils--names-env](tasks/coreutils--names-env.md) | in-progress | 0.5.9 | - | | | | |
+| 9 | [coreutils--names-env](tasks/coreutils--names-env.md) | in-review | 0.5.9 | - | #51 | 1 | | |
 | 10 | [coreutils--chmod-paths](tasks/coreutils--chmod-paths.md) | todo | | - | | | | |
 | 11 | [coreutils--printf-seq](tasks/coreutils--printf-seq.md) | todo | | 4 | | | | |
 | 12 | [coreutils--date](tasks/coreutils--date.md) | todo | | 8, 4 | | | | |

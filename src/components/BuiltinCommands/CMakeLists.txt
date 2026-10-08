@@ -4,6 +4,8 @@ add_library(BuiltinCommands STATIC
     BuiltinCompare.cpp
     BuiltinConfigurator.cpp
     BuiltinProcess.cpp
+    BuiltinPrompt.cpp
+    BuiltinRemove.cpp
     BuiltinText.cpp
     commands/cat/Cat.cpp
     commands/echo/Echo.cpp
@@ -11,6 +13,8 @@ add_library(BuiltinCommands STATIC
     commands/man/Man.cpp
     commands/mkdir/Mkdir.cpp
     commands/pwd/Pwd.cpp
+    commands/rm/Rm.cpp
+    commands/rmdir/Rmdir.cpp
     commands/sort/Sort.cpp
     commands/sort/SortKeys.cpp
     commands/wc/Wc.cpp

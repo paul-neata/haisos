@@ -1,7 +1,7 @@
 # BuiltinCommands
 
 The commands compiled into Haisos itself -- `cat`, `echo`, `hsh`, `ls`, `man`,
-`mkdir`, `pwd`, `sort`, `wc` -- and what places them on filesystems. Implements `IBuiltinCommands`
+`mkdir`, `pwd`, `rm`, `rmdir`, `sort`, `wc` -- and what places them on filesystems. Implements `IBuiltinCommands`
 and `IBuiltinConfigurator` (`interfaces/IBuiltinCommands.h`); both are created
 through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
 
@@ -67,6 +67,16 @@ through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
   `CompareHumanNumeric` (-h, unit order then numeric), `CompareMonth`
   (-M) and `CompareVersion` (-V, gnulib's filevercmp -- a later `ls -v`
   reuses it).
+- `BuiltinPrompt.h` - `BuiltinPrompt`, GNU's yesno(): writes the question to
+  standard error exactly as given, reads one line from standard input, and
+  answers yes only when its first byte is 'y' or 'Y' (end of input, a failed
+  read and a stop while waiting are all no). One instance per run of a
+  command, so lines read ahead stay for the next question; rm uses it, and
+  cp -i and mv -i will too.
+- `BuiltinRemove.h` - `RemoveOperand`, removing one operand as GNU rm does:
+  the messages and prompts of every mode (-r, -d, -i, -v, the root
+  failsafe), one function for rm and for mv to call on a source it copied
+  across filesystems.
 - `commands/hsh/` - `hsh`, the Haisos shell (dash reimplemented); has its own
   CLAUDE.md.
 
@@ -130,6 +140,8 @@ command and links its man page.
 | `man` | 1.0.0 | `-f -k -i -I`, a section first (`man 1 ls`), several pages | pages are compiled in (each builtin's `ManPage()`, its `--help` unless overridden), all section 1, plain text, no pager; `-k` matches names and summaries only; everything else of man-db's reported as not treated |
 | `mkdir` | 1.1.0 | `-p -v` | `-m`/`--mode`, `-Z`/`--context` not treated (no permissions or security contexts) |
 | `pwd` | 1.1.0 | `-L -P` (the same: no symlinks) | -- |
+| `rm` | 1.0.0 | `-f -i -I --interactive[=WHEN] -r -R -d -v --no-preserve-root --preserve-root[=all]`; prompts on standard error, answers from standard input (end of input is no); `-I` asks once before more than three operands or a recursive removal; entries of a directory removed in name order, the last of `-f`/`-i`/`-I`/`--interactive` wins; a failed `RemoveFile` is reported as `Permission denied` | no write-protection prompts (no permissions: a builtin's path, and every write refusal, are `Permission denied`); a failed removal of an empty directory is reported as `Device or resource busy` -- no reason is known, a read-only filesystem included; entries are removed in name order, not the disk's; `--one-file-system` not treated; `--preserve-root=all` is taken as `--preserve-root` |
+| `rmdir` | 1.0.0 | `--ignore-fail-on-non-empty -p -v` | a failed removal of an empty directory is reported as `Device or resource busy` -- no reason is known, a read-only filesystem included |
 | `sort` | 1.1.0 | `-b -d -f -g -h -i -M -n -r -R -s -u -V -z`, `--sort=WORD`, `-k KEYDEF` (with `-t SEP`), `-c`/`-C`/`--check[=WHEN]`, `-m`, `-o FILE`, `--files0-from=F`; with no FILE, or a FILE of `-`, the standard input is read; GNU's last-resort whole-line comparison unless `-u` or `-s`; lines compared byte by byte, as GNU sort with `LC_ALL=C`; the orders of `BuiltinCompare.h`: `-n` exact at any length, `-g` by strtold, `-h` by unit then numeric, `-M` by month, `-V` by gnulib's filevercmp (`CompareVersion`, for `ls -v` to reuse) | `-R` orders by a salted hash of each key, not GNU's MD5, so its order changes from run to run as GNU's does (`--random-source` not treated); `-S`, `-T`, `--parallel` and `--batch-size` accepted and not acted on (Haisos sorts in memory); `--compress-program` and `--debug` not treated |
 | `wc` | 1.0.1 | `-c -m -l -L -w`, `--files0-from`, `--total`; with no FILE, or a FILE of `-`, the standard input is read | standard input has no size, so with it the columns are at least 7 wide (GNU sizes a redirected file); character classes and display widths come from the `Unicode` component's compact tables (unassigned code points count as printable; rare scripts' widths are approximate); `--debug` not treated |
 

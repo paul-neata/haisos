@@ -28,7 +28,7 @@ haisos/
 ├── src/
 │   ├── components/        - Component implementations (each has its own CLAUDE.md)
 │   │   ├── Agent/
-│   │   ├── BuiltinCommands/ - The builtin commands (echo, cat, ls, man, mkdir, pwd, sort, wc, hsh; each in commands/<name>/) and what places them on filesystems
+│   │   ├── BuiltinCommands/ - The builtin commands (echo, cat, ls, man, mkdir, pwd, rm, rmdir, sort, wc, hsh; each in commands/<name>/) and what places them on filesystems
 │   │   ├── Console/
 │   │   ├── Environment/
 │   │   ├── Factory/
@@ -536,7 +536,7 @@ returned by `IHaisosOS`'s `OSToolFactory` and merged with an agent's tools
 ## Builtin Commands
 
 Commands compiled into Haisos (`cat`, `echo`, `hsh`, `ls`, `man`, `mkdir`,
-`pwd`, `sort`, `wc`), implemented in `src/components/BuiltinCommands/`
+`pwd`, `rm`, `rmdir`, `sort`, `wc`), implemented in `src/components/BuiltinCommands/`
 (see its `CLAUDE.md`). A builtin is not a file on disk: it is placed on a
 filesystem at a path (`IBuiltinConfigurator`, or the haisosfile's `BUILTIN`),
 where it lists as a file, reads as a note naming it, cannot be written, and
@@ -596,6 +596,8 @@ use a builtin with what it already knows about the real command:
 | `man` | Prints a builtin's manual page (`man ls`, `man 1 ls`, `-f`, `-k`): its `--help` text, or a full page for `hsh` |
 | `mkdir` | Creates directories (`-p -v`) |
 | `pwd` | Prints the working directory (`-L -P`) |
+| `rm` | Removes files or directories (`-f -i -I --interactive[=WHEN] -r -R -d -v --no-preserve-root --preserve-root[=all]`), prompts read from standard input, entries in name order |
+| `rmdir` | Removes empty directories (`--ignore-fail-on-non-empty -p -v`) |
 | `sort` | Sorts lines (keys `-k`/`-t`, `-b -d -f -g -h -i -M -n -r -R -s -u -V -z`, `--sort=WORD`, `-c -C --check`, `-m`, `-o`, `--files0-from`), byte order, the numeric/general/human/month/version orders, GNU's last-resort comparison |
 | `wc` | Counts lines, words, characters, bytes and the widest line (`-c -m -l -L -w`, `--files0-from`, `--total`), GNU's columns |
 

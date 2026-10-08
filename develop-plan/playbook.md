@@ -21,7 +21,7 @@ Pause: no
 | 13 | [coreutils--stat](tasks/coreutils--stat.md) | todo | | 12, 11, 4 | | | | |
 | 14 | [coreutils--du-cmp](tasks/coreutils--du-cmp.md) | todo | | 12, 4 | | | | |
 | 15 | [coreutils--test-program](tasks/coreutils--test-program.md) | done | 0.5.12 | 4 | #54 | 1 | 0C 2H fixed, 1M 2L open | |
-| 16 | [coreutils--uniq-cut](tasks/coreutils--uniq-cut.md) | in-progress | 0.5.13 | 4 | | | | |
+| 16 | [coreutils--uniq-cut](tasks/coreutils--uniq-cut.md) | in-review | 0.5.13 | 4 | #55 | 1 | | |
 | 17 | [coreutils--head-tail](tasks/coreutils--head-tail.md) | todo | | 14, 4, 16 | | | | |
 | 18 | [coreutils--tr-tee-nl](tasks/coreutils--tr-tee-nl.md) | todo | | 4, 3 | | | | |
 | 19 | [search--grep-core](tasks/search--grep-core.md) | todo | | 3, 4, 16 | | | | |

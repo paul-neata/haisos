@@ -11,8 +11,11 @@ namespace Haisos {
 // objects' -- program data compiled into Haisos, so man may reach them here
 // without breaking the ICurrentProcess rule) and tests need this list; any
 // other command itself needs only BuiltinCommand.h.
+std::shared_ptr<IBuiltinCommand> CreateBasenameCommand();
 std::shared_ptr<IBuiltinCommand> CreateCatCommand();
+std::shared_ptr<IBuiltinCommand> CreateChmodCommand();
 std::shared_ptr<IBuiltinCommand> CreateCpCommand();
+std::shared_ptr<IBuiltinCommand> CreateDirnameCommand();
 std::shared_ptr<IBuiltinCommand> CreateEchoCommand();
 std::shared_ptr<IBuiltinCommand> CreateEnvCommand();
 std::shared_ptr<IBuiltinCommand> CreateFalseCommand();
@@ -21,6 +24,7 @@ std::shared_ptr<IBuiltinCommand> CreateLsCommand();
 std::shared_ptr<IBuiltinCommand> CreateManCommand();
 std::shared_ptr<IBuiltinCommand> CreateMkdirCommand();
 std::shared_ptr<IBuiltinCommand> CreatePwdCommand();
+std::shared_ptr<IBuiltinCommand> CreateRealpathCommand();
 std::shared_ptr<IBuiltinCommand> CreateRmCommand();
 std::shared_ptr<IBuiltinCommand> CreateRmdirCommand();
 std::shared_ptr<IBuiltinCommand> CreateSleepCommand();
@@ -34,8 +38,11 @@ std::shared_ptr<IBuiltinCommand> CreateWhichCommand();
 // the haisosfile `haisos --init` generates.
 inline std::vector<std::shared_ptr<IBuiltinCommand>> CreateStandardBuiltinCommands() {
     return {
+        CreateBasenameCommand(),
         CreateCatCommand(),
+        CreateChmodCommand(),
         CreateCpCommand(),
+        CreateDirnameCommand(),
         CreateEchoCommand(),
         CreateEnvCommand(),
         CreateFalseCommand(),
@@ -44,6 +51,7 @@ inline std::vector<std::shared_ptr<IBuiltinCommand>> CreateStandardBuiltinComman
         CreateManCommand(),
         CreateMkdirCommand(),
         CreatePwdCommand(),
+        CreateRealpathCommand(),
         CreateRmCommand(),
         CreateRmdirCommand(),
         CreateSleepCommand(),

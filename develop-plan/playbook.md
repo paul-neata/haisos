@@ -8,7 +8,7 @@ Pause: no
 | 1 | [base--fs-rename-times](tasks/base--fs-rename-times.md) | done | 0.5.1 | - | #43 | 2 | 0C 0H fixed, 1M 2L open | |
 | 2 | [base--regex-syntax](tasks/base--regex-syntax.md) | done | 0.5.2 | - | #44 | 2 | 0C 3H fixed, 3M 3L open | nesting limit 250 (not 1000) for the Windows stack; Windows CI flaky in HaisosOS.unittests |
 | 3 | [base--regex-match](tasks/base--regex-match.md) | done | 0.5.3 | 2 | #45 | 1 | 1C 4H fixed, 3M 3L open | per-thread capture slots grow threads x groups: cap before grep/sed take user patterns |
-| 53 | [base--rename-fix](tasks/base--rename-fix.md) | in-review | 0.5.4 | 1 | #46 | 1 | | review #43 follow-up; before 8 |
+| 53 | [base--rename-fix](tasks/base--rename-fix.md) | done | 0.5.4 | 1 | #46 | 1 | 0C 0H fixed, 0M 1L open | review #43 follow-up; before 8 |
 | 4 | [coreutils--sort](tasks/coreutils--sort.md) | todo | | - | | | | |
 | 5 | [coreutils--sort-orders](tasks/coreutils--sort-orders.md) | todo | | 4 | | | | |
 | 6 | [coreutils--rm-rmdir](tasks/coreutils--rm-rmdir.md) | todo | | - | | | | |

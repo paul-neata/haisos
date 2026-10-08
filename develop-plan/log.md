@@ -14,3 +14,4 @@
 - 2026-10-08 06:30 UTC -- base--regex-match: PR #45, ready
 - 2026-10-08 06:59 UTC -- base--regex-match merged #45 as 0.5.3: 1C 4H fixed, 3M 3L open, 1 try
 - 2026-10-08 07:00 UTC -- start base--rename-fix (0.5.4)
+- 2026-10-08 07:11 UTC -- base--rename-fix: PR #46, ready

@@ -5,3 +5,5 @@
 - 2026-10-08: WSL interop broken on the host (every .exe: "Exec format error") -- windows.sh cannot build. User decision (2026-10-08): continue without the host Windows build. A Windows-only red: re-run the failed CI job once (`gh run rerun <run> --failed`, `wait_ci.sh <pr>`); still red -> merge anyway, Notes "Windows red", and fix it on the host in the final phase once interop is back (or report the final Windows run as skipped).
 - HaisosOS.unittests is flaky on Windows CI (#44: failed once, passed on re-run, untouched by the PR).
 - Windows' 1 MB stack: recursive parsers need low depth limits (Regex nesting 250).
+- Before coreutils--sort-orders starts: have its plan re-check also fold in #47's open medium (`-d` with `-i`: GNU keeps only `-d`; error text `'-dn'`), Adjustments line.
+- Interim agent notifications ("may be interim") carry a token count: record with it at once and correct the record at the next publish -- don't wait.

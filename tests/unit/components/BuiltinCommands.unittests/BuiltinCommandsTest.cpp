@@ -92,9 +92,9 @@ std::shared_ptr<IBuiltinCommand> FindStandardCommand(const std::string& name) {
 
 TEST_F(BuiltinCommandsTest, ListsEveryBuiltinSortedWithAVersion) {
     const auto commands = builtins->GetCommands();
-    EXPECT_EQ(commands, (Lines{"basename", "cat", "chmod", "cp", "dirname", "echo", "env", "false",
-        "hsh", "ls", "man", "mkdir", "printf", "pwd", "realpath", "rm", "rmdir", "seq", "sleep",
-        "sort", "true", "wc", "which"}));
+    EXPECT_EQ(commands, (Lines{"[", "basename", "cat", "chmod", "cp", "dirname", "echo", "env",
+        "false", "hsh", "ls", "man", "mkdir", "printf", "pwd", "realpath", "rm", "rmdir", "seq",
+        "sleep", "sort", "test", "true", "wc", "which"}));
     for (const auto& name : commands) {
         EXPECT_FALSE(builtins->GetBuiltinVersion(name).empty()) << name;
     }
@@ -125,8 +125,17 @@ TEST_F(BuiltinCommandsTest, ABuiltinProcessLooksLikeAnyOther) {
 TEST_F(BuiltinCommandsTest, EveryBuiltinsHelpHasTheSameShape) {
     for (const auto& command : CreateStandardBuiltinCommands()) {
         const std::string name = command->Name();
-        int status = -1;
-        auto help = Run(name, {"--help"}, &status);
+        // test takes no options: --help is an ordinary non-empty string
+        // operand to it, as GNU's test, so running it shows nothing. Its
+        // help has the same shape anyway -- and [ , its other name, is the
+        // one of the pair that runs --help.
+        Lines help;
+        int status = 0;
+        if (name == "test") {
+            help = SplitLines(BuiltinHelpText(*command));
+        } else {
+            help = Run(name, {"--help"}, &status);
+        }
         // GNU's false exits 1 even after --help; every other builtin 0.
         EXPECT_EQ(status, name == "false" ? 1 : 0) << name;
         ASSERT_GE(help.size(), 5u) << name;
@@ -171,6 +180,10 @@ TEST_F(BuiltinCommandsTest, EveryBuiltinsManPageIsItsHelp) {
 
 TEST_F(BuiltinCommandsTest, EveryBuiltinHasAVersion) {
     for (const auto& name : builtins->GetCommands()) {
+        if (name == "test") {
+            continue;  // --version is a non-empty string operand to test, as
+                       // GNU's; [ --version is the pair's version line
+        }
         int status = -1;
         auto version = Run(name, {"--version"}, &status);
         // GNU's false exits 1 even after --version; every other builtin 0.

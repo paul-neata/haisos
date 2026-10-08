@@ -3,7 +3,7 @@
 - Rock: coreutils
 - Depends on: none
 - Size: ~950 changed lines in ~10 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ f1e1dc9
 - PR title: Add the sort builtin: keys, -n, -u, -s, -o, -z
 
 ## Goal

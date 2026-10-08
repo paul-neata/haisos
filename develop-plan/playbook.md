@@ -9,7 +9,7 @@ Pause: no
 | 2 | [base--regex-syntax](tasks/base--regex-syntax.md) | done | 0.5.2 | - | #44 | 2 | 0C 3H fixed, 3M 3L open | nesting limit 250 (not 1000) for the Windows stack; Windows CI flaky in HaisosOS.unittests |
 | 3 | [base--regex-match](tasks/base--regex-match.md) | done | 0.5.3 | 2 | #45 | 1 | 1C 4H fixed, 3M 3L open | per-thread capture slots grow threads x groups: cap before grep/sed take user patterns |
 | 53 | [base--rename-fix](tasks/base--rename-fix.md) | done | 0.5.4 | 1 | #46 | 1 | 0C 0H fixed, 0M 1L open | review #43 follow-up; before 8 |
-| 4 | [coreutils--sort](tasks/coreutils--sort.md) | todo | | - | | | | |
+| 4 | [coreutils--sort](tasks/coreutils--sort.md) | in-progress | 0.5.5 | - | | | | |
 | 5 | [coreutils--sort-orders](tasks/coreutils--sort-orders.md) | todo | | 4 | | | | |
 | 6 | [coreutils--rm-rmdir](tasks/coreutils--rm-rmdir.md) | todo | | - | | | | |
 | 7 | [coreutils--cp](tasks/coreutils--cp.md) | todo | | 1, 6 | | | | |
@@ -67,3 +67,4 @@ Pause: no
 ## Adjustments
 - 2026-10-08 05:30 (implement) base--regex-match refreshed: checked against d2f11f2; added #44 review outcomes (nesting limit 250 for the Windows stack, add the missing Regex.h Semantics doc comments)
 - 2026-10-08 05:48 (implement) user: continue without the host Windows build (WSL interop broken); Windows-only reds get one CI re-run, then merge with "Windows red" noted, fixed on the host in the final phase
+- 2026-10-08 07:14 (implement) coreutils--sort re-checked against f1e1dc9: nothing to change

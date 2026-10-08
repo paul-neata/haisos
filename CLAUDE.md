@@ -28,7 +28,7 @@ haisos/
 ├── src/
 │   ├── components/        - Component implementations (each has its own CLAUDE.md)
 │   │   ├── Agent/
-│   │   ├── BuiltinCommands/ - The builtin commands (echo, cat, ls, man, mkdir, pwd, rm, rmdir, sort, wc, hsh; each in commands/<name>/) and what places them on filesystems
+│   │   ├── BuiltinCommands/ - The builtin commands (echo, cat, cp, ls, man, mkdir, pwd, rm, rmdir, sort, wc, hsh; each in commands/<name>/) and what places them on filesystems
 │   │   ├── Console/
 │   │   ├── Environment/
 │   │   ├── Factory/
@@ -535,8 +535,8 @@ returned by `IHaisosOS`'s `OSToolFactory` and merged with an agent's tools
 
 ## Builtin Commands
 
-Commands compiled into Haisos (`cat`, `echo`, `hsh`, `ls`, `man`, `mkdir`,
-`pwd`, `rm`, `rmdir`, `sort`, `wc`), implemented in `src/components/BuiltinCommands/`
+Commands compiled into Haisos (`cat`, `cp`, `echo`, `hsh`, `ls`, `man`,
+`mkdir`, `pwd`, `rm`, `rmdir`, `sort`, `wc`), implemented in `src/components/BuiltinCommands/`
 (see its `CLAUDE.md`). A builtin is not a file on disk: it is placed on a
 filesystem at a path (`IBuiltinConfigurator`, or the haisosfile's `BUILTIN`),
 where it lists as a file, reads as a note naming it, cannot be written, and
@@ -590,6 +590,7 @@ use a builtin with what it already knows about the real command:
 | Builtin | Description |
 |---------|-------------|
 | `cat` | Concatenates files and standard input (`-A -b -e -E -n -s -t -T -u -v`) |
+| `cp` | Copies files and directories (`-a -b --backup[=CONTROL] -d -f -H -i -L -l -s -n -P -p --preserve[=LIST] --no-preserve=LIST --parents -R -r --remove-destination --strip-trailing-slashes -S -t -T -u --update[=UPDATE] -v`), GNU's messages, prompts, backups and the `--parents` walk |
 | `echo` | Prints its arguments (`-n -e -E`) |
 | `hsh` | The Haisos shell, after dash: `-c`, scripts, stdin or interactive (`RUN -i /bin/hsh`); quoting, expansions, pipelines, redirections, heredocs, lists, control flow, functions; commands found in `PATH` |
 | `ls` | Lists directories as GNU ls prints them to a terminal: columns, `-l` with `total`/links/owner/group/size/time, sorting, time styles, quoting; to a pipe or file, one name per line, unquoted |

@@ -11,7 +11,7 @@ Pause: no
 | 53 | [base--rename-fix](tasks/base--rename-fix.md) | done | 0.5.4 | 1 | #46 | 1 | 0C 0H fixed, 0M 1L open | review #43 follow-up; before 8 |
 | 4 | [coreutils--sort](tasks/coreutils--sort.md) | done | 0.5.5 | - | #47 | 1 | 0C 3H fixed, 1M 4L open | -d/-i precedence (M) left for coreutils--sort-orders |
 | 5 | [coreutils--sort-orders](tasks/coreutils--sort-orders.md) | done | 0.5.6 | 4 | #48 | 1 | 0C 3H fixed, 1M 4L open | |
-| 6 | [coreutils--rm-rmdir](tasks/coreutils--rm-rmdir.md) | in-review | 0.5.7 | - | #49 | 1 | | |
+| 6 | [coreutils--rm-rmdir](tasks/coreutils--rm-rmdir.md) | done | 0.5.7 | - | #49 | 1 | 0C 1H fixed, 1M 3L open | rm -r follows directory symlinks on PHYSICAL (see Questions) |
 | 7 | [coreutils--cp](tasks/coreutils--cp.md) | todo | | 1, 6 | | | | |
 | 8 | [coreutils--mv-touch](tasks/coreutils--mv-touch.md) | todo | | 1, 6, 7, 53 | | | | |
 | 9 | [coreutils--names-env](tasks/coreutils--names-env.md) | todo | | - | | | | |
@@ -63,6 +63,7 @@ Pause: no
 
 ## Questions
 - (implement, 2026-10-08) base--fs-rename-times review (#43): the Windows rename emulation removes an empty target directory before MoveFileExW and loses it if the move fails (e.g. `/d` -> `/d/sub`). The reviewer suggests a follow-up task before coreutils--mv-touch (row 8) relies on it: refuse a new path under the old one before removing the target, and recreate it if MoveFileExW fails. Add such a task (depends on 1, before 8)? -> answered: yes -- added base--rename-fix (#53, after row 3, depends on 1; row 8 now depends on 53). It also takes the review's two low findings (ToFileTime overflow, the misplaced HaisosOSTest comment).
+- (implement, 2026-10-08) coreutils--rm-rmdir review (#49), medium: `rm -r` stats with Stat, which follows links, so on a PHYSICAL filesystem it descends into a symlinked directory and empties its target, even outside the tree (GNU removes only the link). DELETE already does this, but rm makes it reachable from any process, and cp/mv/find -delete would reuse RemoveOperand. The reviewer suggests giving IFileIO a no-follow status (or a link entry type) before those tasks, and until then documenting it in the rm row of the BuiltinCommands CLAUDE.md. Add such a task (before coreutils--mv-touch, row 8)? I continue with coreutils--cp meanwhile.
 
 ## Adjustments
 - 2026-10-08 05:30 (implement) base--regex-match refreshed: checked against d2f11f2; added #44 review outcomes (nesting limit 250 for the Windows stack, add the missing Regex.h Semantics doc comments)

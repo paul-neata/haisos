@@ -24,3 +24,4 @@
 - 2026-10-08 08:30 UTC -- coreutils--sort-orders merged #48 as 0.5.6: 0C 3H fixed, 1M 4L open, 1 try
 - 2026-10-08 08:31 UTC -- start coreutils--rm-rmdir (0.5.7)
 - 2026-10-08 08:50 UTC -- coreutils--rm-rmdir: PR #49, ready
+- 2026-10-08 09:00 UTC -- coreutils--rm-rmdir merged #49 as 0.5.7: 0C 1H fixed, 1M 3L open, 1 try; question: rm -r follows dir symlinks

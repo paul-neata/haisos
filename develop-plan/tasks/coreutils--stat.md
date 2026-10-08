@@ -3,7 +3,7 @@
 - Rock: coreutils
 - Depends on: coreutils--date (`FormatDateTime`), coreutils--sort (`GnuQuote`), coreutils--printf-seq (`BuiltinPrintf`: `PrintfSpec`, `FormatPrintfUnsigned`, `FormatPrintfString`)
 - Size: ~550 changed lines in ~6 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ 96ca945
 - PR title: Add the stat builtin
 
 (The second half of the planned coreutils--date-stat, split because the two
@@ -26,14 +26,18 @@ Read first: the root `CLAUDE.md` ("Builtin Commands", "Security"),
 rules, the ls row's exceptions), `BuiltinCommand.h`,
 `interfaces/IFileSystemService.h` (`FileStatus`: type, size, blocks,
 linkCount, access/modification/change times, deviceMajor/Minor),
-`commands/ls/Ls.cpp` (how it turns a `FileStatus` into `-rwxrwxrwx`).
+`commands/ls/Ls.cpp` (how it turns a `FileStatus` into `-rwxrwxrwx`, and its
+`--full-time` line, the same `FormatDateTime` format as `%x`).
 
-What earlier tasks provide, as if on develop:
-- coreutils--date: `std::string FormatDateTime(std::string_view format, FileDateTime t, bool utc);` in `BuiltinDate.h`.
-- coreutils--sort: `GnuQuote` in `BuiltinText.h` (GNU's `quote()`: the `'%5%'` of `invalid directive`); file names in `cannot statx` are `ShellEscapeQuoted(name, true)` (GNU's `quoteaf`).
-- coreutils--printf-seq: in `BuiltinPrintf.h`, `struct PrintfSpec { std::string flags; std::optional<int> width; std::optional<int> precision; bool widthFromArgument; bool precisionFromArgument; char conversion; };`,
+What earlier tasks provide (all landed on develop, namespace `Haisos`):
+- coreutils--date: `std::string FormatDateTime(std::string_view format, FileDateTime t, bool utc);` in `BuiltinDate.h` (`%N` 9 digits, `%z` `+hhmm`; `ls --full-time` already uses `"%Y-%m-%d %H:%M:%S.%N %z"`).
+- coreutils--sort: `std::string GnuQuote(std::string_view)` in `BuiltinText.h` (GNU's `quote()`: the `'%5%'` of `invalid directive`); file names in `cannot statx` are `ShellEscapeQuoted(name, true)` (`BuiltinCommand.h`; GNU's `quoteaf`, which `CopyQuoted` in `BuiltinCopy.h` is too).
+- coreutils--printf-seq: in `BuiltinPrintf.h`, `struct PrintfSpec { std::string flags; std::optional<int> width; std::optional<int> precision; bool widthFromArgument = false; bool precisionFromArgument = false; char conversion = 0; };`,
   `std::string FormatPrintfUnsigned(const PrintfSpec&, uintmax_t);` (conversions o u x X),
   `std::string FormatPrintfString(const PrintfSpec&, std::string_view);` (s).
+  Build the `PrintfSpec` from stat's own directive scan: `ParsePrintfSpec` skips
+  `h` and `L` as length modifiers, and stat's `%h` and `%Ld` are directives.
+- coreutils--mv-touch and base--fs-rename-times: `IFileSystem::SetTimes` / `IFileIO::SetTimes`, so a test can set a file's times (see Tests).
 
 ## Changes
 
@@ -43,7 +47,8 @@ What earlier tasks provide, as if on develop:
 file or file system status", usage `stat [OPTION]... FILE...`; notes: the
 directives in a few lines, and the exceptions below.
 
-`Options()` (GNU stat 9.4):
+`Options()` (GNU stat 9.4; `None`/`Required` are `BuiltinArgument::None`/`::Required`, and the
+`k...` ids are constants local to `Stat.cpp`, as in `Touch.cpp`):
 `{'L', "dereference", kDereference, None, "", "follow links (no links here: no effect)"}`,
 `{'f', "file-system", kFileSystem, None, "", "display file system status"}`,
 `{'c', "format", kFormat, Required, "FORMAT", "use FORMAT, a newline after each file"}`,
@@ -57,10 +62,13 @@ operand` + Try, exit 1. A later `-c`/`--printf` replaces an earlier one
 nothing and interprets escapes).
 
 Per operand (go on after a failure; exit 1 if any failed, else 0):
-`context.IO().Stat(name)`; failing: `stat: cannot statx 'NAME': No such file
-or directory` (with `-f`: `stat: cannot read file system information for
-'NAME': No such file or directory`), NAME through `ShellEscapeQuoted(name,
-true)`. `-` is a file named `-` (exception: GNU stats standard input, which
+`context.IO().Stat(name, status)` (an `int`, 0 on success, `FileStatus& out`);
+failing: `stat: cannot statx 'NAME': No such file or directory` (with `-f`:
+`stat: cannot read file system information for 'NAME': No such file or
+directory`), NAME through `ShellEscapeQuoted(name, true)`, the reason from
+`CopyStatMissingReason(context.IO(), name)` (`BuiltinCopy.h`, shared by cp and
+mv: `Not a directory` when a segment on the way is a file, else `No such file
+or directory`). `-` is a file named `-` (exception: GNU stats standard input, which
 a Haisos descriptor cannot report). Check `StopRequested()` between operands.
 
 Default formats (stat.c `default_format`, C locale), byte for byte:
@@ -159,13 +167,17 @@ not treated.
 
 ### `BuiltinCommandList.h`, `CMakeLists.txt`
 
-Declare `CreateStatCommand()`, add it to `CreateStandardBuiltinCommands()`
-(the `haisos --init` template follows), add `commands/stat/Stat.cpp`.
+Declare `CreateStatCommand()` after `CreateSortCommand()` and add it to
+`CreateStandardBuiltinCommands()` between `CreateSortCommand()` and
+`CreateTeeCommand()` (the `haisos --init` template follows). In
+`src/components/BuiltinCommands/CMakeLists.txt` add `commands/stat/Stat.cpp`
+after `commands/sort/SortKeys.cpp`.
 
 ## Tests
 
-New `tests/unit/components/BuiltinCommands.unittests/StatTest.cpp` (in that
-directory's `CMakeLists.txt`), on `RunCaptured` and the fixture's in-memory
+New `tests/unit/components/BuiltinCommands.unittests/StatTest.cpp` (added to
+that directory's `CMakeLists.txt` after `SortTest.cpp`, in the one
+`add_executable` line), on `RunCaptured` and the fixture's in-memory
 files (`/notes.txt` is 17 bytes, 1 block; `/docs` a directory with `a.md` and
 `sub`). Time lines depend on the clock: compare them with a regex
 (`[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{9} [+-][0-9]{4}`),
@@ -185,10 +197,11 @@ everything else exactly.
 - `StatFormatDirectives`: `-c '%n %s %b %B %F %A %a %h %i %u %U %g %G %w %W %d %D %o %f %m %C %N' /notes.txt`
   -> `"/notes.txt 17 1 512 regular file -rwxrwxrwx 777 1 0 0 haisos 0 haisos - 0 0 0 4096 81ff / ? '/notes.txt'\n"`.
 - `StatFormatWidthsAndPrecision`: `-c '%10s|%-12n|%.3n|%04a|%%|%E' /notes.txt` ->
-  `"        17|/notes.txt  |/no|0777|%|?\n"`; epoch precision on a file whose
-  times are set: write a file, set its times with the fixture's physical-disk
-  approach or (simpler) compare `-c '%Y'` with `root->Stat` seconds and
-  `-c '%.3Y'` with those seconds + `.` + the first three nanosecond digits.
+  `"        17|/notes.txt  |/no|0777|%|?\n"`; epoch precision: set the times with
+  `root->SetTimes("/notes.txt", FileDateTime{1700000000, 500000000}, FileDateTime{1700000000, 500000000})`
+  (as `TouchReference` does), then `-c '%X %.Y %.3Y %.1Y'` gives
+  `"1700000000 1700000000.500000000 1700000000.500 1700000000.5\n"` (its change
+  time becomes now, so leave `%Z` out), plus the width cases checked in the container.
 - `StatPrintfEscapesAndNoNewline`: `--printf '%n\t%s\n' /notes.txt /docs/a.md` ->
   `"/notes.txt\t17\n/docs/a.md\t5\n"`; `--printf 'a\q' /notes.txt` -> out `"aq"`,
   err `"stat: warning: unrecognized escape '\\q'\n"`; `-c 'a\tb' /notes.txt` -> `"a\\tb\n"`.
@@ -220,9 +233,9 @@ bash ./scripts/test_linux.sh L U
 (The script's filter matches test executable names, so `BuiltinCommands`
 is the narrowest it takes; the direct run narrows to this task's tests.
 `TheInitTemplatesBuiltinsAllApplyOnceUncommented` lives in
-`CliParser.unittests`.) Add the new builtin names to the exact list in
-`ListsEveryBuiltinSortedWithAVersion` (`BuiltinCommandsTest.cpp`), in byte
-order.
+`CliParser.unittests`.) Add `"stat"` to the exact list in
+`ListsEveryBuiltinSortedWithAVersion` (`BuiltinCommandsTest.cpp`), between
+`"sort"` and `"tee"`.
 
 ## Docs
 

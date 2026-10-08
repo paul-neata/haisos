@@ -127,8 +127,20 @@ TEST_F(BuiltinCommandsTest, SortVersion) {
 
 TEST_F(BuiltinCommandsTest, SortVersionKey) {
     // -V as a key modifier, on the second dash-separated field.
-    const auto run = RunCaptured("sort", {"-t-", "-k2V"}, "a-1.10\nb-1.9\n");
+    auto run = RunCaptured("sort", {"-t-", "-k2V"}, "a-1.10\nb-1.9\n");
     EXPECT_EQ(run.out, "b-1.9\na-1.10\n");
+    EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 0);
+
+    // -f and -d apply before the version comparison, as in GNU's keycompare.
+    run = RunCaptured("sort", {"-V"}, "a\nB\n");
+    EXPECT_EQ(run.out, "B\na\n");
+    run = RunCaptured("sort", {"-fV"}, "a\nB\n");
+    EXPECT_EQ(run.out, "a\nB\n");
+    EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 0);
+    run = RunCaptured("sort", {"-dV"}, "x.10\nx_9\n");
+    EXPECT_EQ(run.out, "x_9\nx.10\n");
     EXPECT_EQ(run.err, kNone);
     EXPECT_EQ(run.status, 0);
 }
@@ -162,6 +174,17 @@ TEST_F(BuiltinCommandsTest, SortRandomGroupsEqualKeys) {
     EXPECT_EQ(groups, (std::vector<std::string>{"a", "b", "c"}));
     EXPECT_EQ(run.err, kNone);
     EXPECT_EQ(run.status, 0);
+
+    // Without -f, case-distinct keys are distinct: 'a' and 'A' are not one
+    // group, so the last resort never has to put them side by side -- run
+    // a few times, some salt splits them (GNU's -R, too, keeps them apart).
+    bool split = false;
+    for (int attempt = 0; attempt < 20 && !split; ++attempt) {
+        const auto cased = RunCaptured("sort", {"-R"}, "a\nA\nb\nB\nc\nC\n");
+        split = cased.out.find("a\nA\n") == std::string::npos
+            && cased.out.find("A\na\n") == std::string::npos;
+    }
+    EXPECT_TRUE(split);
 
     // With -u only one of each group is left.
     const auto unique = RunCaptured("sort", {"-R", "-u"}, input);
@@ -276,6 +299,16 @@ TEST_F(BuiltinCommandsTest, SortDictionaryAndNonprinting) {
     run = RunCaptured("sort", {"-i"}, "a\001c\nab\n");
     EXPECT_EQ(run.out, "ab\na\001c\n");
     EXPECT_EQ(run.err, kNone);
+    EXPECT_EQ(run.status, 0);
+    // Without -f neither folds case: 'B' (0x42) before 'a' (0x61).
+    run = RunCaptured("sort", {"-d"}, "a\nB\n");
+    EXPECT_EQ(run.out, "B\na\n");
+    EXPECT_EQ(run.status, 0);
+    run = RunCaptured("sort", {"-i"}, "a\nB\n");
+    EXPECT_EQ(run.out, "B\na\n");
+    EXPECT_EQ(run.status, 0);
+    run = RunCaptured("sort", {"-df"}, "a\nB\n");
+    EXPECT_EQ(run.out, "a\nB\n");
     EXPECT_EQ(run.status, 0);
 }
 

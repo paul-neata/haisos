@@ -54,15 +54,20 @@ bool IgnoredByModifiers(char c, const SortKey& key) {
     return false;
 }
 
-// The key's text as -R hashes it: case folded, the bytes -d/-i ignore
-// skipped, in one owned string.
-std::string RandomTransformedText(std::string_view text, const SortKey& key) {
+// A byte as the key compares it: folded only with -f (GNU's translate).
+char KeyFold(char c, const SortKey& key) {
+    return key.foldCase ? FoldCase(c) : c;
+}
+
+// The key's text as GNU's keycompare hands it to -R and -V: case folded
+// with -f, the bytes -d/-i ignore skipped, in one owned string.
+std::string TransformedKeyText(std::string_view text, const SortKey& key) {
     std::string out;
     for (const char c : text) {
         if (IgnoredByModifiers(c, key)) {
             continue;
         }
-        out += FoldCase(c);
+        out += KeyFold(c, key);
     }
     return out;
 }
@@ -94,8 +99,8 @@ uint64_t HashKeyText(const std::string& text, const SortSettings& settings) {
 // tie and equal keys always do.
 int CompareRandomTexts(std::string_view a, std::string_view b, const SortKey& key,
                        const SortSettings& settings) {
-    const std::string textA = RandomTransformedText(a, key);
-    const std::string textB = RandomTransformedText(b, key);
+    const std::string textA = TransformedKeyText(a, key);
+    const std::string textB = TransformedKeyText(b, key);
     const uint64_t hashA = HashKeyText(textA, settings);
     const uint64_t hashB = HashKeyText(textB, settings);
     if (hashA != hashB) {
@@ -133,12 +138,15 @@ int CompareKeyTexts(std::string_view a, std::string_view b, const SortKey& key,
         return CompareRandomTexts(a, b, key, settings);
     }
     if (key.version) {
+        if (key.dictionary || key.ignoreNonprinting || key.foldCase) {
+            return CompareVersion(TransformedKeyText(a, key), TransformedKeyText(b, key));
+        }
         return CompareVersion(a, b);
     }
     if (!key.dictionary && !key.ignoreNonprinting && !key.foldCase) {
         return CompareBytes(a, b);
     }
-    // Walk both texts skipping ignored bytes, folding case, the one that runs
+    // Walk both texts skipping ignored bytes, folding case with -f, the one that runs
     // out first the smaller.
     size_t i = 0;
     size_t j = 0;
@@ -153,8 +161,8 @@ int CompareKeyTexts(std::string_view a, std::string_view b, const SortKey& key,
             break;
         }
         // As unsigned bytes, as GNU's to_uchar: 0xC3 sorts after 'A'.
-        const unsigned char ca = static_cast<unsigned char>(FoldCase(a[i]));
-        const unsigned char cb = static_cast<unsigned char>(FoldCase(b[j]));
+        const unsigned char ca = static_cast<unsigned char>(KeyFold(a[i], key));
+        const unsigned char cb = static_cast<unsigned char>(KeyFold(b[j], key));
         if (ca != cb) {
             return ca < cb ? -1 : 1;
         }

@@ -19,7 +19,8 @@ using namespace Haisos;
 namespace {
 
 bool WriteFile(IFileSystem& fs, const std::string& path, const std::string& contents) {
-    auto file = fs.OpenFile(path, kFileOpenWriteCreateTruncate);
+    // With a mode: O_CREAT without one is refused by libc on the host.
+    auto file = fs.OpenFile(path, kFileOpenWriteCreateTruncate, kFileCreateMode);
     if (!file) {
         return false;
     }

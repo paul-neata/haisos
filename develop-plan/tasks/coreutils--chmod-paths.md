@@ -3,7 +3,7 @@
 - Rock: coreutils
 - Depends on: none
 - Size: ~800 changed lines in ~9 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ c7d53a1
 - PR title: Add chmod, basename, dirname and realpath builtins
 
 Split off coreutils--names-env (which came to ~1500 lines with these four):
@@ -180,9 +180,21 @@ d/e/g` -> `/w/f`, `e/g`; `--relative-to=/w --relative-base=d f d/e` ->
 
 ### Registration and build
 
-`BuiltinCommandList.h`: declare and register `CreateBasenameCommand`,
-`CreateChmodCommand`, `CreateDirnameCommand`, `CreateRealpathCommand`
-(alphabetical). `CMakeLists.txt`: the four `commands/<name>/<Name>.cpp`.
+`src/components/BuiltinCommands/BuiltinCommandList.h`: declare and register
+`CreateBasenameCommand` (before `CreateCatCommand`), `CreateChmodCommand`
+(after `CreateCatCommand`, before `CreateCpCommand`), `CreateDirnameCommand`
+(after `CreateCpCommand`, before `CreateEchoCommand`) and
+`CreateRealpathCommand` (after `CreatePwdCommand`, before `CreateRmCommand`),
+in both the declarations and `CreateStandardBuiltinCommands()`.
+`src/components/BuiltinCommands/CMakeLists.txt` (not the root one): the four
+`commands/<name>/<Name>.cpp` in the `BuiltinCommands` library, in the
+alphabetical `commands/` run.
+
+Reuse, do not re-create: `GnuQuote` (`BuiltinText.h`) for the `extra operand`
+text, which GNU prints with `quote()` (`'c'`, same as `q` for plain names);
+`WriteFully` (`BuiltinText.h`) for output; `ShellEscapeQuoted` stays for the
+other messages. `commands/rm`/`rmdir`/`cp` are newer models than mkdir for
+operand-error handling.
 
 ## Tests
 
@@ -228,7 +240,11 @@ New `tests/unit/components/BuiltinCommands.unittests/ChmodPathsTest.cpp`
   `realpath: '': No such file or directory\n`; `realpath` -> missing operand.
 
 Update `ListsEveryBuiltinSortedWithAVersion` in `BuiltinCommandsTest.cpp`
-(add `"basename"`, `"chmod"`, `"dirname"`, `"realpath"` in sorted position).
+(now `cat cp echo env false hsh ls man mkdir pwd rm rmdir sleep sort true wc
+which`): add `"basename"` first, `"chmod"` after `"cat"`, `"dirname"` after
+`"cp"`, `"realpath"` after `"pwd"`. Add `ChmodPathsTest.cpp` to
+`tests/unit/components/BuiltinCommands.unittests/CMakeLists.txt` beside
+`CpTest.cpp`, `RmTest.cpp` etc.
 None of the four has an untreated option.
 
 Commands:
@@ -245,10 +261,10 @@ chmod -v <mode> f` -- run `chmod 777 f` first so the old mode is 0777, and
 
 ## Docs
 
-- `src/components/BuiltinCommands/CLAUDE.md`: the command list; rows for
+- `src/components/BuiltinCommands/CLAUDE.md`: the opening command list (now cat, cp, echo, env, false, hsh, ... which) and the table; rows for
   `basename`, `chmod`, `dirname`, `realpath` (1.0.0) -- chmod's exception
   (validated, nothing changes, 0777, umask 0), realpath's (no links).
-- Root `CLAUDE.md`: rows for the four; the command lists.
+- Root `CLAUDE.md`: the Builtin Commands paragraph and table (already listing the earlier builtins) get the four; the `BuiltinCommands` directory-structure/component lines if they list commands.
 
 ## Acceptance
 

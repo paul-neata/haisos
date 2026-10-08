@@ -15,7 +15,7 @@ Pause: no
 | 7 | [coreutils--cp](tasks/coreutils--cp.md) | done | 0.5.8 | 1, 6 | #50 | 1 | 0C 2H fixed, 3M 4L open | 3 M fit coreutils--mv-touch |
 | 8 | [coreutils--mv-touch](tasks/coreutils--mv-touch.md) | todo | | 1, 6, 7, 53 | | | | |
 | 9 | [coreutils--names-env](tasks/coreutils--names-env.md) | done | 0.5.9 | - | #51 | 1 | 0C 1H fixed, 2M 6L open | Windows green on CI re-run (HaisosOS.unittests flaky) |
-| 10 | [coreutils--chmod-paths](tasks/coreutils--chmod-paths.md) | todo | | - | | | | |
+| 10 | [coreutils--chmod-paths](tasks/coreutils--chmod-paths.md) | in-progress | 0.5.10 | - | | | | |
 | 11 | [coreutils--printf-seq](tasks/coreutils--printf-seq.md) | todo | | 4 | | | | |
 | 12 | [coreutils--date](tasks/coreutils--date.md) | todo | | 8, 4 | | | | |
 | 13 | [coreutils--stat](tasks/coreutils--stat.md) | todo | | 12, 11, 4 | | | | |
@@ -75,3 +75,4 @@ Pause: no
 - 2026-10-08 09:43 (implement) coreutils--names-env (row 9) runs before coreutils--mv-touch (row 8): row 8 waits for the answer to the rm -r symlink Question
 - 2026-10-08 09:44 (implement) coreutils--names-env refreshed against b7b1ee6: BuiltinCommands CMake, current builtin list and order, reuse of WriteFully/GnuQuote
 - 2026-10-08 10:29 (implement) coreutils--chmod-paths (row 10) also runs before coreutils--mv-touch (row 8), still waiting on the rm -r symlink Question
+- 2026-10-08 10:29 (implement) coreutils--chmod-paths refreshed against c7d53a1: BuiltinCommands CMake, list slots, current 17-name expectation, reuse of GnuQuote/WriteFully

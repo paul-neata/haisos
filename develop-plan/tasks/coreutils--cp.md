@@ -3,7 +3,7 @@
 - Rock: coreutils
 - Depends on: base--fs-rename-times, coreutils--rm-rmdir
 - Size: ~900 changed lines in ~8 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ 57ade71
 - PR title: Add the cp builtin and a shared copy routine
 
 ## Goal
@@ -23,21 +23,33 @@ command that copies files (tar, patch, ...).
 Read first: the root `CLAUDE.md` ("Security", "Builtin Commands", rule 9),
 `src/components/BuiltinCommands/CLAUDE.md`, `src/components/Filesystem/CLAUDE.md`.
 
-What earlier tasks provide, as if on develop:
+What earlier tasks provide (now on develop):
 - base--fs-rename-times: in `interfaces/IFileSystemService.h`
   `constexpr int kFileSystemError = -1; constexpr int kFileSystemCrossDevice = -2;`,
-  and on `IFileSystem` and `IFileIO`:
+  and on `IFileSystem` and `IFileIO` (`interfaces/IFileIO.h`):
   `int Rename(const std::string& oldPath, const std::string& newPath)` and
   `int SetTimes(const std::string& path, const std::optional<FileDateTime>& accessTime, const std::optional<FileDateTime>& modificationTime)`
-  (nullopt leaves that time; fails on a builtin's path).
+  (nullopt leaves that time; fails on a builtin's path; succeeds, changing nothing, on a device).
 - coreutils--rm-rmdir: `BuiltinPrompt` (`BuiltinPrompt.h`: `explicit
   BuiltinPrompt(BuiltinContext&)`, `bool Ask(const std::string& question)` --
-  GNU's yesno on stderr/stdin) and `RemoveOperand` (`BuiltinRemove.h`); the
-  `rm`/`rmdir` builtins, whose `Rm.cpp` is the nearest model.
+  GNU's yesno on stderr/stdin) and `RemoveOperand`/`RemoveOptions`
+  (`BuiltinRemove.h`; its internal `RemoveEntry` outcome Done/Skipped/Failed
+  is private to `BuiltinRemove.cpp`); the `rm`/`rmdir` builtins, whose
+  `commands/rm/Rm.cpp` is the nearest model. Use `RemoveOperand`/`RemoveFile`
+  for `--remove-destination` removals rather than re-writing removal.
+- sort task: `BuiltinText.h` -- `GnuQuote` (GNU's quote(), for `extra operand
+  'x'`), `ArgMatch` (GNU's XARGMATCH: exact-or-unambiguous-prefix match of a
+  word against an `ArgChoice` table, printing `invalid argument 'x' for
+  '--opt'` / `Valid arguments are:` / `  - 'a', 'b'` + Try, the caller then
+  returns 1), `OpenInputOperand`, `WriteFully`. Reuse `ArgMatch` for the
+  `--update` word and for `ParseBackupControl` (synonyms share a value, so
+  `'none', 'off'` print on one line) instead of hand-printing the blocks,
+  provided its bytes equal the blocks below; `--preserve`'s comma list is
+  still parsed by hand. Also `BuiltinCompare.h` (not needed by cp).
 
 What exists: `BuiltinCommand.h` (`BuiltinContext`, `BeginBuiltin`,
 `ParseBuiltinArgs`, `ShellEscapeQuoted`, `kBuiltinNotTreated`),
-`FilesystemUtils.h` (`kFileOpenReadOnly`, `kFileOpenWriteCreateTruncate`,
+`src/components/Filesystem/FilesystemUtils.h` (`kFileOpenReadOnly`, `kFileOpenWriteCreateTruncate`,
 `kFileOpenWriteCreateAppend`, `kFileCreateMode`, `EntryTypeOf`),
 `commands/mkdir/Mkdir.cpp` (`kDirectoryMode` per platform). `IFileIO`
 operations fail with -1 and no reason: reasons for messages come from `Stat`.
@@ -301,7 +313,7 @@ directory copied into itself is refused before anything is copied.
 
 ### `src/components/BuiltinCommands/BuiltinCommandList.h`, `CMakeLists.txt`
 
-Declare and register `CreateCpCommand()` (alphabetical); add
+Declare and register `CreateCpCommand()` (alphabetical: after `CreateCatCommand()`, before `CreateEchoCommand()`); add
 `BuiltinCopy.cpp` and `commands/cp/Cp.cpp` to the library.
 
 ## Tests

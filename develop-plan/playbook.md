@@ -12,7 +12,7 @@ Pause: no
 | 4 | [coreutils--sort](tasks/coreutils--sort.md) | done | 0.5.5 | - | #47 | 1 | 0C 3H fixed, 1M 4L open | -d/-i precedence (M) left for coreutils--sort-orders |
 | 5 | [coreutils--sort-orders](tasks/coreutils--sort-orders.md) | done | 0.5.6 | 4 | #48 | 1 | 0C 3H fixed, 1M 4L open | |
 | 6 | [coreutils--rm-rmdir](tasks/coreutils--rm-rmdir.md) | done | 0.5.7 | - | #49 | 1 | 0C 1H fixed, 1M 3L open | rm -r follows directory symlinks on PHYSICAL (see Questions) |
-| 7 | [coreutils--cp](tasks/coreutils--cp.md) | todo | | 1, 6 | | | | |
+| 7 | [coreutils--cp](tasks/coreutils--cp.md) | in-progress | 0.5.8 | 1, 6 | | | | |
 | 8 | [coreutils--mv-touch](tasks/coreutils--mv-touch.md) | todo | | 1, 6, 7, 53 | | | | |
 | 9 | [coreutils--names-env](tasks/coreutils--names-env.md) | todo | | - | | | | |
 | 10 | [coreutils--chmod-paths](tasks/coreutils--chmod-paths.md) | todo | | - | | | | |
@@ -71,3 +71,4 @@ Pause: no
 - 2026-10-08 07:14 (implement) coreutils--sort re-checked against f1e1dc9: nothing to change
 - 2026-10-08 07:54 (implement) coreutils--sort-orders refreshed against d947afa; folded in #47 review medium (-d wins over -i, error text '-dn'), with test SortDictionaryWinsOverNonprinting
 - 2026-10-08 08:31 (implement) coreutils--rm-rmdir refreshed against 74a3f56: names the shared BuiltinText helpers (ArgMatch for --interactive/--preserve-root values), list ordering after pwd and before sort
+- 2026-10-08 09:02 (implement) coreutils--cp refreshed against 57ade71: reuse RemoveOperand/RemoveFile (BuiltinRemove) and ArgMatch/GnuQuote (BuiltinText), full paths for FilesystemUtils.h and the list files

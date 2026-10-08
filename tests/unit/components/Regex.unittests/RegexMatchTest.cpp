@@ -113,6 +113,11 @@ TEST(RegexMatchTest, AnchorsAndFlags) {
         {RegexSyntax::Basic, "a.c", Text("a\nc"), 0, 0, false, false, "(0,3)"},
         {RegexSyntax::Basic, "[^a]", Text("\n"), 0, 0, false, false, "(0,1)"},
         {RegexSyntax::Basic, "a", Text("abc"), 4, 0, false, false, "nomatch"},
+        // Before the text counts as a non-word byte (GNU sed agrees).
+        {RegexSyntax::Basic, "\\bfoo", Text("foo"), 0, 0, false, false, "(0,3)"},
+        {RegexSyntax::Basic, "\\<f", Text("foo"), 0, 0, false, false, "(0,1)"},
+        {RegexSyntax::Extended, "\\Bx", Text("xy"), 0, 0, false, false, "nomatch"},
+        {RegexSyntax::Perl, "\\bfoo\\b", Text("foo"), 0, 0, false, false, "(0,3)"},
     };
     RunMatchCases("AnchorsAndFlags", cases, sizeof(cases) / sizeof(cases[0]));
 }
@@ -179,15 +184,22 @@ TEST(RegexMatchTest, GroupsArePresentForEveryGroup) {
 }
 
 TEST(RegexMatchTest, TooBigPatternsFail) {
+    // An unbounded loop counts its body; 100000 stacked GNU quantifiers would
+    // nest the tree past what the compiler may recurse over.
+    const std::string patterns[] = {"(a{1000}){1000}", "((a{1000}){1000})*",
+                                    "a" + std::string(100000, '*')};
     for (auto syntax : {RegexSyntax::Extended, RegexSyntax::Perl}) {
-        SCOPED_TRACE(syntax == RegexSyntax::Perl ? "Perl" : "Extended");
-        RegexOptions options;
-        options.syntax = syntax;
-        std::string error;
-        std::shared_ptr<const Regex> compiled = Regex::Compile("(a{1000}){1000}", options, error);
-        EXPECT_EQ(compiled, nullptr);
-        EXPECT_EQ(error, syntax == RegexSyntax::Perl ? "regular expression is too large"
-                                                     : "Regular expression too big");
+        for (const std::string& pattern : patterns) {
+            if (syntax == RegexSyntax::Perl && pattern[1] == '*') continue;  // not Perl
+            SCOPED_TRACE((syntax == RegexSyntax::Perl ? "Perl " : "Extended ") + pattern.substr(0, 20));
+            RegexOptions options;
+            options.syntax = syntax;
+            std::string error;
+            std::shared_ptr<const Regex> compiled = Regex::Compile(pattern, options, error);
+            EXPECT_EQ(compiled, nullptr);
+            EXPECT_EQ(error, syntax == RegexSyntax::Perl ? "regular expression is too large"
+                                                         : "Regular expression too big");
+        }
     }
 }
 

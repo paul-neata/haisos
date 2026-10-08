@@ -1,5 +1,7 @@
 #include "RegexProgram.h"
 
+#include <utility>
+
 #include "Regex.h"
 
 namespace Haisos {
@@ -30,13 +32,13 @@ bool RegexAssertionHolds(const RegexInstruction& instruction, std::string_view t
     case RegexAssertion::TextEndBeforeNewline:
         return p == n || (p == n - 1 && text[p] == '\n');
     case RegexAssertion::WordBoundary:
-        return word(p > 0 ? p - 1 : 0) != word(p);
+        return (p > 0 && word(p - 1)) != word(p);
     case RegexAssertion::NotWordBoundary:
-        return word(p > 0 ? p - 1 : 0) == word(p);
+        return (p > 0 && word(p - 1)) == word(p);
     case RegexAssertion::WordStart:
-        return !word(p > 0 ? p - 1 : 0) && word(p);
+        return !(p > 0 && word(p - 1)) && word(p);
     case RegexAssertion::WordEnd:
-        return word(p > 0 ? p - 1 : 0) && !word(p);
+        return (p > 0 && word(p - 1)) && !word(p);
     }
     return false;
 }
@@ -64,7 +66,11 @@ public:
         m_program.hasBackReferences = m_tree.hasBackReferences;
         m_program.slotCount = 2 * (m_tree.groupCount + 1);
 
-        size_t total = SaturatingAdd(4, m_tree.root >= 0 ? NodeSize(m_tree.root) : 0);
+        // NodeSize and EmitNode recurse over the tree: refuse a tree deeper
+        // than the 250-parenthesis limit allows (GNU's stacked quantifiers,
+        // a**...*, nest without parentheses) before recursing at all.
+        size_t total = TreeTooDeep() ? kSizeCap
+                                     : SaturatingAdd(4, m_tree.root >= 0 ? NodeSize(m_tree.root) : 0);
         if (total > kMaxRegexInstructions) {
             error = syntax == RegexSyntax::Perl ? "regular expression is too large"
                                                 : "Regular expression too big";
@@ -94,6 +100,20 @@ private:
     }
 
     int CurrentPc() const { return static_cast<int>(m_program.instructions.size()); }
+
+    // Iterative: whether any path from the root is deeper than kMaxTreeDepth.
+    bool TreeTooDeep() const {
+        constexpr size_t kMaxTreeDepth = 1100;  // 250 parentheses, ~4 nodes each
+        std::vector<std::pair<int, size_t>> stack;
+        if (m_tree.root >= 0) stack.emplace_back(m_tree.root, 1);
+        while (!stack.empty()) {
+            auto [idx, depth] = stack.back();
+            stack.pop_back();
+            if (depth > kMaxTreeDepth) return true;
+            for (int child : m_tree.nodes[idx].children) stack.emplace_back(child, depth + 1);
+        }
+        return false;
+    }
 
     // Whether a node can match the empty string. A BackRef counts as nullable
     // (its group may have captured nothing); a Repeat whose body is nullable
@@ -165,7 +185,7 @@ private:
             size_t size = SaturatingMul(body, node.min);
             if (node.max == -1) {
                 // Split, [ProgressMark,] body, [ProgressCheck,] Jump
-                return SaturatingAdd(size, SaturatingAdd(3, Nullable(node.children[0]) ? 2 : 0));
+                return SaturatingAdd(size, SaturatingAdd(body, Nullable(node.children[0]) ? 4 : 2));
             }
             size_t optional = static_cast<size_t>(node.max - node.min);
             // optional copies, each opened by a Split

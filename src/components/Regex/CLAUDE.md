@@ -127,7 +127,9 @@ participated, as glibc and PCRE2 both do.
   but `\n` in a pattern is the character `n`: callers such as sed and awk
   translate their own string escapes before compiling (the plan's callers
   note). The parser does not take escapes a shell-quoted pattern would.
-- The 250-parenthesis nesting limit (see above).
+- The 250-parenthesis nesting limit (see above); a tree nested deeper than
+  1100 nodes -- say `a` and a thousand stacked GNU quantifiers, `a**...*` --
+  is refused the same way, as the program compiler recurses over the tree.
 - A repetition whose body can match empty completes one empty iteration and
   records its groups, as PCRE2 does. glibc agrees once the loop has consumed
   something, but reports the group as unset when a group whose subexpression

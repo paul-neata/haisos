@@ -193,7 +193,7 @@ bool PikeVM::Run(std::string_view text, size_t start, int flags, std::vector<std
     m_next.generation = 1;
     m_current.threads.reserve(m_program.instructions.size());
     m_next.threads.reserve(m_program.instructions.size());
-    m_stack.reserve(m_program.instructions.size());
+    m_stack.resize(m_program.instructions.size());  // indexed: one entry per Split/Save/Mark at most
     m_work.assign(m_slotCount, -1);
     m_fresh.assign(m_slotCount, -1);
     m_result.assign(m_slotCount, -1);

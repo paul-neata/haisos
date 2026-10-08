@@ -44,3 +44,4 @@
 - 2026-10-08 13:09 UTC -- start coreutils--uniq-cut (0.5.13)
 - 2026-10-08 13:37 UTC -- coreutils--uniq-cut: PR #55, ready
 - 2026-10-08 13:42 UTC -- coreutils--uniq-cut merged #55 as 0.5.13: 0C 0H fixed, 2M 6L open, 1 try
+- 2026-10-08 13:43 UTC -- start coreutils--tr-tee-nl (0.5.14)

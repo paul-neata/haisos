@@ -3,7 +3,7 @@
 - Rock: coreutils
 - Depends on: coreutils--sort (its `BuiltinText.h` helpers), base--regex-match (the `Regex` component, for `nl -bpBRE` only)
 - Size: ~1000 changed lines in ~9 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ 515f39d
 - PR title: Add the tr, tee and nl builtins
 
 ## Goal
@@ -25,11 +25,11 @@ Read first: the root `CLAUDE.md` (sections "Security", "Builtin Commands",
 and the broken-pipe rule), `src/components/Regex/CLAUDE.md` and
 `src/components/Regex/Regex.h`, `develop-plan/tasks/coreutils--sort.md`
 (section `BuiltinText.h`), and the code of `commands/cat/Cat.cpp` (a chunked
-stdin reader) and `commands/sort/Sort.cpp` (option table, `ArgMatch`).
+stdin reader) and `commands/sort/Sort.cpp` and `commands/uniq/Uniq.cpp` (option table, `ArgMatch`, `BuiltinLineReader`, `OpenInputOperand`).
 
 What exists (by exact name):
 - `BuiltinCommand.h`: `IBuiltinCommand`, `BuiltinOption`, `BuiltinArgument`
-  (`Optional`: long `--x=value` only), `kBuiltinNotTreated`, `BeginBuiltin`,
+  (`Optional`: long `--x=value` only), `kBuiltinNotTreated`, `BeginBuiltin` (two overloads: on the context's own arguments, or on a caller-given list -- tr/tee/nl use the first),
   `BuiltinContext` (`Out` -- buffered when stdout is not a terminal --,
   `Flush`, `Error`, `ErrorText`, `TryHelp`, `StopRequested`, `IO()`,
   `Process()`), `ShellEscapeQuoted(name, always)`, `BuiltinHelpText`.
@@ -38,13 +38,13 @@ What exists (by exact name):
 - `IFileDescriptor::Write` returns `kIOBrokenPipe` only for a pipe whose
   reader is gone -- so "an error writing to a pipe" is exactly that result;
   `kIOError` is any other failure.
-- From coreutils--sort, `BuiltinText.h`: `GnuQuote`, `ArgChoice`,
+- From coreutils--sort (merged), `BuiltinText.h` (also used by uniq and cut; `GnuQuote` is what tr's/cut's quoting uses): `GnuQuote`, `ArgChoice`,
   `ArgMatch(context, longOption, value, choices)` (prints GNU's argmatch
   diagnostic; caller returns 1), `OpenInputOperand(context, name,
   InputOpenFailure&)`, `BuiltinLineReader(context, input, delimiter)` /
   `LineReadResult Next(line, delimited)`, `WriteFully(descriptor, bytes)`.
 - From base--regex-match, `src/components/Regex/Regex.h` (target `Regex`,
-  already linked into BuiltinCommands -- just `#include "Regex.h"`):
+  already linked into BuiltinCommands, see its "Notes for callers" -- just `#include "Regex.h"`):
   `Regex::Compile(std::string_view pattern, const RegexOptions& options,
   std::string& error)` -> `std::shared_ptr<const Regex>` (null on a bad
   pattern, `error` holding glibc's text, e.g. `Unmatched ( or \(`),
@@ -64,7 +64,7 @@ Rules that bite (root `CLAUDE.md`, restated):
   `--help` only from `BuiltinHelpText`; `--version`; default `ManPage()`;
   registered in `CreateStandardBuiltinCommands()` (which writes the `haisos
   --init` template line -- never by hand); sources in `CMakeLists.txt`;
-  tests listed in the test `CMakeLists.txt`.
+  tests added to the single `add_executable(BuiltinCommands.unittests ...)` line of the test `CMakeLists.txt`.
 - Portable C++17; no POSIX headers, no `<regex>` (nl uses `Regex`).
 - Reads stop promptly on `TriggerStop()`; broken pipes end with 141.
 
@@ -256,14 +256,13 @@ stdin; each line via `BuiltinLineReader` with `\n`):
 
 `BuiltinCommandList.h`: declare `CreateNlCommand()`, `CreateTeeCommand()`,
 `CreateTrCommand()` and add them to `CreateStandardBuiltinCommands()`.
-`CMakeLists.txt`: add `commands/tr/Tr.cpp` (and `TrSets.cpp` if split),
-`commands/tee/Tee.cpp`, `commands/nl/Nl.cpp`.
+`src/components/BuiltinCommands/CMakeLists.txt` (the `add_library(BuiltinCommands STATIC ...)` list, alphabetical by directory): add `commands/nl/Nl.cpp`, `commands/tee/Tee.cpp`, `commands/tr/Tr.cpp` (and `TrSets.cpp` if split). The declarations and `CreateStandardBuiltinCommands()` entries go in alphabetical position: `CreateNlCommand` after `CreateMkdirCommand`, `CreateTeeCommand` after `CreateSortCommand` (before `CreateTestCommand`), `CreateTrCommand` after `CreateTestCommand` (before `CreateTrueCommand`).
 
 ## Tests
 
 New `TrTest.cpp`, `TeeTest.cpp`, `NlTest.cpp` in
-`tests/unit/components/BuiltinCommands.unittests/` (in its
-`CMakeLists.txt`), `TEST_F(BuiltinCommandsTest, ...)`. Expected outputs are
+`tests/unit/components/BuiltinCommands.unittests/` (added to the
+`add_executable(BuiltinCommands.unittests ...)` line in its `CMakeLists.txt`), `TEST_F(BuiltinCommandsTest, ...)`. Expected outputs are
 GNU 9.4's with `LC_ALL=C` (all verified unless marked); for anything else,
 run it in the container and paste the result.
 
@@ -297,7 +296,7 @@ nl (with `N` = `a\n\nb\n\\:\\:\\:\nh1\n\\:\\:\nb1\n\n\\:\nf1\n\\:\\:\nb2\n`):
 - `NlFiles`: `nl - /w/f` with stdin `x\n` -> numbering continues across them; `nl /docs nofile` -> `nl: /docs: Is a directory\nnl: nofile: No such file or directory\n`, 1.
 
 Generic tests: `ListsEveryBuiltinSortedWithAVersion` -- insert `"nl"`, `"tee"`,
-`"tr"` in sorted position into the list as it is on develop.
+`"tr"` in sorted position into the list as it is on develop (`... "mkdir", "nl", "printf" ...`, `... "sort", "tee", "test", "tr", "true", "uniq" ...`).
 `EveryUntreatedOptionIsAcceptedAndReported` runs `tee -i /docs` (must
 report; the directory failure that follows is fine).
 

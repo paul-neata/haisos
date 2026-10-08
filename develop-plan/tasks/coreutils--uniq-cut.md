@@ -3,7 +3,7 @@
 - Rock: coreutils
 - Depends on: coreutils--sort (its `BuiltinText.h` helpers)
 - Size: ~900 changed lines in ~9 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ 90728a3
 - PR title: Add the uniq and cut builtins
 
 ## Goal
@@ -34,8 +34,13 @@ What exists (by exact name):
   command, usageErrorStatus, exitStatus)`, `BuiltinContext` (`Out` buffered
   off a terminal, `Error`, `ErrorText`, `TryHelp`, `StopRequested`, `IO()`),
   `ShellEscapeQuoted(name, always)` (GNU `quotef`/`quoteaf`),
-  `BuiltinHelpText`.
-- From coreutils--sort, `src/components/BuiltinCommands/BuiltinText.h`:
+  `BuiltinHelpText`. Also a `BeginBuiltin` overload taking the caller's own
+  argument list (chmod's); uniq and cut use the plain one.
+- Shared helpers already on develop (reuse, do not re-add): besides the
+  `BuiltinText.h` ones below, `BuiltinCompare.*`, `BuiltinRemove.*`,
+  `BuiltinCopy.*`, `BuiltinRunProgram.h`, `BuiltinPrintf.*`,
+  `BuiltinTestExpression.*` -- none is needed by uniq/cut.
+- From coreutils--sort (done, `BuiltinTextTest.cpp` tests them), `src/components/BuiltinCommands/BuiltinText.h`:
   `std::string GnuQuote(std::string_view)` (GNU `quote()`, C locale);
   `struct ArgChoice { std::string name; int value; }` and
   `std::optional<int> ArgMatch(BuiltinContext&, const std::string& longOption, const std::string& value, const std::vector<ArgChoice>&)`
@@ -227,14 +232,19 @@ ShellEscapeQuoted; stdin `-`); each reported, the rest still processed, exit
 ### Registration and build
 
 `BuiltinCommandList.h`: declare `CreateCutCommand()`, `CreateUniqCommand()`
-and add both to `CreateStandardBuiltinCommands()`. `CMakeLists.txt`: add
-`commands/uniq/Uniq.cpp`, `commands/cut/Cut.cpp`.
+and add both to `CreateStandardBuiltinCommands()` in sorted position (the
+list is alphabetical: `CreateCutCommand()` between `CreateCpCommand()` and
+`CreateDirnameCommand()`, `CreateUniqCommand()` between `CreateTrueCommand()`
+and `CreateWcCommand()`; head-tail etc. may have added more by then).
+`src/components/BuiltinCommands/CMakeLists.txt` (not the root one): add
+`commands/cut/Cut.cpp` after `commands/cp/Cp.cpp` and `commands/uniq/Uniq.cpp`
+after `commands/true/True.cpp`.
 
 ## Tests
 
 New `UniqTest.cpp` and `CutTest.cpp` in
-`tests/unit/components/BuiltinCommands.unittests/` (both in its
-`CMakeLists.txt`), `TEST_F(BuiltinCommandsTest, ...)`. Expected outputs are
+`tests/unit/components/BuiltinCommands.unittests/` (both added to the
+`add_executable` list in its `CMakeLists.txt`), `TEST_F(BuiltinCommandsTest, ...)`. Expected outputs are
 GNU 9.4's with `LC_ALL=C`; for any case not written out, run it in the
 container and paste the result. With `G` = `a\na\nb\nc\nc\nc\nd` (no final
 newline):
@@ -256,8 +266,11 @@ newline):
 - `CutUsageErrors`: each message of "Validation" and of the list parser above, byte for byte, with `Try 'cut --help' for more information.\n`, exit 1 (e.g. `cut C.txt` -> `cut: you must specify a list of bytes, characters, or fields\n...`; `-s -b1` -> `cut: suppressing non-delimited lines makes sense\n\tonly when operating on fields\n...`; `-f0`, `-f 3-1`, `-f x`, `-f ''`, `-f 1-2-3`, `-f -`, `-f 1x`, `-f x-1`, `-b x`, `-c 0`, `-b 1-2-3`, `-f 99999999999999999999`, `-b 1 -d:`, `-f1 -b1`, `-d ab -f1`).
 - `CutFileErrors`: `cut -b1 /docs nofile c.txt` -> stderr `cut: /docs: Is a directory\ncut: nofile: No such file or directory\n`, stdout c.txt's result, exit 1.
 
-Generic tests: `ListsEveryBuiltinSortedWithAVersion` -- insert `"cut"` and
-`"uniq"` in sorted position into the list as it is on develop;
+Generic tests: `ListsEveryBuiltinSortedWithAVersion` -- insert `"cut"` (after
+`"cp"`, before `"dirname"`) and `"uniq"` (after `"true"`, before `"wc"`) into the
+list as it is on develop (at 90728a3: `"[", "basename", "cat", "chmod", "cp",
+"dirname", "echo", "env", "false", "hsh", "ls", "man", "mkdir", "printf", "pwd",
+"realpath", "rm", "rmdir", "seq", "sleep", "sort", "test", "true", "wc", "which"`);
 `EveryBuiltinsHelpHasTheSameShape` -- skip `hidden` options (above).
 
 Commands:

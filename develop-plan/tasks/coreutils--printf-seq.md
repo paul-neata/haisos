@@ -3,7 +3,7 @@
 - Rock: coreutils
 - Depends on: coreutils--sort (`GnuQuote` in `BuiltinText.h`)
 - Size: ~950 changed lines in ~10 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ 3ea5b35
 - PR title: Add printf and seq builtins and the BuiltinPrintf format engine
 
 ## Goal
@@ -46,9 +46,8 @@ gives `Out`, `Error` (`<name>: ` prepended), `ErrorText`, `TryHelp`,
 `StopRequested()`. A write to a pipe with no reader stops the process (exit
 141) and makes `StopRequested()` true, so a loop that checks it ends.
 
-What earlier tasks provide, as if on develop (coreutils--sort,
-`src/components/BuiltinCommands/BuiltinText.h`; read that plan for the exact
-API): `std::string GnuQuote(std::string_view text);` -- GNU's `quote()` in
+What `src/components/BuiltinCommands/BuiltinText.h` already provides (from
+coreutils--sort, merged; read the header for the exact API): `std::string GnuQuote(std::string_view text);` -- GNU's `quote()` in
 the C locale, which is what GNU puts around a value in a message (`'abc'`;
 `a'b` becomes `'a\'b'`). Every `'x'` in a
 diagnostic below that GNU writes with `quote()` is `GnuQuote(x)`; file names
@@ -221,9 +220,10 @@ that is `-` followed by `.` or a digit, and at any word not starting with `-`
 word is its argument and is skipped too; letters after `f`/`s` in the cluster
 are the attached argument) or a long option (`--format`/`--separator` or an
 unambiguous prefix of them without `=` takes the next word). Hand the option
-words to `BeginBuiltin`-equivalent processing: call `ParseBuiltinArgs` on that
-prefix, then do what `BeginBuiltin` does (errors with the Try line and exit
-1, `--help`, `--version`); the words after the split are the operands. (Do not
+words to the `BeginBuiltin(context, args, command, 1, status)` overload that
+takes the caller's own argument list (in `BuiltinCommand.h`; it does the
+parsing, the Try-line errors with exit 1, `--help` and `--version`); the words
+after the split are the operands. (Do not
 change `ParseBuiltinArgs`.)
 
 Then, as seq.c 9.4 `main`, in this order:
@@ -309,14 +309,16 @@ if prec != INT_MAX and last.precision != INT_MAX:
 return "%Lg"
 ```
 
-### `src/components/BuiltinCommands/BuiltinCommandList.h`, `CMakeLists.txt`
+### `src/components/BuiltinCommands/BuiltinCommandList.h`, `src/components/BuiltinCommands/CMakeLists.txt`
 
-Declare `CreatePrintfCommand()` and `CreateSeqCommand()`; add both to
-`CreateStandardBuiltinCommands()` (that is what puts `# BUILTIN rootfs printf
+Declare `CreatePrintfCommand()` and `CreateSeqCommand()` (alphabetically:
+Printf after Mkdir and before Pwd, Seq after Rmdir and before Sleep) and add
+both to `CreateStandardBuiltinCommands()` in the same places (that is what puts `# BUILTIN rootfs printf
 /bin/printf` and the seq line into the `haisos --init` template -- never edit
-`GetHaisosFileTemplate`). Add `BuiltinPrintf.cpp`,
-`commands/printf/Printf.cpp`, `commands/seq/Seq.cpp` to the `BuiltinCommands`
-library.
+`GetHaisosFileTemplate`). Add `BuiltinPrintf.cpp` (next to `BuiltinProcess.cpp`),
+`commands/printf/Printf.cpp`, `commands/seq/Seq.cpp` to the `add_library(BuiltinCommands ...)`
+list in `src/components/BuiltinCommands/CMakeLists.txt` (the root
+`CMakeLists.txt` needs no change).
 
 Rules that bite (root `CLAUDE.md`): files and everything else only through
 `context.IO()`/`context.Process()` (neither command needs more than its
@@ -418,7 +420,7 @@ is the narrowest it takes; the direct run narrows to this task's tests.
 `TheInitTemplatesBuiltinsAllApplyOnceUncommented` lives in
 `CliParser.unittests`.) Add the new builtin names to the exact list in
 `ListsEveryBuiltinSortedWithAVersion` (`BuiltinCommandsTest.cpp`), in byte
-order.
+order: `"printf"` between `"mkdir"` and `"pwd"`, `"seq"` between `"rmdir"` and `"sleep"`.
 
 The generic tests in `BuiltinCommandsTest.cpp` (`EveryBuiltinsHelpHasTheSameShape`,
 `EveryBuiltinHasAVersion`, `EveryBuiltinsManPageIsItsHelp`) must pass for both

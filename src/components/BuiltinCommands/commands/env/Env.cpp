@@ -348,7 +348,7 @@ private:
     SplitStep AppendEscape(BuiltinContext& context, const std::string& text, size_t& i, bool inQuotes,
                            std::string& word, const std::function<void()>& appendWord) {
         if (i + 1 >= text.size()) {
-            context.Error("invalid sequence '\\' in -S");
+            context.Error("invalid backslash at end of string in -S");
             return SplitStep::Error;
         }
         const char code = text[i + 1];
@@ -375,7 +375,7 @@ private:
             case 'c':
                 return SplitStep::Stop;
             default:
-                context.Error(std::string("invalid sequence '\\") + code + " in -S");
+                context.Error(std::string("invalid sequence '\\") + code + "' in -S");
                 return SplitStep::Error;
         }
         return SplitStep::Ok;

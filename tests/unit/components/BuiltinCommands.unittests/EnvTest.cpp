@@ -202,6 +202,18 @@ TEST_F(BuiltinCommandsTest, EnvSplitString) {
     EXPECT_EQ(captured.out, "");
     EXPECT_EQ(captured.err, "env: no terminating quote in -S string\n");
     EXPECT_EQ(captured.status, 125);
+
+    // GNU's messages for a bad escape and a backslash ending the string.
+    captured = RunCaptured("env", {"-S", "echo \\q"}, std::nullopt, "/",
+        MakeEnv(factory, {{"PATH", "/bin"}}));
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "env: invalid sequence '\\q' in -S\n");
+    EXPECT_EQ(captured.status, 125);
+    captured = RunCaptured("env", {"-S", "echo a\\"}, std::nullopt, "/",
+        MakeEnv(factory, {{"PATH", "/bin"}}));
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "env: invalid backslash at end of string in -S\n");
+    EXPECT_EQ(captured.status, 125);
 }
 
 // The caller's buffered stdout is flushed before the child starts, so output

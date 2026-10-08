@@ -18,6 +18,7 @@ std::shared_ptr<IBuiltinCommand> CreateLsCommand();
 std::shared_ptr<IBuiltinCommand> CreateManCommand();
 std::shared_ptr<IBuiltinCommand> CreateMkdirCommand();
 std::shared_ptr<IBuiltinCommand> CreatePwdCommand();
+std::shared_ptr<IBuiltinCommand> CreateSortCommand();
 std::shared_ptr<IBuiltinCommand> CreateWcCommand();
 
 // Every builtin Haisos has. Adding one here is all it takes for it to be
@@ -32,6 +33,7 @@ inline std::vector<std::shared_ptr<IBuiltinCommand>> CreateStandardBuiltinComman
         CreateManCommand(),
         CreateMkdirCommand(),
         CreatePwdCommand(),
+        CreateSortCommand(),
         CreateWcCommand(),
     };
 }

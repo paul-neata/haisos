@@ -49,3 +49,4 @@
 - 2026-10-08 15:59 UTC -- coreutils--tr-tee-nl: PR #56 green on CI re-run, in review
 - 2026-10-08 16:12 UTC -- coreutils--tr-tee-nl merged #56 as 0.5.14: 0C 3H fixed, 2M 2L open, 1 try
 - 2026-10-08 16:14 UTC -- start search--grep-core (0.5.15)
+- 2026-10-08 16:54 UTC -- search--grep-core: PR #57, windows-failed

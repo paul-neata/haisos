@@ -19,15 +19,15 @@ struct SortKey {
     size_t endChar = 0;
     bool skipStartBlanks = false;      // b on POS1 (or global -b)
     bool skipEndBlanks = false;        // b on POS2 (or global -b)
-    bool dictionary = false;           // d
+    bool dictionary = false;           // d (wins over -i: 'i' does nothing once set)
     bool foldCase = false;             // f
     bool ignoreNonprinting = false;    // i
     bool numeric = false;              // n
-    bool generalNumeric = false;      // g   (compared by coreutils--sort-orders)
-    bool humanNumeric = false;         // h   (idem)
-    bool month = false;                // M   (idem)
-    bool random = false;               // R   (idem)
-    bool version = false;              // V   (idem)
+    bool generalNumeric = false;      // g
+    bool humanNumeric = false;         // h
+    bool month = false;                // M
+    bool random = false;               // R
+    bool version = false;              // V
     bool reverse = false;             // r
 };
 
@@ -38,6 +38,9 @@ struct SortSettings {
     bool unique = false;         // -u
     bool stable = false;         // -s
     char delimiter = '\n';       // '\0' with -z
+    // The salt -R hashes each key with: set once per run, so the order
+    // changes from run to run as GNU's does.
+    uint64_t randomSalt[2] = {0, 0};
 };
 
 // Parses one -k KEYDEF into |key|. On error returns false with |error| the

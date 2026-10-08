@@ -22,3 +22,4 @@
 - 2026-10-08 07:54 UTC -- start coreutils--sort-orders (0.5.6)
 - 2026-10-08 08:16 UTC -- coreutils--sort-orders: PR #48, ready
 - 2026-10-08 08:30 UTC -- coreutils--sort-orders merged #48 as 0.5.6: 0C 3H fixed, 1M 4L open, 1 try
+- 2026-10-08 08:31 UTC -- start coreutils--rm-rmdir (0.5.7)

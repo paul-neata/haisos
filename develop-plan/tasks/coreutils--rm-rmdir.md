@@ -3,7 +3,7 @@
 - Rock: coreutils
 - Depends on: none
 - Size: ~750 changed lines in ~10 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ 74a3f56
 - PR title: Add the rm and rmdir builtins
 
 ## Goal
@@ -35,6 +35,10 @@ What exists:
   buffered stdout first, so prompts and messages come out in order.
 - `commands/mkdir/Mkdir.cpp` is the model for a small builtin (option table,
   `Help()`, `Run()` using `BeginBuiltin`, messages built from `Stat`).
+- `src/components/BuiltinCommands/BuiltinText.h` (added by the sort task):
+  `GnuQuote` (GNU's `quote()`), `ArgMatch`, `OpenInputOperand`,
+  `BuiltinLineReader`, `WriteFully`. `IFileIO` also gained `Rename` and
+  `SetTimes` (unused here; cp/mv/touch use them).
 - `src/components/Filesystem/FilesystemUtils.h`: `EntryTypeOf(io, path)`,
   `VirtualParentOf`, `VirtualLastSegment` (from `VirtualPath.h`).
 - `src/components/libheaders/DescriptorLineReader.h`: reads lines from a
@@ -228,8 +232,11 @@ known; a read-only filesystem included); `--preserve-root=all` is taken as
    Try 'rm --help' for more information.
    ```
    (`Error` for the first line, `ErrorText` for the list, then `TryHelp`).
-   Accept any unambiguous prefix of a WHEN word only if it is easy; exact
-   words are enough. `--preserve-root=all`: `context.NotTreated("--preserve-root=all")`,
+   Match WHEN with the shared `ArgMatch` (`BuiltinText.h`, with `ArgChoice`
+   synonyms `never/no/none`, `once`, `always/yes`, option `--interactive`),
+   which accepts unambiguous prefixes and prints this very block (quoting with
+   `GnuQuote`) and returns nullopt; the caller then returns 1. The same helper
+   serves `--preserve-root`'s value (`all`). `--preserve-root=all`: `context.NotTreated("--preserve-root=all")`,
    then as `--preserve-root`; any other value of `--preserve-root` is the
    same invalid-argument block with the list `  - 'all'`.
 3. No operands: with `-f` (ignoreMissing) exit 0 silently; else `missing
@@ -278,12 +285,14 @@ rmdir: failed to remove directory 'q': Directory not empty     (stderr; exit 1)
 ### `src/components/BuiltinCommands/BuiltinCommandList.h`
 
 Declare `CreateRmCommand()` and `CreateRmdirCommand()`; add both to
-`CreateStandardBuiltinCommands()` (keep the list alphabetical).
+`CreateStandardBuiltinCommands()` (alphabetical: after `CreatePwdCommand()`,
+before the existing `CreateSortCommand()`).
 
 ### `src/components/BuiltinCommands/CMakeLists.txt`
 
 Add `BuiltinPrompt.cpp`, `BuiltinRemove.cpp`, `commands/rm/Rm.cpp`,
-`commands/rmdir/Rmdir.cpp`. The `BuiltinCommands` target already reaches
+`commands/rmdir/Rmdir.cpp` (alphabetical; the list now also holds
+`BuiltinCompare.cpp`, `BuiltinText.cpp`, `commands/sort/`). The `BuiltinCommands` target already reaches
 `src/components/libheaders/` through `${CMAKE_SOURCE_DIR}` includes as the
 other sources do (`#include "src/components/libheaders/DescriptorLineReader.h"`);
 check that the include root is available, as `Ls.cpp` includes
@@ -323,7 +332,7 @@ asserting stdout, stderr and status exactly:
 
 `BuiltinPrompt` is covered through rm. Update the existing generic tests in
 `BuiltinCommandsTest.cpp`: `ListsEveryBuiltinSortedWithAVersion` -- add
-`"rm", "rmdir"` in sorted position to the expected list. The generic tests
+`"rm", "rmdir"` (after `"pwd"`, before `"sort"`) to the expected list. The generic tests
 `EveryBuiltinsHelpHasTheSameShape`, `EveryUntreatedOptionIsAcceptedAndReported`
 (it runs `rm --one-file-system /docs`: must report and must not remove
 anything -- it does not, without `-r`) and the `--init` template test
@@ -346,8 +355,8 @@ bash ./scripts/test_linux.sh L U
   documented exceptions above; a line under "Key Classes" for `BuiltinPrompt`
   and `RemoveOperand` (shared: cp/mv use them).
 - Root `CLAUDE.md`: rows for `rm` and `rmdir` in the "Builtin Commands" table;
-  add `rm`, `rmdir` to the list in its first paragraph and in the directory
-  tree comment for `BuiltinCommands/`.
+  add `rm`, `rmdir` to the list in its first paragraph (`pwd`, `rm`, `rmdir`,
+  `sort`, `wc`) and in the directory tree comment (which now names `sort`) for `BuiltinCommands/`.
 
 ## Acceptance
 

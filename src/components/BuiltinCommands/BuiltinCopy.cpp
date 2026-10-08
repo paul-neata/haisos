@@ -407,7 +407,12 @@ bool CopyFile(BuiltinContext& context, BuiltinPrompt* prompt, const std::string&
 
     if (!options.attributesOnly) {
         char buffer[64 * 1024];
-        while (!context.StopRequested()) {
+        while (true) {
+            // A copy cut short by a stop is not a copy: mv must not then
+            // remove its source.
+            if (context.StopRequested()) {
+                return false;
+            }
             const ssize_t n = in->Read(buffer, sizeof(buffer));
             if (n < 0) {
                 context.Error("error reading " + q(source));
@@ -427,7 +432,7 @@ bool CopyFile(BuiltinContext& context, BuiltinPrompt* prompt, const std::string&
 
     if (options.preserveTimes &&
         io.SetTimes(dest, sourceStatus.accessTime, sourceStatus.modificationTime) != 0) {
-        context.Error("failed to preserve times for " + q(dest) + ": Permission denied");
+        context.Error("preserving times for " + q(dest) + ": Permission denied");
         return false;
     }
 
@@ -472,7 +477,7 @@ bool CopyDirectory(BuiltinContext& context, BuiltinPrompt* prompt, const std::st
     // After the contents: copying them changes the directory's times again.
     if (options.preserveTimes &&
         io.SetTimes(dest, sourceStatus.accessTime, sourceStatus.modificationTime) != 0) {
-        context.Error("failed to preserve times for " + q(dest) + ": Permission denied");
+        context.Error("preserving times for " + q(dest) + ": Permission denied");
         ok = false;
     }
     return ok;

@@ -1,11 +1,21 @@
 #include <gtest/gtest.h>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
 #include <thread>
 #include <vector>
+#ifdef _WIN32
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#undef CreateDirectory
+#undef RemoveDirectory
+#undef GetCurrentDirectory
+#include "src/components/libheaders/WideText.h"
+#endif
 #include "src/components/Filesystem/ComposedFileSystem.h"
 #include "src/components/Filesystem/DeviceFileSystem.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
@@ -432,4 +442,78 @@ TEST_F(FilesystemPhysicalRenameTest, AcrossTwoPhysicalFilesystemsMountedTogether
     EXPECT_EQ(fs->Rename("/a", "/m/a"), kFileSystemCrossDevice);
     FileStatus status;
     EXPECT_EQ(fs->Stat("/a", status), 0);
+}
+
+TEST_F(FilesystemPhysicalRenameTest, RefusesMovingADirectoryBelowItselfAndKeepsTheTarget) {
+    std::filesystem::create_directories(kPhysicalRoot + "/d/sub");
+    std::ofstream(kPhysicalRoot + "/d/f.txt") << "keep";
+    auto fs = PhysicalFileSystem::Create(kPhysicalRoot);
+
+    // rename() answers EINVAL and moves nothing: the empty target directory
+    // is still there afterwards, and so is everything below the source. On
+    // Linux this documents rename(); on Windows the refusal is made before
+    // anything is removed.
+    EXPECT_EQ(fs->Rename("/d", "/d/sub"), kFileSystemError);
+    EXPECT_TRUE(std::filesystem::is_directory(kPhysicalRoot + "/d/sub"));
+    EXPECT_EQ(ReadHostFile(kPhysicalRoot + "/d/f.txt"), "keep");
+
+    // A missing parent below itself fails the same way, moving nothing.
+    EXPECT_EQ(fs->Rename("/d", "/d/sub/deeper"), kFileSystemError);
+    EXPECT_TRUE(std::filesystem::is_directory(kPhysicalRoot + "/d/sub"));
+    EXPECT_EQ(ReadHostFile(kPhysicalRoot + "/d/f.txt"), "keep");
+}
+
+#ifdef _WIN32
+// A file inside the source, held open without FILE_SHARE_DELETE, makes
+// MoveFileExW fail -- after the empty target directory was removed to make
+// room. The target must come back as it was: still there, with its times.
+TEST_F(FilesystemPhysicalRenameTest, AFailedMoveKeepsTheEmptyTarget) {
+    std::filesystem::create_directories(kPhysicalRoot + "/src");
+    std::filesystem::create_directories(kPhysicalRoot + "/dst");
+    std::ofstream(kPhysicalRoot + "/src/held.txt") << "held";
+    auto fs = PhysicalFileSystem::Create(kPhysicalRoot);
+    const FileDateTime when{1600000000, 0};
+    ASSERT_EQ(fs->SetTimes("/dst", when, when), 0);
+
+    std::wstring heldWide;
+    ASSERT_TRUE(Utf8ToWide(kPhysicalRoot + "/src/held.txt", heldWide));
+    const HANDLE held = ::CreateFileW(heldWide.c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE /* no FILE_SHARE_DELETE */,
+        nullptr, OPEN_EXISTING, 0, nullptr);
+    ASSERT_NE(held, INVALID_HANDLE_VALUE);
+    const int result = fs->Rename("/src", "/dst");
+    ::CloseHandle(held);
+
+    // Either the move failed and the target is intact, or a Windows version
+    // let it happen and the moved file is there instead.
+    if (result == 0) {
+        EXPECT_EQ(ReadHostFile(kPhysicalRoot + "/dst/held.txt"), "held");
+        return;
+    }
+    EXPECT_TRUE(std::filesystem::is_directory(kPhysicalRoot + "/dst"));
+    FileStatus status;
+    ASSERT_EQ(fs->Stat("/dst", status), 0);
+    EXPECT_EQ(status.modificationTime, when);
+    EXPECT_EQ(ReadHostFile(kPhysicalRoot + "/src/held.txt"), "held");
+}
+#endif
+
+TEST_F(FilesystemPhysicalRenameTest, SetTimesRefusesATimeBeyondFiletime) {
+    auto fs = PhysicalFileSystem::Create(kPhysicalRoot);
+    ASSERT_TRUE(WriteFile(*fs, "/t.txt", "x"));
+    FileStatus before;
+    ASSERT_EQ(fs->Stat("/t.txt", before), 0);
+
+    // INT64_MAX/2 seconds since the epoch is beyond the last FILETIME: the
+    // call fails rather than overflowing. On Windows that is certain; on
+    // Linux whatever utimensat answers, nothing may change when it fails.
+    const int result = fs->SetTimes("/t.txt", FileDateTime{INT64_MAX / 2, 0}, std::nullopt);
+#ifdef _WIN32
+    EXPECT_EQ(result, kFileSystemError);
+#endif
+    if (result != 0) {
+        FileStatus after;
+        ASSERT_EQ(fs->Stat("/t.txt", after), 0);
+        EXPECT_EQ(after.modificationTime, before.modificationTime);
+    }
 }

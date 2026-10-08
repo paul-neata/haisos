@@ -23,6 +23,7 @@ add_library(BuiltinCommands STATIC
     commands/ls/Ls.cpp
     commands/man/Man.cpp
     commands/mkdir/Mkdir.cpp
+    commands/nl/Nl.cpp
     commands/printf/Printf.cpp
     commands/pwd/Pwd.cpp
     commands/realpath/Realpath.cpp
@@ -32,7 +33,9 @@ add_library(BuiltinCommands STATIC
     commands/sleep/Sleep.cpp
     commands/sort/Sort.cpp
     commands/sort/SortKeys.cpp
+    commands/tee/Tee.cpp
     commands/test/Test.cpp
+    commands/tr/Tr.cpp
     commands/true/True.cpp
     commands/uniq/Uniq.cpp
     commands/wc/Wc.cpp

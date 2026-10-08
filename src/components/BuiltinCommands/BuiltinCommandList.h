@@ -28,6 +28,7 @@ std::shared_ptr<IBuiltinCommand> CreateHshCommand();
 std::shared_ptr<IBuiltinCommand> CreateLsCommand();
 std::shared_ptr<IBuiltinCommand> CreateManCommand();
 std::shared_ptr<IBuiltinCommand> CreateMkdirCommand();
+std::shared_ptr<IBuiltinCommand> CreateMvCommand();
 std::shared_ptr<IBuiltinCommand> CreateNlCommand();
 std::shared_ptr<IBuiltinCommand> CreatePrintfCommand();
 std::shared_ptr<IBuiltinCommand> CreatePwdCommand();
@@ -39,6 +40,7 @@ std::shared_ptr<IBuiltinCommand> CreateSleepCommand();
 std::shared_ptr<IBuiltinCommand> CreateSortCommand();
 std::shared_ptr<IBuiltinCommand> CreateTeeCommand();
 std::shared_ptr<IBuiltinCommand> CreateTestCommand();
+std::shared_ptr<IBuiltinCommand> CreateTouchCommand();
 std::shared_ptr<IBuiltinCommand> CreateTrCommand();
 std::shared_ptr<IBuiltinCommand> CreateTrueCommand();
 std::shared_ptr<IBuiltinCommand> CreateUniqCommand();
@@ -67,6 +69,7 @@ inline std::vector<std::shared_ptr<IBuiltinCommand>> CreateStandardBuiltinComman
         CreateLsCommand(),
         CreateManCommand(),
         CreateMkdirCommand(),
+        CreateMvCommand(),
         CreateNlCommand(),
         CreatePrintfCommand(),
         CreatePwdCommand(),
@@ -78,6 +81,7 @@ inline std::vector<std::shared_ptr<IBuiltinCommand>> CreateStandardBuiltinComman
         CreateSortCommand(),
         CreateTeeCommand(),
         CreateTestCommand(),
+        CreateTouchCommand(),
         CreateTrCommand(),
         CreateTrueCommand(),
         CreateUniqCommand(),

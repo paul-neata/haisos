@@ -289,6 +289,10 @@ bool ParseZoneDigits(char sign, std::string_view digits, int64_t& offsetSeconds)
 // above does not say.
 bool ParseDateItems(const std::vector<std::string>& tokens, DateItems& items) {
     size_t i = 0;
+    // A signed number is a zone only DIRECTLY after a time of day (GNU's
+    // rule): after any other item it is a relative item's count, so
+    // "12:00 tomorrow -1 hour" is noon tomorrow minus one hour.
+    bool previousWasTime = false;
     while (i < tokens.size()) {
         const std::string& raw = tokens[i];
         const std::string word = Lowercased(raw);
@@ -305,6 +309,7 @@ bool ParseDateItems(const std::vector<std::string>& tokens, DateItems& items) {
                 if (!ParseDate(raw, items, withTime) || (withTime && hadTime)) {
                     return false;
                 }
+                previousWasTime = withTime;
                 ++i;
                 continue;
             }
@@ -322,6 +327,7 @@ bool ParseDateItems(const std::vector<std::string>& tokens, DateItems& items) {
                 items.second = second;
                 items.nanoseconds = nanoseconds;
                 items.hasTime = true;
+                previousWasTime = true;
                 ++i;
                 continue;
             }
@@ -343,11 +349,13 @@ bool ParseDateItems(const std::vector<std::string>& tokens, DateItems& items) {
                 ++i;
             }
             ApplyRelative(items, count, *unit);
+            previousWasTime = false;
             continue;
         }
 
-        // A zone word, or a signed number: a zone after a time of day (GNU's
-        // rule), otherwise a relative item's count with a following unit.
+        // A zone word, or a signed number: a zone directly after a time of
+        // day (GNU's rule), otherwise a relative item's count with a
+        // following unit.
         if (raw[0] == '+' || raw[0] == '-') {
             const char sign = raw[0];
             std::string number;
@@ -361,7 +369,7 @@ bool ParseDateItems(const std::vector<std::string>& tokens, DateItems& items) {
             } else {
                 number = raw.substr(1);
             }
-            if (items.hasTime) {
+            if (previousWasTime) {
                 if (items.hasZone) {
                     return false;
                 }
@@ -371,6 +379,7 @@ bool ParseDateItems(const std::vector<std::string>& tokens, DateItems& items) {
                 }
                 items.zoneOffsetSeconds = offset;
                 items.hasZone = true;
+                previousWasTime = false;
                 ++i;
                 continue;
             }
@@ -392,6 +401,7 @@ bool ParseDateItems(const std::vector<std::string>& tokens, DateItems& items) {
                 ++i;
             }
             ApplyRelative(items, sign == '-' ? -count : count, *unit);
+            previousWasTime = false;
             continue;
         }
 
@@ -402,20 +412,24 @@ bool ParseDateItems(const std::vector<std::string>& tokens, DateItems& items) {
             }
             items.zoneOffsetSeconds = 0;
             items.hasZone = true;
+            previousWasTime = false;
             ++i;
             continue;
         }
         if (word == "now" || word == "today") {
+            previousWasTime = false;
             ++i;
             continue;
         }
         if (word == "yesterday") {
             items.relDays -= 1;
+            previousWasTime = false;
             ++i;
             continue;
         }
         if (word == "tomorrow") {
             items.relDays += 1;
+            previousWasTime = false;
             ++i;
             continue;
         }
@@ -447,6 +461,7 @@ bool ParseDateItems(const std::vector<std::string>& tokens, DateItems& items) {
             ++i;
         }
         ApplyRelative(items, count, *unit);
+        previousWasTime = false;
     }
     return true;
 }

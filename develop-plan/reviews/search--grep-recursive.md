@@ -1,7 +1,7 @@
 # Review: search--grep-recursive (PR #58)
 - Verdict: merged
 - Merged as: f2d3be1, version 0.5.16
-- Tokens: claude 215775, ollama input 374769, ollama output 154779
+- Tokens: claude 216631, ollama input 374769, ollama output 154779
 
 | Severity | Status | Where | Finding |
 |----------|--------|-------|---------|

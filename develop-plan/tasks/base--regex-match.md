@@ -3,7 +3,7 @@
 - Rock: base
 - Depends on: base--regex-syntax
 - Size: ~850 changed lines in ~8 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ d2f11f2
 - PR title: Regex: match GNU leftmost-longest and Perl leftmost-first
 
 ## Goal
@@ -153,7 +153,8 @@ Construction (program = `Save 0`, root, `Save 1`, `Match`):
   `"regular expression is too large"` (Perl, PCRE2's text) -- so
   `(a{1000}){1000}` fails quickly instead of eating memory.
 - The compile walks the tree recursively (depth bounded by the parser's
-  nesting limit) but iterates over `Concat`/`Alternate` children.
+  nesting limit of 250 -- not 1000: the Windows stack is 1 MB, so keep each
+  recursive frame small, and the matcher must mind recursion depth too) but iterates over `Concat`/`Alternate` children.
 
 `firstBytes`/`canSkip`: walk from instruction 0 through `Save`, `Split`,
 `Jump`, `ProgressMark/Check` and `Assert` (an assertion is treated as
@@ -233,6 +234,15 @@ so far (ties keep the first found), stop the search early if `p == n`, else
 keep popping. When the stack is empty and a result exists for `s`, return
 it; otherwise try the next `s`. No recursion.
 
+### `src/components/Regex/Regex.h`
+
+The review of #44 found the "Semantics" doc comments on the `Regex.h` members
+still missing; this task touches `Regex.h` and adds them: above `Search`, the
+two modes (leftmost-longest with glibc's tie rule for Basic/Extended,
+leftmost-first for Perl), `start`, the flags, `match` untouched on failure,
+empty matches, unset groups (-1, -1), and that `Search` is const and
+thread-safe; and short ones on `Compile`'s limits (nesting 250, program size).
+
 ### `src/components/Regex/Regex.cpp`
 
 `Regex::Compiled` gains a `RegexProgram program`; `Compile` calls
@@ -244,7 +254,8 @@ comment.
 
 ### `src/components/Regex/CMakeLists.txt`
 
-Add `RegexProgram.cpp RegexPikeVM.cpp RegexBacktrack.cpp`.
+Add `RegexProgram.cpp RegexPikeVM.cpp RegexBacktrack.cpp` to the existing
+`add_library(Regex STATIC Regex.cpp RegexParser.cpp RegexTree.cpp)`.
 
 ### `src/components/Regex/CLAUDE.md`
 
@@ -252,8 +263,9 @@ Add a "Matching" section: the program and the two engines, when each runs,
 the two modes and the glibc tie rule above (with the `(a|ab)(c|bcd)(d*)`
 example), the complexity (O(text x program) without back-references;
 exponential possible with them, as in GNU), the instruction limit and its
-message, and that nothing recurses per input byte. Remove "the matcher
-arrives with base--regex-match".
+message, and that nothing recurses per input byte. Replace the Search bullet's "by the next task (base--regex-match); a stub
+returning `false` for now" and any other mention of the stub. Note that the
+nesting limit is 250 (see Regex.cpp above).
 
 ## Tests
 

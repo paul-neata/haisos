@@ -9,3 +9,4 @@
 - 2026-10-08 04:28 UTC -- resume base--regex-syntax (0.5.2), host memory OK
 - 2026-10-08 05:07 UTC -- base--regex-syntax: PR #44, windows-failed
 - 2026-10-08 05:29 UTC -- base--regex-syntax merged #44 as 0.5.2: 0C 3H fixed, 3M 3L open, 2 tries (Windows green on CI re-run)
+- 2026-10-08 05:30 UTC -- start base--regex-match (0.5.3)

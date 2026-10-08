@@ -1,6 +1,6 @@
 # Playbook
 
-Phase: planning
+Phase: implementing
 Pause: no
 
 | # | Task | Status | Version | Depends | PR | Tries | Review | Notes |

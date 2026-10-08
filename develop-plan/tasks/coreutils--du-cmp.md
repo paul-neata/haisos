@@ -3,7 +3,7 @@
 - Rock: coreutils
 - Depends on: coreutils--date (`FormatDateTime`, for `du --time`), coreutils--sort (`GnuQuote`, `ArgMatch`, `OpenInputOperand` in `BuiltinText.h`)
 - Size: ~800 changed lines in ~9 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ f561090
 - PR title: Add du and cmp builtins and shared GNU size parsing
 
 (The planned coreutils--du-cmp-test came to ~1250 changed lines; `test` and
@@ -34,25 +34,27 @@ directories with `IO().ReadDirectory` and `IO().Stat`, `-R`),
 `commands/wc/Wc.cpp` (`--files0-from`, reading standard input),
 `commands/cat/Cat.cpp` (reading a file or `-` in chunks with
 `StopRequested()` and `kIOInterrupted`),
-`commands/hsh/HshPattern.h` (`Hsh::MatchPattern`, the shell pattern matcher),
+`BuiltinFnmatch.h` (`FnMatch(pattern, text, flags)`, glibc's fnmatch, used by
+grep's `--exclude`; du's exclusion uses it too),
 `src/components/Filesystem/FilesystemUtils.h` (`BlocksForSize`: an in-memory
 file of N bytes reports ceil(N/512) blocks, a directory 0, a placed builtin 0).
 
-What earlier tasks provide, as if on develop: coreutils--date,
+What earlier tasks provide (all on develop now): coreutils--date,
 `std::string FormatDateTime(std::string_view format, FileDateTime t, bool utc);`
-in `BuiltinDate.h`.
+in `BuiltinDate.h` (ls already formats its times through it; `FileStatus` has
+`accessTime`, `modificationTime`, `changeTime`, each a `FileDateTime`).
 
-Also (coreutils--sort,
-`src/components/BuiltinCommands/BuiltinText.h`; read that plan for the exact
-API): `std::string GnuQuote(std::string_view text);` -- GNU's `quote()` in
+Also (coreutils--sort, `src/components/BuiltinCommands/BuiltinText.h`, read
+the header for the exact API): `std::string GnuQuote(std::string_view text);` -- GNU's `quote()` in
 the C locale, which is what GNU puts around a value in a message (`'abc'`;
 `a'b` becomes `'a\'b'`) -- and `ArgMatch(context, "--opt", value, choices)`
 (GNU's `XARGMATCH` with its "Valid arguments are:" block). Every `'x'` in a
 diagnostic below that GNU writes with `quote()` is `GnuQuote(x)`; file names
 GNU writes with `quoteaf` are `ShellEscapeQuoted(name, true)`, with `quotef`
 `ShellEscapeQuoted(name)`.
-`OpenInputOperand(context, name, failure)` opens cmp's operands (`-` is
-descriptor 0) and says why one failed (`Missing`, `Directory`, ...); cmp
+`OpenInputOperand(context, name, failure)` (`failure` an `InputOpenFailure`)
+opens cmp's operands (`-` is descriptor 0) and says why one failed (`Missing`,
+`Directory`, `Denied`, `BadDescriptor`); cmp
 words it (`cmp: NAME: No such file or directory`, unquoted, as diffutils
 prints it). cmp's own usage messages put plain `'...'` around values (they
 are printf strings in diffutils, not `quote()`).
@@ -83,8 +85,8 @@ std::string FormatHumanSize(uint64_t bytes, bool si);
 ```
 
 `FormatHumanSize(bytes, false)` is exactly ls's current `HumanSize` (move it;
-ls's `AllocatedSize` calls `FormatHumanSize(..., false)`; ls output must not
-change).
+ls's `AllocatedSize` and the `-h` size column in the long listing both call
+`FormatHumanSize(..., false)`; ls output must not change).
 
 ### New `src/components/BuiltinCommands/commands/du/Du.cpp`
 
@@ -156,7 +158,7 @@ the names below it with one `/` (`.` gives `./a/b`; `a/` prints itself as
 `a/` and its children as `a/b`). Exclusions (`--exclude=PATTERN`,
 `-X FILE` one pattern per line): a path is excluded when the pattern matches
 the whole path or any part of it after a `/` (gnulib's unanchored exclude),
-with `Hsh::MatchPattern`; an excluded entry is neither shown nor counted.
+with `FnMatch(pattern, text, 0)` (`BuiltinFnmatch.h`); an excluded entry is neither shown nor counted.
 `-c`: a last line `SIZE\ttotal`. Check `StopRequested()` per entry.
 
 Printing a size: blocks mode `ceil(bytes / blockSize)` (default block size
@@ -228,14 +230,19 @@ Read both in chunks, check `StopRequested()`, treat `kIOInterrupted` as a stop.
 
 ### `src/components/BuiltinCommands/commands/ls/Ls.cpp`
 
-`HumanSize` moved to `BuiltinSize` (above); include `BuiltinSize.h`. No
-version bump (no behaviour change).
+`HumanSize` (its two uses: `AllocatedSize` and the `-h` size column) moved to
+`BuiltinSize` (above); include `BuiltinSize.h`. No version bump (no behaviour
+change; `ls` is at 1.3.1 now).
 
 ### `BuiltinCommandList.h`, `CMakeLists.txt`
 
-Declare `CreateCmpCommand()` and `CreateDuCommand()`, add both to
-`CreateStandardBuiltinCommands()` (that puts them in the `haisos --init`
-template); add `BuiltinSize.cpp`, `commands/du/Du.cpp`, `commands/cmp/Cmp.cpp`.
+Declare `CreateCmpCommand()` (after `CreateChmodCommand()`) and
+`CreateDuCommand()` (after `CreateDirnameCommand()`), add both at the same
+places to `CreateStandardBuiltinCommands()` (that puts them in the `haisos
+--init` template); in `src/components/BuiltinCommands/CMakeLists.txt` add
+`BuiltinSize.cpp` (between `BuiltinRunProgram.cpp` and
+`BuiltinTestExpression.cpp`), `commands/cmp/Cmp.cpp` (after `Chmod.cpp`) and
+`commands/du/Du.cpp` (after `Dirname.cpp`).
 
 Rules that bite: files only through `context.IO()` (`Stat`, `ReadDirectory`,
 `OpenFile`, `GetDescriptor(0)`); every GNU option in `Options()`; `--help`
@@ -244,8 +251,10 @@ from `BuiltinHelpText`; GNU's messages; portable C++17, no POSIX headers.
 ## Tests
 
 New `DuTest.cpp`, `CmpTest.cpp` and `BuiltinSizeTest.cpp` in
-`tests/unit/components/BuiltinCommands.unittests/` (add to its
-`CMakeLists.txt`), on `RunCaptured`. The fixture's files are in memory, so
+`tests/unit/components/BuiltinCommands.unittests/` (add to the one
+`add_executable(BuiltinCommands.unittests ...)` line of its `CMakeLists.txt`,
+in alphabetical order), on the fixture's `RunCaptured`
+(`BuiltinCommandsFixture.h`; tests are `TEST_F(BuiltinCommandsTest, ...)`). The fixture's files are in memory, so
 blocks are ceil(size/512) and directories 0: set up a tree for du in each
 test, e.g. `/t/a/f1` of 5000 bytes (10 blocks), `/t/a/b/f2` of 100 bytes (1
 block), `/t/c/e` empty. Expected du numbers follow from that (5120 + 512 =
@@ -316,14 +325,19 @@ is the narrowest it takes; the direct run narrows to this task's tests.
 `TheInitTemplatesBuiltinsAllApplyOnceUncommented` lives in
 `CliParser.unittests`.) Add the new builtin names to the exact list in
 `ListsEveryBuiltinSortedWithAVersion` (`BuiltinCommandsTest.cpp`), in byte
-order.
+order: `"cmp"` between `"chmod"` and `"cp"`, `"du"` between `"dirname"` and
+`"echo"`.
 
 ## Docs
 
-- `src/components/BuiltinCommands/CLAUDE.md`: rows for `cmp` and `du` (version,
-  treated, exceptions above), both in the opening list; a sentence on
-  `BuiltinSize` (`ParseSizeWithSuffix`, `FormatHumanSize`).
-- Root `CLAUDE.md`: rows for `cmp` and `du`, and in the builtin lists.
+- `src/components/BuiltinCommands/CLAUDE.md`: rows for `cmp` (after `chmod`)
+  and `du` (after `dirname`) in "The commands" table (version, treated,
+  exceptions above), both in the opening list; a "Key Classes" bullet on
+  `BuiltinSize.h` (`ParseSizeWithSuffix`, `FormatHumanSize`), next to the
+  `BuiltinText.h` and `BuiltinDate.h` ones.
+- Root `CLAUDE.md`: rows for `cmp` and `du` in the "Builtin Commands" table, and
+  in its lists of builtins (the directory tree's `BuiltinCommands/` line, the
+  "Commands compiled into Haisos" paragraph).
 
 ## Acceptance
 

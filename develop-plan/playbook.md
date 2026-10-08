@@ -19,7 +19,7 @@ Pause: no
 | 11 | [coreutils--printf-seq](tasks/coreutils--printf-seq.md) | done | 0.5.11 | 4 | #53 | 1 | 0C 1H fixed, 2M 3L open | |
 | 12 | [coreutils--date](tasks/coreutils--date.md) | done | 0.5.18 | 8, 4 | #60 | 1 | 0C 0H fixed, 6M 5L open | Windows red, not checked |
 | 13 | [coreutils--stat](tasks/coreutils--stat.md) | done | 0.5.19 | 12, 11, 4 | #61 | 1 | 0C 1H fixed, 3M 2L open | Windows red, not checked |
-| 14 | [coreutils--du-cmp](tasks/coreutils--du-cmp.md) | todo | | 12, 4 | | | | |
+| 14 | [coreutils--du-cmp](tasks/coreutils--du-cmp.md) | in-progress | 0.5.20 | 12, 4 | | | | |
 | 15 | [coreutils--test-program](tasks/coreutils--test-program.md) | done | 0.5.12 | 4 | #54 | 1 | 0C 2H fixed, 1M 2L open | |
 | 16 | [coreutils--uniq-cut](tasks/coreutils--uniq-cut.md) | done | 0.5.13 | 4 | #55 | 1 | 0C 0H fixed, 2M 6L open | |
 | 17 | [coreutils--head-tail](tasks/coreutils--head-tail.md) | todo | | 14, 4, 16 | | | | |
@@ -92,3 +92,4 @@ Pause: no
 - 2026-10-08 (implement) coreutils--mv-touch back in review: Ollama credits reset by the user; fix round on #59 with the review's round-1 feedback
 - 2026-10-08 (implement) coreutils--date refreshed against 7b806fb (BuiltinDate names from #59, CMake/test slots, BuiltinDateTest exists); folded in #59 medium: previousWasTime only when no zone attached (`2024-01-02T03:04Z +1 hour`)
 - 2026-10-09 (implement) coreutils--stat refreshed against 96ca945 (Stat(path, FileStatus&) call, CopyStatMissingReason, SetTimes-based precision test, list/CMake slots; warns that ParsePrintfSpec skips h/L while stat's %h/%Ld are directives)
+- 2026-10-09 (implement) coreutils--du-cmp refreshed against f561090 (FnMatch from BuiltinFnmatch.h for --exclude, InputOpenFailure/FileStatus fields, both ls HumanSize uses move to FormatHumanSize, list/CMake/test slots)

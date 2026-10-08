@@ -1,7 +1,7 @@
 # Review: coreutils--stat (PR #61)
 - Verdict: merged
 - Merged as: 630baac, version 0.5.19
-- Tokens: claude 209784, ollama input 146678, ollama output 131409
+- Tokens: claude 318500, ollama input 146678, ollama output 131409
 
 | Severity | Status | Where | Finding |
 |----------|--------|-------|---------|

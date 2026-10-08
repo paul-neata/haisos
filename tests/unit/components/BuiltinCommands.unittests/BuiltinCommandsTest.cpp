@@ -92,7 +92,8 @@ std::shared_ptr<IBuiltinCommand> FindStandardCommand(const std::string& name) {
 
 TEST_F(BuiltinCommandsTest, ListsEveryBuiltinSortedWithAVersion) {
     const auto commands = builtins->GetCommands();
-    EXPECT_EQ(commands, (Lines{"cat", "cp", "echo", "hsh", "ls", "man", "mkdir", "pwd", "rm", "rmdir", "sort", "wc"}));
+    EXPECT_EQ(commands, (Lines{"cat", "cp", "echo", "env", "false", "hsh", "ls", "man", "mkdir",
+        "pwd", "rm", "rmdir", "sleep", "sort", "true", "wc", "which"}));
     for (const auto& name : commands) {
         EXPECT_FALSE(builtins->GetBuiltinVersion(name).empty()) << name;
     }
@@ -125,7 +126,8 @@ TEST_F(BuiltinCommandsTest, EveryBuiltinsHelpHasTheSameShape) {
         const std::string name = command->Name();
         int status = -1;
         auto help = Run(name, {"--help"}, &status);
-        EXPECT_EQ(status, 0) << name;
+        // GNU's false exits 1 even after --help; every other builtin 0.
+        EXPECT_EQ(status, name == "false" ? 1 : 0) << name;
         ASSERT_GE(help.size(), 5u) << name;
         EXPECT_EQ(help[0].rfind("HaisosOS " + name + " version " + command->Version() + " - ", 0), 0u) << help[0];
         const std::string& real = command->Help().basedOn.empty() ? name : command->Help().basedOn;
@@ -170,7 +172,8 @@ TEST_F(BuiltinCommandsTest, EveryBuiltinHasAVersion) {
     for (const auto& name : builtins->GetCommands()) {
         int status = -1;
         auto version = Run(name, {"--version"}, &status);
-        EXPECT_EQ(status, 0) << name;
+        // GNU's false exits 1 even after --version; every other builtin 0.
+        EXPECT_EQ(status, name == "false" ? 1 : 0) << name;
         EXPECT_EQ(version, (Lines{name + " (HaisosOS builtin) " + builtins->GetBuiltinVersion(name)})) << name;
     }
 }

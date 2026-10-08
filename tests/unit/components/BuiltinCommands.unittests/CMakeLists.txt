@@ -1,4 +1,4 @@
-add_executable(BuiltinCommands.unittests BuiltinCommandsTest.cpp CpTest.cpp BuiltinTextTest.cpp ManTest.cpp RmTest.cpp SortTest.cpp WcTest.cpp)
+add_executable(BuiltinCommands.unittests BuiltinCommandsTest.cpp CpTest.cpp EnvTest.cpp BuiltinTextTest.cpp ManTest.cpp RmTest.cpp SortTest.cpp WcTest.cpp WhichSleepTrueFalseTest.cpp)
 target_include_directories(BuiltinCommands.unittests PRIVATE ${CMAKE_SOURCE_DIR}/src/components/Factory)
 target_link_libraries(BuiltinCommands.unittests PRIVATE gtest_main BuiltinCommands Factory)
 target_compile_features(BuiltinCommands.unittests PRIVATE cxx_std_17)

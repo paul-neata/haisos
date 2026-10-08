@@ -199,10 +199,17 @@ const BuiltinOption* FindShortOption(char name, const std::vector<BuiltinOption>
 
 } // namespace
 
-ParsedBuiltinArgs ParseBuiltinArgs(const std::vector<std::string>& args, const std::vector<BuiltinOption>& options) {
+ParsedBuiltinArgs ParseBuiltinArgs(const std::vector<std::string>& args,
+    const std::vector<BuiltinOption>& options, bool stopAtFirstOperand) {
     ParsedBuiltinArgs parsed;
     for (size_t i = 0; i < args.size(); ++i) {
         const std::string& arg = args[i];
+        if (stopAtFirstOperand && !(arg.size() > 1 && arg[0] == '-')) {
+            // "+" mode: the first operand ("-" alone included) ends the
+            // options; every argument from it on is an operand untouched.
+            parsed.operands.insert(parsed.operands.end(), args.begin() + static_cast<std::ptrdiff_t>(i), args.end());
+            break;
+        }
         if (arg == "--") {
             parsed.operands.insert(parsed.operands.end(), args.begin() + static_cast<std::ptrdiff_t>(i) + 1, args.end());
             break;
@@ -431,9 +438,10 @@ std::string ShellEscapeQuoted(const std::string& name, bool always) {
 }
 
 std::optional<ParsedBuiltinArgs> BeginBuiltin(
-    BuiltinContext& context, const IBuiltinCommand& command, int usageErrorStatus, int& exitStatus)
+    BuiltinContext& context, const IBuiltinCommand& command, int usageErrorStatus, int& exitStatus,
+    bool stopAtFirstOperand)
 {
-    ParsedBuiltinArgs parsed = ParseBuiltinArgs(context.Args(), command.Options());
+    ParsedBuiltinArgs parsed = ParseBuiltinArgs(context.Args(), command.Options(), stopAtFirstOperand);
     if (!parsed.error.empty()) {
         context.Error(parsed.error);
         context.TryHelp();

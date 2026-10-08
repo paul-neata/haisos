@@ -195,7 +195,9 @@ GrepFileResult GrepOneInput(BuiltinContext& context, const GrepSettings& setting
                     break;
                 }
                 stopInput = processLine(std::string_view(data).substr(pos, end - pos));
-                offset = end + 1;
+                // |data| is erased after every chunk: advance by the line's
+                // length, never by an index into it.
+                offset += end - pos + 1;
                 pos = end + 1;
                 if (stopInput || result.stopped) {
                     break;

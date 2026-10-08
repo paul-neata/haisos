@@ -94,6 +94,20 @@ TEST_F(BuiltinCommandsTest, GrepPrefixes) {
     EXPECT_EQ(RunCaptured("grep", {"-ob", "TODO", "a.c"}, "", "/g").out, "8:TODO\n29:TODO\n59:TODO\n");
 }
 
+TEST_F(BuiltinCommandsTest, GrepByteOffsetsPastTheFirstRead) {
+    MakeGrepFiles(root);
+    // 50000 lines "x\n" (100000 bytes, past one 96 KiB read), then TODO: its
+    // offset counts every byte before it, whichever read brought them.
+    std::string big;
+    for (int i = 0; i < 50000; ++i) {
+        big += "x\n";
+    }
+    big += "TODO\n";
+    WriteTo(root, "/g/big", big);
+    EXPECT_EQ(RunCaptured("grep", {"-nb", "TODO", "big"}, "", "/g").out, "50001:100000:TODO\n");
+    EXPECT_EQ(RunCaptured("grep", {"-ob", "TODO"}, big).out, "100000:TODO\n");
+}
+
 TEST_F(BuiltinCommandsTest, GrepInitialTab) {
     MakeGrepFiles(root);
     // a.c is 64 bytes: line numbers pad to the digits of 65, offsets to the

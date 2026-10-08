@@ -1,7 +1,7 @@
 # Review: coreutils--test-program (PR #54)
 - Verdict: merged
 - Merged as: 435d22f, version 0.5.12
-- Tokens: claude 196298, ollama input 491458, ollama output 248163
+- Tokens: claude 199087, ollama input 491458, ollama output 248163
 
 | Severity | Status | Where | Finding |
 |----------|--------|-------|---------|

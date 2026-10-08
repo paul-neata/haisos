@@ -33,7 +33,7 @@ DEV_SUBREPO_GIT="$DEV_SUBREPO_HOME/git"
 DEV_BASE_IMAGE_REPO="haisos-devtask-base"
 DEV_IMAGE_REPO="haisos-devtask"
 DEV_CONTAINER_PREFIX="haisos-develop"
-DEV_DEFAULT_MODEL="kimi-k3:cloud"
+DEV_DEFAULT_MODEL="glm-5.3:cloud"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 

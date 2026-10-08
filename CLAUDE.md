@@ -660,7 +660,7 @@ container builds Linux only; Windows is built and fixed on the host, after the r
 the code. The leaf-task skills (`/begin`, `/end`, `/implement`, ...) stay for
 small changes straight to `master`.
 
-`/claude-docker [<ollama model>]` (default `kimi-k3:cloud`), independent of
+`/claude-docker [<ollama model>]` (default `glm-5.3:cloud`), independent of
 the develop skills, opens an interactive Claude Code on an Ollama model in the
 same container, in `subrepo/` put in this clone's exact state (branch,
 commit, staged and unstaged changes), in a new terminal tab; when the user

@@ -1,9 +1,9 @@
 ---
 name: claude-docker
-description: Open an interactive Claude Code on an Ollama model (kimi-k3:cloud by default) in the develop workflow's task container, working in the repository's subrepo/ folder, put in this clone's exact state -- branch, commit, staged and unstaged changes -- in a new terminal tab; when the user exits it, have a Sonnet agent check what came back for repository-level security risks (hooks, build-time commands, agent instructions, links, secrets -- not the code itself), then put this clone in the session's exact state -- branch, history, staged and unstaged changes. Works on any branch; independent of the /develop-* skills.
+description: Open an interactive Claude Code on an Ollama model (glm-5.3:cloud by default) in the develop workflow's task container, working in the repository's subrepo/ folder, put in this clone's exact state -- branch, commit, staged and unstaged changes -- in a new terminal tab; when the user exits it, have a Sonnet agent check what came back for repository-level security risks (hooks, build-time commands, agent instructions, links, secrets -- not the code itself), then put this clone in the session's exact state -- branch, history, staged and unstaged changes. Works on any branch; independent of the /develop-* skills.
 args:
   - name: model
-    description: "The Ollama model, e.g. kimi-k3:cloud (default kimi-k3:cloud); optionally followed by --launcher direct"
+    description: "The Ollama model, e.g. kimi-k3:cloud (default glm-5.3:cloud); optionally followed by --launcher direct"
     required: false
 ---
 
@@ -39,7 +39,7 @@ The work is done by `scripts/develop/claude_docker.sh`.
 bash scripts/develop/claude_docker.sh prepare <model> [--launcher direct]
 ```
 
-The model is the argument, `kimi-k3:cloud` when none is given. It refuses
+The model is the argument, `glm-5.3:cloud` when none is given. It refuses
 during a merge or rebase, on a detached HEAD, without the model in ollama
 (with tool calling), or while a container (another session, or a develop
 task) runs on the subrepo; report that and stop. Otherwise note the

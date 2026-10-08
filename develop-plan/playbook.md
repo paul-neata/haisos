@@ -16,7 +16,7 @@ Pause: no
 | 8 | [coreutils--mv-touch](tasks/coreutils--mv-touch.md) | todo | | 1, 6, 7, 53 | | | | |
 | 9 | [coreutils--names-env](tasks/coreutils--names-env.md) | done | 0.5.9 | - | #51 | 1 | 0C 1H fixed, 2M 6L open | Windows green on CI re-run (HaisosOS.unittests flaky) |
 | 10 | [coreutils--chmod-paths](tasks/coreutils--chmod-paths.md) | done | 0.5.10 | - | #52 | 1 | 0C 0H fixed, 1M 3L open | Windows green on CI re-run (HaisosOS.unittests flaky) |
-| 11 | [coreutils--printf-seq](tasks/coreutils--printf-seq.md) | in-review | 0.5.11 | 4 | #53 | 1 | | |
+| 11 | [coreutils--printf-seq](tasks/coreutils--printf-seq.md) | done | 0.5.11 | 4 | #53 | 1 | 0C 1H fixed, 2M 3L open | |
 | 12 | [coreutils--date](tasks/coreutils--date.md) | todo | | 8, 4 | | | | |
 | 13 | [coreutils--stat](tasks/coreutils--stat.md) | todo | | 12, 11, 4 | | | | |
 | 14 | [coreutils--du-cmp](tasks/coreutils--du-cmp.md) | todo | | 12, 4 | | | | |

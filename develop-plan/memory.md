@@ -7,3 +7,4 @@
 - Windows' 1 MB stack: recursive parsers need low depth limits (Regex nesting 250).
 - Interim agent notifications ("may be interim") carry a token count: record with it at once and correct the record at the next publish -- don't wait.
 - Before coreutils--mv-touch starts: its plan re-check folds in #50's three open mediums (move cp's duplicated helpers into BuiltinCopy.h and reuse them in mv; backup mode worked out once at the end as GNU, '$VERSION_CONTROL' in the error, -S included; -n wins over a later --update=WORD) -- and waits for the answer to the rm -r symlink Question.
+- When awk--functions or search--find-actions is re-checked: note that ParsePrintfSpec (BuiltinPrintf.h) does not skip the `q` length modifier (#53 review).

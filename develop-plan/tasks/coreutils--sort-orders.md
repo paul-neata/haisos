@@ -3,7 +3,7 @@
 - Rock: coreutils
 - Depends on: coreutils--sort
 - Size: ~700 changed lines in ~7 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ d947afa
 - PR title: sort: general, human, month, version, random order; -c, -m
 
 ## Goal
@@ -110,6 +110,11 @@ Expected (`sort -V`, verified): `.`, `..`, `.a`, `foo~`, `foo`,
   `humanNumeric` -> `CompareHumanNumeric`, `month` -> `CompareMonth`,
   `version` -> `CompareVersion`, `random` -> the random comparison below,
   else text as before; `reverse` still negates.
+- `-d` with `-i`: GNU keeps only `-d` (its `ignore` is set by `d` always, by
+  `i` only when unset), so `ApplySortModifier` ('d' clears `ignoreNonprinting`,
+  'i' does nothing once `dictionary` is set; also when the global flags are
+  inherited) and `IncompatibleOptions` (so `-din` + `-n` says `'-dn'`, now
+  `'-din'`) change; `IgnoredByModifiers` then never sees both.
 - `SortSettings` gains `uint64_t randomSalt[2]` (set once per run in
   `Sort.cpp` from `std::random_device`).
 - Random comparison: hash each key's text after the key's text transforms
@@ -170,6 +175,7 @@ here: run it in the container and paste the result):
 - `SortVersionKey`: `-t- -k2V` on `a-1.10\nb-1.9\n` -> `b-1.9\na-1.10\n`.
 - `SortRandomGroupsEqualKeys`: `-R` on `a\nb\na\nc\nb\na\n` -> six lines, a permutation of the input, each value's copies adjacent; `-R -u` -> three lines.
 - `SortSortWord`: `--sort=numeric` == `-n`; `--sort=num` (prefix) works; `--sort=foo` -> stderr `sort: invalid argument 'foo' for '--sort'\nValid arguments are:\n  - 'general-numeric'\n  - 'human-numeric'\n  - 'month'\n  - 'numeric'\n  - 'random'\n  - 'version'\nTry 'sort --help' for more information.\n`, exit 1; `--sort=h -n` -> `sort: options '-hn' are incompatible\n`, 2.
+- `SortDictionaryWinsOverNonprinting`: `-di -n` -> `sort: options '-dn' are incompatible\n`, 2 (also `-id -n`, `-k1di,1n`); `-di` on the same input gives the same output as `-d` (tab and newline still compared).
 - `SortIncompatibleOrders`: `-gn` -> `'-gn'`; `-Mn` -> `'-Mn'`; `-nR` -> `'-nR'`; `-i -g` -> `'-gi'`; `-fgn` -> `'-fgn'`; `-k1,1Vn` -> `'-nV'`; all exit 2.
 - `SortCheck`: input `a\nb\n\nc` with `-c -` -> stderr `sort: -:3: disorder: \n`, exit 1; sorted input -> nothing, 0; `-C` on disorder -> no output, 1; `--check=silent` -> like `-C`; `-cu` on `a\na\n` -> `sort: -:2: disorder: a\n`, 1; `-c -f` on `a\nA\n` -> `sort: -:2: disorder: A\n` (last resort); `-c -k2n` on `x 2\ny 10\n` -> 0, and `-c -k2` -> `sort: -:2: disorder: y 10\n`, 1; `-cz` on `b\0a\0` -> stderr `sort: -:2: disorder: a\0`; with a file operand the name is the operand (`sort: f.txt:2: disorder: a`).
 - `SortCheckErrors`: `-c f g` -> `sort: extra operand 'g' not allowed with -c\n`, 2; `-c -o z f` -> `sort: options '-co' are incompatible\n`, 2; `-C -c f` -> `sort: options '-cC' are incompatible\n`, 2; `--check=foo` -> the argmatch listing with `  - 'quiet', 'silent'\n  - 'diagnose-first'\n`, 1; `-c nofile` -> `sort: open failed: nofile: No such file or directory\n`, 2.
@@ -200,6 +206,8 @@ bash ./scripts/test_linux.sh L U
 - [ ] `-g -h -M -V -R` and `--sort=WORD` order exactly as GNU sort 9.4
       with `LC_ALL=C` on every test; incompatible combinations rejected
       with GNU's messages.
+- [ ] `-d` with `-i` behaves as `-d` alone, and says `'-dn'` in the
+      incompatibility error.
 - [ ] `-c`/`-C`/`--check` print GNU's disorder line (raw name, line number,
       delimiter) and exit 1; their errors exit 2 (argmatch 1).
 - [ ] `-m` merges without re-sorting, ties to the earlier input, `-u` works.

@@ -1,7 +1,7 @@
 # Review: coreutils--chmod-paths (PR #52)
 - Verdict: merged
 - Merged as: 22cefe9, version 0.5.10
-- Tokens: claude 174228, ollama input 192956, ollama output 96294
+- Tokens: claude 175036, ollama input 192956, ollama output 96294
 
 | Severity | Status | Where | Finding |
 |----------|--------|-------|---------|

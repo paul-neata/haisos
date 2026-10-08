@@ -28,7 +28,7 @@ haisos/
 ├── src/
 │   ├── components/        - Component implementations (each has its own CLAUDE.md)
 │   │   ├── Agent/
-│   │   ├── BuiltinCommands/ - The builtin commands (basename, cat, chmod, cp, dirname, echo, env, false, hsh, ls, man, mkdir, pwd, realpath, rm, rmdir, sleep, sort, true, wc, which; each in commands/<name>/) and what places them on filesystems
+│   │   ├── BuiltinCommands/ - The builtin commands (basename, cat, chmod, cp, dirname, echo, env, false, hsh, ls, man, mkdir, printf, pwd, realpath, rm, rmdir, seq, sleep, sort, true, wc, which; each in commands/<name>/) and what places them on filesystems
 │   │   ├── Console/
 │   │   ├── Environment/
 │   │   ├── Factory/
@@ -536,8 +536,9 @@ returned by `IHaisosOS`'s `OSToolFactory` and merged with an agent's tools
 ## Builtin Commands
 
 Commands compiled into Haisos (`basename`, `cat`, `chmod`, `cp`, `dirname`,
-`echo`, `env`, `false`, `hsh`, `ls`, `man`, `mkdir`, `pwd`, `realpath`, `rm`,
-`rmdir`, `sleep`, `sort`, `true`, `wc`, `which`), implemented in
+`echo`, `env`, `false`, `hsh`, `ls`, `man`, `mkdir`, `printf`, `pwd`,
+`realpath`, `rm`, `rmdir`, `seq`, `sleep`, `sort`, `true`, `wc`, `which`),
+implemented in
 `src/components/BuiltinCommands/`
 (see its `CLAUDE.md`). A builtin is not a file on disk: it is placed on a
 filesystem at a path (`IBuiltinConfigurator`, or the haisosfile's `BUILTIN`),
@@ -603,10 +604,12 @@ use a builtin with what it already knows about the real command:
 | `ls` | Lists directories as GNU ls prints them to a terminal: columns, `-l` with `total`/links/owner/group/size/time, sorting, time styles, quoting; to a pipe or file, one name per line, unquoted |
 | `man` | Prints a builtin's manual page (`man ls`, `man 1 ls`, `-f`, `-k`): its `--help` text, or a full page for `hsh` |
 | `mkdir` | Creates directories (`-p -v`) |
+| `printf` | Formats and prints data (FORMAT reused until the arguments run out; every conversion with flags, widths, precisions, `%b`, `%q`, `\` escapes, character constants; GNU's diagnostics) |
 | `pwd` | Prints the working directory (`-L -P`) |
 | `realpath` | Resolves names to absolute paths (`-e -m -L -P -q --relative-to=DIR --relative-base=DIR -s -z`) from the working directory, with existence checks; no symbolic links, so `-L`, `-P` and `-s` change nothing |
 | `rm` | Removes files or directories (`-f -i -I --interactive[=WHEN] -r -R -d -v --no-preserve-root --preserve-root[=all]`), prompts read from standard input, entries in name order |
 | `rmdir` | Removes empty directories (`--ignore-fail-on-non-empty -p -v`) |
+| `seq` | Prints a sequence of numbers (`-f FORMAT -s STRING -w`), FIRST/INCREMENT/LAST, GNU's default-format and fast-path rules, negative numbers as operands |
 | `sleep` | Sleeps for the summed NUMBERs (`s m h d` suffixes; `inf` until stopped) |
 | `sort` | Sorts lines (keys `-k`/`-t`, `-b -d -f -g -h -i -M -n -r -R -s -u -V -z`, `--sort=WORD`, `-c -C --check`, `-m`, `-o`, `--files0-from`), byte order, the numeric/general/human/month/version orders, GNU's last-resort comparison |
 | `true` | Does nothing, exits 0 (`--help`/`--version` only as the sole argument) |

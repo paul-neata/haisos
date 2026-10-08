@@ -23,10 +23,12 @@ std::shared_ptr<IBuiltinCommand> CreateHshCommand();
 std::shared_ptr<IBuiltinCommand> CreateLsCommand();
 std::shared_ptr<IBuiltinCommand> CreateManCommand();
 std::shared_ptr<IBuiltinCommand> CreateMkdirCommand();
+std::shared_ptr<IBuiltinCommand> CreatePrintfCommand();
 std::shared_ptr<IBuiltinCommand> CreatePwdCommand();
 std::shared_ptr<IBuiltinCommand> CreateRealpathCommand();
 std::shared_ptr<IBuiltinCommand> CreateRmCommand();
 std::shared_ptr<IBuiltinCommand> CreateRmdirCommand();
+std::shared_ptr<IBuiltinCommand> CreateSeqCommand();
 std::shared_ptr<IBuiltinCommand> CreateSleepCommand();
 std::shared_ptr<IBuiltinCommand> CreateSortCommand();
 std::shared_ptr<IBuiltinCommand> CreateTrueCommand();
@@ -50,10 +52,12 @@ inline std::vector<std::shared_ptr<IBuiltinCommand>> CreateStandardBuiltinComman
         CreateLsCommand(),
         CreateManCommand(),
         CreateMkdirCommand(),
+        CreatePrintfCommand(),
         CreatePwdCommand(),
         CreateRealpathCommand(),
         CreateRmCommand(),
         CreateRmdirCommand(),
+        CreateSeqCommand(),
         CreateSleepCommand(),
         CreateSortCommand(),
         CreateTrueCommand(),

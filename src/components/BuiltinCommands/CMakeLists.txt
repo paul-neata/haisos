@@ -11,15 +11,18 @@ add_library(BuiltinCommands STATIC
     BuiltinPrompt.cpp
     BuiltinRemove.cpp
     BuiltinRunProgram.cpp
+    BuiltinSize.cpp
     BuiltinTestExpression.cpp
     BuiltinText.cpp
     commands/basename/Basename.cpp
     commands/cat/Cat.cpp
     commands/chmod/Chmod.cpp
+    commands/cmp/Cmp.cpp
     commands/cp/Cp.cpp
     commands/cut/Cut.cpp
     commands/date/Date.cpp
     commands/dirname/Dirname.cpp
+    commands/du/Du.cpp
     commands/echo/Echo.cpp
     commands/env/Env.cpp
     commands/false/False.cpp

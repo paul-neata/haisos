@@ -1,10 +1,10 @@
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <string>
 #include "BuiltinCommand.h"
 #include "BuiltinDate.h"
+#include "BuiltinSize.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
 
 namespace Haisos {
@@ -99,35 +99,10 @@ struct LsEntry {
 
 // --- Formatting pieces ---
 
-// GNU's -h: powers of 1024, rounded up, one decimal below 10 ("1.5K", "12K").
-std::string HumanSize(uint64_t bytes) {
-    if (bytes < 1024) {
-        return std::to_string(bytes);
-    }
-    static const char kUnits[] = "KMGTPEZY";
-    double value = static_cast<double>(bytes);
-    size_t unit = 0;
-    value /= 1024;
-    while (true) {
-        double shown = value < 10 ? std::ceil(value * 10) / 10 : std::ceil(value);
-        if (shown < 1024 || unit + 1 >= sizeof(kUnits) - 1) {
-            char buffer[32];
-            if (shown < 10) {
-                std::snprintf(buffer, sizeof(buffer), "%.1f%c", shown, kUnits[unit]);
-            } else {
-                std::snprintf(buffer, sizeof(buffer), "%.0f%c", shown, kUnits[unit]);
-            }
-            return buffer;
-        }
-        value /= 1024;
-        ++unit;
-    }
-}
-
 // Allocated size, as -s and the total line show it: 1K blocks (rounded up),
 // or with -h, human-readable bytes.
 std::string AllocatedSize(uint64_t blocks512, bool human) {
-    return human ? HumanSize(blocks512 * 512) : std::to_string((blocks512 + 1) / 2);
+    return human ? FormatHumanSize(blocks512 * 512, /*si=*/false) : std::to_string((blocks512 + 1) / 2);
 }
 
 // The time column for --time-style STYLE (already validated). The formats
@@ -641,7 +616,7 @@ private:
                 minorWidth = std::max(minorWidth, std::to_string(entry.status.deviceMinor).size());
                 sizeWidth = std::max(sizeWidth, majorWidth + 2 + minorWidth);
             } else {
-                sizes.push_back(settings.human ? HumanSize(entry.status.size) : std::to_string(entry.status.size));
+                sizes.push_back(settings.human ? FormatHumanSize(entry.status.size, /*si=*/false) : std::to_string(entry.status.size));
                 sizeWidth = std::max(sizeWidth, sizes.back().size());
             }
         }

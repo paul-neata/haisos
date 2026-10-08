@@ -81,6 +81,10 @@ TEST(RegexMatchTest, GnuLeftmostLongest) {
         {RegexSyntax::Extended, "[a-c]*", Text(""), 0, 0, false, false, "(0,0)"},
         {RegexSyntax::Basic, "ABC", Text("xabc"), 0, 0, true, false, "(1,4)"},
         {RegexSyntax::Basic, "[a-c]\\+", Text("ABCD"), 0, 0, true, false, "(0,3)"},
+        // A repetition whose body matches empty completes that one iteration
+        // with its groups recorded (verified against GNU sed, via a back
+        // reference that can only match if the group is set).
+        {RegexSyntax::Basic, "\\(a\\?\\)*", Text("b"), 0, 0, false, false, "(0,0)(0,0)"},
     };
     RunMatchCases("GnuLeftmostLongest", cases, sizeof(cases) / sizeof(cases[0]));
 }
@@ -120,6 +124,10 @@ TEST(RegexMatchTest, BackReferences) {
         {RegexSyntax::Extended, "(a)|b\\1", Text("b"), 0, 0, false, false, "nomatch"},
         {RegexSyntax::Basic, "\\(a\\)\\1", Text("aA"), 0, 0, true, false, "(0,2)(0,1)"},
         {RegexSyntax::Perl, "(\\w)\\1", Text("hello"), 0, 0, false, false, "(2,4)(2,3)"},
+        // The empty last iteration of the outer loop sets group 1 to "", which
+        // \\1 then matches (verified against GNU sed on the whole pattern).
+        {RegexSyntax::Basic, "\\(\\(a\\?\\)\\+\\)*b\\1x", Text("abx"), 0, 0, false, false,
+         "(0,3)(1,1)(1,1)"},
     };
     RunMatchCases("BackReferences", cases, sizeof(cases) / sizeof(cases[0]));
 }
@@ -143,6 +151,13 @@ TEST(RegexMatchTest, PerlLeftmostFirst) {
          "(3,10)(3,7)(8,10)"},
         {RegexSyntax::Perl, "\\bfoo\\b", Text("a foo."), 0, 0, false, false, "(2,5)"},
         {RegexSyntax::Perl, "(?:ab)+", Text("ababx"), 0, 0, false, false, "(0,4)"},
+        // One empty iteration of a nullable body, its groups recorded, then
+        // the loop leaves (PCRE2's answers; a lazy loop exits directly, so
+        // its group stays unset).
+        {RegexSyntax::Perl, "(a*)*", Text("b"), 0, 0, false, false, "(0,0)(0,0)"},
+        {RegexSyntax::Perl, "(a|)*", Text("b"), 0, 0, false, false, "(0,0)(0,0)"},
+        {RegexSyntax::Perl, "(a*)*?", Text("b"), 0, 0, false, false, "(0,0)(-1,-1)"},
+        {RegexSyntax::Perl, "((a?)+)*", Text("b"), 0, 0, false, false, "(0,0)(0,0)(0,0)"},
     };
     RunMatchCases("PerlLeftmostFirst", cases, sizeof(cases) / sizeof(cases[0]));
 }

@@ -17,7 +17,8 @@ namespace {
 class PikeVM {
 public:
     explicit PikeVM(const RegexProgram& program)
-        : m_program(program), m_longest(program.longest), m_slotCount(program.slotCount) {}
+        : m_program(program), m_longest(program.longest),
+          m_slotCount(program.slotCount + program.markCount) {}
 
     bool Run(std::string_view text, size_t start, int flags, std::vector<std::ptrdiff_t>& out);
 
@@ -120,9 +121,18 @@ private:
                         continue;
                     }
                     break;  // the assertion fails: this path dies
-                case RegexOp::ProgressMark:
-                case RegexOp::ProgressCheck:  // no-ops: one thread per pc stops empty loops
+                case RegexOp::ProgressMark: {  // a Save on a pseudo-slot past the groups
+                    int slot = static_cast<int>(m_program.slotCount) + inst.x;
+                    if (branches > 0) m_stack[top++] = Entry{-1, slot, m_work[slot]};
+                    m_work[slot] = static_cast<std::ptrdiff_t>(pos);
                     cur = cur + 1;
+                    continue;
+                }
+                case RegexOp::ProgressCheck:  // an empty iteration: leave, keeping its captures
+                    cur = m_work[static_cast<size_t>(m_program.slotCount) + inst.x] ==
+                                  static_cast<std::ptrdiff_t>(pos)
+                              ? inst.y
+                              : cur + 1;
                     continue;
                 case RegexOp::BackRef:
                     break;  // unreachable: Pike runs only programs without back-references

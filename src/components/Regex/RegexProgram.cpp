@@ -247,18 +247,28 @@ private:
     void EmitRepeat(const RegexNode& node) {
         for (int i = 0; i < node.min; ++i) EmitNode(node.children[0]);
         if (node.max == -1) {
-            bool mark = Nullable(node.children[0]);
+            // A body that can match empty completes one such iteration -- its
+            // captures recorded, as glibc and PCRE2 both report them -- and
+            // the ProgressCheck at the loop's bottom then leaves the loop
+            // instead of turning that iteration into an infinite one. The
+            // check must sit at the bottom, not the head: the wrap-around of
+            // an empty iteration reaches it for the first time, before any
+            // engine's visited-set could drop the path.
+            bool guard = Nullable(node.children[0]);
             int markSlot = -1;
-            if (mark) markSlot = static_cast<int>(m_program.markCount++);
+            if (guard) markSlot = static_cast<int>(m_program.markCount++);
             int loop = CurrentPc();
             int split = CurrentPc();
             Add(RegexOp::Split);
             int body = CurrentPc();
-            if (mark) Add(RegexOp::ProgressMark, markSlot);
+            if (guard) Add(RegexOp::ProgressMark, markSlot);
             EmitNode(node.children[0]);
-            if (mark) Add(RegexOp::ProgressCheck, markSlot);
+            int check = -1;
+            if (guard) check = CurrentPc();
+            if (guard) Add(RegexOp::ProgressCheck, markSlot);  // y = out, set below
             Add(RegexOp::Jump, loop);
             int out = CurrentPc();
+            if (guard) m_program.instructions[check].y = out;
             m_program.instructions[split].x = node.greedy ? body : out;
             m_program.instructions[split].y = node.greedy ? out : body;
             return;
@@ -304,7 +314,10 @@ private:
                 break;
             case RegexOp::Save:
             case RegexOp::ProgressMark:
-            case RegexOp::ProgressCheck:
+                stack.push_back(pc + 1);
+                break;
+            case RegexOp::ProgressCheck:  // leaves the loop after an empty iteration
+                stack.push_back(inst.y);
                 stack.push_back(pc + 1);
                 break;
             case RegexOp::Jump:

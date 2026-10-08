@@ -17,7 +17,7 @@ enum class RegexOp {
     Assert, // assertion: holds or fails without consuming
     BackRef, // x: group; match the bytes its slot pair holds again
     ProgressMark,   // x: mark slot; write the current position into it
-    ProgressCheck,  // x: mark slot; fail when it holds the current position
+    ProgressCheck,  // x: mark slot; jump to y when it holds the current position
     Match,
 };
 
@@ -25,7 +25,7 @@ struct RegexInstruction {
     RegexOp op = RegexOp::Match;
     int x = 0;  // Byte: index into byteSets; Split: preferred target; Jump: target;
                 // Save: capture slot; BackRef: group; ProgressMark/ProgressCheck: mark slot
-    int y = 0;  // Split: the other target
+    int y = 0;  // Split: the other target; ProgressCheck: the loop's exit
     RegexAssertion assertion = RegexAssertion::LineStart;  // Assert
     bool multiline = false;   // Assert
     bool ignoreCase = false; // BackRef

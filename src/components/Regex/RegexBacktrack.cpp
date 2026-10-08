@@ -110,9 +110,11 @@ bool Run(const RegexProgram& program, std::string_view text, size_t start, int f
                 marks[inst.x] = static_cast<std::ptrdiff_t>(p);
                 stack.push_back(Frame{true, frame.pc + 1, p, 0, -1});
                 break;
-            case RegexOp::ProgressCheck:
-                if (marks[inst.x] != static_cast<std::ptrdiff_t>(p))  // an empty iteration
-                    stack.push_back(Frame{true, frame.pc + 1, p, 0, -1});
+            case RegexOp::ProgressCheck:  // an empty iteration: leave, keeping its captures
+                stack.push_back(Frame{true, marks[inst.x] == static_cast<std::ptrdiff_t>(p)
+                                           ? inst.y
+                                           : frame.pc + 1,
+                                      p, 0, -1});
                 break;
             case RegexOp::Match:
                 if (!program.longest) {  // leftmost-first: the first match wins

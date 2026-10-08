@@ -113,20 +113,17 @@ public:
             m_context.Error("line number overflow");
             return false;
         }
-        char formatted[32]; // any intmax_t, however wide
-        switch (m_format) {
-            case kNlLeft:
-                std::snprintf(formatted, sizeof(formatted), "%-*jd", m_width, m_lineNumber);
-                break;
-            case kNlRight:
-                std::snprintf(formatted, sizeof(formatted), "%*jd", m_width, m_lineNumber);
-                break;
-            case kNlRightZero:
-                std::snprintf(formatted, sizeof(formatted), "%0*jd", m_width, m_lineNumber);
-                break;
-        }
-        m_context.Out(std::string(formatted) + m_separator + line + "\n");
-        if (m_lineNumber > INTMAX_MAX - m_increment) {
+        const char* pattern = m_format == kNlLeft ? "%-*jd"
+            : (m_format == kNlRight ? "%*jd" : "%0*jd");
+        // Sized for the width asked, however wide (-w may go up to INT_MAX).
+        const int length = std::snprintf(nullptr, 0, pattern, m_width, m_lineNumber);
+        std::string formatted(static_cast<size_t>(length > 0 ? length : 0) + 1, '\0');
+        std::snprintf(&formatted[0], formatted.size(), pattern, m_width, m_lineNumber);
+        formatted.pop_back();
+        m_context.Out(formatted + m_separator + line + "\n");
+        // Overflow either way: a negative increment can run past INTMAX_MIN.
+        if (m_increment > 0 ? m_lineNumber > INTMAX_MAX - m_increment
+                            : m_lineNumber < INTMAX_MIN - m_increment) {
             // The next line to number is past the end: reported there, not
             // here -- a section that renumbers first starts over cleanly.
             m_overflowed = true;

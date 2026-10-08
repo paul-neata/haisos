@@ -65,6 +65,26 @@ TEST_F(BuiltinCommandsTest, NlNumbers) {
         EXPECT_EQ(captured.status, 0);
     }
 
+    // A negative increment counts down, and overflows past INTMAX_MIN.
+    {
+        const Captured captured = RunCaptured("nl", {"-i", "-1"}, "a\nb\nc\n");
+        EXPECT_EQ(captured.out, "     1\ta\n     0\tb\n    -1\tc\n");
+        EXPECT_EQ(captured.status, 0);
+    }
+    {
+        const Captured captured =
+            RunCaptured("nl", {"-v", "-9223372036854775807", "-i", "-1"}, "a\nb\nc\n");
+        EXPECT_EQ(captured.out, "-9223372036854775807\ta\n-9223372036854775808\tb\n");
+        EXPECT_EQ(captured.err, "nl: line number overflow\n");
+        EXPECT_EQ(captured.status, 1);
+    }
+    // A width past what a small buffer holds is kept whole.
+    {
+        const Captured captured = RunCaptured("nl", {"-w", "33", "-n", "ln", "-s", "|"}, "a\n");
+        EXPECT_EQ(captured.out, "1" + std::string(32, ' ') + "|a\n");
+        EXPECT_EQ(captured.status, 0);
+    }
+
     {
         const Captured captured = RunCaptured("nl", {"-v", "-3", "-n", "rz"}, "a\nb\n");
         EXPECT_EQ(captured.out, "-00003\ta\n-00002\tb\n");

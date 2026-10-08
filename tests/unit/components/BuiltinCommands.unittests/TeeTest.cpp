@@ -180,6 +180,29 @@ TEST_F(BuiltinCommandsTest, TeeBrokenPipeWarnDiagnosesAndFinishesTheFile) {
     EXPECT_EQ(content, kInput);
 }
 
+// With no output left, tee stops reading at once, as GNU's does: here its
+// input never ends (the writer stays open), so a tee that read on would hang.
+TEST_F(BuiltinCommandsTest, TeeStopsOnceNoOutputIsLeft) {
+    auto out = os->GetPipeService()->CreatePipe();
+    out.readEnd.reset();
+    auto in = os->GetPipeService()->CreatePipe();
+    ASSERT_EQ(in.writeEnd->Write(kInput.data(), kInput.size()),
+              static_cast<ssize_t>(kInput.size()));
+    StartProcessOptions options;
+    options.stdIn = in.readEnd;
+    options.stdOut = out.writeEnd;
+    auto process = os->StartProcess(os->GetOsEnvironment()->Clone(), "/bin/tee",
+        {"--output-error=warn"}, "/", options);
+    in.readEnd.reset();
+    out.writeEnd.reset();
+    options = StartProcessOptions{};
+    ASSERT_NE(process, nullptr);
+    ASSERT_TRUE(process->WaitToFinish(kWaitMs));
+    ASSERT_TRUE(process->ExitCode().has_value());
+    EXPECT_EQ(*process->ExitCode(), 1);
+    EXPECT_EQ(console->TakeErr(), "tee: 'standard output': Broken pipe\n");
+}
+
 TEST_F(BuiltinCommandsTest, TeeBrokenPipeNopipeModesDropItSilently) {
     for (const std::string mode : {"-p", "--output-error=warn-nopipe", "--output-error"}) {
         auto ends = os->GetPipeService()->CreatePipe();

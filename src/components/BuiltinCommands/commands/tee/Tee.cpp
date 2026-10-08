@@ -52,8 +52,8 @@ public:
             "first write error, 'exit-nopipe' the same but silent on broken pipes.\n"
             "Without it, a write to a broken pipe stops tee as SIGPIPE does, and a\n"
             "write error on a file is diagnosed and gone past; -p and a bare\n"
-            "--output-error are --output-error=warn-nopipe, and in the 'nopipe'\n"
-            "MODEs tee stops once every output is a broken pipe.",
+            "--output-error are --output-error=warn-nopipe. tee stops reading once\n"
+            "no output is left.",
         };
     }
 
@@ -211,10 +211,9 @@ public:
                         return status;
                 }
             }
-            // In the nopipe MODEs, tee stops once every output is a broken
-            // pipe -- nothing it reads could go anywhere.
-            if ((mode == TeeWarnNopipe || mode == TeeExitNopipe)
-                && (!output || outputDead)) {
+            // In every MODE, tee stops once no output is left, as GNU's does --
+            // nothing it reads could go anywhere.
+            if (!output || outputDead) {
                 bool anyAlive = false;
                 for (size_t i = 0; i < files.size(); ++i) {
                     if (!fileDead[i]) {

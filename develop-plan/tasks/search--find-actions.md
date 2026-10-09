@@ -74,7 +74,7 @@ C++17; stop promptly on `TriggerStop()`.
 // Null if no pipe could be made.
 std::shared_ptr<IFileDescriptor> OpenEmptyInput(BuiltinContext& context);
 ```
-(Not named `OpenEmptyInput`: that is already a class in
+(Not named `EmptyInputDescriptor`: that is already a class in
 `src/components/Console/ConsoleDescriptors.h`, in the same namespace.
 search--xargs uses this exact name, `OpenEmptyInput`.)
 Used as `RunProgramOptions::stdIn` by `-ok`/`-okdir` and xargs (GNU gives

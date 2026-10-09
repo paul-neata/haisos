@@ -88,3 +88,4 @@
 - 2026-10-09 09:25 UTC -- search--sed-core: PR #67, windows-failed (ignored per Direction)
 - 2026-10-09 09:53 UTC -- search--sed-core merged #67 as 0.5.25: 1C 4H 3M 1L fixed, 4M 1L open, 1 try
 - 2026-10-09 09:54 UTC -- start search--sed-advanced (0.5.26)
+- 2026-10-09 11:36 UTC -- search--sed-advanced: PR #68, windows-failed (ignored per Direction)

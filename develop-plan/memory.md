@@ -3,7 +3,7 @@
 - **CLEAN ROOM, above all (user, 2026-10-09):** no code copied from any program, whatever its licence; all written from scratch, behaviour matched only from docs/specs/papers/real output. Every plan re-check prompt and every review prompt must say so: strip any "port of X" / mirrored function structure from plans; copied-looking code is critical in reviews.
 
 - The 2d overlap check matches the bare `CLAUDE.md` in nearly every plan; when only the root CLAUDE.md overlaps, look at its diff -- table rows and the /claude-docker model line are no reason to re-check a plan.
-- 2026-10-08: the host (WSL, 7.6 GiB RAM, 2 GiB swap) ran critically low on memory during base--regex-syntax's first container run and the run was killed; check `free -h` before a task.
+- Memory (user, 2026-10-09: Claude Code runs out of memory on this PC; WSL 7.6 GiB, 2 GiB swap): at every task boundary check `free -h` and clean leftovers (task.sh/wait_ci.sh processes, haisos-develop-* containers). Peak use is the container build (8 cc1plus x ~300 MB) plus two Claude sessions (~470 MB each).
 - 2026-10-08: WSL interop broken on the host (every .exe: "Exec format error"). Plan Direction: ignore task PRs' Windows checks (no waiting, re-runs or fixes); a PR green on Linux is reviewed and merged, Notes "Windows not checked". Windows built and tested once in the final phase; final--windows-fix (#54) runs last.
 - HaisosOS.unittests is flaky on Windows CI (#44, #51, #52 -- on #52 a 30 s timeout, a hang); a fix task is asked in Questions.
 - Windows' 1 MB stack: recursive parsers need low depth limits (Regex nesting 250).

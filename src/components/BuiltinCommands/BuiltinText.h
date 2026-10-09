@@ -46,6 +46,31 @@ enum class InputOpenFailure { None, Missing, Directory, Denied, BadDescriptor };
 std::shared_ptr<IFileDescriptor> OpenInputOperand(BuiltinContext& context, const std::string& name,
                                                   InputOpenFailure& failure);
 
+// The failure text of OpenInputOperand, as each command words it: rg adds
+// its own " (os error N)" suffix (see OpenFailureErrno), grep none.
+inline const char* OpenFailureText(InputOpenFailure failure) {
+    switch (failure) {
+        case InputOpenFailure::Missing: return "No such file or directory";
+        case InputOpenFailure::Directory: return "Is a directory";
+        case InputOpenFailure::Denied: return "Permission denied";
+        case InputOpenFailure::BadDescriptor: return "Bad file descriptor";
+        case InputOpenFailure::None: break;
+    }
+    return "";
+}
+
+// The errno each failure is on HaisosOS, for rg's " (os error N)" suffix.
+inline int OpenFailureErrno(InputOpenFailure failure) {
+    switch (failure) {
+        case InputOpenFailure::Missing: return 2;
+        case InputOpenFailure::Directory: return 21;
+        case InputOpenFailure::Denied: return 13;
+        case InputOpenFailure::BadDescriptor: return 9;
+        case InputOpenFailure::None: break;
+    }
+    return 0;
+}
+
 enum class LineReadResult { Line, End, Error, Stopped };
 
 // Lines split on |delimiter| ('\n', or '\0' for -z), byte for byte: nothing

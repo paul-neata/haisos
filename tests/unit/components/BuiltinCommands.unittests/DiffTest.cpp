@@ -1118,6 +1118,28 @@ TEST(DiffEngineTest, BlockPlacementFinishesQuickly) {
     EXPECT_EQ(Apply(TextOf(aText), TextOf(bText), big), bText);
 }
 
+TEST(DiffEngineTest, LargeVeryDifferentPair) {
+    // A large pair with no line in common: the search runs to its full
+    // depth, one change covering each file, and the script still rebuilds
+    // file 1. The search tables are not copied per step.
+    std::mt19937 rng(20240104);
+    const int lines = 3000;
+    std::string aText, bText;
+    for (int i = 0; i < lines; ++i) {
+        aText += "a" + std::to_string(rng() % 60) + "\n";
+        bText += "b" + std::to_string(rng() % 60) + "\n";
+    }
+    const DiffText a = TextOf(aText);
+    const DiffText b = TextOf(bText);
+    bool stopped = false;
+    const auto script = ComputeDiff(a, b, DiffAnalysisOptions{}, []() { return false; }, stopped);
+    ASSERT_FALSE(stopped);
+    ASSERT_EQ(script.size(), 1u);
+    EXPECT_EQ(script[0].deleted, lines);
+    EXPECT_EQ(script[0].inserted, lines);
+    EXPECT_EQ(Apply(a, b, script), bText);
+}
+
 TEST(DiffEngineTest, StopEndsEarly) {
     const DiffText a = TextOf("a\nb\n");
     const DiffText b = TextOf("a\nc\n");

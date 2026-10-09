@@ -29,7 +29,7 @@ Pause: no
 | 21 | [search--find-tests](tasks/search--find-tests.md) | done | 0.5.22 | 3, 20, 1, 8, 4 | #64 | 1 | 0C 3H 2M fixed, 0M 5L open | Windows red, not checked; 2843 lines, 1.8M Ollama tokens |
 | 22 | [search--find-actions](tasks/search--find-actions.md) | done | 0.5.23 | 21, 9, 11, 6, 12, 4 | #65 | 1 | 0C 1H fixed, 1M 4L open | Windows red, not checked |
 | 23 | [search--xargs](tasks/search--xargs.md) | done | 0.5.24 | 22, 9, 4, 6 | #66 | 1 | 1C 2H fixed, 4M 2L open | Windows red, not checked |
-| 24 | [search--sed-core](tasks/search--sed-core.md) | todo | | 3, 4 | | | | |
+| 24 | [search--sed-core](tasks/search--sed-core.md) | in-progress | 0.5.25 | 3, 4 | | | | |
 | 25 | [search--sed-advanced](tasks/search--sed-advanced.md) | todo | | 24, 1 | | | | |
 | 26 | [search--rg-search](tasks/search--rg-search.md) | todo | | 20 | | | | |
 | 27 | [search--rg-regex](tasks/search--rg-regex.md) | todo | | 26 | | | | |
@@ -99,3 +99,5 @@ Pause: no
 - 2026-10-09 (implement) search--find-actions and search--xargs: the planned helper EmptyInputDescriptor renamed OpenEmptyInput -- a class of that name already exists in the same namespace (Console/ConsoleDescriptors.h)
 - 2026-10-09 (implement) search--xargs refreshed against a092a28 (OpenEmptyInput in BuiltinRunProgram.h, slots); folded in #65 medium: a null OpenEmptyInput fails the run instead of handing over the caller's stdin, in xargs and find -ok
 - 2026-10-09 (implement) search--xargs: its first container run (06:29 UTC) was interrupted with the previous implement session; restarted, version 0.5.24 kept.
+- 2026-10-09 (implement) user: Windows stays ignored on task PRs and CI for the rest of the develop; fixed at the end (final--windows-fix) or in a separate PR
+- 2026-10-09 (implement) search--sed-core refreshed against f6f5bec (Regex already linked; list/CMake/test slots after rmdir/rm, before seq)

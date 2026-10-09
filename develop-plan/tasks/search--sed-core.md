@@ -3,7 +3,7 @@
 - Rock: search
 - Depends on: base--regex-match (`Regex`, with `multiline`), coreutils--sort (`BuiltinText.h`)
 - Size: ~950 changed lines in ~8 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ f6f5bec
 - PR title: Add the sed builtin: scripts, addresses, s and basic commands
 
 ## Goal
@@ -34,8 +34,8 @@ What earlier tasks provide, as if on develop (their plans in
   part). `.` and `[^...]` match `\n`; `^`/`$` anchor at the text's ends, also
   at inner newlines with `multiline` -- GNU sed's pattern-space semantics.
   The engine does **not** translate `\n`, `\t` ...: sed does (below).
-  Compile errors carry glibc's text (`Unmatched ( or \(`). Link CMake target
-  `Regex` to `BuiltinCommands` if no earlier task did.
+  Compile errors carry glibc's text (`Unmatched ( or \(`). `Regex` is already linked to `BuiltinCommands`
+  (CMake `target_link_libraries`).
 - `BuiltinText.h` (coreutils--sort): `OpenInputOperand(context, name,
   failure)` with `InputOpenFailure`, `BuiltinLineReader(context, input,
   delimiter)` and `Next(line, delimited)` with `LineReadResult`.
@@ -285,8 +285,8 @@ all: GNU prints its usage to stderr with status 1 -- write
 
 ### Registration and build
 
-`BuiltinCommandList.h`: `CreateSedCommand()` registered (alphabetical);
-`CMakeLists.txt`: `commands/sed/Sed.cpp`, `SedParser.cpp`, `SedExecutor.cpp`.
+`BuiltinCommandList.h`: declare `CreateSedCommand()` after `CreateRmdirCommand()` and register it there in `CreateStandardBuiltinCommands()` (before `CreateSeqCommand()`, alphabetical);
+`src/components/BuiltinCommands/CMakeLists.txt`: `commands/sed/Sed.cpp`, `SedParser.cpp`, `SedExecutor.cpp` (before `commands/seq/`); the test file goes into `tests/unit/components/BuiltinCommands.unittests/CMakeLists.txt`'s `add_executable` list (after `RmTest.cpp`).
 
 ## Tests
 

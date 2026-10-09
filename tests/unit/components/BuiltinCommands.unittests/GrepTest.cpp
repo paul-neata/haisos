@@ -243,6 +243,23 @@ TEST_F(BuiltinCommandsTest, GrepQuietStopsAtFirstMatch) {
     EXPECT_EQ(captured.status, 0);
 }
 
+TEST_F(BuiltinCommandsTest, GrepQuietStopsAfterRecursiveMatch) {
+    ASSERT_EQ(root->CreateDirectory("/g", kDirMode), 0);
+    ASSERT_EQ(root->CreateDirectory("/g/d", kDirMode), 0);
+    WriteTo(root, "/g/d/x", "TODO\n");
+    WriteTo(root, "/g/y", "TODO\n");
+    // A match found in a walked directory stops the later operands too.
+    const Captured both = RunCaptured("grep", {"-q", "-r", "TODO", "d", "y"}, "", "/g");
+    EXPECT_EQ(both.out, "");
+    EXPECT_EQ(both.err, "");
+    EXPECT_EQ(both.status, 0);
+    // So a later operand is never reached, its error included.
+    const Captured later = RunCaptured("grep", {"-q", "-r", "TODO", "d", "nosuch"}, "", "/g");
+    EXPECT_EQ(later.out, "");
+    EXPECT_EQ(later.err, "");
+    EXPECT_EQ(later.status, 0);
+}
+
 TEST_F(BuiltinCommandsTest, GrepBinaryFiles) {
     MakeGrepFiles(root);
     // Only a NUL makes a file binary, and it says so on stderr.

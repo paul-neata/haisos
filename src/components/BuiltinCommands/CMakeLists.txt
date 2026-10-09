@@ -43,6 +43,8 @@ add_library(BuiltinCommands STATIC
     commands/printf/Printf.cpp
     commands/pwd/Pwd.cpp
     commands/realpath/Realpath.cpp
+    commands/rg/Rg.cpp
+    commands/rg/RgSearch.cpp
     commands/rm/Rm.cpp
     commands/rmdir/Rmdir.cpp
     commands/sed/Sed.cpp

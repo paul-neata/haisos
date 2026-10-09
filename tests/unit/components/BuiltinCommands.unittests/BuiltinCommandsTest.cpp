@@ -93,7 +93,7 @@ std::shared_ptr<IBuiltinCommand> FindStandardCommand(const std::string& name) {
 TEST_F(BuiltinCommandsTest, ListsEveryBuiltinSortedWithAVersion) {
     const auto commands = builtins->GetCommands();
     EXPECT_EQ(commands, (Lines{"[", "basename", "cat", "chmod", "cmp", "cp", "cut", "date", "dirname", "du", "echo",
-        "egrep", "env", "false", "fgrep", "find", "grep", "head", "hsh", "ls", "man", "mkdir", "mv", "nl", "printf", "pwd", "realpath", "rm",
+        "egrep", "env", "false", "fgrep", "find", "grep", "head", "hsh", "ls", "man", "mkdir", "mv", "nl", "printf", "pwd", "realpath", "rg", "rm",
         "rmdir", "sed", "seq", "sleep", "sort", "stat", "tail", "tee", "test", "touch", "tr", "true", "uniq", "wc", "which", "xargs"}));
     for (const auto& name : commands) {
         EXPECT_FALSE(builtins->GetBuiltinVersion(name).empty()) << name;
@@ -141,7 +141,10 @@ TEST_F(BuiltinCommandsTest, EveryBuiltinsHelpHasTheSameShape) {
         ASSERT_GE(help.size(), 5u) << name;
         EXPECT_EQ(help[0].rfind("HaisosOS " + name + " version " + command->Version() + " - ", 0), 0u) << help[0];
         const std::string& real = command->Help().basedOn.empty() ? name : command->Help().basedOn;
-        EXPECT_EQ(help[1], "Based on Linux " + real + ": https://man7.org/linux/man-pages/man1/" + real + ".1.html");
+        const std::string& url = command->Help().referenceUrl.empty()
+            ? "https://man7.org/linux/man-pages/man1/" + real + ".1.html"
+            : command->Help().referenceUrl;
+        EXPECT_EQ(help[1], "Based on Linux " + real + ": " + url);
         EXPECT_EQ(help[2], "");
         EXPECT_EQ(help[3].rfind("Usage: " + name, 0), 0u) << help[3];
         EXPECT_TRUE(Contains(help, "      --help"));

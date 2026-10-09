@@ -11,7 +11,7 @@ namespace Haisos {
 
 namespace {
 
-int DiffDirs(BuiltinContext& context, const DiffSettings& settings, const DiffTreeSettings& tree,
+int CompareDirectoryEntries(BuiltinContext& context, const DiffSettings& settings, const DiffTreeSettings& tree,
              const std::string& d0, const std::string& d1, bool topLevel);
 
 // D + "/" + NAME, without doubling the slash ("rb" and "rb/" both give
@@ -75,7 +75,7 @@ std::string PairHeader(const DiffSettings& settings, const DiffTreeSettings& tre
                        const std::string& p0, const std::string& p1) {
     const std::string shown0 = settings.label0 ? *settings.label0 : p0;
     const std::string shown1 = settings.label1 ? *settings.label1 : p1;
-    return "diff" + tree.switchString + " " + QuoteHeaderName(shown0) + " "
+    return "diff" + tree.echoedOptions + " " + QuoteHeaderName(shown0) + " "
         + QuoteHeaderName(shown1);
 }
 
@@ -98,9 +98,12 @@ int DiffEntryPair(BuiltinContext& context, const DiffSettings& settings, const D
             context.Out("Common subdirectories: " + p0 + " and " + p1 + "\n");
             return 0;
         }
-        return DiffDirs(context, settings, tree, p0, p1, false);
+        return CompareDirectoryEntries(context, settings, tree, p0, p1, false);
     }
-    if (kind0 != kind1) {
+    // Inside the walk only two regular files are compared by content: a file
+    // against a directory, or a device on both sides (even of one type, as
+    // GNU reports it), is reported by type and never read.
+    if (kind0 != kind1 || (have0 && have1 && kind0 != DirectoryEntryType::File)) {
         // Both sides are real here: a faked one copies the other's type.
         const std::string shown0 = settings.label0 ? *settings.label0 : p0;
         const std::string shown1 = settings.label1 ? *settings.label1 : p1;
@@ -114,7 +117,7 @@ int DiffEntryPair(BuiltinContext& context, const DiffSettings& settings, const D
 // Compares two directories entry by entry, in byte order of the names;
 // |topLevel| applies -S. Returns the greatest status of the entries, 2 on a
 // stop asked for.
-int DiffDirs(BuiltinContext& context, const DiffSettings& settings, const DiffTreeSettings& tree,
+int CompareDirectoryEntries(BuiltinContext& context, const DiffSettings& settings, const DiffTreeSettings& tree,
              const std::string& d0, const std::string& d1, bool topLevel) {
     std::vector<std::string> names0 = EntryNames(context, d0, tree);
     std::vector<std::string> names1 = EntryNames(context, d1, tree);
@@ -198,7 +201,7 @@ int DiffOperands(BuiltinContext& context, const DiffSettings& settings, const Di
     // A faked side has the other side's type, so a directory against a faked
     // missing one compares as two directories.
     if ((isDir0 || (missing0 && isDir1)) && (isDir1 || (missing1 && isDir0))) {
-        return DiffDirs(context, settings, tree, name0, name1, true);
+        return CompareDirectoryEntries(context, settings, tree, name0, name1, true);
     }
     if (isDir0 || isDir1) {
         // One directory: it is compared through the same-named entry under

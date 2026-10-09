@@ -1134,11 +1134,23 @@ TEST_F(BuiltinCommandsTest, DiffDirTypes) {
               "File ta/e is a regular empty file while file tb/e is a directory\n");
     EXPECT_EQ(captured.err, "");
     EXPECT_EQ(captured.status, 1);
+
+    // Two devices inside the walk are reported by type, never read (GNU
+    // 3.10 prints the line even when both types agree).
+    auto devices = factory->CreateServicesCreator()->CreateFileSystemService();
+    root->Mount("/d1", devices->CreateDeviceFileSystem());
+    root->Mount("/d2", devices->CreateDeviceFileSystem());
+    const auto walked = RunCaptured("diff", {"-r", "/d1", "/d2"}, std::nullopt, "/");
+    EXPECT_EQ(walked.out,
+              "File /d1/null is a character special file while file /d2/null is a character special file\n"
+              "File /d1/zero is a character special file while file /d2/zero is a character special file\n");
+    EXPECT_EQ(walked.err, "");
+    EXPECT_EQ(walked.status, 1);
 }
 
 // The pair header carries every option word as typed, shell-quoted when a
 // word needs it; the file headers under -u show the files' own times.
-TEST_F(BuiltinCommandsTest, DiffDirSwitchString) {
+TEST_F(BuiltinCommandsTest, DiffDirOptionEcho) {
     MakeDiffTree(root);
     const auto quoted = RunCaptured("diff", {"-x", "o*", "-r", "ra", "rb"}, std::nullopt, "/t");
     EXPECT_EQ(quoted.out,

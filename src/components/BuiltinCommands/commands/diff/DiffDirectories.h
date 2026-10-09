@@ -17,7 +17,7 @@ struct DiffTreeSettings {
     std::optional<std::string> startingFile;  // -S
     // The options echoed in the "diff OPTIONS A B" lines, each word as typed
     // and shell-quoted, each preceded by a space; empty without options.
-    std::string switchString;
+    std::string echoedOptions;
 };
 
 // Compares two operands as given on the command line -- files, directories,

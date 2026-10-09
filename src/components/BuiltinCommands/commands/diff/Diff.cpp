@@ -513,7 +513,7 @@ int DiffCommand::Run(BuiltinContext& context) {
     // The options the recursive form echoes in its "diff OPTIONS A B"
     // lines, each word as typed.
     for (const std::string& word : DiffOptionWords(context.Args(), Options())) {
-        tree.switchString += " " + ShellEscapeQuoted(word);
+        tree.echoedOptions += " " + ShellEscapeQuoted(word);
     }
 
     // --from-file/--to-file compare one file with every operand, in order.

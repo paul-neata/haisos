@@ -96,3 +96,4 @@
 - 2026-10-09 14:59 UTC -- start search--rg-regex (0.5.28)
 - 2026-10-09 15:58 UTC -- user: clean-room rule added (no copied code, any licence) to CLAUDE.md, goal, playbook Directions; audit of merged code asked in Questions
 - 2026-10-09 16:25 UTC -- search--rg-regex: PR #70, windows-failed (ignored per Direction)
+- 2026-10-09 16:39 UTC -- search--rg-regex merged #70 as 0.5.28: 0C 1H fixed, 3M 4L open, 1 try

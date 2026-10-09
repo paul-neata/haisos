@@ -145,7 +145,7 @@ public:
         : m_name(std::move(name)), m_defaultSyntax(defaultSyntax) {}
 
     std::string Name() const override { return m_name; }
-    std::string Version() const override { return "1.1.0"; }
+    std::string Version() const override { return "1.2.0"; }
 
     const std::vector<BuiltinOption>& Options() const override {
         static const std::vector<BuiltinOption> options = {
@@ -912,6 +912,9 @@ public:
                     }
                     const std::string prefix = childPrefix(file);
                     walk(walk, file, prefix);
+                    if (stopped) {
+                        break;
+                    }
                     continue;
                 }
                 // -d read: opened, and reported as a directory (below).

@@ -294,7 +294,8 @@ std::string BuiltinHelpText(const IBuiltinCommand& command) {
     const std::string name = command.Name();
     const std::string& real = help.basedOn.empty() ? name : help.basedOn;
     std::string text = "HaisosOS " + name + " version " + command.Version() + " - " + help.summary + "\n";
-    text += "Based on Linux " + real + ": " + BuiltinReferenceUrl(real) + "\n\n";
+    const std::string& url = help.referenceUrl.empty() ? BuiltinReferenceUrl(real) : help.referenceUrl;
+    text += "Based on Linux " + real + ": " + url + "\n\n";
 
     for (size_t i = 0; i < help.usage.size(); ++i) {
         text += (i == 0 ? "Usage: " : "  or:  ") + help.usage[i] + "\n";

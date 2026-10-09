@@ -82,6 +82,10 @@ struct BuiltinHelp {
     // builtin's own: "dash" for hsh. Empty: the builtin's own name. The "Based
     // on Linux <command>: <url>" line of --help names it and links its page.
     std::string basedOn;
+    // Where the real command is documented, when not the Linux man-pages
+    // project's page for it (ripgrep has none): used as the url of that line.
+    // Empty: BuiltinReferenceUrl of the real command.
+    std::string referenceUrl;
 };
 
 class IBuiltinCommand;

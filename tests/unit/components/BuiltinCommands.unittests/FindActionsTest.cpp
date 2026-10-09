@@ -48,6 +48,13 @@ TEST_F(BuiltinCommandsTest, FindExecSemicolon) {
                                      std::nullopt, "/proj", env);
     EXPECT_EQ(printed.out, "./z.h\nE./z.h\n");
     EXPECT_EQ(printed.status, 0);
+    // A {} in the command slot runs each file itself: the program is looked
+    // up for each file, not once for the first.
+    const auto selves = RunCaptured("find", {"/bin/pwd", "/bin/echo", "-exec", "{}", ";"},
+                                    std::nullopt, "/proj", env);
+    EXPECT_EQ(selves.out, "/proj\n\n");
+    EXPECT_EQ(selves.err, "");
+    EXPECT_EQ(selves.status, 0);
     // False when the command fails: the -print after it never runs, and the
     // exit status stays as it was.
     const auto failed = RunCaptured("find", {"-name", "z.h", "-exec", "false", "{}", ";", "-print"},
@@ -118,6 +125,13 @@ TEST_F(BuiltinCommandsTest, FindExecdir) {
     const auto dirs = RunCaptured("find", {"a", "-execdir", "pwd", ";"}, std::nullopt, "/proj", env);
     ExpectSameLines(dirs.out, "/proj\n/proj/a\n/proj/a\n/proj/a\n/proj/a/b\n");
     EXPECT_EQ(dirs.status, 0);
+    // A relative command with a '/' is taken from the file's directory, as
+    // -execdir {} runs ./NAME there.
+    const auto self = RunCaptured("find", {"/bin/pwd", "-execdir", "{}", ";"},
+                                  std::nullopt, "/proj", env);
+    EXPECT_EQ(self.out, "/bin\n");
+    EXPECT_EQ(self.err, "");
+    EXPECT_EQ(self.status, 0);
     // An empty or relative PATH entry is refused, at parse time, with the
     // message of whichever came first.
     auto insecure = factory->CreateEnvironment();

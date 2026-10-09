@@ -775,11 +775,19 @@ private:
         return size;
     }
 
-    // Where the program runs from, looked up once per run of find, at the
-    // first use (GNU caches it too; only the message is printed again).
-    bool ResolveProgram(FindRun& run, const std::string& command) {
-        if (!m_resolved) {
-            m_program = FindProgramInPath(run.context, command);
+    // Where the program runs from. A command that stays the same is looked
+    // up once, at its first use; one holding {} changes with the file and is
+    // looked up again. -execdir's command with a '/' that is not absolute
+    // (./{} among them) is taken from the file's directory, where it runs.
+    bool ResolveProgram(FindRun& run, const std::string& command, const std::string& directory) {
+        std::string lookup = command;
+        if (m_dir && !command.empty() && command[0] != '/'
+            && command.find('/') != std::string::npos) {
+            lookup = (directory == "/" ? std::string("/") : directory + "/") + command;
+        }
+        if (!m_resolved || lookup != m_resolvedName) {
+            m_program = FindProgramInPath(run.context, lookup);
+            m_resolvedName = lookup;
             m_resolved = true;
         }
         return m_program.has_value();
@@ -791,7 +799,7 @@ private:
     bool RunSemicolon(FindRun& run, const std::vector<std::string>& arguments,
                      const RunProgramOptions& options) {
         const std::string& command = arguments.front();
-        if (!ResolveProgram(run, command)) {
+        if (!ResolveProgram(run, command, options.workingDirectory.value_or(std::string()))) {
             ReportMissing(run, command);
             return false;
         }
@@ -824,7 +832,7 @@ private:
         if (m_dir) {
             options.workingDirectory = m_lastDirectory;
         }
-        if (!ResolveProgram(run, command)) {
+        if (!ResolveProgram(run, command, m_lastDirectory)) {
             ReportMissing(run, command);
             run.exitStatus = 1;
         } else {
@@ -852,6 +860,7 @@ private:
     std::vector<std::string> m_paths;  // "+"-form: the batch collected so far
     std::string m_lastDirectory;       // -execdir ... +: its batch's directory
     std::optional<std::string> m_program;
+    std::string m_resolvedName;        // the name m_program was looked up as
     bool m_resolved = false;
 };
 

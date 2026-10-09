@@ -122,6 +122,22 @@ TEST(RegexMatchTest, AnchorsAndFlags) {
     RunMatchCases("AnchorsAndFlags", cases, sizeof(cases) / sizeof(cases[0]));
 }
 
+// sed's M flag (glibc's REG_NEWLINE): '.' and a negated list no longer match
+// a newline, while '^' and '$' gain the embedded ones (AnchorsAndFlags above).
+TEST(RegexMatchTest, MultilineDotAndListsSkipNewline) {
+    const MatchCase cases[] = {
+        {RegexSyntax::Basic, "a.b", Text("a\nb"), 0, 0, false, false, "(0,3)"},
+        {RegexSyntax::Basic, "a.b", Text("a\nb"), 0, 0, false, true, "nomatch"},
+        {RegexSyntax::Basic, "a[^x]b", Text("a\nb"), 0, 0, false, false, "(0,3)"},
+        {RegexSyntax::Basic, "a[^x]b", Text("a\nb"), 0, 0, false, true, "nomatch"},
+        {RegexSyntax::Extended, "a.b", Text("a\nb"), 0, 0, false, false, "(0,3)"},
+        {RegexSyntax::Extended, "a.b", Text("a\nb"), 0, 0, false, true, "nomatch"},
+        {RegexSyntax::Extended, "a[^x]b", Text("a\nb"), 0, 0, false, false, "(0,3)"},
+        {RegexSyntax::Extended, "a[^x]b", Text("a\nb"), 0, 0, false, true, "nomatch"},
+    };
+    RunMatchCases("MultilineDotAndListsSkipNewline", cases, sizeof(cases) / sizeof(cases[0]));
+}
+
 TEST(RegexMatchTest, BackReferences) {
     const MatchCase cases[] = {
         {RegexSyntax::Basic, "\\(.\\)\\1", Text("abccd"), 0, 0, false, false, "(2,4)(2,3)"},

@@ -170,8 +170,8 @@ private:
     std::shared_ptr<const Regex> m_regex;
 };
 
-// -type/-xtype: a set of file types. b, p, l, s and D name types HaisosOS
-// has none of, so they never match (GNU dies on D; the plan has it taken).
+// -type/-xtype: a set of file types. b, p, l and s name types HaisosOS has
+// none of, so they never match; D is refused at parse, as GNU dies on it.
 class FindTypePrimary : public FindPrimary {
 public:
     FindTypePrimary(bool file, bool dir, bool charDevice)
@@ -709,7 +709,12 @@ std::unique_ptr<FindPrimary> ParseTypePrimary(FindParser& parser, const std::str
         case 'f': bit = 16; file = true; break;
         case 'l': bit = 32; break;
         case 's': bit = 64; break;
-        case 'D': bit = 128; break;  // HaisosOS has no doors; GNU dies on it
+        case 'D':
+            // GNU dies on a door too, with the message find has had since
+            // Solaris doors were a thing.
+            parser.Fail(name + " D is not supported because Solaris doors are not supported"
+                " on the platform find was compiled on.");
+            return std::unique_ptr<FindPrimary>();
         default:
             parser.Fail("Unknown argument to " + name + ": " + std::string(1, c));
             return std::unique_ptr<FindPrimary>();

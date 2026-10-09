@@ -78,19 +78,30 @@ struct FindPrimaryEntry {
     std::function<std::unique_ptr<FindPrimary>(FindParser& parser, const std::string& name)> parse;
 };
 
-// The rows of this task's primaries (FindTests.cpp); the actions task adds
-// FindActionPrimaries() the same way. GNU find's table order.
+// The rows of the tests' primaries (FindTests.cpp) and of the actions'
+// (FindActions.cpp), GNU find's table order. FindParser looks a primary up
+// in the tests' rows first, then in the actions'.
 const std::vector<FindPrimaryEntry>& FindTestPrimaries();
+const std::vector<FindPrimaryEntry>& FindActionPrimaries();
 
 // What the primaries' parse functions read and change while parsing.
+class FindActionState;  // the actions' own shared state (FindActions.cpp)
+
 struct FindParseState {
     bool warnings = false;                      // -warn/-nowarn; default: stdin is a terminal
     FileDateTime startTime;                     // CurrentFileDateTime() when find started
     FileDateTime timeOrigin;                    // startTime, or after -daystart the start of tomorrow local
     RegexSyntax regexSyntax = RegexSyntax::Basic;  // from -regextype
     bool regexEmacs = true;                     // the default type, emacs (translated, FindTests.cpp)
-    std::string firstNonOption;                 // the first test/action seen, for the option-order warning
+    // What the actions share: -ok and -okdir's one prompt, the output files
+    // -fprint and friends open once for every primary naming them, and
+    // whether -delete was given. Null until an action is parsed.
+    std::shared_ptr<FindActionState> actions;
 };
+
+// Whether -delete was parsed among the actions (false while no action was):
+// FindParser checks its clash with -prune once the tree is built.
+bool FindDeleteWasGiven(const FindParseState& state);
 
 class FindParser {
 public:

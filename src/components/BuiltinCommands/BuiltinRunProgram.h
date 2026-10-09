@@ -32,6 +32,13 @@ std::vector<std::string> SearchPathEntries(BuiltinContext& context,
 std::optional<std::string> FindProgramInPath(BuiltinContext& context, const std::string& name,
                                              const IEnvironment* environment = nullptr);
 
+// An input that is at its end at once, for a child that must be allowed to
+// read (and find only end-of-file, never find's own standard input): made
+// through IFileIO::CreatePipe, as the read end of a pipe whose write end is
+// already released. Its two slots are closed again before returning. Null if
+// no pipe could be made.
+std::shared_ptr<IFileDescriptor> OpenEmptyInput(BuiltinContext& context);
+
 struct RunProgramOptions {
     // The child's descriptors 0, 1 and 2. Null: the caller's own slot 0/1/2;
     // an empty slot goes as Hsh::ClosedDescriptor, never as null.

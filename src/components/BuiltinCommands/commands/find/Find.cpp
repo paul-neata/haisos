@@ -1,7 +1,7 @@
 // The find command itself: the option table every generic builtin test
-// reads, the help, and the walk -- the expression itself (the tests, the
-// options, the actions of this task) lives in FindTests.cpp and
-// FindParser.cpp.
+// reads, the help, and the walk -- the expression itself (the tests and the
+// options in FindTests.cpp, the actions in FindActions.cpp, the parsing of
+// both in FindParser.cpp) lives there.
 #include <memory>
 #include <string>
 #include <vector>
@@ -21,7 +21,7 @@ constexpr size_t kMaxPathLength = 4096;
 class FindCommand : public IBuiltinCommand {
 public:
     std::string Name() const override { return "find"; }
-    std::string Version() const override { return "1.0.0"; }
+    std::string Version() const override { return "1.1.0"; }
 
     const std::vector<BuiltinOption>& Options() const override {
         static const std::vector<BuiltinOption> options = {
@@ -55,12 +55,17 @@ public:
             "  -iregex -links -lname -mmin -mtime -name -newer -nouser -nogroup -path\n"
             "  -perm -readable -writable -executable -regex -samefile -size -true -type\n"
             "  -uid -used -user -wholename -xtype\n"
-            "Actions: -print -print0 -prune -quit.\n"
+            "Actions: -delete -exec -execdir -fls -fprint -fprint0 -fprintf -ls -ok\n"
+            "  -okdir -print -print0 -printf -prune -quit.\n"
             "\n"
             "HaisosOS reports no owners or permissions: every file's mode is taken as\n"
             "0777, its user and group haisos (uid and gid 0), its inode number 0, and\n"
-            "there are no symbolic links, so -lname never matches and -H -L -P -follow\n"
-            "change nothing. A -newerXY with B (birth time) cannot be given.\n"
+            "there are no symbolic links, so -lname never matches, %Y is %y and %l is\n"
+            "empty, and -H -L -P -follow change nothing. A -newerXY with B (birth\n"
+            "time) cannot be given, -type D is refused (no Solaris doors), and %B and\n"
+            "%Z print nothing (no birth times, no SELinux). -ok and -okdir prompt on\n"
+            "the standard error and read the answer from the standard input; -exec\n"
+            "... + runs its command in batches of at most 131072 bytes.\n"
             "Not treated primaries: -mount, -xdev, -fstype";
         return help;
     }

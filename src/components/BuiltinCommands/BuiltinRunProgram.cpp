@@ -65,6 +65,19 @@ std::optional<std::string> FindProgramInPath(BuiltinContext& context, const std:
     return std::nullopt;
 }
 
+std::shared_ptr<IFileDescriptor> OpenEmptyInput(BuiltinContext& context) {
+    // The read end of a pipe whose write end is released at once: the child
+    // holding it reads nothing and finds the end, exactly as /dev/null's.
+    auto slots = context.IO().CreatePipe();
+    if (!slots) {
+        return nullptr;
+    }
+    auto input = context.IO().GetDescriptor(slots->first);
+    context.IO().CloseDescriptor(slots->second);  // no writer: the end at once
+    context.IO().CloseDescriptor(slots->first);
+    return input;
+}
+
 int RunProgramAndWait(BuiltinContext& context, const std::string& programPath,
                       const std::vector<std::string>& args,
                       const RunProgramOptions& options, bool* started) {

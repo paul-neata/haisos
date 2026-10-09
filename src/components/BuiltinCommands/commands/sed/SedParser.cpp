@@ -4,6 +4,7 @@
 #include <cctype>
 
 #include "src/components/Regex/Regex.h"
+#include "src/components/Filesystem/FilesystemUtils.h"
 
 namespace Haisos::Sed {
 namespace {
@@ -147,14 +148,89 @@ std::string TranslateRegex(const std::string& raw)
     return out;
 }
 
+// The second pass over a/i/c text and the y strings: the reader kept every
+// escaped pair as written, and here \n \t and friends become the byte,
+// \dNNN \oNNN \xNN and \cX their byte, \\ a backslash and \ before anything
+// else the char alone, as GNU takes it.
+std::string ApplyTextEscapes(const std::string& raw)
+{
+    std::string out;
+    out.reserve(raw.size());
+    size_t i = 0;
+    while (i < raw.size()) {
+        const char c = raw[i];
+        if (c != '\\' || i + 1 >= raw.size()) {
+            out += c;
+            ++i;
+            continue;
+        }
+        const char d = raw[++i];
+        ++i;
+        switch (d) {
+            case 'n': out += '\n'; continue;
+            case 't': out += '\t'; continue;
+            case 'f': out += '\f'; continue;
+            case 'v': out += '\v'; continue;
+            case 'a': out += '\a'; continue;
+            case 'r': out += '\r'; continue;
+            case 'd': {
+                int taken = 0;
+                const int v = EscapeValue(raw, i, 3, 10, taken);
+                if (v >= 0 && taken > 0) {
+                    out += static_cast<char>(v);
+                    i += taken;
+                } else {
+                    out += 'd';
+                }
+                continue;
+            }
+            case 'o': {
+                int taken = 0;
+                const int v = EscapeValue(raw, i, 3, 8, taken);
+                if (v >= 0) {
+                    out += static_cast<char>(v);
+                    i += taken;
+                } else {
+                    out += 'o';
+                }
+                continue;
+            }
+            case 'x': {
+                int taken = 0;
+                const int v = EscapeValue(raw, i, 2, 16, taken);
+                if (v >= 0) {
+                    out += static_cast<char>(v);
+                    i += taken;
+                } else {
+                    out += 'x';
+                }
+                continue;
+            }
+            case 'c': {
+                if (i < raw.size()) {
+                    out += static_cast<char>(raw[i] & 0x1F);
+                    ++i;
+                } else {
+                    out += 'c';
+                }
+                continue;
+            }
+            case '\\': out += '\\'; continue;
+            default: out += d; continue;
+        }
+    }
+    return out;
+}
+
 // Parses the pieces of the script as one stream. Each piece is read as GNU
 // reads it -- a newline is added when its text lacks one -- and an error is
 // located within its own piece: "expression #N, char M" for a command-line
 // piece, "file F line L" for a script file.
 class Parser {
 public:
-    Parser(BuiltinContext& context, const std::vector<ScriptPiece>& pieces, bool extended, Script& script)
-        : m_context(context), m_extended(extended), m_script(script)
+    Parser(BuiltinContext& context, const std::vector<ScriptPiece>& pieces, bool extended,
+           bool sandbox, Script& script)
+        : m_context(context), m_extended(extended), m_sandbox(sandbox), m_script(script)
     {
         int expression = 0;
         for (const auto& piece : pieces) {
@@ -194,6 +270,26 @@ public:
                 m_script.labels.push_back({m_script.commands[i].text, i});
             }
         }
+        // The jumps, resolved now that every label is known: an unknown one
+        // is GNU's compile-time error, exit 4, with no position to name.
+        for (auto& command : m_script.commands) {
+            if ((command.name == 'b' || command.name == 't' || command.name == 'T') &&
+                !command.text.empty() && command.jump == 0) {
+                bool found = false;
+                for (const auto& label : m_script.labels) {
+                    if (label.first == command.text) {
+                        command.jump = label.second;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    m_context.Error("can't find label for jump to `" + command.text + "'");
+                    m_script.parseErrorStatus = 4;
+                    return false;
+                }
+            }
+        }
         return true;
     }
 
@@ -219,6 +315,16 @@ private:
             return -1;
         }
         return static_cast<unsigned char>(m_pieces[m_piece].data[m_pos]);
+    }
+
+    // The character after the current one, or -1 at the stream's end (each
+    // piece ends with a newline, so a pair never straddles two pieces).
+    int PeekNext() const
+    {
+        if (m_piece >= m_pieces.size() || m_pos + 1 >= m_pieces[m_piece].data.size()) {
+            return -1;
+        }
+        return static_cast<unsigned char>(m_pieces[m_piece].data[m_pos + 1]);
     }
 
     void Advance()
@@ -652,6 +758,148 @@ private:
         return true;
     }
 
+    // Registers a w/W/s///w file, opening it now (GNU reports one it cannot
+    // open during the parse, exiting 4 without reading any input). Returns
+    // its index, or -1 with the message written.
+    int AddOutputFile(const std::string& name)
+    {
+        OutputFile out;
+        out.name = name;
+        if (name == "/dev/stdout") {
+            out.isStdout = true;
+        } else if (name == "/dev/stderr") {
+            out.isStderr = true;
+        } else {
+            out.file = m_context.IO().OpenFile(name, kFileOpenWriteCreateTruncate);
+            if (!out.file) {
+                std::string reason = "Permission denied";
+                FileStatus status;
+                if (m_context.IO().Stat(name, status) != 0) {
+                    reason = "No such file or directory";
+                } else if (status.type == DirectoryEntryType::Dir) {
+                    reason = "Is a directory";
+                }
+                m_context.Error("couldn't open file " + name + ": " + reason);
+                m_script.parseErrorStatus = 4;
+                return -1;
+            }
+        }
+        m_script.outputFiles.push_back(std::move(out));
+        return static_cast<int>(m_script.outputFiles.size()) - 1;
+    }
+
+    // The file name of r/R/w/W: leading blanks, then the rest of the line as
+    // written -- a ';' or '}' is part of the name, as GNU takes it. The
+    // ending newline is consumed. Empty is GNU's error at |errorIndex| (the
+    // command character, or the w flag of s).
+    bool ParseFileName(size_t errorIndex, std::string& name)
+    {
+        SkipBlanks();
+        const size_t start = m_pos;
+        while (!End() && static_cast<char>(Peek()) != '\n') {
+            Advance();
+        }
+        if (m_pos == start) {
+            return Fail(m_piece, errorIndex, "missing filename in r/R/w/W commands");
+        }
+        name = m_pieces[m_piece].data.substr(start, m_pos - start);
+        return true;
+    }
+
+    // The a/i/c text. One line: an optional '\' introducer, then the rest of
+    // the line with every escaped pair kept as written and '\'+newline
+    // continuing the text; `a\` on its own line is the classic form, where
+    // the text is the following lines, each one ending in '\' continuing it.
+    // The assembled text then takes ApplyTextEscapes.
+    bool ParseTextCommand(Command& command, size_t commandIndex)
+    {
+        std::string raw;
+        SkipBlanks();
+        if (End() || static_cast<char>(Peek()) == '\n') {
+            return Fail(m_piece, commandIndex, "expected \\ after `a', `c' or `i'");
+        }
+        if (static_cast<char>(Peek()) == '\\') {
+            Advance();  // the introducer, not part of the text
+            if (End() || static_cast<char>(Peek()) == '\n') {
+                Advance();  // the newline: the classic form
+                bool anyLine = false;
+                while (!End()) {
+                    anyLine = true;
+                    std::string line;
+                    while (!End() && static_cast<char>(Peek()) != '\n') {
+                        line += static_cast<char>(Peek());
+                        Advance();
+                    }
+                    bool hadNewline = false;
+                    if (!End() && static_cast<char>(Peek()) == '\n') {
+                        Advance();
+                        hadNewline = true;
+                    }
+                    // GNU continues the text onto the next line only when
+                    // the line ends with an odd number of backslashes: the
+                    // last one is the marker, the pairs before it literal
+                    // backslashes (ApplyTextEscapes takes each pair down to
+                    // one, an even count leaving the text ended).
+                    size_t trailing = 0;
+                    while (trailing < line.size() && line[line.size() - 1 - trailing] == '\\') {
+                        ++trailing;
+                    }
+                    const bool continued = (trailing & 1) == 1;
+                    if (continued) {
+                        line.pop_back();
+                    }
+                    raw += line;
+                    if (!continued) {
+                        break;
+                    }
+                    raw += '\n';
+                    if (!hadNewline) {
+                        break;  // the stream ended mid-line
+                    }
+                }
+                command.text = ApplyTextEscapes(raw);
+                command.noText = !anyLine;  // GNU: no text line, nothing is added
+                return true;
+            }
+            // `a\\` at the end of its line: GNU ends the text there, empty.
+            if (static_cast<char>(Peek()) == '\\' &&
+                (PeekNext() == '\n' || PeekNext() == -1)) {
+                Advance();
+                if (!End() && static_cast<char>(Peek()) == '\n') {
+                    Advance();
+                }
+                command.text = "";
+                return true;
+            }
+        }
+        while (!End()) {
+            const char c = static_cast<char>(Peek());
+            if (c == '\n') {
+                Advance();
+                break;
+            }
+            if (c == '\\') {
+                if (PeekNext() == '\n') {
+                    raw += '\n';  // a continued line, the newline kept
+                    Advance();
+                    Advance();
+                    continue;
+                }
+                raw += c;  // every other escaped pair, as written
+                if (PeekNext() != -1) {
+                    raw += static_cast<char>(PeekNext());
+                    Advance();
+                }
+                Advance();
+                continue;
+            }
+            raw += c;
+            Advance();
+        }
+        command.text = ApplyTextEscapes(raw);
+        return true;
+    }
+
     // The s command (the current character is 's'): s/regex/replacement/flags.
     bool ParseS(Command& command)
     {
@@ -716,26 +964,27 @@ private:
             } else if (ch == 'e') {
                 m_context.NotTreated("s///e");
             } else if (ch == 'w') {
-                // GNU's s///w writes the pattern space to a file; the writing
-                // comes with the advanced task, but the filename is consumed
-                // either way, as GNU takes it, so a script that gives one is
-                // not refused as malformed.
+                // s///w's file, the rest of the line (a ';' is part of the
+                // name, as GNU takes it), registered like w's.
                 const size_t wPos = m_pos;
+                if (m_sandbox) {
+                    return Fail(m_piece, wPos, "e/r/w commands disabled in sandbox mode");
+                }
                 Advance();
                 SkipBlanks();
                 const size_t start = m_pos;
-                while (!End()) {
-                    const char c2 = static_cast<char>(Peek());
-                    if (c2 == '\n' || c2 == ';' || c2 == '}' || IsBlank(c2)) {
-                        break;
-                    }
+                while (!End() && static_cast<char>(Peek()) != '\n') {
                     Advance();
                 }
                 if (m_pos == start) {
-                    return Fail(m_piece, wPos, "missing filename in r/R/w/W commands");
+                    return Fail(m_piece, m_pos, "missing filename in r/R/w/W commands");
                 }
-                m_context.NotTreated("s///w");
-                continue;  // the flag and its filename are already consumed
+                const int index = AddOutputFile(m_pieces[m_piece].data.substr(start, m_pos - start));
+                if (index < 0) {
+                    return false;
+                }
+                command.wFile = index;
+                break;  // the name took the rest of the line
             } else {
                 return FailHere("unknown option to `s'");
             }
@@ -914,7 +1163,140 @@ private:
             m_script.commands.push_back(std::move(command));
             return AfterCommand();
         }
-        if (ch == 'd' || ch == 'p' || ch == 'n' || ch == '=') {
+        if (ch == 'a' || ch == 'i' || ch == 'c') {
+            Advance();
+            command.name = ch;
+            if (!ParseTextCommand(command, commandIndex)) {
+                return false;
+            }
+            // The text took its line (and any lines it continued to); what
+            // follows is a fresh command, without AfterCommand.
+            m_script.commands.push_back(std::move(command));
+            return true;
+        }
+        if (ch == 'b' || ch == 't' || ch == 'T') {
+            Advance();
+            command.name = ch;
+            SkipBlanks();
+            const size_t start = m_pos;
+            while (!End()) {
+                const char c2 = static_cast<char>(Peek());
+                if (c2 == '\n' || c2 == ';' || c2 == '}' || IsBlank(c2)) {
+                    break;
+                }
+                Advance();
+            }
+            if (m_pos == start) {
+                command.jump = kJumpToEnd;  // the end of the script, GNU's empty label
+            } else {
+                command.text = m_pieces[m_piece].data.substr(start, m_pos - start);
+                command.jump = 0;  // resolved after the parse
+            }
+            m_script.commands.push_back(std::move(command));
+            return AfterCommand();
+        }
+        if (ch == 'r' || ch == 'R') {
+            if (m_sandbox) {
+                return Fail(m_piece, commandIndex, "e/r/w commands disabled in sandbox mode");
+            }
+            Advance();
+            command.name = ch;
+            if (!ParseFileName(commandIndex, command.text)) {
+                return false;
+            }
+            m_script.commands.push_back(std::move(command));
+            return true;  // the name took the rest of the line
+        }
+        if (ch == 'w' || ch == 'W') {
+            if (m_sandbox) {
+                return Fail(m_piece, commandIndex, "e/r/w commands disabled in sandbox mode");
+            }
+            Advance();
+            command.name = ch;
+            std::string name;
+            if (!ParseFileName(commandIndex, name)) {
+                return false;
+            }
+            const int index = AddOutputFile(name);
+            if (index < 0) {
+                return false;
+            }
+            command.wFile = index;
+            m_script.commands.push_back(std::move(command));
+            return true;  // the name took the rest of the line
+        }
+        if (ch == 'y') {
+            Advance();
+            command.name = 'y';
+            if (End() || static_cast<char>(Peek()) == '\n') {
+                return FailTaken("unterminated `y' command");
+            }
+            const char delimiter = static_cast<char>(Peek());
+            Advance();
+            std::string source;
+            std::string dest;
+            if (!ScanDelimited(source, delimiter, false)) {
+                return FailTaken("unterminated `y' command");
+            }
+            if (!ScanDelimited(dest, delimiter, false)) {
+                return FailTaken("unterminated `y' command");
+            }
+            command.text = ApplyTextEscapes(source);
+            command.text2 = ApplyTextEscapes(dest);
+            if (command.text.size() != command.text2.size()) {
+                return FailTaken("strings for `y' command are different lengths");
+            }
+            m_script.commands.push_back(std::move(command));
+            return AfterCommand();
+        }
+        if (ch == 'l') {
+            Advance();
+            command.name = 'l';
+            SkipBlanks();
+            if (!End() && IsDigit(static_cast<char>(Peek()))) {
+                command.lLength = static_cast<int>(ParseNumber());
+            }
+            m_script.commands.push_back(std::move(command));
+            return AfterCommand();
+        }
+        if (ch == 'v') {
+            Advance();
+            command.name = 'v';
+            SkipBlanks();
+            const size_t start = m_pos;
+            while (!End()) {
+                const char c2 = static_cast<char>(Peek());
+                if (c2 == '\n' || c2 == ';' || c2 == '}' || IsBlank(c2)) {
+                    break;
+                }
+                Advance();
+            }
+            if (m_pos > start && !VersionOk(m_pieces[m_piece].data.substr(start, m_pos - start))) {
+                return FailTaken("expected newer version of sed");
+            }
+            m_script.commands.push_back(std::move(command));
+            return AfterCommand();
+        }
+        if (ch == 'e') {
+            if (m_sandbox) {
+                return Fail(m_piece, commandIndex, "e/r/w commands disabled in sandbox mode");
+            }
+            Advance();
+            command.name = 'e';
+            SkipBlanks();
+            const size_t start = m_pos;
+            while (!End() && static_cast<char>(Peek()) != '\n') {
+                Advance();
+            }
+            if (m_pos > start) {
+                command.text = m_pieces[m_piece].data.substr(start, m_pos - start);
+            }
+            m_context.NotTreated("e");
+            m_script.commands.push_back(std::move(command));
+            return true;  // the command line took the rest of the line
+        }
+        if (ch == 'd' || ch == 'p' || ch == 'n' || ch == '=' || ch == 'N' || ch == 'D' || ch == 'P' ||
+            ch == 'h' || ch == 'H' || ch == 'g' || ch == 'G' || ch == 'x' || ch == 'z' || ch == 'F') {
             Advance();
             command.name = ch;
             m_script.commands.push_back(std::move(command));
@@ -923,8 +1305,45 @@ private:
         return Fail(m_piece, commandIndex, "unknown command: `" + std::string(1, ch) + "'");
     }
 
+    // v's version, against this sed's 4.9: every component numeric, and the
+    // version greater than 4.9 (or as long as it: 4.9.x) is refused.
+    static bool VersionOk(const std::string& token)
+    {
+        size_t i = 0;
+        const uint64_t reference[] = {4, 9};
+        size_t component = 0;
+        while (true) {
+            if (i >= token.size() || !IsDigit(token[i])) {
+                return false;
+            }
+            uint64_t value = 0;
+            while (i < token.size() && IsDigit(token[i])) {
+                value = value * 10 + (token[i] - '0');
+                ++i;
+            }
+            if (component >= 2) {
+                return false;  // more components than 4.9 has
+            }
+            if (value > reference[component]) {
+                return false;
+            }
+            if (value < reference[component]) {
+                return true;  // an older version is fine
+            }
+            ++component;
+            if (i >= token.size()) {
+                return true;
+            }
+            if (token[i] != '.') {
+                return false;
+            }
+            ++i;
+        }
+    }
+
     BuiltinContext& m_context;
     bool m_extended = false;
+    bool m_sandbox = false;
     Script& m_script;
     std::vector<Piece> m_pieces;
     std::vector<OpenBlock> m_open;
@@ -936,9 +1355,10 @@ private:
 
 } // namespace
 
-bool ParseScript(BuiltinContext& context, const std::vector<ScriptPiece>& pieces, bool extendedRegex, Script& script)
+bool ParseScript(BuiltinContext& context, const std::vector<ScriptPiece>& pieces, bool extendedRegex,
+                 bool sandbox, Script& script)
 {
-    Parser parser(context, pieces, extendedRegex, script);
+    Parser parser(context, pieces, extendedRegex, sandbox, script);
     return parser.Parse();
 }
 

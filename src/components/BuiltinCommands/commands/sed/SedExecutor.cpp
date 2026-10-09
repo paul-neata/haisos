@@ -9,69 +9,150 @@
 namespace Haisos::Sed {
 namespace {
 
-// Everything a run writes to standard output goes through here, so GNU's
-// missing-newline rule holds: a line read without its delimiter is written
-// without one, and the newline it is owed is written before anything else
-// that follows.
-class SedOutput {
+// Where one stream's bytes go: standard output, standard error, or a file
+// (an -i temp file among them). The streams a script writes to each keep
+// their own pending-delimiter state, which the writers below take by
+// reference (the main one lives here, a w/W file's in its OutputFile).
+class OutStream {
 public:
-    explicit SedOutput(BuiltinContext& context)
-        : m_context(context)
+    OutStream() = default;
+    explicit OutStream(BuiltinContext& context) : m_context(&context) {}
+    OutStream(BuiltinContext& context, bool toStderr)
+        : m_context(&context), m_stderr(toStderr)
     {
     }
+    explicit OutStream(std::shared_ptr<IFileDescriptor> file) : m_file(std::move(file)) {}
 
-    // The pattern space, written with its newline unless the line was read
-    // without one (|delimited|).
-    void WritePatternSpace(const std::string& text, bool delimited)
+    void Write(const std::string& data) const
     {
-        std::string out;
-        if (m_missing) {
-            out += '\n';
+        if (data.empty()) {
+            return;
         }
-        out += text;
-        if (delimited) {
-            out += '\n';
+        if (m_file) {
+            WriteFully(*m_file, data);
+        } else if (m_stderr) {
+            m_context->ErrorText(data);
+        } else {
+            m_context->Out(data);
         }
-        m_context.Out(out);
-        m_missing = !delimited;
-    }
-
-    // A line '=' writes: always complete with its newline.
-    void WriteLine(const std::string& text)
-    {
-        std::string out;
-        if (m_missing) {
-            out += '\n';
-        }
-        out += text;
-        out += '\n';
-        m_context.Out(out);
-        m_missing = false;
-    }
-
-    // q's write, not the ordinary one: GNU flushes the pending newline even
-    // under -n, and terminates the pattern space with a newline even when
-    // the line was read without one (printf 'x' | sed q prints "x\n").
-    void QuitWrite(const std::string& text, bool quiet)
-    {
-        std::string out;
-        if (m_missing) {
-            out += '\n';
-        }
-        if (!quiet) {
-            out += text;
-            out += '\n';
-        }
-        if (!out.empty()) {
-            m_context.Out(out);
-        }
-        m_missing = false;
     }
 
 private:
-    BuiltinContext& m_context;
-    bool m_missing = false;
+    BuiltinContext* m_context = nullptr;
+    bool m_stderr = false;
+    std::shared_ptr<IFileDescriptor> m_file;
 };
+
+// The delimiter a previous undelimited record is still owed, paid before
+// anything else is written to the stream.
+void PayPending(const OutStream& stream, bool& missing, char d)
+{
+    if (missing) {
+        stream.Write(std::string(1, d));
+        missing = false;
+    }
+}
+
+// A record (the pattern space): paid what it is owed, ended with the
+// delimiter only when |delimited|, and remembering whether it was.
+void WriteRecord(const OutStream& stream, bool& missing, const std::string& text, bool delimited, char d)
+{
+    std::string out;
+    if (missing) {
+        out += d;
+    }
+    out += text;
+    if (delimited) {
+        out += d;
+    }
+    stream.Write(out);
+    missing = !delimited;
+}
+
+// A line that is always complete: what '=', i, c, l and F write.
+void WriteLine(const OutStream& stream, bool& missing, const std::string& text, char d)
+{
+    std::string out;
+    if (missing) {
+        out += d;
+    }
+    out += text;
+    out += d;
+    stream.Write(out);
+    missing = false;
+}
+
+// Through the first record delimiter only, inclusive (P and W); with none,
+// the whole pattern space as WriteRecord takes it.
+void WriteHeadRecord(const OutStream& stream, bool& missing, const std::string& text, bool delimited, char d)
+{
+    const size_t pos = text.find(d);
+    if (pos == std::string::npos) {
+        WriteRecord(stream, missing, text, delimited, d);
+        return;
+    }
+    std::string out;
+    if (missing) {
+        out += d;
+    }
+    out.append(text, 0, pos + 1);
+    stream.Write(out);
+    missing = false;
+}
+
+// The stream of a w/W target.
+OutStream OutputTarget(BuiltinContext& context, const OutputFile& out)
+{
+    if (out.isStdout) {
+        return OutStream(context);
+    }
+    if (out.isStderr) {
+        return OutStream(context, true);
+    }
+    return OutStream(out.file);
+}
+
+// The pattern space as l prints it: the escapes GNU's, wrapped every |wrap|
+// characters (0 never), ended with a '$'.
+std::string FormatList(const std::string& text, int wrap)
+{
+    std::string out;
+    int column = 0;
+    auto put = [&](const std::string& unit) {
+        if (wrap > 0 && column >= wrap - 1) {
+            out += '\\';
+            out += '\n';
+            column = 0;
+        }
+        out += unit;
+        column += static_cast<int>(unit.size());
+    };
+    for (const unsigned char c : text) {
+        switch (c) {
+            case '\a': put("\\a"); break;
+            case '\b': put("\\b"); break;
+            case '\f': put("\\f"); break;
+            case '\n': put("\\n"); break;
+            case '\r': put("\\r"); break;
+            case '\t': put("\\t"); break;
+            case '\v': put("\\v"); break;
+            case '\\': put("\\\\"); break;
+            default: {
+                if (c < 0x20 || c >= 0x7F) {
+                    const char oct[5] = {'\\',
+                                         static_cast<char>('0' + ((c >> 6) & 7)),
+                                         static_cast<char>('0' + ((c >> 3) & 7)),
+                                         static_cast<char>('0' + (c & 7))};
+                    put(std::string(oct, 4));
+                } else {
+                    put(std::string(1, static_cast<char>(c)));
+                }
+            }
+        }
+    }
+    out += '$';
+    return out;
+}
 
 // The inputs, one read at a time, with the one-line lookahead the '$' address
 // needs. A pattern-space read reports what GNU reports; the lookahead is
@@ -80,8 +161,8 @@ private:
 // cost is settled when the pattern space reaches the same end.
 class SedInput {
 public:
-    SedInput(BuiltinContext& context, std::vector<std::string> inputs, bool separate)
-        : m_context(context), m_inputs(std::move(inputs)), m_separate(separate)
+    SedInput(BuiltinContext& context, std::vector<std::string> inputs, bool separate, char delimiter)
+        : m_context(context), m_inputs(std::move(inputs)), m_separate(separate), m_delimiter(delimiter)
     {
     }
 
@@ -185,6 +266,8 @@ public:
     }
 
     uint64_t LineNumber() const { return m_lineNumber; }
+    // The name of the input the lines come from, as given: F's output.
+    const std::string& Name() const { return m_name; }
 
     // The status of an input that could not be opened, once it happens.
     int ErrorStatus() const { return m_errorStatus; }
@@ -225,7 +308,7 @@ private:
             }
             m_input = std::move(input);
             m_name = name;
-            m_reader = std::make_unique<BuiltinLineReader>(m_context, *m_input, '\n');
+            m_reader = std::make_unique<BuiltinLineReader>(m_context, *m_input, m_delimiter);
             if (m_separate) {  // with -s each file's lines are numbered anew
                 m_lineNumber = 0;
             }
@@ -248,6 +331,7 @@ private:
     BuiltinContext& m_context;
     std::vector<std::string> m_inputs;
     bool m_separate = false;
+    char m_delimiter = '\n';
     size_t m_next = 0;
     std::shared_ptr<IFileDescriptor> m_input;
     std::unique_ptr<BuiltinLineReader> m_reader;
@@ -305,8 +389,10 @@ bool MatchOne(const Address& address, SedInput& input, const std::string& patter
     }
 }
 
+// |rangeEnded| tells the caller a two-address range ended on this line (what
+// c waits for before it writes its text).
 bool MatchAddress(Command& command, SedInput& input, const std::string& patternSpace,
-                  std::shared_ptr<const Regex>& lastRegex, bool& missingRegex)
+                  std::shared_ptr<const Regex>& lastRegex, bool& missingRegex, bool& rangeEnded)
 {
     bool matched = false;
     if (command.a1.kind == AddressKind::None && command.a2.kind == AddressKind::None) {
@@ -318,6 +404,7 @@ bool MatchAddress(Command& command, SedInput& input, const std::string& patternS
             matched = true;
             if (RegexMatches(command.a2, patternSpace, lastRegex, missingRegex)) {
                 command.rangeEnded = true;
+                rangeEnded = true;
             }
         }
     } else if (command.a2.kind != AddressKind::None) {
@@ -334,6 +421,9 @@ bool MatchAddress(Command& command, SedInput& input, const std::string& patternS
                     (command.a2.kind == AddressKind::RelativeLines && command.a2.line == 0) ||
                     (command.a2.kind == AddressKind::Multiple && command.a2.line == 0);
                 command.rangeActive = !oneLine;
+                if (oneLine) {
+                    rangeEnded = true;
+                }
             }
         } else {
             matched = true;
@@ -366,6 +456,7 @@ bool MatchAddress(Command& command, SedInput& input, const std::string& patternS
                 // on, so a later one may open a range of its own. Only
                 // 0,/re/ (rangeEnded) never restarts.
                 command.rangeActive = false;
+                rangeEnded = true;
             }
         }
     } else {
@@ -504,7 +595,7 @@ bool Substitute(Command& command, std::string& patternSpace, std::shared_ptr<con
     return true;
 }
 
-// The ranges' state is per file with -s.
+// The ranges' state is per file with -s, and per run: the caller resets it.
 void ResetRanges(Script& script)
 {
     for (auto& command : script.commands) {
@@ -514,34 +605,144 @@ void ResetRanges(Script& script)
     }
 }
 
+// One item of the append queue (a and r build it as they run; R is resolved
+// when the queue is flushed, reading its own next line).
+struct QueueItem {
+    char kind = 'a';       // 'a' text, 'r' a file, 'R' one line of a file
+    std::string text;     // 'a': the text; 'r': the file name
+    size_t command = 0;   // 'R': the command's index
+};
+
+// The file R reads from, opened the first time the queue is flushed with one
+// of its lines queued, and kept open for the rest of the run.
+struct RReader {
+    bool tried = false;
+    std::shared_ptr<IFileDescriptor> file;
+    std::unique_ptr<BuiltinLineReader> reader;
+};
+
+// r's file, read whole when the queue is flushed. A missing file is silent,
+// as GNU's; a directory is GNU's read error, which stops the run (|fatal|).
+bool ReadAppendFile(BuiltinContext& context, const std::string& name, std::string& contents, bool& fatal)
+{
+    if (name == "/dev/stdin") {
+        auto input = context.IO().GetDescriptor(IFileIO::kStdIn);
+        return input ? ReadWholeDescriptor(*input, contents) : false;
+    }
+    InputOpenFailure failure = InputOpenFailure::None;
+    auto input = OpenInputOperand(context, name, failure);
+    if (!input) {
+        if (failure == InputOpenFailure::Directory) {
+            context.Error("read error on " + name + ": Is a directory");
+            fatal = true;
+        }
+        return false;
+    }
+    return ReadWholeDescriptor(*input, contents);
+}
+
+// The queue, flushed before every read and after q's print. Every item is
+// paid what the main stream is owed first, then written whole. Returns false
+// when an r file was a directory (GNU's read error: the run ends at once;
+// an R file is opened by the command itself, so it never fails here).
+bool FlushQueue(BuiltinContext& context, std::vector<QueueItem>& queue,
+                std::vector<RReader>& rReaders, const OutStream& main, bool& mainMissing, char d)
+{
+    for (const auto& item : queue) {
+        switch (item.kind) {
+            case 'a':
+                PayPending(main, mainMissing, d);
+                main.Write(item.text + '\n');  // a literal newline, even with -z
+                mainMissing = false;
+                break;
+            case 'r': {
+                std::string contents;
+                bool fatal = false;
+                if (!ReadAppendFile(context, item.text, contents, fatal)) {
+                    return !fatal;
+                }
+                PayPending(main, mainMissing, d);
+                main.Write(contents);
+                mainMissing = false;
+                break;
+            }
+            case 'R': {
+                RReader& state = rReaders[item.command];
+                if (!state.reader) {
+                    break;  // a file that never could be opened: silent, as GNU's
+                }
+                std::string line;
+                bool delimited = false;
+                if (state.reader->Next(line, delimited) == LineReadResult::Line) {
+                    PayPending(main, mainMissing, d);
+                    std::string out = line;
+                    if (delimited) {
+                        out += d;
+                    }
+                    main.Write(out);
+                    mainMissing = !delimited;
+                }
+                break;
+            }
+        }
+    }
+    queue.clear();
+    return true;
+}
+
 } // namespace
 
 int RunScript(BuiltinContext& context, Script& script, const std::vector<std::string>& inputs,
               const ExecSettings& settings)
 {
-    SedInput input(context, inputs, settings.separate);
-    SedOutput output(context);
+    ResetRanges(script);  // each call is one run (-i runs the files one by one)
+    const char d = settings.delimiter;
+    SedInput input(context, inputs, settings.separate, d);
+    OutStream main(context);
+    if (settings.inPlaceOutput) {
+        main = OutStream(settings.inPlaceOutput);
+    }
+    bool mainMissing = false;
+    std::string holdSpace;
+    bool holdDelimited = true;  // the hold space's own delimiter state
+    std::vector<QueueItem> queue;
+    std::vector<RReader> rReaders(script.commands.size());
+    bool tFlag = false;
     const bool quiet = settings.quiet || script.quietFromScript;
     std::shared_ptr<const Regex> lastRegex;
     int quitCode = -1;
     bool missingRegex = false;
     std::string patternSpace;
     bool delimited = false;
-    bool cycleEnd = false;   // reached the end without printing (d, or n without a line)
-    while (true) {
-        bool newFile = false;
-        const auto r = input.Read(patternSpace, delimited, newFile);
-        if (r == SedInput::ReadResult::End || r == SedInput::ReadResult::Error ||
-            r == SedInput::ReadResult::Stopped) {
-            break;
+    bool stopAll = false;    // N at the end of the input: print, flush, stop
+    bool readAgain = true;   // D restarts a cycle without reading
+    bool appendFatal = false;  // r/R's file was a directory: the run ends, exit 4
+    while (!stopAll) {
+        if (readAgain) {
+            if (!FlushQueue(context, queue, rReaders, main, mainMissing, d)) {
+                appendFatal = true;
+                break;
+            }
+            bool newFile = false;
+            const auto r = input.Read(patternSpace, delimited, newFile);
+            if (r == SedInput::ReadResult::End || r == SedInput::ReadResult::Error ||
+                r == SedInput::ReadResult::Stopped) {
+                break;
+            }
+            tFlag = false;  // the t flag is cleared by every line read
+            if (newFile && settings.separate) {
+                ResetRanges(script);
+            }
         }
-        if (newFile && settings.separate) {
-            ResetRanges(script);
-        }
-        cycleEnd = false;
-        for (size_t i = 0; i < script.commands.size(); ++i) {
+        readAgain = true;
+        bool cycleEnd = false;  // the pattern space is discarded, not printed
+        bool restart = false;   // D: run the script again without reading
+        size_t i = 0;
+        while (i < script.commands.size()) {
             Command& command = script.commands[i];
-            const bool matches = MatchAddress(command, input, patternSpace, lastRegex, missingRegex);
+            bool rangeEnded = false;
+            const bool matches =
+                MatchAddress(command, input, patternSpace, lastRegex, missingRegex, rangeEnded);
             if (missingRegex) {
                 break;
             }
@@ -549,22 +750,43 @@ int RunScript(BuiltinContext& context, Script& script, const std::vector<std::st
                 if (command.name == '{') {
                     i = command.jump - 1;
                 }
+                ++i;
                 continue;
             }
             switch (command.name) {
                 case '{':
                 case '}':
                 case ':':
+                case 'v':   // checked against this sed when parsed
+                case 'e':   // not treated by HaisosOS, reported when parsed
                     break;
                 case 'p':
-                    output.WritePatternSpace(patternSpace, delimited);
+                    WriteRecord(main, mainMissing, patternSpace, delimited, d);
+                    break;
+                case 'P':
+                    WriteHeadRecord(main, mainMissing, patternSpace, delimited, d);
                     break;
                 case 'd':
                     cycleEnd = true;
                     break;
+                case 'D': {
+                    const size_t pos = patternSpace.find(d);
+                    if (pos == std::string::npos) {
+                        cycleEnd = true;  // no delimiter: as d
+                    } else {
+                        patternSpace.erase(0, pos + 1);
+                        restart = true;  // from the top, without reading
+                    }
+                    break;
+                }
                 case 'n': {
                     if (!quiet) {
-                        output.WritePatternSpace(patternSpace, delimited);
+                        WriteRecord(main, mainMissing, patternSpace, delimited, d);
+                    }
+                    if (!FlushQueue(context, queue, rReaders, main, mainMissing, d)) {
+                        appendFatal = true;
+                        stopAll = true;
+                        break;
                     }
                     bool nNewFile = false;
                     std::string line;
@@ -579,10 +801,46 @@ int RunScript(BuiltinContext& context, Script& script, const std::vector<std::st
                     }
                     patternSpace = std::move(line);
                     delimited = nDelimited;
+                    tFlag = false;
+                    break;
+                }
+                case 'N': {
+                    if (!FlushQueue(context, queue, rReaders, main, mainMissing, d)) {
+                        appendFatal = true;
+                        stopAll = true;
+                        break;
+                    }
+                    bool nNewFile = false;
+                    std::string line;
+                    bool nDelimited = false;
+                    const auto nr = input.Read(line, nDelimited, nNewFile);
+                    if (nr != SedInput::ReadResult::Line) {
+                        // GNU prints the pattern space (unless -n), flushes
+                        // the queue and stops the whole run.
+                        if (!quiet) {
+                            WriteRecord(main, mainMissing, patternSpace, delimited, d);
+                        }
+                        FlushQueue(context, queue, rReaders, main, mainMissing, d);
+                        stopAll = true;
+                        break;
+                    }
+                    if (nNewFile && settings.separate) {
+                        ResetRanges(script);
+                    }
+                    patternSpace += d;
+                    patternSpace += line;
+                    delimited = nDelimited;
+                    tFlag = false;
                     break;
                 }
                 case 'q':
-                    output.QuitWrite(patternSpace, quiet);
+                    PayPending(main, mainMissing, d);
+                    if (!quiet) {
+                        main.Write(patternSpace + std::string(1, d));
+                    }
+                    if (!FlushQueue(context, queue, rReaders, main, mainMissing, d)) {
+                        appendFatal = true;  // GNU's read error wins over q's code
+                    }
                     quitCode = command.intArg;
                     cycleEnd = true;
                     break;
@@ -591,40 +849,169 @@ int RunScript(BuiltinContext& context, Script& script, const std::vector<std::st
                     cycleEnd = true;
                     break;
                 case '=':
-                    output.WriteLine(std::to_string(input.LineNumber()));
+                    WriteLine(main, mainMissing, std::to_string(input.LineNumber()), d);
                     break;
+                case 'F':
+                    WriteLine(main, mainMissing, input.Name(), d);
+                    break;
+                case 'i':
+                    if (!command.noText) {
+                        WriteLine(main, mainMissing, command.text, d);
+                    }
+                    break;
+                case 'c':
+                    // With a range, only when it ends on this line.
+                    if (!command.noText &&
+                        (command.a2.kind == AddressKind::None || command.negate || rangeEnded)) {
+                        WriteLine(main, mainMissing, command.text, d);
+                    }
+                    cycleEnd = true;  // the pattern space is discarded either way
+                    break;
+                case 'a':
+                    if (!command.noText) {
+                        queue.push_back(QueueItem{'a', command.text, 0});
+                    }
+                    break;
+                case 'r':
+                    queue.push_back(QueueItem{'r', command.text, 0});
+                    break;
+                case 'R': {
+                    // GNU opens R's file the first time the command runs, so
+                    // its read error (a directory) aborts right there, before
+                    // this line is printed; the line itself is read at flush.
+                    RReader& state = rReaders[i];
+                    if (!state.tried) {
+                        state.tried = true;
+                        const std::string& name = command.text;
+                        if (name == "/dev/stdin") {
+                            state.file = context.IO().GetDescriptor(IFileIO::kStdIn);
+                        } else {
+                            InputOpenFailure failure = InputOpenFailure::None;
+                            state.file = OpenInputOperand(context, name, failure);
+                            if (!state.file && failure == InputOpenFailure::Directory) {
+                                context.Error("read error on " + name + ": Is a directory");
+                                appendFatal = true;
+                                stopAll = true;
+                                break;
+                            }
+                        }
+                        if (state.file) {
+                            state.reader = std::make_unique<BuiltinLineReader>(context, *state.file, d);
+                        }
+                    }
+                    queue.push_back(QueueItem{'R', "", i});
+                    break;
+                }
+                case 'h':
+                    holdSpace = patternSpace;
+                    holdDelimited = delimited;
+                    break;
+                case 'H':
+                    holdSpace += d;
+                    holdSpace += patternSpace;
+                    holdDelimited = delimited;
+                    break;
+                case 'g':
+                    patternSpace = holdSpace;
+                    delimited = holdDelimited;
+                    break;
+                case 'G':
+                    patternSpace += d;
+                    patternSpace += holdSpace;
+                    delimited = holdDelimited;
+                    break;
+                case 'x':
+                    std::swap(patternSpace, holdSpace);
+                    std::swap(delimited, holdDelimited);
+                    break;
+                case 'z':
+                    patternSpace.clear();  // its delimiter state is kept
+                    break;
+                case 'b':
+                    // A continue skips the ++i below, so the target is the
+                    // label's ':' itself, a no-op (the end of the script for
+                    // an empty label: the loop falls through to the print).
+                    i = command.jump == kJumpToEnd ? script.commands.size() : command.jump;
+                    continue;
+                case 't':
+                    if (tFlag) {
+                        tFlag = false;
+                        i = command.jump == kJumpToEnd ? script.commands.size() : command.jump;
+                        continue;
+                    }
+                    break;
+                case 'T':
+                    if (tFlag) {
+                        tFlag = false;
+                    } else {
+                        i = command.jump == kJumpToEnd ? script.commands.size() : command.jump;
+                        continue;
+                    }
+                    break;
+                case 'y':
+                    for (char& c : patternSpace) {
+                        const size_t k = command.text.find(c);
+                        if (k != std::string::npos) {
+                            c = command.text2[k];
+                        }
+                    }
+                    break;
+                case 'l': {
+                    const int wrap = command.lLength >= 0 ? command.lLength : settings.lineLength;
+                    WriteLine(main, mainMissing, FormatList(patternSpace, wrap), d);
+                    break;
+                }
+                case 'w': {
+                    OutputFile& out = script.outputFiles[command.wFile];
+                    WriteRecord(OutputTarget(context, out), out.missing, patternSpace, delimited, d);
+                    break;
+                }
+                case 'W': {
+                    OutputFile& out = script.outputFiles[command.wFile];
+                    WriteHeadRecord(OutputTarget(context, out), out.missing, patternSpace, delimited, d);
+                    break;
+                }
                 case 's': {
                     bool replaced = false;
                     Substitute(command, patternSpace, lastRegex, missingRegex, replaced);
                     if (missingRegex) {
                         break;
                     }
+                    if (replaced) {
+                        tFlag = true;
+                    }
                     if (replaced && command.print) {
-                        output.WritePatternSpace(patternSpace, delimited);
+                        WriteRecord(main, mainMissing, patternSpace, delimited, d);
+                    }
+                    if (replaced && command.wFile >= 0) {
+                        OutputFile& out = script.outputFiles[command.wFile];
+                        WriteRecord(OutputTarget(context, out), out.missing, patternSpace, delimited, d);
                     }
                     break;
                 }
                 default:
                     break;
             }
-            if (cycleEnd || missingRegex) {
+            if (cycleEnd || restart || stopAll || quitCode >= 0) {
                 break;
             }
+            ++i;
         }
-        if (cycleEnd || missingRegex) {
-            if (quitCode >= 0) {
-                break;
-            }
-            if (missingRegex) {
-                break;
-            }
-            continue;  // d, or n without a line: on to the next cycle
+        if (stopAll || quitCode >= 0 || missingRegex) {
+            break;
         }
-        if (!quiet) {
-            output.WritePatternSpace(patternSpace, delimited);
+        if (restart) {
+            readAgain = false;
+            continue;
+        }
+        if (!cycleEnd && !quiet) {
+            WriteRecord(main, mainMissing, patternSpace, delimited, d);
+        }
+        if (settings.unbuffered) {
+            context.Flush();
         }
     }
-    if (input.Fatal()) {
+    if (input.Fatal() || appendFatal) {
         return 4;
     }
     if (missingRegex) {

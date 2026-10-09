@@ -12,4 +12,5 @@
 - A run cut short (here by Ollama's 429) still ends `ready` when the leftovers build and pass: before the review, compare the PR's file list with the plan (tests, CMake, BuiltinCommandList.h, docs).
 - When a task touching date/BuiltinDate (coreutils--stat, du, ls -l time styles) is re-checked: #60's mediums are candidates to fold in -- date --help lists no +FORMAT conversions, set-operand docs say ParseDateString but code uses ParseTouchStamp, FormatDateTime flag edge cases (%^P, %_N/%-3N, %_:z, last of - _ 0 wins); GNU date 9.4 on the host is the reference.
 - Every process of a builtin shares one command object: glm-5.3 kept per-run state in its members (#66, critical) -- reviews check for it.
+- When search--sed-advanced is re-checked: fold in #67's follow-ups -- `s///w FILE` (and `w`) filename runs to end of line as GNU's; SedIsStoppedPromptly on a held-open stdin pipe; a Regex unit test for multiline (M) `.`/`[^...]` not matching `\n`; the `/[/p` error row.
 - When awk--functions is re-checked: ParsePrintfSpec (BuiltinPrintf.h) does not skip the `q` length modifier (#53 review).

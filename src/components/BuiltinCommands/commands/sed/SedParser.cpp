@@ -81,7 +81,7 @@ std::string TranslateRegex(const std::string& raw)
                 case 'd': {
                     int taken = 0;
                     const int v = EscapeValue(raw, i + 2, 3, 10, taken);
-                    if (v >= 0 && taken == 3) {
+                    if (v >= 0 && taken > 0) {  // GNU takes one to three digits
                         out += static_cast<char>(v);
                         i += 2 + taken;
                         continue;
@@ -368,43 +368,9 @@ private:
             Advance();
         }
         std::string raw;
-        bool closed = false;
-        while (!End()) {
-            const char c = static_cast<char>(Peek());
-            if (c == '\n') {
-                break;
-            }
-            if (c == '\\') {
-                const char* after = nullptr;
-                char next = 0;
-                if (m_pos + 1 < m_pieces[m_piece].data.size()) {
-                    next = m_pieces[m_piece].data[m_pos + 1];
-                    after = &next;
-                }
-                if (after && next == delimiter) {
-                    raw += delimiter;
-                    Advance();
-                    Advance();
-                    continue;
-                }
-                if (after && next == '\n') {  // a continued line, as GNU takes it
-                    Advance();
-                    Advance();
-                    continue;
-                }
-                raw += c;
-                Advance();
-                continue;
-            }
-            if (c == delimiter) {
-                closed = true;
-                Advance();
-                break;
-            }
-            raw += c;
-            Advance();
-        }
-        if (!closed) {
+        // The same scanning as s's halves: an escape is one unit and '['
+        // brackets hold their delimiter, so /a\/ and /[/]/ parse as GNU's.
+        if (!ScanDelimited(raw, delimiter, true)) {
             return FailHere("unterminated address regex");
         }
         bool ignoreCase = false;
@@ -483,9 +449,12 @@ private:
         }
     }
 
-    // The text between the delimiters of s: '\\' escapes the delimiter and
-    // (before a newline) continues the line; '[' brackets are counted when
-    // |regex| -- the delimiter is a literal inside them, as GNU takes it.
+    // The text between the delimiters of s (and of an address regex):
+    // '\\' escapes the delimiter and, before a newline, continues the line
+    // keeping a newline in the text, as GNU does; '[' brackets are counted
+    // when |regex| -- the delimiter is a literal inside them, as GNU takes
+    // it -- with a first ']' literal and [:class:], [.x.] and [=x=] each one
+    // unit, their own ']' not closing the bracket.
     bool ScanDelimited(std::string& raw, char delimiter, bool regex)
     {
         bool inBracket = false;
@@ -496,7 +465,8 @@ private:
             }
             if (c == '\\') {
                 const bool has = m_pos + 1 < m_pieces[m_piece].data.size();
-                if (has && m_pieces[m_piece].data[m_pos + 1] == '\n') {  // a continued line
+                if (has && m_pieces[m_piece].data[m_pos + 1] == '\n') {
+                    raw += '\n';  // a continued line, the newline kept, as GNU's
                     Advance();
                     Advance();
                     continue;
@@ -523,7 +493,44 @@ private:
             }
             if (regex && !inBracket && c == '[') {
                 inBracket = true;
-            } else if (regex && inBracket && c == ']') {
+                raw += c;
+                Advance();
+                if (!End() && static_cast<char>(Peek()) == '^') {
+                    raw += '^';
+                    Advance();
+                }
+                if (!End() && static_cast<char>(Peek()) == ']') {  // a first ']' is a literal
+                    raw += ']';
+                    Advance();
+                }
+                continue;
+            }
+            if (regex && inBracket && c == '[' && m_pos + 1 < m_pieces[m_piece].data.size()) {
+                const char n = m_pieces[m_piece].data[m_pos + 1];
+                if (n == ':' || n == '.' || n == '=') {
+                    // A bracket item, one unit: its ']' does not close the
+                    // bracket it sits in.
+                    raw += c;
+                    raw += n;
+                    Advance();
+                    Advance();
+                    while (!End()) {
+                        const char c2 = static_cast<char>(Peek());
+                        if (c2 == '\n') {
+                            return false;
+                        }
+                        raw += c2;
+                        Advance();
+                        if (c2 == n && !End() && static_cast<char>(Peek()) == ']') {
+                            raw += ']';
+                            Advance();
+                            break;
+                        }
+                    }
+                    continue;
+                }
+            }
+            if (regex && inBracket && c == ']') {
                 inBracket = false;
             }
             if (c == delimiter && !inBracket) {
@@ -572,7 +579,7 @@ private:
                 case 'd': {
                     int taken = 0;
                     const int v = EscapeValue(raw, i + 1, 3, 10, taken);
-                    if (v >= 0 && taken == 3) {
+                    if (v >= 0 && taken > 0) {  // GNU takes one to three digits
                         addText(std::string(1, static_cast<char>(v)));
                         i += taken;
                         continue;
@@ -824,11 +831,13 @@ private:
         }
         const char ch = static_cast<char>(c);
         if (ch == '}') {
-            if (haveA1 || haveA2) {
-                return Fail(m_piece, commandIndex, "unexpected `}'");
-            }
+            // GNU checks for an open block first, then for addresses: `1}`
+            // is unexpected, `{p;1}` has addresses on a closing '}'.
             if (m_open.empty()) {
                 return Fail(m_piece, commandIndex, "unexpected `}'");
+            }
+            if (haveA1 || haveA2) {
+                return Fail(m_piece, commandIndex, "`}' doesn't want any addresses");
             }
             Advance();
             const OpenBlock& block = m_open.back();

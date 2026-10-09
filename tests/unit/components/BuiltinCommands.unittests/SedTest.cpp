@@ -115,6 +115,13 @@ TEST_F(BuiltinCommandsTest, SedReplacementEscapes) {
     EXPECT_EQ(captured.out, "&\n");
     captured = RunCaptured("sed", {"s/one/&/"}, "one\n");
     EXPECT_EQ(captured.out, "one\n");
+
+    // The case escapes together with groups and &: \U\2\E\1x\u& on "one".
+    captured = RunCaptured("sed", {"s/\\(o\\)\\(n\\)/\\U\\2\\E\\1x\\u&/"}, "one\n");
+    EXPECT_EQ(captured.out, "NoxOne\n");
+    // A custom delimiter, '|' escaped in the replacement as the delimiter.
+    captured = RunCaptured("sed", {"s|/|\\||"}, "a/b\n");
+    EXPECT_EQ(captured.out, "a|b\n");
     EXPECT_EQ(captured.status, 0);
 }
 
@@ -128,6 +135,10 @@ TEST_F(BuiltinCommandsTest, SedExtendedRegex) {
     EXPECT_EQ(captured.out, "=ne\n");
     captured = RunCaptured("sed", {"-E", "s/(a)(b)/\\2\\1/"}, "ab\n");
     EXPECT_EQ(captured.out, "ba\n");
+    // The task's acceptance scenario: a group kept and a () pair dropped.
+    captured = RunCaptured("sed", {"-E", "s/(Create)\\(\\)/\\1Instance()/g"},
+                           "auto a = Create();\n");
+    EXPECT_EQ(captured.out, "auto a = CreateInstance();\n");
     EXPECT_EQ(captured.status, 0);
 }
 
@@ -212,6 +223,23 @@ TEST_F(BuiltinCommandsTest, SedAddresses) {
     // An open range ends at the end of input.
     captured = RunCaptured("sed", {"-n", "/tw/,/nope/p"}, kFour);
     EXPECT_EQ(captured.out, "two\nthree\nfour\n");
+
+    // A regex address with I, a custom delimiter, and a negated match.
+    captured = RunCaptured("sed", {"-n", "/x/I p"}, "aXb\nc\n");
+    EXPECT_EQ(captured.out, "aXb\n");
+    captured = RunCaptured("sed", {"-n", "\\%t%p"}, "two\nfoo\n");
+    EXPECT_EQ(captured.out, "two\n");
+    captured = RunCaptured("sed", {"-n", "/x/ !p"}, "x\ny\n");
+    EXPECT_EQ(captured.out, "y\n");
+    EXPECT_EQ(captured.status, 0);
+
+    // 1,/re/ starts at the first match, so it may run past it; 0,/re/ is
+    // open from the first line, so the regex ends it there.
+    captured = RunCaptured("sed", {"-n", "1,/one/p"}, "one\ntwo\nthree\n");
+    EXPECT_EQ(captured.out, "one\ntwo\nthree\n");
+    captured = RunCaptured("sed", {"-n", "0,/one/p"}, "one\ntwo\nthree\n");
+    EXPECT_EQ(captured.out, "one\n");
+    EXPECT_EQ(captured.status, 0);
 }
 
 TEST_F(BuiltinCommandsTest, SedZeroAndStepAddresses) {
@@ -239,6 +267,89 @@ TEST_F(BuiltinCommandsTest, SedZeroAndStepAddresses) {
     // +N and ~N are second addresses only.
     captured = RunCaptured("sed", {"+2p"}, kFour);
     EXPECT_EQ(captured.err, "sed: -e expression #1, char 2: invalid usage of +N or ~N as first address\n");
+
+    // ~0 ends the range on the line that started it, as GNU's, and never
+    // divides by it; +0 the same. A ~N with N > 0 ends at the next multiple
+    // strictly after the starting line, even when that line is one.
+    captured = RunCaptured("sed", {"-n", "2,~0p"}, kFour);
+    EXPECT_EQ(captured.out, "two\n");
+    EXPECT_EQ(captured.status, 0);
+    captured = RunCaptured("sed", {"-n", "/tw/,+0p"}, kFour);
+    EXPECT_EQ(captured.out, "two\n");
+    captured = RunCaptured("sed", {"-n", "2,~2p"}, kFour);
+    EXPECT_EQ(captured.out, "two\nthree\nfour\n");
+    captured = RunCaptured("sed", {"-n", "2,~4p"}, kFour);
+    EXPECT_EQ(captured.out, "two\nthree\nfour\n");
+    captured = RunCaptured("sed", {"-n", "/on/,~0p;/th/,+0p"}, kFour);
+    EXPECT_EQ(captured.out, "one\nthree\n");
+
+    // Options may come after the script operand, as GNU's.
+    captured = RunCaptured("sed", {"1~2p", "-n"}, "1\n2\n3\n");
+    EXPECT_EQ(captured.out, "1\n3\n");
+    EXPECT_EQ(captured.status, 0);
+}
+
+TEST_F(BuiltinCommandsTest, SedRangeRestarts) {
+    // A range that ended is opened again by its first address: a1 is
+    // matched again on every line after a range closed, so a later match
+    // starts a range of its own. Only 0,/re/ never restarts.
+    Captured captured = RunCaptured("sed", {"-n", "/a/,/b/p"}, "a\nb\na\nb\n");
+    EXPECT_EQ(captured.out, "a\nb\na\nb\n");
+    EXPECT_EQ(captured.status, 0);
+    captured = RunCaptured("sed", {"/a/,/b/d"}, "a\nb\nc\na\nb\n");
+    EXPECT_EQ(captured.out, "c\n");
+    captured = RunCaptured("sed", {"-n", "1~3,+1p"}, "1\n2\n3\n4\n5\n6\n");
+    EXPECT_EQ(captured.out, "1\n2\n4\n5\n");
+    // A one-line range (its second address reached at once) opens again too.
+    captured = RunCaptured("sed", {"-n", "/a/,+0p"}, "a\nb\na\nb\n");
+    EXPECT_EQ(captured.out, "a\na\n");
+    captured = RunCaptured("sed", {"-n", "/a/,~0p"}, "a\nb\na\nb\n");
+    EXPECT_EQ(captured.out, "a\na\n");
+    captured = RunCaptured("sed", {"-n", "/a/,2p"}, "a\n1\na\n2\na\n3\n");
+    EXPECT_EQ(captured.out, "a\n1\na\na\n");
+    EXPECT_EQ(captured.status, 0);
+}
+
+TEST_F(BuiltinCommandsTest, SedContinuedLines) {
+    // A backslash before a newline keeps a newline in the text, as GNU's,
+    // in the replacement as in the regex.
+    Captured captured = RunCaptured("sed", {"s/o/x\\\ny/"}, "one\n");
+    EXPECT_EQ(captured.out, "x\nyne\n");
+    EXPECT_EQ(captured.status, 0);
+    captured = RunCaptured("sed", {"s/a/x\\\ny/;s/x\\\ny/Z/"}, "a\nb\n");
+    EXPECT_EQ(captured.out, "Z\nb\n");
+    EXPECT_EQ(captured.status, 0);
+    // In an address regex too: the pattern just holds a newline.
+    captured = RunCaptured("sed", {"-n", "/a\\\nb/p"}, "x\n");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.status, 0);
+}
+
+TEST_F(BuiltinCommandsTest, SedRegexScanning) {
+    // An address regex scans as s's halves do: an escape is one unit and
+    // '[' brackets hold their delimiter.
+    Captured captured = RunCaptured("sed", {"-n", "/a\\\\/p"}, "a\\\nb\n");
+    EXPECT_EQ(captured.out, "a\\\n");
+    EXPECT_EQ(captured.status, 0);
+    captured = RunCaptured("sed", {"-n", "/[/]/p"}, "a/b\nc\n");
+    EXPECT_EQ(captured.out, "a/b\n");
+
+    // Inside a bracket a [:class:], [.x.] or [=x=] is one unit (its ']'
+    // does not close the bracket), and a ']' right after '[' or '[^' is
+    // a literal member.
+    captured = RunCaptured("sed", {"s/[[:alpha:]/]/x/g"}, "a/\n");
+    EXPECT_EQ(captured.out, "xx\n");
+    captured = RunCaptured("sed", {"s/[]/]/x/g"}, "a]/\n");
+    EXPECT_EQ(captured.out, "axx\n");
+    captured = RunCaptured("sed", {"s/[^]]x/y/"}, "ax\n]x\n");
+    EXPECT_EQ(captured.out, "y\n]x\n");
+
+    // \d takes one to three digits, \o and \x as GNU's.
+    captured = RunCaptured("sed", {"s/a/\\d65/"}, "a\n");
+    EXPECT_EQ(captured.out, "A\n");
+    captured = RunCaptured("sed", {"s/\\d97/b/"}, "a\n");
+    EXPECT_EQ(captured.out, "b\n");
+    EXPECT_EQ(captured.status, 0);
 }
 
 TEST_F(BuiltinCommandsTest, SedBlocksAndSeparators) {
@@ -266,6 +377,15 @@ TEST_F(BuiltinCommandsTest, SedBlocksAndSeparators) {
     captured = RunCaptured("sed", {"p{"}, kTwo);
     EXPECT_EQ(captured.err, "sed: -e expression #1, char 2: extra characters after command\n");
     EXPECT_EQ(captured.status, 1);
+
+    // A block's commands may carry their own addresses: the q inside stops
+    // the run after the second line was printed.
+    captured = RunCaptured("sed", {"-n", "2,4{p;2q}"}, "1\n2\n3\n4\n5\n");
+    EXPECT_EQ(captured.out, "2\n");
+    EXPECT_EQ(captured.status, 0);
+    captured = RunCaptured("sed", {"-n", "$!{n;p}"}, "1\n2\n3\n");
+    EXPECT_EQ(captured.out, "2\n");
+    EXPECT_EQ(captured.status, 0);
 }
 
 TEST_F(BuiltinCommandsTest, SedLabelsAndComments) {
@@ -304,6 +424,10 @@ TEST_F(BuiltinCommandsTest, SedNext) {
     // n at the last line ends the cycle: the last line is printed once.
     captured = RunCaptured("sed", {"n"}, "a\nb");
     EXPECT_EQ(captured.out, "a\nb");
+    EXPECT_EQ(captured.status, 0);
+    // Nothing after n runs when it read the end: the substitution is skipped.
+    captured = RunCaptured("sed", {"n;s/1/X/"}, "1\n");
+    EXPECT_EQ(captured.out, "1\n");
     EXPECT_EQ(captured.status, 0);
 }
 
@@ -438,6 +562,7 @@ TEST_F(BuiltinCommandsTest, SedScriptFile) {
     WriteFile("/brace", "2p\n{\n");
     WriteFile("/noregex", "2p\n//p\n");
     WriteFile("/mixed", "s/o/0/\n/tw/d\n");
+    WriteFile("/badcmd", "p\nk\n");
 
     // #n at the start of the first script file makes it quiet too.
     Captured captured = RunCaptured("sed", {"-f", "/quiet"}, kTwo);
@@ -455,6 +580,11 @@ TEST_F(BuiltinCommandsTest, SedScriptFile) {
     captured = RunCaptured("sed", {"-f", "/brace"}, kTwo);
     EXPECT_EQ(captured.out, "");
     EXPECT_EQ(captured.err, "sed: file /brace line 2: unmatched `{'\n");
+    EXPECT_EQ(captured.status, 1);
+    // A bad command on the file's second line, reported there.
+    captured = RunCaptured("sed", {"-f", "/badcmd"}, kTwo);
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "sed: file /badcmd line 2: unknown command: `k'\n");
     EXPECT_EQ(captured.status, 1);
     captured = RunCaptured("sed", {"-f", "/nosuch"});
     EXPECT_EQ(captured.err, "sed: couldn't open file /nosuch: No such file or directory\n");
@@ -523,6 +653,22 @@ TEST_F(BuiltinCommandsTest, SedScriptErrors) {
         {"2,3"},
         {"s,/x,"},
         {"\\$p"},
+        {"s/a"},
+        {"s/[/x/"},
+        {"p;k"},
+        {"{p"},
+        {"p}"},
+        {"s/a/b/q"},
+        {"s/a/b/pp"},
+        {"s/\\(a/b/"},
+        {"0,5p"},
+        {"1!!p"},
+        {"p x"},
+        {"/x"},
+        {"\\%x"},
+        {"{p;1}"},
+        {"1}"},
+        {"1,2}"},
     };
     const std::vector<std::string> errors = {
         "sed: -e expression #1, char 1: unknown command: `u'\n",
@@ -547,6 +693,22 @@ TEST_F(BuiltinCommandsTest, SedScriptErrors) {
         "sed: -e expression #1, char 3: missing command\n",
         "sed: -e expression #1, char 5: unterminated `s' command\n",
         "sed: -e expression #1, char 3: unterminated address regex\n",
+        "sed: -e expression #1, char 3: unterminated `s' command\n",
+        "sed: -e expression #1, char 6: unterminated `s' command\n",
+        "sed: -e expression #1, char 3: unknown command: `k'\n",
+        "sed: -e expression #1, char 0: unmatched `{'\n",
+        "sed: -e expression #1, char 2: unexpected `}'\n",
+        "sed: -e expression #1, char 7: unknown option to `s'\n",
+        "sed: -e expression #1, char 8: multiple `p' options to `s' command\n",
+        "sed: -e expression #1, char 8: Unmatched ( or \\(\n",
+        "sed: -e expression #1, char 4: invalid usage of line address 0\n",
+        "sed: -e expression #1, char 3: multiple `!'s\n",
+        "sed: -e expression #1, char 3: extra characters after command\n",
+        "sed: -e expression #1, char 2: unterminated address regex\n",
+        "sed: -e expression #1, char 3: unterminated address regex\n",
+        "sed: -e expression #1, char 5: `}' doesn't want any addresses\n",
+        "sed: -e expression #1, char 2: unexpected `}'\n",
+        "sed: -e expression #1, char 4: unexpected `}'\n",
     };
     for (size_t i = 0; i < cases.size(); ++i) {
         Captured captured = RunCaptured("sed", cases[i], kFour);

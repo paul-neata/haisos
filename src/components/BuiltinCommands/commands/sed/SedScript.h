@@ -61,7 +61,7 @@ struct Command {
     // Runtime state of a range address, carried in the script (a script
     // object serves one run).
     bool rangeActive = false;
-    bool rangeEnded = false;   // a 0,/re/ or a range past its end, never restarting
+    bool rangeEnded = false;   // a 0,/re/ past its end, never restarting
     uint64_t rangeStart = 0;   // the line the range started on
 };
 

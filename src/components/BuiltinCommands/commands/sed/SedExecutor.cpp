@@ -321,16 +321,19 @@ bool MatchAddress(Command& command, SedInput& input, const std::string& patternS
             }
         }
     } else if (command.a2.kind != AddressKind::None) {
-        if (command.rangeEnded) {
-            matched = false;
-        } else if (!command.rangeActive) {
+        if (!command.rangeActive) {
             matched = MatchOne(command.a1, input, patternSpace, lastRegex, missingRegex);
             if (matched) {
-                command.rangeActive = true;
                 command.rangeStart = input.LineNumber();
-                if (command.a2.kind == AddressKind::Line && command.a2.line <= input.LineNumber()) {
-                    command.rangeEnded = true;
-                }
+                // A second address already reached (a line number at or
+                // before this line, +0, ~0) ends the range on its first
+                // line, as one line; a ~N with N > 0 ends at the next
+                // multiple strictly after it, never on the line itself.
+                const bool oneLine =
+                    (command.a2.kind == AddressKind::Line && command.a2.line <= input.LineNumber()) ||
+                    (command.a2.kind == AddressKind::RelativeLines && command.a2.line == 0) ||
+                    (command.a2.kind == AddressKind::Multiple && command.a2.line == 0);
+                command.rangeActive = !oneLine;
             }
         } else {
             matched = true;
@@ -350,14 +353,19 @@ bool MatchAddress(Command& command, SedInput& input, const std::string& patternS
                         end = input.LineNumber() >= command.rangeStart + command.a2.line;
                         break;
                     case AddressKind::Multiple:
-                        end = input.LineNumber() % command.a2.line == 0;
+                        // ~0 cannot reach here (the range ended at its
+                        // start), but keep the division safe.
+                        end = command.a2.line == 0 || input.LineNumber() % command.a2.line == 0;
                         break;
                     default:
                         break;
                 }
             }
             if (end) {
-                command.rangeEnded = true;
+                // The range is over: a1 is matched again from the next line
+                // on, so a later one may open a range of its own. Only
+                // 0,/re/ (rangeEnded) never restarts.
+                command.rangeActive = false;
             }
         }
     } else {

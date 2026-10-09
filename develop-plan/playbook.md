@@ -34,7 +34,7 @@ Pause: no
 | 26 | [search--rg-search](tasks/search--rg-search.md) | done | 0.5.27 | 20 | #69 | 1 | 0C 2H fixed, 0M 3L open | Windows red, not checked; grep -q fix (#58) included, grep 1.2.0 |
 | 27 | [search--rg-regex](tasks/search--rg-regex.md) | done | 0.5.28 | 26 | #70 | 1 | 0C 1H fixed, 3M 4L open | Windows red, not checked; clean-room checked |
 | 28 | [search--rg-ignore](tasks/search--rg-ignore.md) | done | 0.5.29 | 26 | #71 | 2 | 0C 2H fixed, 4M 3L open | Windows red, not checked; clean-room checked |
-| 29 | [diff--diff-core](tasks/diff--diff-core.md) | in-review | 0.5.30 | 4, 12 | #72 | 4 | | runs 1-2 died on the 32000 output-token cap, 3 on Ollama 429 (account changed); finished in fix round 4 |
+| 29 | [diff--diff-core](tasks/diff--diff-core.md) | done | 0.5.30 | 4, 12 | #72 | 4 | 1C 2H 2M 1L fixed, 1M 2L open | Windows red, not checked; clean-room re-planned; runs 1-2 died on the 32000 output-token cap, 3 on Ollama 429 (account changed); finished in fix round 4 |
 | 30 | [diff--diff-recursive](tasks/diff--diff-recursive.md) | todo | | 29, 20 | | | | |
 | 31 | [diff--patch-core](tasks/diff--patch-core.md) | todo | | 1, 4, 29 | | | | |
 | 32 | [diff--patch-fuzz-rej](tasks/diff--patch-fuzz-rej.md) | todo | | 31, 7 | | | | |

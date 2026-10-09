@@ -26,6 +26,9 @@ add_library(BuiltinCommands STATIC
     commands/echo/Echo.cpp
     commands/env/Env.cpp
     commands/false/False.cpp
+    commands/find/Find.cpp
+    commands/find/FindParser.cpp
+    commands/find/FindTests.cpp
     commands/grep/Grep.cpp
     commands/grep/GrepContext.cpp
     commands/grep/GrepFile.cpp

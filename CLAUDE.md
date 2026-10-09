@@ -28,7 +28,7 @@ haisos/
 ├── src/
 │   ├── components/        - Component implementations (each has its own CLAUDE.md)
 │   │   ├── Agent/
-│   │   ├── BuiltinCommands/ - The builtin commands ([, basename, cat, chmod, cmp, cp, cut, date, dirname, du, echo, egrep, env, false, fgrep, grep, head, hsh, ls, man, mkdir, mv, nl, printf, pwd, realpath, rm, rmdir, seq, sleep, sort, stat, tail, tee, test, touch, tr, true, uniq, wc, which; each in commands/<name>/) and what places them on filesystems
+│   │   ├── BuiltinCommands/ - The builtin commands ([, basename, cat, chmod, cmp, cp, cut, date, dirname, du, echo, egrep, env, false, fgrep, find, grep, head, hsh, ls, man, mkdir, mv, nl, printf, pwd, realpath, rm, rmdir, seq, sleep, sort, stat, tail, tee, test, touch, tr, true, uniq, wc, which; each in commands/<name>/) and what places them on filesystems
 │   │   ├── Console/
 │   │   ├── Environment/
 │   │   ├── Factory/
@@ -537,7 +537,7 @@ returned by `IHaisosOS`'s `OSToolFactory` and merged with an agent's tools
 
 Commands compiled into Haisos (`[`, `basename`, `cat`, `chmod`, `cmp`, `cp`,
 `cut`, `date`, `dirname`, `du`, `echo`, `egrep`, `env`, `false`, `fgrep`,
-`grep`, `head`, `hsh`, `ls`, `man`, `mkdir`, `mv`, `nl`, `printf`, `pwd`, `realpath`,
+`find`, `grep`, `head`, `hsh`, `ls`, `man`, `mkdir`, `mv`, `nl`, `printf`, `pwd`, `realpath`,
 `rm`, `rmdir`, `seq`, `sleep`, `sort`, `stat`, `tail`, `tee`, `test`, `touch`, `tr`,
 `true`, `uniq`, `wc`, `which`), implemented in
 `src/components/BuiltinCommands/`
@@ -608,6 +608,7 @@ use a builtin with what it already knows about the real command:
 | `env` | Runs a program in a modified environment (`-i -0 -u NAME -C DIR -S STRING`), the child looked up in the new PATH; with no COMMAND, prints the variables sorted by name |
 | `false` | Does nothing, exits 1 (`--help`/`--version` only as the sole argument, and 1 even after them) |
 | `fgrep` | `grep -F`: grep with fixed strings preselected (see `grep`) |
+| `find` | Searches a directory tree (findutils 4.9.0): the leading options `-H -L -P -O -D --`, the expression operators `( ) ! -not -a -and -o -or ,` with implicit `-a`, the global options (`-depth -d -maxdepth -mindepth -mount -xdev -noleaf -ignore_readdir_race -noignore_readdir_race -files0-from -warn -nowarn`), the positional (`-daystart -follow -regextype`), every test (`-amin` ... `-xtype`, `-name`/`-path` through `FnMatch`, `-regex` through the `Regex` engine, the time windows GNU's, `-newerXY`, `-perm`, `-size`, the ownership and type ones) and the actions `-print -print0 -prune -quit`; GNU's two-phase parse and its diagnostics and warnings, the implicit `-print` when no action is given, the walk pre-order (post-order with `-depth`), `-quit` ending it and a stop checked per file | mode 0777, owner `haisos` (uid and gid 0), inode 0; no links (`-lname` never matches, `-H -L -P -follow` change nothing); a birth-time `-newerXY` is refused; `-xdev -mount -fstype -D -O` not treated; `-context` fails, as GNU's without SELinux; entries of a directory are visited in the filesystem's order, not the disk's |
 | `grep` | Prints lines matching patterns (`-E -F -G -P -e -f -i -v -w -x -c -l -L -q -o -n -b -H -h --label -T -m -s -a -I --binary-files -U -z --line-buffered -r -R -d -D --include --exclude --exclude-from --exclude-dir -Z`), several patterns (one per line of an argument or file), GNU's prefixes, binary files by the first NUL, exit statuses 0/1/2; recursive search (`.` by default, `-d read/recurse/skip`, `-D read/skip` for devices, the `--include`/`--exclude` filters GNU's way), context (`-A -B -C -NUM` with `--` group separators, `--group-separator`, `--no-group-separator`) and colour (`--color`/`--colour` with `GREP_COLORS`) |
 | `head` | Outputs the first part of files (`-c -n -q -v -z`, obsolete `-NUM[bckmlqvz]...`): the first NUM lines/bytes, or all but the last NUM (a leading `-`); size suffixes `1k`, `1kB`, `1KiB`, `b`; `==> NAME <==` headers with more than one FILE, `-q` never, `-v` always |
 | `hsh` | The Haisos shell, after dash: `-c`, scripts, stdin or interactive (`RUN -i /bin/hsh`); quoting, expansions, pipelines, redirections, heredocs, lists, control flow, functions; commands found in `PATH` |

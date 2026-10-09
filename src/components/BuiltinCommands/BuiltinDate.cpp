@@ -42,7 +42,8 @@ bool DigitsTo(std::string_view digits, int64_t& out) {
     }
     errno = 0;
     char* end = nullptr;
-    const long long value = std::strtoll(std::string(digits).c_str(), &end, 10);
+    const std::string text(digits);
+    const long long value = std::strtoll(text.c_str(), &end, 10);
     if (errno == ERANGE || end == nullptr || *end != '\0') {
         return false;
     }

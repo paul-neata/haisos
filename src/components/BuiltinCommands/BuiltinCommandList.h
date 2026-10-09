@@ -26,6 +26,7 @@ std::shared_ptr<IBuiltinCommand> CreateEgrepCommand();
 std::shared_ptr<IBuiltinCommand> CreateEnvCommand();
 std::shared_ptr<IBuiltinCommand> CreateFalseCommand();
 std::shared_ptr<IBuiltinCommand> CreateFgrepCommand();
+std::shared_ptr<IBuiltinCommand> CreateFindCommand();
 std::shared_ptr<IBuiltinCommand> CreateGrepCommand();
 std::shared_ptr<IBuiltinCommand> CreateHeadCommand();
 std::shared_ptr<IBuiltinCommand> CreateHshCommand();
@@ -73,6 +74,7 @@ inline std::vector<std::shared_ptr<IBuiltinCommand>> CreateStandardBuiltinComman
         CreateEnvCommand(),
         CreateFalseCommand(),
         CreateFgrepCommand(),
+        CreateFindCommand(),
         CreateGrepCommand(),
         CreateHeadCommand(),
         CreateHshCommand(),

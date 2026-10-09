@@ -98,6 +98,15 @@ private:
     bool m_atEnd = false;
 };
 
+// One input's bytes read whole, or why they could not be.
+enum class WholeReadOutcome { Done, Stopped, Error };
+
+// Reads |file| whole into |out|, 64 KiB at a time, with no size cap. A stop
+// asked for (or a read it interrupted) ends quietly; any other failed read
+// is the caller's error to report. diff reads its operands this way, and
+// patch every file it touches.
+WholeReadOutcome ReadWholeInput(BuiltinContext& context, IFileDescriptor& file, std::string& out);
+
 // Writes all of |bytes| to |out|, looping over partial writes. Returns
 // bytes.size(), or the first negative result (kIOError, kIOBrokenPipe, ...).
 // For outputs that are not stdout (sort -o, uniq OUTPUT, tee's files);

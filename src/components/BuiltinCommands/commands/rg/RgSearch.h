@@ -8,6 +8,13 @@
 
 namespace Haisos {
 
+// One -g / --iglob glob, with its own case folding (--iglob, or
+// --glob-case-insensitive).
+struct RgGlob {
+    std::string pattern;
+    bool caseFold = false;
+};
+
 // What rg prints: the output modes of ripgrep 14.1.1, one at a time (the
 // last one given wins, --files included).
 enum class RgMode {
@@ -47,6 +54,17 @@ struct RgSettings {
     bool noMessages = false;                 // --no-messages
     int color = 1;                           // --color: 0 never, 1 auto, 2 always
     bool lineBuffered = false;                // --line-buffered
+    // What the walk skips (search--rg-ignore).
+    bool hidden = false;                     // --hidden / -.: search hidden entries
+    bool noIgnoreDot = false;                // .ignore and .rgignore not respected
+    bool noIgnoreVcs = false;                // .gitignore and .git/info/exclude not
+    bool noIgnoreExclude = false;            // .git/info/exclude alone not
+    bool noIgnoreParent = false;             // .ignore/.rgignore above the operand
+    bool requireGit = true;                  // .gitignore only inside a repository
+    std::optional<uint64_t> maxDepth;        // --max-depth: nothing deeper visited
+    std::vector<RgGlob> globs;               // -g / --iglob, in the order given
+    std::vector<std::string> typeSelected;  // -t: the selected types' globs
+    std::vector<std::string> typeNegated;    // -T: the negated types' globs
 };
 
 // What the run came to, for Rg.cpp to turn into an exit status.

@@ -409,21 +409,27 @@ TEST_F(BuiltinCommandsTest, RgColor) {
 
 TEST_F(BuiltinCommandsTest, RgHelpAndVersion) {
     const Captured version = RunCaptured("rg", {"--version"});
-    EXPECT_EQ(version.out, "rg (HaisosOS builtin) 1.1.0\n");
+    EXPECT_EQ(version.out, "rg (HaisosOS builtin) 1.2.0\n");
     EXPECT_EQ(version.status, 0);
     // ripgrep has no man7 page: the reference line links its guide.
     int status = -1;
     const Lines help = Run("rg", {"--help"}, &status);
     EXPECT_EQ(status, 0);
     ASSERT_GE(help.size(), 5u);
-    EXPECT_EQ(help[0], "HaisosOS rg version 1.1.0 - recursively search the current directory "
+    EXPECT_EQ(help[0], "HaisosOS rg version 1.2.0 - recursively search the current directory "
                        "for lines matching a pattern");
     EXPECT_EQ(help[1], "Based on Linux rg: https://github.com/BurntSushi/ripgrep/blob/14.1.1/GUIDE.md");
     EXPECT_EQ(help[3], "Usage: rg [OPTIONS] PATTERN [PATH ...]");
     EXPECT_EQ(help.back().rfind("Not treated arguments: ", 0), 0u);
-    // The ignore rules of a later develop, and the rest Haisos lacks.
-    EXPECT_NE(help.back().find("-., --hidden"), std::string::npos);
+    // The ignore rules of search--rg-ignore are treated now: -g and --hidden
+    // are described, not reported; the rest Haisos lacks stays.
+    EXPECT_EQ(help.back().find("--hidden"), std::string::npos);
     EXPECT_NE(help.back().find("--pcre2"), std::string::npos);
+    bool describesGlob = false;
+    for (const std::string& line : help) {
+        if (line.find("-g, --glob=GLOB") != std::string::npos) describesGlob = true;
+    }
+    EXPECT_TRUE(describesGlob);
     const Lines shortHelp = Run("rg", {"-h"}, &status);
     EXPECT_EQ(status, 0);
     EXPECT_EQ(shortHelp, help);

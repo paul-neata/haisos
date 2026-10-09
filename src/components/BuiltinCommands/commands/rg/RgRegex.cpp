@@ -161,7 +161,18 @@ private:
     }
 
     bool EmitQuantifier(const std::string& base, bool lazy) {
-        if (m_lastItemBoundary) return true;  // a repeated assertion is itself
+        if (m_lastItemBoundary) {
+            // A quantifier with a 0 minimum makes a zero-width assertion
+            // optional, as Rust's regex does (^*abc matches xabc): an
+            // empty alternative, the one spelling of that Haisos's Perl
+            // subset takes (it will not repeat an assertion). A non-zero
+            // minimum leaves the assertion itself.
+            if (base == "*" || base == "?") {
+                m_out.insert(m_lastItemStart, "(?:");
+                m_out += "|)";
+            }
+            return true;
+        }
         if (m_lastQuantified) {
             // stacked: wrap what the previous quantifier took first
             m_out.insert(m_lastItemStart, "(?:");
@@ -221,7 +232,23 @@ private:
         ++m_i;
         StartAtom();
         if (byte >= 0x80) {
-            m_out += c;  // raw non-ASCII bytes, as the bytes they are
+            // Raw non-ASCII bytes, as the bytes they are. A multi-byte
+            // sequence is one atom, so a quantifier after it repeats the
+            // whole code point, not its last byte.
+            size_t length = 1;
+            while (m_i < m_w.size()
+                   && static_cast<unsigned char>(m_w[m_i]) >= 0x80
+                   && static_cast<unsigned char>(m_w[m_i]) < 0xc0) {
+                ++length;
+                ++m_i;
+            }
+            if (length > 1) {
+                m_out += "(?:";
+                m_out.append(m_w.substr(m_i - length, length));
+                m_out += ')';
+            } else {
+                m_out += c;
+            }
         } else if (byte >= 'A' && byte <= 'Z') {
             m_hasUpper = true;
             m_out += c;
@@ -445,9 +472,9 @@ private:
     // m_i at the '{'. Spaces inside the braces are dropped always, and what
     // stops the counts short of '}' is "unclosed" from '{' to there. A count
     // on a zero-width assertion (\b{2}, \b{0}) is the assertion itself --
-    // \b{0} the empty match -- since Haisos's engine takes no '{m}' after
-    // one; |boundaryRepeat| says the assertion is this quantifier's own.
-    bool ParseCountedQuantifier(bool boundaryRepeat = false) {
+    // or, with a 0 minimum, an optional one -- since Haisos's engine takes
+    // no '{m}' after one.
+    bool ParseCountedQuantifier() {
         const size_t openPos = m_i++;
         if (!m_lastRepeatable) return Fail(openPos, 1, "repetition operator missing expression");
         SkipBraceSpace();
@@ -483,8 +510,11 @@ private:
         const bool lazy = m_i < m_w.size() && m_w[m_i] == '?';
         if (lazy) ++m_i;
         if (m_lastItemBoundary) {
-            if (boundaryRepeat && min == 0) m_out.resize(m_lastItemStart);
-            return true;  // EmitQuantifier swallows it either way
+            if (min == 0) {
+                m_out.insert(m_lastItemStart, "(?:");
+                m_out += "|)";
+            }
+            return true;  // a non-zero minimum: the assertion itself
         }
         return EmitQuantifier(base, lazy);
     }
@@ -564,10 +594,10 @@ private:
         while (p < m_w.size() && (IsAlpha(m_w[p]) || m_w[p] == '-')) ++p;
         const size_t nameLength = p - nameStart;
         if (nameLength == 0) {
-            // m_i at the '{': \b{2} is the boundary, \b{0} the empty match
+            // m_i at the '{': \b{2} is the boundary, \b{0} an optional one
             m_out += "\\b";
             m_lastItemBoundary = true;
-            return ParseCountedQuantifier(true);
+            return ParseCountedQuantifier();
         }
         const std::string name(m_w.substr(nameStart, nameLength));
         if (p >= m_w.size() || m_w[p] != '}') {
@@ -628,7 +658,8 @@ private:
     }
 
     // A code point outside a class: its bytes, one \xhh each ('\n' takes the
-    // multiline message instead).
+    // multiline message instead). Above 0x7f the bytes are one atom, so a
+    // quantifier after them repeats the whole code point, not its last byte.
     bool EmitCodePoint(unsigned int value) {
         if (value == 0x0a) {
             m_error.multiline = true;
@@ -638,6 +669,7 @@ private:
             m_out += HexByte(static_cast<unsigned char>(value));
             return true;
         }
+        m_out += "(?:";
         if (value <= 0x7ff) {
             m_out += HexByte(static_cast<unsigned char>(0xc0 | (value >> 6)));
             m_out += HexByte(static_cast<unsigned char>(0x80 | (value & 0x3f)));
@@ -651,6 +683,7 @@ private:
             m_out += HexByte(static_cast<unsigned char>(0x80 | ((value >> 6) & 0x3f)));
             m_out += HexByte(static_cast<unsigned char>(0x80 | (value & 0x3f)));
         }
+        m_out += ')';
         return true;
     }
 

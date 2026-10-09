@@ -1,11 +1,15 @@
 #include "commands/rg/RgSearch.h"
 #include <algorithm>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <optional>
 #include <vector>
+#include "BuiltinFnmatch.h"
 #include "BuiltinText.h"
 #include "commands/grep/GrepContext.h"
+#include "commands/rg/RgIgnore.h"
+#include "src/components/Filesystem/FilesystemUtils.h"
 #include "interfaces/IFileIO.h"
 #include "interfaces/IProcess.h"
 
@@ -419,6 +423,255 @@ FileOutcome SearchFile(BuiltinContext& context, const RgSettings& settings, cons
     return result;
 }
 
+// One directory's ignore files, read once and cached by its absolute path.
+struct RgDirIgnores {
+    std::string absDir;  // '/'-separated, absolute, no trailing '/'
+    bool hasGit = false;  // an entry named .git, a directory or a file
+    bool gitIsDir = false;
+    RgGitignore rgignore;   // .rgignore
+    RgGitignore dotIgnore;  // .ignore
+    RgGitignore gitignore;  // .gitignore
+    RgGitignore gitExclude;  // .git/info/exclude
+};
+
+// The directories an entry's decision looks at: D (the directory being
+// walked) and every ancestor up to '/', deepest first, with the index of the
+// nearest one holding a .git -- the root of the repository D is inside.
+struct RgChainEntry {
+    const RgDirIgnores* data;
+    bool aboveOperand;  // an ancestor above the operand's own directory
+};
+struct RgChain {
+    std::vector<RgChainEntry> dirs;  // [0] is D, the last is '/'
+    int repoRoot = -1;               // index of the nearest .git holder, -1 none
+};
+
+// What the walk skips, ripgrep's order: the -g globs first, then the ignore
+// files by kind, then the types, then hidden names. Operands are never
+// filtered; only entries met while walking go through here.
+class RgIgnoreFilters {
+public:
+    RgIgnoreFilters(BuiltinContext& context, const RgSettings& settings)
+        : m_context(context)
+        , m_settings(settings) {
+        for (const auto& glob : settings.globs) {
+            m_globs.AddLines(glob.pattern, glob.caseFold);
+        }
+    }
+
+    // The chain for a directory operand: its own directory and everything
+    // above, up to '/'.
+    RgChain ChainFor(const std::string& absDir) {
+        RgChain chain;
+        std::string dir = absDir;
+        while (true) {
+            chain.dirs.push_back({&DataFor(dir), !chain.dirs.empty()});
+            if (dir == "/") {
+                break;
+            }
+            const size_t slash = dir.rfind('/');
+            dir = slash == 0 ? "/" : dir.substr(0, slash);
+        }
+        chain.repoRoot = -1;
+        for (size_t i = 0; i < chain.dirs.size(); ++i) {
+            if (chain.dirs[i].data->hasGit) {
+                chain.repoRoot = static_cast<int>(i);
+                break;
+            }
+        }
+        return chain;
+    }
+
+    // The chain for a subdirectory of |chain|: its own data in front, the
+    // repository root one further away (or itself, when it holds a .git).
+    RgChain Descend(const RgChain& chain, const std::string& absChildDir) {
+        RgChain next;
+        next.dirs.reserve(chain.dirs.size() + 1);
+        const RgDirIgnores& data = DataFor(absChildDir);
+        next.dirs.push_back({&data, false});
+        for (const auto& entry : chain.dirs) {
+            next.dirs.push_back(entry);
+        }
+        next.repoRoot = data.hasGit ? 0
+            : chain.repoRoot >= 0 ? chain.repoRoot + 1 : -1;
+        return next;
+    }
+
+    // Whether an entry met while walking is skipped. |absChild|: its
+    // absolute path; |printedPath|: the path as printed (a glob is matched
+    // against it, without a leading "./"); |name|: its own name.
+    bool SkipEntry(const RgChain& chain, const std::string& absChild,
+                   const std::string& printedPath, const std::string& name,
+                   bool isDirectory) {
+        // 1. Globs, matched against the path relative to the working
+        //    directory. A plain glob that matched whitelists the entry
+        //    (steps 2-4 skipped); a '!' glob that matched excludes it; a
+        //    file matched by none is skipped when any plain glob exists.
+        if (!m_globs.Empty()) {
+            std::string_view globPath = printedPath;
+            if (globPath.compare(0, 2, "./") == 0) {
+                globPath.remove_prefix(2);
+            }
+            const RgMatch glob = m_globs.Match(globPath, isDirectory);
+            if (glob == RgMatch::Whitelist) {
+                return true;  // an '!' glob: excluded
+            }
+            if (glob == RgMatch::Ignore) {
+                return false;  // a plain glob: whitelisted
+            }
+            if (!isDirectory && m_globs.HasWhitelist()) {
+                return true;
+            }
+        }
+        bool whitelisted = false;
+        // 2. Ignore files, by kind in this precedence: .rgignore, .ignore,
+        //    .gitignore, .git/info/exclude. Within a kind the deepest
+        //    directory whose file has a matching pattern decides; the
+        //    first kind with a decision wins.
+        for (int kind = 0; kind < 4; ++kind) {
+            RgMatch match = RgMatch::None;
+            for (size_t i = 0; i < chain.dirs.size(); ++i) {
+                const RgChainEntry& entry = chain.dirs[i];
+                if (!KindApplies(kind, entry, chain.repoRoot, i)) {
+                    continue;
+                }
+                const RgGitignore* file = KindFile(*entry.data, kind);
+                if (!file) {
+                    continue;
+                }
+                match = file->Match(RelativeTo(entry.data->absDir, absChild), isDirectory);
+                if (match != RgMatch::None) {
+                    break;
+                }
+            }
+            if (match == RgMatch::Ignore) {
+                return true;
+            }
+            if (match == RgMatch::Whitelist) {
+                whitelisted = true;  // remembered for the hidden check
+                break;
+            }
+        }
+        // 3. Types, files only: a -T type wins over -t; a -t type must match.
+        if (!isDirectory) {
+            if (MatchesTypeGlobs(m_settings.typeNegated, name)) {
+                return true;
+            }
+            if (!m_settings.typeSelected.empty()) {
+                if (MatchesTypeGlobs(m_settings.typeSelected, name)) {
+                    whitelisted = true;
+                } else {
+                    return true;
+                }
+            }
+        }
+        // 4. A hidden name, unless --hidden or whitelisted above.
+        if (!name.empty() && name[0] == '.' && !m_settings.hidden && !whitelisted) {
+            return true;
+        }
+        return false;
+    }
+
+private:
+    // One directory's data, read through context.IO() once, cached by path.
+    const RgDirIgnores& DataFor(const std::string& absDir) {
+        const auto cached = m_cache.find(absDir);
+        if (cached != m_cache.end()) {
+            return cached->second;
+        }
+        RgDirIgnores data;
+        data.absDir = absDir;
+        for (const auto& entry : m_context.IO().ReadDirectory(absDir)) {
+            if (entry.name == ".git") {
+                data.hasGit = true;
+                data.gitIsDir = entry.type == DirectoryEntryType::Dir;
+            }
+        }
+        const auto join = [&](const char* below) {
+            return data.absDir == "/" ? "/" + std::string(below)
+                : data.absDir + "/" + below;
+        };
+        std::string text;
+        if (ReadWholeFile(m_context.IO(), join(".rgignore"), text)) {
+            data.rgignore = RgGitignore::Parse(text, false);
+        }
+        if (ReadWholeFile(m_context.IO(), join(".ignore"), text)) {
+            data.dotIgnore = RgGitignore::Parse(text, false);
+        }
+        if (ReadWholeFile(m_context.IO(), join(".gitignore"), text)) {
+            data.gitignore = RgGitignore::Parse(text, false);
+        }
+        if (data.gitIsDir
+            && ReadWholeFile(m_context.IO(), join(".git/info/exclude"), text)) {
+            data.gitExclude = RgGitignore::Parse(text, false);
+        }
+        return m_cache.emplace(absDir, std::move(data)).first->second;
+    }
+
+    // Whether the ignore files of |kind| apply from a chain entry.
+    bool KindApplies(int kind, const RgChainEntry& entry, int repoRoot, size_t index) const {
+        switch (kind) {
+            case 0:  // .rgignore
+            case 1:  // .ignore
+                if (m_settings.noIgnoreDot) {
+                    return false;
+                }
+                return !(m_settings.noIgnoreParent && entry.aboveOperand);
+            case 2:  // .gitignore
+                // --no-ignore-parent: none above the operand, as for the
+                // dot files (rg's manual: ignore files in parent directories)
+                if (m_settings.noIgnoreVcs
+                    || (m_settings.noIgnoreParent && entry.aboveOperand)) {
+                    return false;
+                }
+                if (repoRoot >= 0) {
+                    return index <= static_cast<size_t>(repoRoot);
+                }
+                return !m_settings.requireGit;
+            case 3:  // .git/info/exclude: the repository root's alone
+                if (m_settings.noIgnoreVcs || m_settings.noIgnoreExclude) {
+                    return false;
+                }
+                return repoRoot >= 0 && index == static_cast<size_t>(repoRoot);
+        }
+        return false;
+    }
+
+    static const RgGitignore* KindFile(const RgDirIgnores& data, int kind) {
+        const RgGitignore* file = kind == 0 ? &data.rgignore
+            : kind == 1 ? &data.dotIgnore
+            : kind == 2 ? &data.gitignore : &data.gitExclude;
+        return file->Empty() ? nullptr : file;
+    }
+
+    // |absChild| relative to |absDir| (an ancestor of it): no leading "./".
+    static std::string_view RelativeTo(const std::string& absDir, const std::string& absChild) {
+        if (absDir == "/") {
+            return std::string_view(absChild).substr(1);
+        }
+        return std::string_view(absChild).substr(absDir.size() + 1);
+    }
+
+    static bool MatchesTypeGlobs(const std::vector<std::string>& globs, const std::string& name) {
+        for (const auto& glob : globs) {
+            if (FnMatch(glob, name, 0)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    BuiltinContext& m_context;
+    const RgSettings& m_settings;
+    RgGitignore m_globs;  // the -g/--iglob globs
+    std::map<std::string, RgDirIgnores> m_cache;
+};
+
+// |absDir| + '/' + |name|, with nothing between at the root.
+std::string JoinAbs(const std::string& absDir, const std::string& name) {
+    return absDir == "/" ? "/" + name : absDir + "/" + name;
+}
+
 } // namespace
 
 RgResult RgSearch(BuiltinContext& context, const RgSettings& settings, const GrepMatcher& matcher,
@@ -589,15 +842,27 @@ RgResult RgSearch(BuiltinContext& context, const RgSettings& settings, const Gre
         return operand + "/";
     };
 
+    // What the walk skips: the -g globs, the ignore files, the types, hidden
+    // names. Operands are never filtered; only entries met while walking.
+    RgIgnoreFilters filters(context, settings);
+
     // The recursive walk, depth first: the entries of a directory minus
     // . and .., in byte order, files and directories together (rg's
     // --sort path order, without its parallelism). A device met while
-    // walking is skipped.
+    // walking is skipped, and so is what ripgrep skips: the filters decide
+    // per entry, a skipped directory not descended. |depth|: the operand's
+    // directory is 0, its entries 1; with --max-depth nothing deeper than
+    // that is visited.
     const auto walk = [&](const auto& self, const std::string& dirPath,
-                          const std::string& prefix) -> void {
+                          const std::string& prefix, const RgChain& chain,
+                          uint64_t depth) -> void {
         if (context.StopRequested() || stopped) {
             return;
         }
+        if (settings.maxDepth && depth >= *settings.maxDepth) {
+            return;
+        }
+        const std::string& absDir = chain.dirs[0].data->absDir;
         std::vector<DirectoryEntry> children;
         for (const auto& entry : context.IO().ReadDirectory(dirPath)) {
             if (entry.name != "." && entry.name != "..") {
@@ -610,9 +875,15 @@ RgResult RgSearch(BuiltinContext& context, const RgSettings& settings, const Gre
             if (context.StopRequested() || stopped) {
                 return;
             }
+            const bool isDirectory = entry.type == DirectoryEntryType::Dir;
             const std::string child = prefix + entry.name;
-            if (entry.type == DirectoryEntryType::Dir) {
-                self(self, child, child + "/");
+            if (filters.SkipEntry(chain, JoinAbs(absDir, entry.name), child, entry.name,
+                                  isDirectory)) {
+                continue;
+            }
+            if (isDirectory) {
+                self(self, child, child + "/",
+                     filters.Descend(chain, JoinAbs(absDir, entry.name)), depth + 1);
             } else if (entry.type == DirectoryEntryType::CharDevice) {
                 continue;
             } else if (settings.mode == RgMode::Files) {
@@ -643,7 +914,9 @@ RgResult RgSearch(BuiltinContext& context, const RgSettings& settings, const Gre
         FileStatus status;
         const bool haveStat = context.IO().Stat(path, status) == 0;
         if (haveStat && status.type == DirectoryEntryType::Dir) {
-            walk(walk, path, childPrefix(path));
+            // A directory operand is itself never filtered; the walk inside
+            // it decides per entry.
+            walk(walk, path, childPrefix(path), filters.ChainFor(context.IO().ResolvePath(path)), 0);
             continue;
         }
         if (!haveStat) {

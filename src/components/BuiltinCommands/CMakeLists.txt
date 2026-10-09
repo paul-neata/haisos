@@ -30,6 +30,7 @@ add_library(BuiltinCommands STATIC
     commands/grep/GrepContext.cpp
     commands/grep/GrepFile.cpp
     commands/grep/GrepMatcher.cpp
+    commands/head/Head.cpp
     commands/ls/Ls.cpp
     commands/man/Man.cpp
     commands/mkdir/Mkdir.cpp
@@ -45,6 +46,7 @@ add_library(BuiltinCommands STATIC
     commands/sort/Sort.cpp
     commands/sort/SortKeys.cpp
     commands/stat/Stat.cpp
+    commands/tail/Tail.cpp
     commands/tee/Tee.cpp
     commands/test/Test.cpp
     commands/touch/Touch.cpp

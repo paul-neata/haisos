@@ -1235,6 +1235,43 @@ TEST_F(BuiltinCommandsTest, DiffFromToFile) {
     EXPECT_EQ(missing.status, 2);
 }
 
+// The remaining cases of the plan, each printed by GNU diff 3.10 (LC_ALL=C):
+// -P and its one-way rule, '-' against a directory, the option conflicts,
+// -ruN's epoch header, and a long option word that needs quoting.
+TEST_F(BuiltinCommandsTest, DiffDirOperandRules) {
+    MakeDiffTree(root);
+    auto captured = RunCaptured("diff", {"-P", "nofile", "x"}, std::nullopt, "/t");
+    EXPECT_EQ(captured.out, "0a1\n> 1\n");
+    EXPECT_EQ(captured.status, 1);
+    captured = RunCaptured("diff", {"--unidirectional-new-file", "x", "nofile"}, std::nullopt, "/t");
+    EXPECT_EQ(captured.err, "diff: nofile: No such file or directory\n");
+    EXPECT_EQ(captured.status, 2);
+    captured = RunCaptured("diff", {"-", "ra"}, std::nullopt, "/t");
+    EXPECT_EQ(captured.err, "diff: cannot compare '-' to a directory\n");
+    EXPECT_EQ(captured.status, 2);
+    captured = RunCaptured("diff", {"--from-file=a", "--to-file=b", "x"}, std::nullopt, "/t");
+    EXPECT_EQ(captured.err, "diff: --from-file and --to-file both specified\n");
+    EXPECT_EQ(captured.status, 2);
+    captured = RunCaptured("diff", {"-S", "a", "-S", "b", "ra", "rb"}, std::nullopt, "/t");
+    EXPECT_EQ(captured.err, "diff: conflicting -S option value 'b'\n"
+                            "diff: Try 'diff --help' for more information.\n");
+    EXPECT_EQ(captured.status, 2);
+    captured = RunCaptured("diff", {"-X", "nope", "ra", "rb"}, std::nullopt, "/t");
+    EXPECT_EQ(captured.err, "diff: nope: No such file or directory\n");
+    EXPECT_EQ(captured.status, 2);
+
+    captured = RunCaptured("diff", {"-ruN", "na", "nb"}, std::nullopt, "/t");
+    const std::string epoch = FormatDateTime("%Y-%m-%d %H:%M:%S.%N %z", FileDateTime{0, 0}, false);
+    EXPECT_EQ(captured.out.rfind("diff -ruN na/new nb/new\n--- na/new\t" + epoch + "\n+++ nb/new\t", 0), 0u)
+        << captured.out;
+    EXPECT_NE(captured.out.find("\n@@ -0,0 +1 @@\n+n\n"), std::string::npos) << captured.out;
+    EXPECT_EQ(captured.status, 1);
+
+    captured = RunCaptured("diff", {"--recursive", "--exclude=a b", "ra", "rb"}, std::nullopt, "/t");
+    EXPECT_NE(captured.out.find("diff --recursive '--exclude=a b' ra/x rb/x\n"), std::string::npos)
+        << captured.out;
+}
+
 // Review regressions, each expectation printed by GNU diff 3.10 (LC_ALL=C).
 TEST_F(BuiltinCommandsTest, DiffReviewRegressions) {
     MakeDiffFiles(root);

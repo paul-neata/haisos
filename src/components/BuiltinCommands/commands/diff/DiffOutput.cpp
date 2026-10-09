@@ -312,7 +312,6 @@ bool DiffHasRealChanges(const std::vector<DiffChange>& changes, const DiffText& 
     }
     return false;
 }
-namespace {
 
 // A file name in a header: in double quotes when it is empty or holds a
 // space, '"', '\', a byte below 0x20 or a byte 0x80 or above, with the
@@ -356,6 +355,8 @@ std::string QuoteHeaderName(const std::string& name) {
     out += "\"";
     return out;
 }
+
+namespace {
 
 // One file's half of a unified/context header: its label as given, or its
 // quoted name and modification time.

@@ -204,10 +204,12 @@ bool FindMiddleSnake(const std::vector<int64_t>& a, const std::vector<int64_t>& 
         return a[static_cast<size_t>(box.x1 - 1 - u)] == b[static_cast<size_t>(box.y1 - 1 - v)];
     };
 
+    // One table per direction, kept across the steps: step D writes only the
+    // diagonals of D's parity, so the other parity still holds step D-1's
+    // values, exactly what the step reads -- no per-step copy is needed.
     ReachTable vf, vb;
     vf.Reset(box);
     vb.Reset(box);
-    std::vector<int64_t> prevVf, prevVb;
     // D = 0: k = 0 starts at the corner and follows its snake. The box was
     // shrunk, so its first and last lines differ; the snakes are empty.
     int64_t x = 0, y = 0;
@@ -228,8 +230,6 @@ bool FindMiddleSnake(const std::vector<int64_t>& a, const std::vector<int64_t>& 
             stopped = true;
             return false;
         }
-        prevVf = vf.values;
-        prevVb = vb.values;
         // The forward step visits its diagonals from D down to -D (the most
         // deletions first); each visited diagonal starts the step empty, so
         // one with no usable way in holds no value this step.
@@ -243,10 +243,10 @@ bool FindMiddleSnake(const std::vector<int64_t>& a, const std::vector<int64_t>& 
             // stays inside the box.
             // A diagonal outside [-M, N] never has a value (and is not in the table).
             const bool downPossible = k + 1 >= -d + 1 && k + 1 <= d - 1 && k + 1 <= n;
-            const int64_t downReach = downPossible ? prevVf[static_cast<size_t>(k + 1 + vf.offset)] : kNoReach;
+            const int64_t downReach = downPossible ? vf.Get(k + 1) : kNoReach;
             const bool haveDown = downReach != kNoReach && downReach - k <= m;
             const bool rightPossible = k - 1 >= -(d - 1) && k - 1 <= d - 1 && k - 1 >= -m;
-            const int64_t rightReach = rightPossible ? prevVf[static_cast<size_t>(k - 1 + vf.offset)] + 1 : kNoReach;
+            const int64_t rightReach = rightPossible ? vf.Get(k - 1) + 1 : kNoReach;
             const bool haveRight = rightReach != kNoReach && rightReach <= n;
             if (!haveDown && !haveRight) {
                 continue;
@@ -269,7 +269,7 @@ bool FindMiddleSnake(const std::vector<int64_t>& a, const std::vector<int64_t>& 
             if (delta % 2 != 0) {
                 const int64_t kb = delta - k;
                 if (kb >= -m && kb <= n && kb >= -(d - 1) && kb <= d - 1) {
-                    const int64_t reach = prevVb[static_cast<size_t>(kb + vb.offset)];
+                    const int64_t reach = vb.Get(kb);
                     if (reach != kNoReach && vf.At(k) + reach >= n) {
                         splitX = box.x0 + x;
                         splitY = box.y0 + y;
@@ -286,10 +286,10 @@ bool FindMiddleSnake(const std::vector<int64_t>& a, const std::vector<int64_t>& 
             }
             vb.At(k) = kNoReach;
             const bool downPossible = k + 1 >= -d + 1 && k + 1 <= d - 1 && k + 1 <= n;
-            const int64_t downReach = downPossible ? prevVb[static_cast<size_t>(k + 1 + vb.offset)] : kNoReach;
+            const int64_t downReach = downPossible ? vb.Get(k + 1) : kNoReach;
             const bool haveDown = downReach != kNoReach && downReach - k <= m;
             const bool rightPossible = k - 1 >= -(d - 1) && k - 1 <= d - 1 && k - 1 >= -m;
-            const int64_t rightReach = rightPossible ? prevVb[static_cast<size_t>(k - 1 + vb.offset)] + 1 : kNoReach;
+            const int64_t rightReach = rightPossible ? vb.Get(k - 1) + 1 : kNoReach;
             const bool haveRight = rightReach != kNoReach && rightReach <= n;
             if (!haveDown && !haveRight) {
                 continue;
@@ -371,6 +371,11 @@ std::pair<int64_t, int64_t> PlaceBlock(std::vector<bool>& flags, const std::vect
             flags[static_cast<size_t>(i)] = value;
         }
     };
+    // Unchanged lines of |flags| in [regionStart, e), kept as a running value
+    // through the slides and merges below: a slide down turns the block's top
+    // line unchanged (+1), a slide up over an unchanged line takes one back,
+    // and a merge only takes in lines already changed.
+    int64_t u = UnchangedBefore(flags, regionStart, e);
     bool merged = true;
     std::vector<std::pair<int64_t, int64_t>> noted;  // positions lining up, top to bottom
     while (merged) {
@@ -379,10 +384,14 @@ std::pair<int64_t, int64_t> PlaceBlock(std::vector<bool>& flags, const std::vect
         // (a) slide up while the line above equals the last line, absorbing
         // any run reached.
         while (s > regionStart && keys[static_cast<size_t>(s - 1)] == keys[static_cast<size_t>(e - 1)]) {
+            const bool aboveChanged = flags[static_cast<size_t>(s - 1)];
             flags[static_cast<size_t>(s - 1)] = true;
             flags[static_cast<size_t>(e - 1)] = false;
             --s;
             --e;
+            if (!aboveChanged) {
+                --u;
+            }
             if (s > regionStart && flags[static_cast<size_t>(s - 1)]) {
                 int64_t p = s - 1;
                 while (p > regionStart && flags[static_cast<size_t>(p - 1)]) {
@@ -394,7 +403,6 @@ std::pair<int64_t, int64_t> PlaceBlock(std::vector<bool>& flags, const std::vect
         }
         // (b) slide down as far as the line below equals the first line,
         // noting every position where the block lines up (the top included).
-        int64_t u = UnchangedBefore(flags, regionStart, e);
         if (LinesUp(other, u, regionStart, otherRegionEnd)) {
             noted.emplace_back(s, e);
         }
@@ -403,7 +411,7 @@ std::pair<int64_t, int64_t> PlaceBlock(std::vector<bool>& flags, const std::vect
             flags[static_cast<size_t>(e)] = true;
             ++s;
             ++e;
-            ++u;  // the line slid over was unchanged
+            ++u;  // the block's top line, slid over, is unchanged now
             if (e < regionEnd && flags[static_cast<size_t>(e)]) {
                 int64_t q = e;
                 while (q < regionEnd && flags[static_cast<size_t>(q)]) {
@@ -411,7 +419,6 @@ std::pair<int64_t, int64_t> PlaceBlock(std::vector<bool>& flags, const std::vect
                 }
                 e = q;
                 merged = true;
-                u = UnchangedBefore(flags, regionStart, e);  // recount after a merge
             }
             if (LinesUp(other, u, regionStart, otherRegionEnd)) {
                 noted.emplace_back(s, e);

@@ -7,6 +7,7 @@
 #include "BuiltinCommand.h"
 #include "BuiltinText.h"
 #include "commands/diff/Diff.h"
+#include "commands/diff/DiffDirectories.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
 
 namespace Haisos {
@@ -36,6 +37,15 @@ enum DiffOptionId {
     kDiffSuppressBlankEmpty,     // --suppress-blank-empty
     kDiffHorizonLines,           // --horizon-lines
     kDiffNoEffect,               // --binary, -h, --inhibit-hunk-merge
+    kDiffRecursive,              // -r
+    kDiffNoDereference,          // --no-dereference (no links here)
+    kDiffNewFile,                // -N
+    kDiffUnidirectionalNewFile,  // --unidirectional-new-file
+    kDiffExclude,                // -x
+    kDiffExcludeFrom,            // -X
+    kDiffStartingFile,           // -S
+    kDiffFromFile,               // --from-file
+    kDiffToFile,                 // --to-file
 };
 
 // A non-negative decimal number, as diff's NUM options take it; false when
@@ -58,10 +68,92 @@ bool ParseCount(const std::string& text, int64_t& out) {
     return true;
 }
 
+// The long option |name| names: exact match, or an unambiguous prefix of it,
+// the way the parser finds it too.
+const BuiltinOption* DiffFindLongOption(const std::string& name,
+                                        const std::vector<BuiltinOption>& options) {
+    const BuiltinOption* prefix = nullptr;
+    for (const BuiltinOption& option : options) {
+        if (option.longName.empty()) {
+            continue;
+        }
+        if (option.longName == name) {
+            return &option;
+        }
+        if (option.longName.compare(0, name.size(), name) == 0) {
+            if (prefix) {
+                return nullptr;  // ambiguous: the parser has reported it
+            }
+            prefix = &option;
+        }
+    }
+    return prefix;
+}
+
+// The command-line words that are options or an option's separate argument,
+// in the order given -- what the recursive form echoes in its
+// "diff OPTIONS A B" lines. Operands and a "--" are left out; the words are
+// classified with the same rules the parser uses (it has already accepted
+// every word by the time this runs).
+std::vector<std::string> DiffOptionWords(const std::vector<std::string>& args,
+                                         const std::vector<BuiltinOption>& options) {
+    std::vector<std::string> words;
+    for (size_t i = 0; i < args.size(); ++i) {
+        const std::string& arg = args[i];
+        if (arg == "--") {
+            break;
+        }
+        if (arg.size() > 2 && arg.compare(0, 2, "--") == 0) {
+            const size_t eq = arg.find('=');
+            const std::string name = arg.substr(2, eq == std::string::npos ? std::string::npos : eq - 2);
+            const BuiltinOption* option = DiffFindLongOption(name, options);
+            if (!option) {
+                continue;
+            }
+            words.push_back(arg);
+            if (eq == std::string::npos && option->argument == BuiltinArgument::Required
+                && i + 1 < args.size()) {
+                words.push_back(args[++i]);  // a separate argument word
+            }
+            continue;
+        }
+        if (arg.size() > 1 && arg[0] == '-') {
+            // One cluster word: a Required option's argument follows it in
+            // the cluster ("-xo") or as the next word ("-x o").
+            bool takesNextWord = false;
+            for (size_t j = 1; j < arg.size(); ++j) {
+                const BuiltinOption* option = nullptr;
+                for (const BuiltinOption& candidate : options) {
+                    if (candidate.shortName == arg[j]) {
+                        option = &candidate;
+                        break;
+                    }
+                }
+                if (!option) {
+                    break;
+                }
+                if (option->argument == BuiltinArgument::Required) {
+                    takesNextWord = j + 1 == arg.size();
+                    break;
+                }
+                if (option->argument == BuiltinArgument::OptionalAttached && j + 1 < arg.size()) {
+                    break;  // the rest of the cluster is the argument
+                }
+            }
+            words.push_back(arg);
+            if (takesNextWord && i + 1 < args.size()) {
+                words.push_back(args[++i]);
+            }
+            continue;
+        }
+    }
+    return words;
+}
+
 class DiffCommand : public IBuiltinCommand {
 public:
     std::string Name() const override { return "diff"; }
-    std::string Version() const override { return "1.0.0"; }
+    std::string Version() const override { return "1.1.0"; }
 
     const std::vector<BuiltinOption>& Options() const override {
         using A = BuiltinArgument;
@@ -113,18 +205,26 @@ public:
             {'h', "", kDiffNoEffect, A::None, "", "accepted with no effect"},
             {0, "inhibit-hunk-merge", kDiffNoEffect, A::None, "", "accepted with no effect"},
             {'v', "", kBuiltinOptionVersion, A::None, "", "output version information"},
-            // Treated by diff--diff-recursive, not yet:
-            {'r', "recursive", kBuiltinNotTreated, A::None},
-            {0, "no-dereference", kBuiltinNotTreated, A::None},
-            {'N', "new-file", kBuiltinNotTreated, A::None},
-            {'P', "unidirectional-new-file", kBuiltinNotTreated, A::None},
+            {'r', "recursive", kDiffRecursive, A::None, "",
+                "recursively compare any subdirectories found"},
+            {0, "no-dereference", kDiffNoDereference, A::None, "",
+                "treat arguments that are symlinks as themselves (no links here)"},
+            {'N', "new-file", kDiffNewFile, A::None, "",
+                "treat absent files as empty"},
+            {'P', "unidirectional-new-file", kDiffUnidirectionalNewFile, A::None, "",
+                "treat absent first files as empty"},
             {0, "ignore-file-name-case", kBuiltinNotTreated, A::None},
             {0, "no-ignore-file-name-case", kBuiltinNotTreated, A::None},
-            {'x', "exclude", kBuiltinNotTreated, A::Required, "PAT"},
-            {'X', "exclude-from", kBuiltinNotTreated, A::Required, "FILE"},
-            {'S', "starting-file", kBuiltinNotTreated, A::Required, "FILE"},
-            {0, "from-file", kBuiltinNotTreated, A::Required, "FILE1"},
-            {0, "to-file", kBuiltinNotTreated, A::Required, "FILE2"},
+            {'x', "exclude", kDiffExclude, A::Required, "PAT",
+                "exclude files that match PAT"},
+            {'X', "exclude-from", kDiffExcludeFrom, A::Required, "FILE",
+                "exclude files that match any pattern in FILE"},
+            {'S', "starting-file", kDiffStartingFile, A::Required, "FILE",
+                "start with FILE when comparing directories"},
+            {0, "from-file", kDiffFromFile, A::Required, "FILE1",
+                "compare FILE1 to all operands; FILE1 can be a directory"},
+            {0, "to-file", kDiffToFile, A::Required, "FILE2",
+                "compare all operands to FILE2; FILE2 can be a directory"},
             // Never treated:
             {'y', "side-by-side", kBuiltinNotTreated, A::None},
             {'W', "width", kBuiltinNotTreated, A::Required, "NUM"},
@@ -232,6 +332,8 @@ int DiffCommand::Run(BuiltinContext& context) {
     context.ReportNotTreated(parsed);
 
     DiffSettings settings;
+    DiffTreeSettings tree;
+    std::optional<std::string> fromFile, toFile;
     int64_t contextLines = 0;   // the -C/-U value, the largest given
     int64_t horizon = 0;
     size_t tabSize = 8;
@@ -333,6 +435,59 @@ int DiffCommand::Run(BuiltinContext& context) {
                 break;
             }
             case kDiffNoEffect: break;  // --binary, -h, --inhibit-hunk-merge
+            case kDiffRecursive: tree.recursive = true; break;
+            case kDiffNoDereference: break;  // no links: nothing to not follow
+            case kDiffNewFile: tree.newFile = true; break;
+            case kDiffUnidirectionalNewFile: tree.unidirectionalNewFile = true; break;
+            case kDiffExclude: tree.excludes.push_back(option.argument); break;
+            case kDiffExcludeFrom: {
+                // Read now, in option order: the patterns are a file's
+                // lines, empty ones skipped.
+                InputOpenFailure failure = InputOpenFailure::None;
+                const auto file = OpenInputOperand(context, option.argument, failure);
+                if (!file) {
+                    context.Error(option.argument + ": " + OpenFailureText(failure));
+                    return 2;
+                }
+                BuiltinLineReader reader(context, *file, '\n');
+                std::string line;
+                bool delimited = false;
+                for (;;) {
+                    const LineReadResult result = reader.Next(line, delimited);
+                    if (result == LineReadResult::End) {
+                        break;
+                    }
+                    if (result == LineReadResult::Stopped) {
+                        return 2;  // a quiet stop
+                    }
+                    if (result == LineReadResult::Error) {
+                        context.Error(option.argument + ": Input/output error");
+                        return 2;
+                    }
+                    if (!line.empty()) {
+                        tree.excludes.push_back(line);
+                    }
+                }
+                break;
+            }
+            case kDiffStartingFile:
+                if (tree.startingFile && *tree.startingFile != option.argument) {
+                    return usageError("conflicting -S option value '" + option.argument + "'");
+                }
+                tree.startingFile = option.argument;
+                break;
+            case kDiffFromFile:
+                if (fromFile && *fromFile != option.argument) {
+                    return usageError("conflicting --from-file option value '" + option.argument + "'");
+                }
+                fromFile = option.argument;
+                break;
+            case kDiffToFile:
+                if (toFile && *toFile != option.argument) {
+                    return usageError("conflicting --to-file option value '" + option.argument + "'");
+                }
+                toFile = option.argument;
+                break;
             default: break;
         }
     }
@@ -351,6 +506,28 @@ int DiffCommand::Run(BuiltinContext& context) {
     settings.output.whiteSpace = whiteSpace;
     settings.output.tabSize = tabSize;
 
+    if (fromFile && toFile) {
+        context.Error("--from-file and --to-file both specified");
+        return 2;
+    }
+    // The options the recursive form echoes in its "diff OPTIONS A B"
+    // lines, each word as typed.
+    for (const std::string& word : DiffOptionWords(context.Args(), Options())) {
+        tree.echoedOptions += " " + ShellEscapeQuoted(word);
+    }
+
+    // --from-file/--to-file compare one file with every operand, in order.
+    if (fromFile || toFile) {
+        int status = 0;
+        for (const std::string& operand : parsed.operands) {
+            const int compared = fromFile
+                ? DiffOperands(context, settings, tree, *fromFile, operand)
+                : DiffOperands(context, settings, tree, operand, *toFile);
+            status = std::max(status, compared);
+        }
+        return status;
+    }
+
     if (parsed.operands.size() < 2) {
         const std::string last = context.Args().empty() ? std::string("diff") : context.Args().back();
         return usageError("missing operand after '" + last + "'");
@@ -358,11 +535,12 @@ int DiffCommand::Run(BuiltinContext& context) {
     if (parsed.operands.size() > 2) {
         return usageError("extra operand '" + parsed.operands[2] + "'");
     }
-    return DiffTwoFiles(context, settings, parsed.operands[0], parsed.operands[1], "");
+    return DiffOperands(context, settings, tree, parsed.operands[0], parsed.operands[1]);
 }
 
 int DiffTwoFiles(BuiltinContext& context, const DiffSettings& settings,
-                 const std::string& name0, const std::string& name1, const std::string& header) {
+                 const std::string& name0, const std::string& name1, const std::string& header,
+                 bool missing0, bool missing1) {
     // The name each message shows for a file: its label when one was given,
     // the operand as given otherwise.
     const std::string shown0 = settings.label0 ? *settings.label0 : name0;
@@ -372,11 +550,17 @@ int DiffTwoFiles(BuiltinContext& context, const DiffSettings& settings,
             context.Out(header + "\n");
         }
     };
+    const bool missing[2] = {missing0, missing1};
 
-    // Open both operands; both failures are reported before returning.
+    // Open both operands; both failures are reported before returning. A
+    // side flagged missing (diff -N against a file that is not there) is
+    // neither opened nor stated: it is read as empty bytes.
     std::shared_ptr<IFileDescriptor> files[2] = {};
     bool trouble = false;
     for (int i = 0; i < 2; ++i) {
+        if (missing[i]) {
+            continue;
+        }
         const std::string& name = i == 0 ? name0 : name1;
         InputOpenFailure failure = InputOpenFailure::None;
         files[i] = OpenInputOperand(context, name, failure);
@@ -393,6 +577,9 @@ int DiffTwoFiles(BuiltinContext& context, const DiffSettings& settings,
     // always compares equal to itself.
     std::string bytes[2];
     for (int i = 0; i < 2; ++i) {
+        if (missing[i]) {
+            continue;
+        }
         if (i == 1 && name0 == "-" && name1 == "-") {
             bytes[1] = bytes[0];
             continue;
@@ -409,10 +596,13 @@ int DiffTwoFiles(BuiltinContext& context, const DiffSettings& settings,
     }
 
     // The modification times the headers show: the file's own, the current
-    // time for standard input.
+    // time for standard input, the epoch for a side that is not there.
     FileDateTime times[2];
     for (int i = 0; i < 2; ++i) {
         const std::string& name = i == 0 ? name0 : name1;
+        if (missing[i]) {
+            continue;
+        }
         if (name == "-") {
             times[i] = CurrentFileDateTime();
         } else {
@@ -431,13 +621,11 @@ int DiffTwoFiles(BuiltinContext& context, const DiffSettings& settings,
     };
     if (!settings.text && (isBinary(bytes[0]) || isBinary(bytes[1]))) {
         if (bytes[0] == bytes[1]) {
-            outHeader();
             if (settings.reportIdentical) {
                 context.Out("Files " + shown0 + " and " + shown1 + " are identical\n");
             }
             return 0;
         }
-        outHeader();
         if (settings.brief) {
             context.Out("Files " + shown0 + " and " + shown1 + " differ\n");
         } else {
@@ -463,25 +651,26 @@ int DiffTwoFiles(BuiltinContext& context, const DiffSettings& settings,
     }
 
     const bool same = !DiffHasRealChanges(script, texts[0], texts[1], settings.output);
-    const bool newlineTrouble = !robust && !settings.brief
+    // A missing final newline is trouble only when there is a difference to
+    // print: an identical pair is silently the same, in -e style too.
+    const bool newlineTrouble = !robust && !settings.brief && !same
         && (texts[0].missingNewline || texts[1].missingNewline);
-    if (same && !newlineTrouble) {
-        outHeader();
+    if (same) {
         if (settings.reportIdentical) {
             context.Out("Files " + shown0 + " and " + shown1 + " are identical\n");
         }
         return 0;
     }
-    if (!same) {
-        outHeader();
-        if (settings.brief) {
-            context.Out("Files " + shown0 + " and " + shown1 + " differ\n");
-            return 1;
-        }
-        context.Out(FormatDiff(script, texts[0], texts[1],
-            DiffHeaderFile{name0, settings.label0, times[0]},
-            DiffHeaderFile{name1, settings.label1, times[1]}, settings.output));
+    if (settings.brief) {
+        context.Out("Files " + shown0 + " and " + shown1 + " differ\n");
+        return 1;
     }
+    // The pair header goes before a text difference's output alone: GNU
+    // prints none before a binary, brief or identical report.
+    outHeader();
+    context.Out(FormatDiff(script, texts[0], texts[1],
+        DiffHeaderFile{name0, settings.label0, times[0]},
+        DiffHeaderFile{name1, settings.label1, times[1]}, settings.output));
     if (newlineTrouble) {
         for (int i = 0; i < 2; ++i) {
             if (texts[i].missingNewline) {
@@ -491,7 +680,7 @@ int DiffTwoFiles(BuiltinContext& context, const DiffSettings& settings,
         }
         return 2;
     }
-    return same ? 0 : 1;
+    return 1;
 }
 
 } // namespace Haisos

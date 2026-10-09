@@ -22,6 +22,7 @@ add_library(BuiltinCommands STATIC
     commands/cut/Cut.cpp
     commands/date/Date.cpp
     commands/diff/Diff.cpp
+    commands/diff/DiffDirectories.cpp
     commands/diff/DiffEngine.cpp
     commands/diff/DiffOutput.cpp
     commands/dirname/Dirname.cpp

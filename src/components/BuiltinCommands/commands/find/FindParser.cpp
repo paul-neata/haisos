@@ -404,6 +404,12 @@ bool FindParser::Parse(FindSettings& settings, std::unique_ptr<FindNode>& expres
         // A global option after a test is still applied to it -- GNU says so
         // in a warning; the positional options are exempt, as is everything
         // before the first test or action.
+        // -d's deprecation comes first, as GNU's parse_d warns before it
+        // hands over to -depth's parser, which gives the order warning.
+        if (arg == "-d") {
+            Warn("the -d option is deprecated; please use -depth instead,"
+                " because the latter is a POSIX-compliant feature.");
+        }
         if (row->kind == FindPrimaryKind::GlobalOption && !firstNonOption.empty()) {
             Warn("you have specified the global option " + arg + " after the argument "
                 + firstNonOption + ", but global options are not positional, i.e., " + arg

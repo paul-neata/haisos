@@ -110,6 +110,11 @@ TEST_F(BuiltinCommandsTest, FindMissingStartingPoint) {
     ExpectSameLines(captured.out, "a\na/b\na/b/empty\na/x.txt\na/y.md\nz.h\n");
     EXPECT_EQ(captured.err, "find: 'nope': No such file or directory\n");
     EXPECT_EQ(captured.status, 1);
+    // An empty name is no file, not the working directory.
+    const auto empty = RunCaptured("find", {""}, std::nullopt, "/proj");
+    EXPECT_EQ(empty.out, "");
+    EXPECT_EQ(empty.err, "find: '': No such file or directory\n");
+    EXPECT_EQ(empty.status, 1);
     // The name is quoted as GNU's quote() has it.
     const auto quoted = RunCaptured("find", {"a'b"}, std::nullopt, "/proj");
     EXPECT_EQ(quoted.out, "");
@@ -357,6 +362,18 @@ TEST_F(BuiltinCommandsTest, FindPermAndOwners) {
     EXPECT_EQ(RunCaptured("find", {"-perm", "+222"}, std::nullopt, "/proj").err,
         "find: invalid mode '+222'\n");
     EXPECT_EQ(RunCaptured("find", {"-perm", "g+q"}, std::nullopt, "/proj").status, 1);
+    // An empty permission list is a valid clause ("u=" clears, "=" is 0);
+    // an empty mode is not.
+    EXPECT_EQ(RunCaptured("find", {"-perm", "-u=", "-maxdepth", "0"}, std::nullopt, "/proj").out,
+        ".\n");
+    const auto equalsOnly = RunCaptured("find", {"-perm", "=", "-maxdepth", "0"}, std::nullopt, "/proj");
+    EXPECT_EQ(equalsOnly.out, "");
+    EXPECT_EQ(equalsOnly.err, "");
+    EXPECT_EQ(equalsOnly.status, 0);
+    EXPECT_EQ(RunCaptured("find", {"-perm", "-"}, std::nullopt, "/proj").err,
+        "find: invalid mode '-'\n");
+    EXPECT_EQ(RunCaptured("find", {"-perm", ""}, std::nullopt, "/proj").err,
+        "find: invalid mode ''\n");
     // Every file is owned by haisos, uid and gid 0.
     EXPECT_EQ(RunCaptured("find", {"-user", "haisos", "-maxdepth", "0"}, std::nullopt, "/proj").out,
         ".\n");
@@ -367,6 +384,13 @@ TEST_F(BuiltinCommandsTest, FindPermAndOwners) {
     const auto unknownUser = RunCaptured("find", {"-user", "nosuch"}, std::nullopt, "/proj");
     EXPECT_EQ(unknownUser.err, "find: 'nosuch' is not the name of a known user\n");
     EXPECT_EQ(unknownUser.status, 1);
+    // A numeric ID is digits alone: a sign makes it a name.
+    EXPECT_EQ(RunCaptured("find", {"-user", "+5"}, std::nullopt, "/proj").err,
+        "find: '+5' is not the name of a known user\n");
+    EXPECT_EQ(RunCaptured("find", {"-group", "-5"}, std::nullopt, "/proj").err,
+        "find: '-5' is not the name of an existing group\n");
+    EXPECT_EQ(RunCaptured("find", {"-group", "0", "-maxdepth", "0"}, std::nullopt, "/proj").out,
+        ".\n");
 }
 
 TEST_F(BuiltinCommandsTest, FindLinksInumSamefile) {
@@ -498,15 +522,15 @@ TEST_F(BuiltinCommandsTest, FindExpressionErrors) {
         " -type, but global options are not positional, i.e., -maxdepth affects tests"
         " specified before it as well as those specified after it."
         "  Please specify global options before other arguments.\n");
-    // -d after a test warns twice: its deprecation, once per occurrence.
+    // -d after a test warns twice: its deprecation first, as GNU's.
     const auto d = run({"-warn", "-name", "x", "-d"});
     EXPECT_EQ(d.err,
+        "find: warning: the -d option is deprecated; please use -depth instead,"
+        " because the latter is a POSIX-compliant feature.\n"
         "find: warning: you have specified the global option -d after the argument -name,"
         " but global options are not positional, i.e., -d affects tests specified before"
         " it as well as those specified after it.  Please specify global options before"
-        " other arguments.\n"
-        "find: warning: the -d option is deprecated; please use -depth instead,"
-        " because the latter is a POSIX-compliant feature.\n");
+        " other arguments.\n");
     EXPECT_EQ(run({"-warn", "-name", "x/y"}).err,
         "find: warning: '-name' matches against basenames only, but the given pattern"
         " contains a directory separator ('/'), thus the expression will evaluate to false"

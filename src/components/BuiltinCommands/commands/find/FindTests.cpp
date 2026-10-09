@@ -447,7 +447,10 @@ public:
 // alone as the right side copies those bits), applied to 0 with umask 0, X as
 // x. -1 when the mode is not valid.
 int64_t ParsePermMode(const std::string& spec) {
-    if (!spec.empty() && spec.find_first_not_of("01234567") == std::string::npos) {
+    if (spec.empty()) {
+        return -1;  // "-perm ''" and "-perm -" are invalid modes
+    }
+    if (spec.find_first_not_of("01234567") == std::string::npos) {
         const int64_t value = std::strtoll(spec.c_str(), nullptr, 8);
         return value > 07777 ? -1 : value;
     }
@@ -486,10 +489,9 @@ int64_t ParsePermMode(const std::string& spec) {
             }
             ++i;
         } else {
-            bool sawPerm = false;
+            // The permission list may be empty: "u=" clears, "=" is 0.
             while (i < spec.size() && (spec[i] == 'r' || spec[i] == 'w' || spec[i] == 'x'
                 || spec[i] == 'X' || spec[i] == 's' || spec[i] == 't')) {
-                sawPerm = true;
                 const char perm = spec[i++];
                 for (const char target : targets) {
                     const int shift = shiftOf(target);
@@ -505,9 +507,6 @@ int64_t ParsePermMode(const std::string& spec) {
                         specialBits |= 01000;  // t
                     }
                 }
-            }
-            if (!sawPerm) {
-                return -1;
             }
         }
         int64_t whoBits = specialBits;
@@ -819,8 +818,8 @@ const std::vector<FindPrimaryEntry>& FindTestPrimaries() {
             }},
         {"-d", FindPrimaryKind::GlobalOption, false,
             [](FindParser& parser, const std::string&) {
-                parser.Warn("the -d option is deprecated; please use -depth instead,"
-                    " because the latter is a POSIX-compliant feature.");
+                // The deprecation warning is FindParser's, ahead of the
+                // global-option one.
                 parser.Settings().depthFirst = true;
                 parser.Settings().depthGiven = true;
                 return AlwaysTrue();
@@ -1162,13 +1161,12 @@ const std::vector<FindPrimaryEntry>& FindTestPrimaries() {
                 if (arg == "haisos") {
                     return MakePrimary<FindOwnerPrimary>(0);
                 }
-                FindComparison kind;
-                int64_t id = 0;
-                if (!ParseInteger(arg, kind, id)) {
+                // A numeric ID is digits alone: "+5" or "-5" is a name.
+                if (arg.find_first_not_of("0123456789") != std::string::npos) {
                     parser.Fail(GnuQuote(arg) + " is not the name of a known user");
                     return std::unique_ptr<FindPrimary>();
                 }
-                return MakePrimary<FindOwnerPrimary>(id);
+                return MakePrimary<FindOwnerPrimary>(std::strtoll(arg.c_str(), nullptr, 10));
             }},
         {"-group", FindPrimaryKind::Test, false,
             [](FindParser& parser, const std::string& name) {
@@ -1181,10 +1179,8 @@ const std::vector<FindPrimaryEntry>& FindTestPrimaries() {
                     return std::unique_ptr<FindPrimary>();
                 }
                 if (arg != "haisos") {
-                    FindComparison kind;
-                    int64_t id = 0;
-                    if (ParseInteger(arg, kind, id)) {
-                        return MakePrimary<FindOwnerPrimary>(id);
+                    if (arg.find_first_not_of("0123456789") == std::string::npos) {
+                        return MakePrimary<FindOwnerPrimary>(std::strtoll(arg.c_str(), nullptr, 10));
                     }
                     // A name that begins like a numeric ID but does not end
                     // as one has its suffix named.

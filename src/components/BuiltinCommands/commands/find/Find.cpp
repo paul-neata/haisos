@@ -193,7 +193,9 @@ private:
         FindFile file;
         file.path = point;
         file.startingPoint = point;
-        if (run.context.IO().Stat(point, file.status) != 0) {
+        // An empty name is no file, as GNU's lstat("") says -- not the
+        // working directory the path resolution would make of it.
+        if (point.empty() || run.context.IO().Stat(point, file.status) != 0) {
             run.context.Error(GnuQuote(point) + ": No such file or directory");
             run.exitStatus = 1;
             return;

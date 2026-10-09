@@ -28,7 +28,7 @@ haisos/
 ├── src/
 │   ├── components/        - Component implementations (each has its own CLAUDE.md)
 │   │   ├── Agent/
-│   │   ├── BuiltinCommands/ - The builtin commands ([, basename, cat, chmod, cmp, cp, cut, date, dirname, du, echo, egrep, env, false, fgrep, find, grep, head, hsh, ls, man, mkdir, mv, nl, printf, pwd, realpath, rm, rmdir, seq, sleep, sort, stat, tail, tee, test, touch, tr, true, uniq, wc, which, xargs; each in commands/<name>/) and what places them on filesystems
+│   │   ├── BuiltinCommands/ - The builtin commands ([, basename, cat, chmod, cmp, cp, cut, date, dirname, du, echo, egrep, env, false, fgrep, find, grep, head, hsh, ls, man, mkdir, mv, nl, printf, pwd, realpath, rm, rmdir, sed, seq, sleep, sort, stat, tail, tee, test, touch, tr, true, uniq, wc, which, xargs; each in commands/<name>/) and what places them on filesystems
 │   │   ├── Console/
 │   │   ├── Environment/
 │   │   ├── Factory/
@@ -538,7 +538,7 @@ returned by `IHaisosOS`'s `OSToolFactory` and merged with an agent's tools
 Commands compiled into Haisos (`[`, `basename`, `cat`, `chmod`, `cmp`, `cp`,
 `cut`, `date`, `dirname`, `du`, `echo`, `egrep`, `env`, `false`, `fgrep`,
 `find`, `grep`, `head`, `hsh`, `ls`, `man`, `mkdir`, `mv`, `nl`, `printf`, `pwd`, `realpath`,
-`rm`, `rmdir`, `seq`, `sleep`, `sort`, `stat`, `tail`, `tee`, `test`, `touch`, `tr`,
+`rm`, `rmdir`, `sed`, `seq`, `sleep`, `sort`, `stat`, `tail`, `tee`, `test`, `touch`, `tr`,
 `true`, `uniq`, `wc`, `which`, `xargs`), implemented in
 `src/components/BuiltinCommands/`
 (see its `CLAUDE.md`). A builtin is not a file on disk: it is placed on a
@@ -622,6 +622,7 @@ use a builtin with what it already knows about the real command:
 | `realpath` | Resolves names to absolute paths (`-e -m -L -P -q --relative-to=DIR --relative-base=DIR -s -z`) from the working directory, with existence checks; no symbolic links, so `-L`, `-P` and `-s` change nothing |
 | `rm` | Removes files or directories (`-f -i -I --interactive[=WHEN] -r -R -d -v --no-preserve-root --preserve-root[=all]`), prompts read from standard input, entries in name order |
 | `rmdir` | Removes empty directories (`--ignore-fail-on-non-empty -p -v`) |
+| `sed` | Streams an editor over its input (GNU sed 4.9's core: `-n -e -f -E/-r -s`, `;` and newline separators, `{ }` blocks, every address form (a line number, `first~step`, `$`, `/re/`, `\cre`, `addr,+N`, `addr,~N`, `0,/re/`), the commands `s` (flags `g`, a number, `p`, `i`/`I`, `m`/`M`) `d p n q Q =` `#` `:label`), GNU's messages, character positions and exit statuses (1 a bad script, 2 an unreadable input, 4 an I/O error, `q`'s own code), the input streamed with a one-line lookahead for `$` | the advanced commands (`a b c i r R t T w W y z`) and `-i -l -u -z --follow-symlinks --sandbox --debug --posix` are not treated (a later task); `s///w` consumes its filename without writing it and `s///e` is not treated; with no script the help text goes to stderr (GNU prints its usage) and exits 1 |
 | `seq` | Prints a sequence of numbers (`-f FORMAT -s STRING -w`), FIRST/INCREMENT/LAST, GNU's default-format and fast-path rules, negative numbers as operands |
 | `sleep` | Sleeps for the summed NUMBERs (`s m h d` suffixes; `inf` until stopped) |
 | `sort` | Sorts lines (keys `-k`/`-t`, `-b -d -f -g -h -i -M -n -r -R -s -u -V -z`, `--sort=WORD`, `-c -C --check`, `-m`, `-o`, `--files0-from`), byte order, the numeric/general/human/month/version orders, GNU's last-resort comparison |

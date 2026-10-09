@@ -13,7 +13,10 @@ enum class RegexSyntax { Basic, Extended, Perl };
 struct RegexOptions {
     RegexSyntax syntax = RegexSyntax::Basic;
     bool ignoreCase = false;  // ASCII letters only
-    bool multiline = false;   // sed's M flag: ^ and $ also match after/before each '\n'
+    bool multiline = false;   // sed's M flag: glibc's REG_NEWLINE -- ^ and $ also
+                              // match after/before each '\n', and '.' and a
+                              // nonmatching list no longer match one (Perl's
+                              // (?m) shares only the ^/$ part)
 };
 
 // Search flags, as regexec()'s REG_NOTBOL / REG_NOTEOL.

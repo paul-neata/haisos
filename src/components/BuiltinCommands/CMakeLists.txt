@@ -45,6 +45,9 @@ add_library(BuiltinCommands STATIC
     commands/realpath/Realpath.cpp
     commands/rm/Rm.cpp
     commands/rmdir/Rmdir.cpp
+    commands/sed/Sed.cpp
+    commands/sed/SedExecutor.cpp
+    commands/sed/SedParser.cpp
     commands/seq/Seq.cpp
     commands/sleep/Sleep.cpp
     commands/sort/Sort.cpp

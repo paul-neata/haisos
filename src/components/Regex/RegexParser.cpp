@@ -487,7 +487,9 @@ int Parser::ParseAtom(TermContext& ctx) {
     if (c == '.') {
         Advance();
         std::bitset<256> set;
-        if (IsPerl() && !m_dotAll) {
+        if ((IsPerl() && !m_dotAll) || (!IsPerl() && m_multiline)) {
+            // Perl: '.' excludes '\n' unless (?s). Basic/Extended with
+            // sed's M flag: glibc's REG_NEWLINE, '.' excludes '\n'.
             for (int b = 0; b < 256; ++b) set[b] = b != '\n';
         } else {
             for (int b = 0; b < 256; ++b) set[b] = true;
@@ -910,7 +912,14 @@ int Parser::ParseGnuBracket() {
         first = false;
     }
     if (m_caseFold) FoldSet(set);
-    if (negated) set = Complement(set);
+    if (negated) {
+        set = Complement(set);
+        // sed's M flag (glibc's REG_NEWLINE): a nonmatching list does not
+        // match a newline.
+        if (m_multiline) {
+            set['\n'] = false;
+        }
+    }
     return NewBytesRaw(set);
 }
 

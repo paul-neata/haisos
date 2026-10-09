@@ -47,6 +47,7 @@ share one regex engine of Haisos's own.
 - Q: egrep/fgrep's obsolescence warning? -- A: none, as Ubuntu's scripts (upstream 3.8+ prints one).
 - Q: tar member modes, with no permissions in Haisos? -- A: 0644 for files, 0755 for directories (owner `haisos`, uid/gid 0), so archives extract normally on real systems.
 - Q: Task model? -- A: `glm-5.3:cloud` for this develop (Settings).
+- Q: May code be taken from GNU (or any other) sources? -- A (user, 2026-10-09, a rule above all others): **no -- clean room.** No code is copied from any program, whatever its licence (same, compatible or not); all code is written from scratch. Behaviour is matched from man pages, specifications, published papers and the real program's output -- never by reading, porting, translating or paraphrasing its source, nor by mirroring its code structure (functions, their split and order). Plans describe behaviour only. See the root CLAUDE.md "Clean-room rule".
 
 ## Acceptance scenarios
 

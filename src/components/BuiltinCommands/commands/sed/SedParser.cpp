@@ -496,13 +496,23 @@ private:
             }
             if (c == '\\') {
                 const bool has = m_pos + 1 < m_pieces[m_piece].data.size();
+                if (has && m_pieces[m_piece].data[m_pos + 1] == '\n') {  // a continued line
+                    Advance();
+                    Advance();
+                    continue;
+                }
                 if (has && m_pieces[m_piece].data[m_pos + 1] == delimiter) {
                     raw += delimiter;
                     Advance();
                     Advance();
                     continue;
                 }
-                if (has && m_pieces[m_piece].data[m_pos + 1] == '\n') {  // a continued line
+                // An escape is one unit: "\\/" is a literal backslash
+                // (kept as "\\\\" for the regex or replacement parser) and
+                // then the delimiter, not an escaped one.
+                if (has) {
+                    raw += c;
+                    raw += m_pieces[m_piece].data[m_pos + 1];
                     Advance();
                     Advance();
                     continue;
@@ -791,6 +801,19 @@ private:
             command.negate = true;
         }
         SkipBlanks();
+        // The line address 0: only the first half of 0,/re/ takes it. GNU
+        // reports it at the '!' when there is one, else at the command char,
+        // else right after the address itself (in place of "missing command").
+        if ((command.a1.kind == AddressKind::Zero && !(haveA2 && command.a2.kind == AddressKind::Regex)) ||
+            command.a2.kind == AddressKind::Zero) {
+            if (command.negate) {
+                return Fail(m_piece, m_takenIndex, "invalid usage of line address 0");
+            }
+            if (End()) {
+                return FailTaken("invalid usage of line address 0");
+            }
+            return Fail(m_piece, m_pos, "invalid usage of line address 0");
+        }
         const int c = Peek();
         if (c == -1) {
             return FailHere("missing command");
@@ -824,32 +847,39 @@ private:
             }
             return true;
         }
-        // The line address 0: only the first half of 0,/re/ takes it.
-        if ((command.a1.kind == AddressKind::Zero && !(haveA2 && command.a2.kind == AddressKind::Regex)) ||
-            command.a2.kind == AddressKind::Zero) {
-            return Fail(m_piece, commandIndex, "invalid usage of line address 0");
-        }
         if (ch == ':') {
             if (haveA1 || haveA2) {
                 return Fail(m_piece, commandIndex, ": doesn't want any addresses");
             }
-            Advance();
-            SkipBlanks();
-            const size_t start = m_pos;
-            while (!End()) {
-                const char c2 = static_cast<char>(Peek());
-                if (c2 == '\n' || c2 == ';' || IsBlank(c2)) {
-                    break;
+            // Blanks may follow a label before more script on the same line
+            // (":a p" is GNU's), unlike the commands AfterCommand checks.
+            while (true) {
+                Advance();  // ':' or the blank before the next label
+                SkipBlanks();
+                const size_t start = m_pos;
+                while (!End()) {
+                    const char c2 = static_cast<char>(Peek());
+                    if (c2 == '\n' || c2 == ';' || IsBlank(c2)) {
+                        break;
+                    }
+                    Advance();
                 }
-                Advance();
+                if (m_pos == start) {
+                    return FailHere("\":\" lacks a label");
+                }
+                Command label;
+                label.name = ':';
+                label.text = m_pieces[m_piece].data.substr(start, m_pos - start);
+                m_script.commands.push_back(std::move(label));
+                SkipBlanks();
+                const int next = Peek();
+                if (next == -1 || next == '\n' || next == ';' || next == '}' || next == '#') {
+                    return AfterCommand();
+                }
+                if (next != ':') {
+                    return ParseOne();
+                }
             }
-            if (m_pos == start) {
-                return FailHere("\":\" lacks a label");
-            }
-            command.name = ':';
-            command.text = m_pieces[m_piece].data.substr(start, m_pos - start);
-            m_script.commands.push_back(std::move(command));
-            return AfterCommand();
         }
         if (ch == '{') {
             Advance();

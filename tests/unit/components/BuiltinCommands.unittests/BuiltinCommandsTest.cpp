@@ -94,7 +94,7 @@ TEST_F(BuiltinCommandsTest, ListsEveryBuiltinSortedWithAVersion) {
     const auto commands = builtins->GetCommands();
     EXPECT_EQ(commands, (Lines{"[", "basename", "cat", "chmod", "cmp", "cp", "cut", "date", "dirname", "du", "echo",
         "egrep", "env", "false", "fgrep", "find", "grep", "head", "hsh", "ls", "man", "mkdir", "mv", "nl", "printf", "pwd", "realpath", "rm",
-        "rmdir", "seq", "sleep", "sort", "stat", "tail", "tee", "test", "touch", "tr", "true", "uniq", "wc", "which", "xargs"}));
+        "rmdir", "sed", "seq", "sleep", "sort", "stat", "tail", "tee", "test", "touch", "tr", "true", "uniq", "wc", "which", "xargs"}));
     for (const auto& name : commands) {
         EXPECT_FALSE(builtins->GetBuiltinVersion(name).empty()) << name;
     }

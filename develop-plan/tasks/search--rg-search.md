@@ -3,7 +3,7 @@
 - Rock: search
 - Depends on: search--grep-recursive
 - Size: ~900 changed lines in ~8 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ 82119e0
 - PR title: Add the rg builtin: ripgrep 14 search and output
 
 ## Goal
@@ -36,13 +36,21 @@ What exists, by exact name:
   `GrepMatcherOptions`, `GrepMatcher::Create(patterns, options, error)`,
   `Find(line, start, begin, end)`, `Matches(line)`.
 - `commands/grep/GrepContext.h`: `GrepContext(before, after, enabled,
-  separatorAcrossFiles, printLine, printSeparator)`, `BeginFile()`,
-  `Line(text, lineNumber, byteOffset, selected, extendsAfter)`,
-  `AfterPending()`.
+  separatorAcrossFiles, printLine, printSeparator)`, `SetPrinters(printLine,
+  printSeparator)` (one context spans the run; each file sets its own
+  printers), `BeginFile()`, `Line(text, lineNumber, byteOffset, selected,
+  extendsAfter)`, `AfterPending()`.
+- `commands/grep/GrepFile.h` / `GrepSettings.h`: `GrepOneInput(...)` is
+  grep's per-file reader/printer, tied to `GrepSettings` (GNU's output); rg
+  does not use it -- its own reading and printing are `RgSearch` below.
 - `BuiltinText.h`: `OpenInputOperand`, `InputOpenFailure`,
-  `BuiltinLineReader`. `BuiltinFnmatch.h`: `FnMatch` (not needed yet).
+  `BuiltinLineReader`. `BuiltinFnmatch.h`: `FnMatch` (not needed yet). `BuiltinContext::OutIsTerminal()`,
+  `StopRequested()`, `ErrorText()`.
 - `BuiltinCommand.h`: `ParseBuiltinArgs`, `BuiltinOption` (with `hidden`),
   `BuiltinHelp`, `BuiltinHelpText`, `BuiltinReferenceUrl`.
+- Landed since: `Grep.cpp` (recursive walk, `--include`/`--exclude`) is the
+  model for walking operands, `commands/find`, `commands/xargs`,
+  `commands/sed` exist (rg needs none of them).
 - `IFileIO::ReadDirectory`, `IFileIO::Stat`; the environment through
   `context.Process().GetEnvironment()`.
 
@@ -62,16 +70,22 @@ ICurrentProcess is the only door out (files and directories through
 rg 14 in `Options()` (untreated ones `kBuiltinNotTreated`, reported);
 `--help` from `BuiltinHelpText`, `--version`, default `ManPage()`;
 registered in `CreateStandardBuiltinCommands()` (so the `haisos --init`
-template gets `# BUILTIN rootfs rg /bin/rg`); sources in `CMakeLists.txt`;
-`rg` added to the exact list of `ListsEveryBuiltinSortedWithAVersion`;
+template gets `# BUILTIN rootfs rg /bin/rg`): `CreateRgCommand()` declared
+next to `CreateGrepCommand()` in `BuiltinCommandList.h` and listed
+alphabetically between `CreateRealpathCommand()` and `CreateRmCommand()`;
+sources `commands/rg/Rg.cpp` and `commands/rg/RgSearch.cpp` in
+`src/components/BuiltinCommands/CMakeLists.txt` (after the `commands/rm`
+entries, as the others); `RgTest.cpp` added to the `add_executable` list in
+`tests/unit/components/BuiltinCommands.unittests/CMakeLists.txt`; `"rg"`
+added between `"realpath"` and `"rm"` in the exact list of
+`ListsEveryBuiltinSortedWithAVersion` (`BuiltinCommandsTest.cpp`);
 portable C++17; reads stop promptly on `TriggerStop()`.
 
 ### `BuiltinCommand.h` / `.cpp` -- a reference other than man7
 
 ripgrep has no page on man7.org. Add to `BuiltinHelp` a last member
 `std::string referenceUrl;` ("empty: `BuiltinReferenceUrl` of the real
-command"); `BuiltinHelpText` uses it when set. (If another task already
-added an equivalent, use that instead.) rg sets
+command"); `BuiltinHelpText` uses it when set. (As of 82119e0 no task has added one: `BuiltinHelp` ends with `basedOn`.) rg sets
 `https://github.com/BurntSushi/ripgrep/blob/14.1.1/GUIDE.md`; its `--help`
 line reads `Based on Linux rg: <that url>`.
 
@@ -209,7 +223,7 @@ terminal (`context.OutIsTerminal()`) and names are shown. **Line numbers**
 `auto` (the default) = a terminal, `TERM` set and not `dumb`, and
 `NO_COLOR` unset or empty. `-p` = `--color=always --heading -n`.
 
-**Reading** (per file): the grep-core chunk loop's shape -- `Read` up to
+**Reading** (per file): the grep-core chunk loop's shape (`GrepFile.cpp`; `BuiltinLineReader` splits lines but gives no byte offsets or NUL handling, so rg keeps its own loop) -- `Read` up to
 65536 bytes, a carry, line numbers and byte offsets -- written here.
 Binary files (no `-a`): a file named as an operand (or any file with
 `--binary`): from the first chunk holding a NUL, each NUL also ends a
@@ -274,7 +288,7 @@ any error (unless `-q` matched).
 CMakeLists), `TEST_F(BuiltinCommandsTest, Rg...)`. Tree under `/r`:
 `src/a.c` (grep-core's a.c), `src/sub/b.h` = `TODO sub\n`, `src/bin.dat` =
 `x\0y TODO\n`, `t1` = `TODO\n`, `k` = `none\n`; run from `/r`.
-`RunCaptured` is "off a terminal"; `Run` (the console) is a terminal, with
+`RunCaptured` (`BuiltinCommandsFixture.h`) is "off a terminal"; `Run` (the console) is a terminal, with
 stdout and stderr merged into lines (and no `TERM` in the OS environment,
 so no colour unless a test sets it).
 - `RgSearchesDotByDefault`: `rg TODO` (RunCaptured, no stdin input) ->
@@ -304,6 +318,20 @@ bash ./scripts/test_linux.sh L U BuiltinCommands
 ./output/linux/BuiltinCommands.unittests --gtest_filter='*Rg*'
 bash ./scripts/test_linux.sh L U
 ```
+
+## Separate item: `grep -q` over later operands (#58's open medium)
+
+rg does not touch `Grep.cpp`, so this is its own small change in this PR.
+In `commands/grep/Grep.cpp` (operand loop, ~line 913), after the recursive
+branch's `walk(walk, file, prefix);` add `if (stopped) { break; }` before
+the `continue;` -- `-q` found in the walk must stop later operands (the
+other branches already check `stopped`). Bump grep's version (and egrep's/
+fgrep's, which share it) per the builtin rule, and the version in its
+`--version` test if any. Test in `GrepTest.cpp`, `GrepQuietStopsAfterRecursiveMatch`:
+tree `/g/d/x` = `TODO\n`, `/g/y` = `TODO\n`; `grep -q -r TODO d y` ->
+no output, status 0, and with a second operand `nosuch` after `d`
+(`-q -r TODO d nosuch`) no `grep: nosuch: ...` error on stderr (it is
+never reached).
 
 ## Docs
 

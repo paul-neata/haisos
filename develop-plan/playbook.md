@@ -31,7 +31,7 @@ Pause: no
 | 23 | [search--xargs](tasks/search--xargs.md) | done | 0.5.24 | 22, 9, 4, 6 | #66 | 1 | 1C 2H fixed, 4M 2L open | Windows red, not checked |
 | 24 | [search--sed-core](tasks/search--sed-core.md) | done | 0.5.25 | 3, 4 | #67 | 1 | 1C 4H 3M 1L fixed, 4M 1L open | Windows red, not checked; plan wrong on `2,~2p` (GNU prints 2-4) |
 | 25 | [search--sed-advanced](tasks/search--sed-advanced.md) | done | 0.5.26 | 24, 1 | #68 | 1 | 0C 2H fixed, 4M 3L open | Windows red, not checked |
-| 26 | [search--rg-search](tasks/search--rg-search.md) | todo | | 20 | | | | |
+| 26 | [search--rg-search](tasks/search--rg-search.md) | in-progress | 0.5.27 | 20 | | | | |
 | 27 | [search--rg-regex](tasks/search--rg-regex.md) | todo | | 26 | | | | |
 | 28 | [search--rg-ignore](tasks/search--rg-ignore.md) | todo | | 26 | | | | |
 | 29 | [diff--diff-core](tasks/diff--diff-core.md) | todo | | 4, 12 | | | | |
@@ -102,3 +102,4 @@ Pause: no
 - 2026-10-09 (implement) user: Windows stays ignored on task PRs and CI for the rest of the develop; fixed at the end (final--windows-fix) or in a separate PR
 - 2026-10-09 (implement) search--sed-core refreshed against f6f5bec (Regex already linked; list/CMake/test slots after rmdir/rm, before seq)
 - 2026-10-09 (implement) search--sed-advanced refreshed against c68238e (sed-core's real names, CMake/test slots, sed 1.1.0); folded in #67's follow-ups: s///w and w FILE to end of line, SedIsStoppedPromptly on a held-open stdin pipe, a Regex multiline . / [^...] test, the /[/p error row
+- 2026-10-09 (implement) search--rg-search refreshed against 82119e0 (GrepContext::SetPrinters, GrepFile.h/GrepSettings.h, rg keeps its own read loop, list/CMake/test slots); folded in #58 medium as a separate item: grep -q stops after a recursive match (GrepQuietStopsAfterRecursiveMatch)

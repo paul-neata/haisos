@@ -26,7 +26,7 @@ Pause: no
 | 18 | [coreutils--tr-tee-nl](tasks/coreutils--tr-tee-nl.md) | done | 0.5.14 | 4, 3 | #56 | 1 | 0C 3H fixed, 2M 2L open | Linux CI hung once in Build (runner); green on re-run |
 | 19 | [search--grep-core](tasks/search--grep-core.md) | done | 0.5.15 | 3, 4, 16 | #57 | 1 | 0C 3H fixed, 1M 2L open | MSVC compile errors fixed in review |
 | 20 | [search--grep-recursive](tasks/search--grep-recursive.md) | done | 0.5.16 | 19 | #58 | 1 | 0C 3H fixed, 2M 3L open | Windows green |
-| 21 | [search--find-tests](tasks/search--find-tests.md) | todo | | 3, 20, 1, 8, 4 | | | | |
+| 21 | [search--find-tests](tasks/search--find-tests.md) | in-progress | 0.5.22 | 3, 20, 1, 8, 4 | | | | |
 | 22 | [search--find-actions](tasks/search--find-actions.md) | todo | | 21, 9, 11, 6, 12, 4 | | | | |
 | 23 | [search--xargs](tasks/search--xargs.md) | todo | | 22, 9, 4, 6 | | | | |
 | 24 | [search--sed-core](tasks/search--sed-core.md) | todo | | 3, 4 | | | | |
@@ -94,3 +94,4 @@ Pause: no
 - 2026-10-09 (implement) coreutils--stat refreshed against 96ca945 (Stat(path, FileStatus&) call, CopyStatMissingReason, SetTimes-based precision test, list/CMake slots; warns that ParsePrintfSpec skips h/L while stat's %h/%Ld are directives)
 - 2026-10-09 (implement) coreutils--du-cmp refreshed against f561090 (FnMatch from BuiltinFnmatch.h for --exclude, InputOpenFailure/FileStatus fields, both ls HumanSize uses move to FormatHumanSize, list/CMake/test slots)
 - 2026-10-09 (implement) coreutils--head-tail refreshed against 6221bce (ArgMatch/BuiltinLineReader/WriteFully signatures, hidden digit options as uniq's, list/CMake/test slots, init-template test filter `haisos`)
+- 2026-10-09 (implement) search--find-tests refreshed against a24afec (reuse FnMatch/ParseDateString/Regex; -size keeps its own grammar; Regex already linked; list/CMake/test slots; IFileIO::kStdIn)

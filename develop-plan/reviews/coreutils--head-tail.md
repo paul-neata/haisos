@@ -1,7 +1,7 @@
 # Review: coreutils--head-tail (PR #63)
 - Verdict: merged
 - Merged as: 76bca30, version 0.5.21
-- Tokens: claude 265960, ollama input 274801, ollama output 136020
+- Tokens: claude 268978, ollama input 274801, ollama output 136020
 
 | Severity | Status | Where | Finding |
 |----------|--------|-------|---------|

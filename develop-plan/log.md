@@ -73,3 +73,4 @@
 - 2026-10-09 00:11 UTC -- start coreutils--head-tail (0.5.21)
 - 2026-10-09 00:56 UTC -- coreutils--head-tail: PR #63, windows-failed (ignored per Direction)
 - 2026-10-09 01:08 UTC -- coreutils--head-tail merged #63 as 0.5.21: 0C 2H fixed, 3M 5L open, 1 try
+- 2026-10-09 01:09 UTC -- start search--find-tests (0.5.22)

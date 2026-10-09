@@ -3,7 +3,7 @@
 - Rock: search
 - Depends on: base--fs-rename-times (`SetTimes`, used by the tests), base--regex-match (`Regex`), coreutils--sort (`BuiltinText.h`), coreutils--mv-touch (`BuiltinDate.h`: `ParseDateString`, `LocalTimeOf`, `SecondsFromLocalTime`), search--grep-recursive (`FnMatch`, contract 6)
 - Size: ~1000 changed lines in ~8 files (at the upper limit: if it grows past ~1100 while planning the work, split off the second group of tests -- `-size`, the time tests, `-perm`, owners, `-links`, `-inum`, `-samefile` -- into a task of their own)
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ a24afec
 - PR title: Add the find builtin: expressions, options and tests
 
 ## Goal
@@ -43,19 +43,25 @@ What earlier tasks provide, as if on develop (read their plans in
 - `src/components/Regex/Regex.h` (base--regex-syntax/-match): `Regex::Compile(pattern,
   RegexOptions{syntax, ignoreCase, multiline}, error)` -> `shared_ptr<const Regex>`
   or null with GNU's message; `Search(text, start, match, flags)`;
-  `RegexMatch::groups[0]`. CMake target `Regex` (link it to `BuiltinCommands`
-  if no earlier task did).
-- `BuiltinFnmatch.h` (search--grep-recursive, contract 6): `bool FnMatch(std::string_view
-  pattern, std::string_view text, int flags = 0)`, flags `kFnmPathname`,
-  `kFnmPeriod`, `kFnmCaseFold`, `kFnmLeadingDir`; glibc fnmatch semantics.
+  `RegexMatch::groups[0]`. CMake target `Regex` (already linked to `BuiltinCommands`:
+  nothing to add).
+- `BuiltinFnmatch.h` (search--grep-recursive, contract 6; on develop):
+  `bool FnMatch(std::string_view pattern, std::string_view text, int flags = 0)`,
+  flags `kFnmPathname`, `kFnmNoEscape`, `kFnmPeriod`, `kFnmLeadingDir`,
+  `kFnmCaseFold`; glibc fnmatch semantics. Reuse it, never a second matcher.
 - `BuiltinText.h` (coreutils--sort): `std::string GnuQuote(std::string_view)`
   (GNU's quote() in the C locale: `'a\'b'`), `BuiltinLineReader` (lines split on
   a delimiter, `'\0'` for `-files0-from`), `OpenInputOperand`.
-- `BuiltinDate.h` (coreutils--mv-touch): `bool ParseDateString(std::string_view
-  text, FileDateTime now, FileDateTime& out)`, `std::tm LocalTimeOf(int64_t)`,
-  `std::optional<int64_t> SecondsFromLocalTime(const std::tm&)`.
-- `IFileSystem::SetTimes(path, optional<FileDateTime> atime, optional<FileDateTime> mtime)`
-  (base--fs-rename-times) -- the tests set file times with it.
+- `BuiltinDate.h` (coreutils--mv-touch / date): `bool ParseDateString(std::string_view
+  text, FileDateTime now, FileDateTime& out)` (the local-zone inline overload
+  of the one taking `bool utc`), `std::tm LocalTimeOf(int64_t)`,
+  `std::optional<int64_t> SecondsFromLocalTime(const std::tm&)`. (`FormatDateTime`
+  is not needed until `-printf`.) `BuiltinSize.h`'s `ParseSizeWithSuffix` is not
+  used: `-size`'s suffixes (`c w b k M G`, rounding up, a `+`/`-` sign) are
+  find's own and are parsed in `FindTests.cpp`.
+- `IFileSystem::SetTimes(path, const optional<FileDateTime>& atime, const optional<FileDateTime>& mtime)`
+  (base--fs-rename-times; `IFileIO` has it too) -- the tests set file times
+  with it on the fixture's `root`.
 
 Facts Haisos gives `find` to work with, and what follows (documented
 exceptions, consistent with `ls -l` and the `stat` plan): every file's mode
@@ -65,7 +71,7 @@ never matches), no device numbers or filesystem types, no birth time.
 
 Rules that bite:
 - `ICurrentProcess` is the only door out: every file access through
-  `context.IO()` (`Stat`, `ReadDirectory`, `ResolvePath`, `OpenFile`); no
+  `context.IO()` (`Stat`, `ReadDirectory`, `ResolvePath`, `OpenFile`, `GetDescriptor`); no
   `IFileSystem` or `IHaisosOS` held.
 - GNU's output and messages byte for byte (C locale: ASCII quotes); every
   argument the real command accepts is accepted; `--help` from
@@ -239,7 +245,7 @@ the `Create()` rule is for classes implementing `interfaces/`.
    deprecated; please use -depth instead, because the latter is a
    POSIX-compliant feature.` (when warnings are on).
 5. Warnings are on when descriptor 0 is a terminal
-   (`IO().GetDescriptor(0)` non-null and `IsTerminal()`), then switched by
+   (`IO().GetDescriptor(IFileIO::kStdIn)` non-null and `IsTerminal()`), then switched by
    `-warn`/`-nowarn` as they are parsed.
 6. `anyAction` is true when some parsed primary's entry has
    `suppressesDefaultPrint`. `Run` then wraps: no expression -> `-print`;
@@ -369,16 +375,20 @@ arguments: -D, -O`). search--find-actions updates the notes.
 ### Registration and build
 
 - `BuiltinCommandList.h`: declare `CreateFindCommand()`, add it to
-  `CreateStandardBuiltinCommands()` (alphabetical).
+  `CreateStandardBuiltinCommands()` (alphabetical: after `CreateFgrepCommand`,
+  before `CreateGrepCommand`).
 - `src/components/BuiltinCommands/CMakeLists.txt`: `commands/find/Find.cpp`,
-  `commands/find/FindParser.cpp`, `commands/find/FindTests.cpp`; link
-  `Regex` if not already linked.
+  `commands/find/FindParser.cpp`, `commands/find/FindTests.cpp` in the
+  `add_library(BuiltinCommands ...)` list, after `commands/false/False.cpp`
+  (`Regex` is already in its `target_link_libraries`).
 
 ## Tests
 
-New `tests/unit/components/BuiltinCommands.unittests/FindTest.cpp`, listed
-in that directory's `CMakeLists.txt`; `TEST_F(BuiltinCommandsTest, Find...)`
-on `RunCaptured` (stdout, stderr, status byte for byte).
+New `tests/unit/components/BuiltinCommands.unittests/FindTest.cpp` (include
+`BuiltinCommandsFixture.h`), added to the `add_executable(BuiltinCommands.unittests
+...)` list in that directory's `CMakeLists.txt` (after `EnvTest.cpp`);
+`TEST_F(BuiltinCommandsTest, Find...)` on `RunCaptured` (stdout, stderr,
+status byte for byte; its stdin is not a terminal, so warnings start off).
 
 A helper in the file builds `/proj` on the fixture's in-memory `root`:
 `/proj/a/` (dir), `/proj/a/x.txt` = `hi\n`, `/proj/a/b/` (dir),
@@ -413,7 +423,7 @@ set with `root->SetTimes(...)` relative to `CurrentFileDateTime()`.
 - `FindIsStoppedPromptly`: a tree of 2000 files; start `find /proj` with `os->StartProcess`, `TriggerStop()`, finishes within 1 s with 143.
 
 Update `BuiltinCommandsTest.cpp`'s `ListsEveryBuiltinSortedWithAVersion`
-list with `"find"` in sorted position.
+list with `"find"` between `"fgrep"` and `"grep"`.
 
 Commands:
 ```
@@ -425,8 +435,10 @@ bash ./scripts/test_linux.sh L U
 
 ## Docs
 
-- `src/components/BuiltinCommands/CLAUDE.md`: the command list; a table row
-  for `find` 1.0.0 (treated: operators, options, tests, `-print -print0
+- `src/components/BuiltinCommands/CLAUDE.md`: the command list (top paragraph);
+  the `BuiltinFnmatch.h` entry (find now uses `FnMatch`, drop "are to reuse it
+  too" for find); a table row (Builtin | Version | Treated | Exceptions) for
+  `find` 1.0.0 (treated: operators, options, tests, `-print -print0
   -prune -quit`; exceptions: mode 0777, owner haisos uid/gid 0, inode 0, no
   links, `-xdev -mount -fstype -D -O` not treated, `-context` fails, order of
   entries the filesystem's); a short paragraph on `commands/find/` (parser,

@@ -3,7 +3,7 @@
 - Rock: coreutils
 - Depends on: coreutils--du-cmp (`ParseSizeWithSuffix` in `BuiltinSize.h`), coreutils--sort (`BuiltinText.h`), coreutils--uniq-cut (`BuiltinOption::hidden`)
 - Size: ~850 changed lines in ~7 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ 6221bce
 - PR title: Add head and tail builtins, tail following files by polling
 
 ## Goal
@@ -37,7 +37,7 @@ reading and discarding. A descriptor keeps reading where it stopped, and a
 read at end-of-file returns 0 but returns data appended later (in-memory and
 physical files alike) -- what descriptor-mode following relies on.
 
-What earlier tasks provide, as if on develop (coreutils--du-cmp,
+What earlier tasks provide, on develop (coreutils--du-cmp,
 `src/components/BuiltinCommands/BuiltinSize.h`):
 
 ```cpp
@@ -49,16 +49,21 @@ SizeParse ParseSizeWithSuffix(std::string_view text, std::string_view validSuffi
 with `0` in the list, `kB` 1000 and `KiB` 1024; no digits but a suffix is 1
 of it.)
 
-From coreutils--sort (`src/components/BuiltinCommands/BuiltinText.h`; read
-that plan for the exact API): `GnuQuote(text)` -- GNU's `quote()`, used for
+From coreutils--sort (`src/components/BuiltinCommands/BuiltinText.h`, read
+it for the exact API): `GnuQuote(text)` -- GNU's `quote()`, used for
 every value in a message below (`invalid number of lines: 'x'`);
-`ArgMatch(context, "--follow", value, choices)` -- GNU's `XARGMATCH`, which
+`ArgMatch(context, "--follow", value, choices)` (`choices` a
+`std::vector<ArgChoice>`, `ArgChoice{name, value}`, returning
+`std::optional<int>`) -- GNU's `XARGMATCH`, which
 prints the "invalid argument ... Valid arguments are: ..." block and leaves
 the exit (1) to the caller; `OpenInputOperand(context, name, failure)` --
 `-` as descriptor 0, a name Stat-ed then opened, failure `Missing` /
 `Directory` / `Denied` / `BadDescriptor`, which each command words itself;
-`BuiltinLineReader(context, input, delimiter)` with `Next(line, delimited)`
--- lines split on `\n` or `\0`, the last one possibly without its delimiter.
+`BuiltinLineReader(context, input, delimiter)` (`input` an
+`IFileDescriptor&`) with `Next(line, delimited)` returning `LineReadResult`
+(`Line`/`End`/`Error`/`Stopped`) -- lines split on `\n` or `\0`, the last one
+possibly without its delimiter; `WriteFully(out, bytes)` for outputs other
+than stdout.
 Use them; do not write second copies. File names in messages are
 `ShellEscapeQuoted(name, true)` where GNU uses `quoteaf` (`cannot open`,
 `error reading`, `has become inaccessible`, `has appeared`) and
@@ -78,8 +83,11 @@ the first part of files", usage `head [OPTION]... [FILE]...`.
 `Options()`: `{'c', "bytes", Required, "[-]NUM"}`, `{'n', "lines", Required, "[-]NUM"}`,
 `{'q', "quiet"}` and `{0, "silent"}` (same id), `{'v', "verbose"}`,
 `{'z', "zero-terminated"}`, `{0, "-presume-input-pipe", kBuiltinNotTreated}`
-(GNU's hidden `---presume-input-pipe`), and `'0'`-`'9'` as hidden short
-options sharing one id `kDigit` (GNU's getopt string has them, so `head -n1
+(GNU's hidden `---presume-input-pipe`), and `'0'`-`'9'` as short options
+sharing one id `kDigit`, each `hidden = true` as uniq's `kUniqObsoleteDigit`
+ones are (`commands/uniq/Uniq.cpp`; a real entry is `{shortName, longName, id,
+BuiltinArgument::X, argumentName, description, hidden}`, the notation here is
+shorthand) (GNU's getopt string has them, so `head -n1
 -5` parses and is then refused by the command, not by the parser).
 
 Parsing (head.c `main`), usage errors exit 1:
@@ -196,9 +204,13 @@ same or larger size is not noticed in name mode until its size shrinks
 
 ### `BuiltinCommandList.h`, `CMakeLists.txt`
 
-Declare `CreateHeadCommand()` and `CreateTailCommand()`, add both to
-`CreateStandardBuiltinCommands()` (that alone puts them in the `haisos --init`
-template); add `commands/head/Head.cpp` and `commands/tail/Tail.cpp`.
+Declare `CreateHeadCommand()` (between `CreateGrepCommand()` and
+`CreateHshCommand()`) and `CreateTailCommand()` (between `CreateStatCommand()`
+and `CreateTeeCommand()`), add both to `CreateStandardBuiltinCommands()` in the
+same spots (that alone puts them in the `haisos --init` template); in
+`src/components/BuiltinCommands/CMakeLists.txt` add `commands/head/Head.cpp`
+(after `commands/grep/GrepMatcher.cpp`) and `commands/tail/Tail.cpp` (after
+`commands/stat/Stat.cpp`).
 
 Rules that bite: files only through `context.IO()`, processes only through
 `context.Process().OS()`; every GNU option in `Options()`; `--help` from
@@ -209,8 +221,9 @@ broken pipe exits 141 (as `BuiltinContext` already arranges); portable C++17
 ## Tests
 
 New `HeadTest.cpp` and `TailTest.cpp` in
-`tests/unit/components/BuiltinCommands.unittests/` (add to its
-`CMakeLists.txt`), on `RunCaptured`. Files: `/n12` holding `seq 12`'s output
+`tests/unit/components/BuiltinCommands.unittests/` (add both to the
+`add_executable(BuiltinCommands.unittests ...)` list in its `CMakeLists.txt`;
+the shared fixture is `BuiltinCommandsFixture.h`), on `RunCaptured`. Files: `/n12` holding `seq 12`'s output
 (`"1\n2\n...\n12\n"`, 27 bytes), `/abc` = `"a\nb\nc"`. Expected outputs are
 GNU coreutils 9.4's (`LC_ALL=C`); verify any new one in the container.
 
@@ -275,16 +288,17 @@ Commands:
 bash ./scripts/build_linux_on_linux.sh
 bash ./scripts/test_linux.sh L U BuiltinCommands
 ./output/linux/BuiltinCommands.unittests --gtest_filter='BuiltinCommandsTest.Head*:BuiltinCommandsTest.Tail*'
-bash ./scripts/test_linux.sh L U CliParser
+bash ./scripts/test_linux.sh L U haisos
 bash ./scripts/test_linux.sh L U
 ```
 
 (The script's filter matches test executable names, so `BuiltinCommands`
 is the narrowest it takes; the direct run narrows to this task's tests.
 `TheInitTemplatesBuiltinsAllApplyOnceUncommented` lives in
-`CliParser.unittests`.) Add the new builtin names to the exact list in
+`HaisosFileOperationsTest.cpp` of `haisos.unittests`.) Add the new builtin names to the exact list in
 `ListsEveryBuiltinSortedWithAVersion` (`BuiltinCommandsTest.cpp`), in byte
-order.
+order (`"head"` goes between `"grep"` and `"hsh"`, `"tail"` between `"stat"`
+and `"tee"`).
 
 ## Docs
 

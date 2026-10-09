@@ -70,3 +70,4 @@
 - 2026-10-08 23:15 UTC -- start coreutils--du-cmp (0.5.20)
 - 2026-10-08 23:56 UTC -- coreutils--du-cmp: PR #62, windows-failed (ignored per Direction)
 - 2026-10-09 00:10 UTC -- coreutils--du-cmp merged #62 as 0.5.20: 0C 1H fixed, 3M 6L open, 1 try
+- 2026-10-09 00:11 UTC -- start coreutils--head-tail (0.5.21)

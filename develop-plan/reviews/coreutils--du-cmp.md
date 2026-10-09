@@ -1,7 +1,7 @@
 # Review: coreutils--du-cmp (PR #62)
 - Verdict: merged
 - Merged as: 47a0439, version 0.5.20
-- Tokens: claude 314202, ollama input 329244, ollama output 140514
+- Tokens: claude 317424, ollama input 329244, ollama output 140514
 
 | Severity | Status | Where | Finding |
 |----------|--------|-------|---------|

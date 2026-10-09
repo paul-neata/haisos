@@ -22,7 +22,7 @@ Pause: no
 | 14 | [coreutils--du-cmp](tasks/coreutils--du-cmp.md) | done | 0.5.20 | 12, 4 | #62 | 1 | 0C 1H fixed, 3M 6L open | Windows red, not checked |
 | 15 | [coreutils--test-program](tasks/coreutils--test-program.md) | done | 0.5.12 | 4 | #54 | 1 | 0C 2H fixed, 1M 2L open | |
 | 16 | [coreutils--uniq-cut](tasks/coreutils--uniq-cut.md) | done | 0.5.13 | 4 | #55 | 1 | 0C 0H fixed, 2M 6L open | |
-| 17 | [coreutils--head-tail](tasks/coreutils--head-tail.md) | todo | | 14, 4, 16 | | | | |
+| 17 | [coreutils--head-tail](tasks/coreutils--head-tail.md) | in-progress | 0.5.21 | 14, 4, 16 | | | | |
 | 18 | [coreutils--tr-tee-nl](tasks/coreutils--tr-tee-nl.md) | done | 0.5.14 | 4, 3 | #56 | 1 | 0C 3H fixed, 2M 2L open | Linux CI hung once in Build (runner); green on re-run |
 | 19 | [search--grep-core](tasks/search--grep-core.md) | done | 0.5.15 | 3, 4, 16 | #57 | 1 | 0C 3H fixed, 1M 2L open | MSVC compile errors fixed in review |
 | 20 | [search--grep-recursive](tasks/search--grep-recursive.md) | done | 0.5.16 | 19 | #58 | 1 | 0C 3H fixed, 2M 3L open | Windows green |
@@ -93,3 +93,4 @@ Pause: no
 - 2026-10-08 (implement) coreutils--date refreshed against 7b806fb (BuiltinDate names from #59, CMake/test slots, BuiltinDateTest exists); folded in #59 medium: previousWasTime only when no zone attached (`2024-01-02T03:04Z +1 hour`)
 - 2026-10-09 (implement) coreutils--stat refreshed against 96ca945 (Stat(path, FileStatus&) call, CopyStatMissingReason, SetTimes-based precision test, list/CMake slots; warns that ParsePrintfSpec skips h/L while stat's %h/%Ld are directives)
 - 2026-10-09 (implement) coreutils--du-cmp refreshed against f561090 (FnMatch from BuiltinFnmatch.h for --exclude, InputOpenFailure/FileStatus fields, both ls HumanSize uses move to FormatHumanSize, list/CMake/test slots)
+- 2026-10-09 (implement) coreutils--head-tail refreshed against 6221bce (ArgMatch/BuiltinLineReader/WriteFully signatures, hidden digit options as uniq's, list/CMake/test slots, init-template test filter `haisos`)

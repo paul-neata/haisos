@@ -763,6 +763,13 @@ private:
     // its index, or -1 with the message written.
     int AddOutputFile(const std::string& name)
     {
+        // One target per distinct name, shared by every w, W and s///w
+        // naming it (GNU opens each file once: their writes interleave).
+        for (size_t k = 0; k < m_script.outputFiles.size(); ++k) {
+            if (m_script.outputFiles[k].name == name) {
+                return static_cast<int>(k);
+            }
+        }
         OutputFile out;
         out.name = name;
         if (name == "/dev/stdout") {

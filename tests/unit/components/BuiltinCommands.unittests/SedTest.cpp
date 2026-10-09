@@ -1009,6 +1009,11 @@ TEST_F(BuiltinCommandsTest, SedWriteFiles) {
     EXPECT_EQ(captured.status, 0);
     ASSERT_TRUE(ReadWholeFile(*root, "/a;b", content));
     EXPECT_EQ(content, "x\n");
+    // Every w and s///w naming one file share it, their writes interleaved.
+    captured = RunCaptured("sed", {"-n", "-e", "w /shared", "-e", "s/./X/w /shared"}, "1\n2\n");
+    EXPECT_EQ(captured.status, 0);
+    ASSERT_TRUE(ReadWholeFile(*root, "/shared", content));
+    EXPECT_EQ(content, "1\nX\n2\nX\n");
     captured = RunCaptured("sed", {"1{p;w /out}"}, "x\n");
     EXPECT_EQ(captured.out, "");
     EXPECT_EQ(captured.err, "sed: -e expression #1, char 0: unmatched `{'\n");

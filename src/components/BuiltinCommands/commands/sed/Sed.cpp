@@ -1,6 +1,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <memory>
+#include <mutex>
 #include <random>
 #include <string>
 #include <vector>
@@ -250,6 +251,8 @@ private:
     // letters, in the original's directory, not one that is already there.
     static std::string TempFileName(BuiltinContext& context, const std::string& name)
     {
+        // Shared by every sed process (each runs on its own thread).
+        static std::mutex generatorMutex;
         static std::mt19937 generator(static_cast<uint32_t>(
             std::chrono::steady_clock::now().time_since_epoch().count()));
         static const char alphabet[] =
@@ -258,8 +261,11 @@ private:
         const std::string dir = slash == std::string::npos ? "" : name.substr(0, slash + 1);
         while (true) {
             std::string candidate = dir + "sed";
-            for (int i = 0; i < 6; ++i) {
-                candidate += alphabet[generator() % 62];
+            {
+                std::lock_guard<std::mutex> lock(generatorMutex);
+                for (int i = 0; i < 6; ++i) {
+                    candidate += alphabet[generator() % 62];
+                }
             }
             FileStatus fileStat;
             if (context.IO().Stat(candidate, fileStat) != 0) {

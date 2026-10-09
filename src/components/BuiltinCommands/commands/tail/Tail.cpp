@@ -87,28 +87,33 @@ bool IsOptionWord(const std::string& arg) {
 enum class Obsolete { No, Yes, Error };
 
 // GNU's parse_obsolete_option: the first argument "+NUM" or "-NUM", with an
-// optional b (512 bytes), c (bytes) or l (lines) unit and an optional trailing
-// f (--follow, by descriptor), when the argument list is short enough that
-// the first argument cannot be an option of the regular syntax -- decided by
-// the caller. The number defaults to 10.
+// optional b (512-byte blocks), c (bytes) or l (lines) unit and an optional
+// trailing f (--follow, by descriptor), when the argument list is short
+// enough that the first argument cannot be an option of the regular syntax
+// -- decided by the caller. The number defaults to 10 lines, or 10 blocks
+// for b, 10 bytes for c; a given NUM is the count and the unit only says
+// what kind ("b" scaling it by 512). An obsolete spelling the regular syntax
+// also knows is left to it: "-" alone, and "-c" without its argument.
 Obsolete ParseTailObsolete(BuiltinContext& context, const std::string& arg,
                            TailCount& count, bool& follow) {
     if (arg.size() < 2 || (arg[0] != '+' && arg[0] != '-')) {
         return Obsolete::No;
     }
-    uintmax_t n = 0;
+    uintmax_t parsed = 0;
     bool overflow = false;
     bool digits = false;
     size_t i = 1;
     for (; i < arg.size() && arg[i] >= '0' && arg[i] <= '9'; ++i) {
         digits = true;
         const uintmax_t digit = static_cast<uintmax_t>(arg[i] - '0');
-        if (n > (UINTMAX_MAX - digit) / 10) {
+        if (parsed > (UINTMAX_MAX - digit) / 10) {
             overflow = true;
         } else {
-            n = n * 10 + digit;
+            parsed = parsed * 10 + digit;
         }
     }
+    // DEFAULT_N_LINES is also the count when no NUM is given.
+    uintmax_t n = digits ? parsed : 10;
     char unit = 'l';
     if (i < arg.size() && (arg[i] == 'b' || arg[i] == 'c' || arg[i] == 'l')) {
         unit = arg[i];
@@ -447,7 +452,9 @@ public:
                 return 1;
             }
             if (result == Obsolete::Yes) {
-                followMode = TailFollow::Descriptor;
+                if (follow) {
+                    followMode = TailFollow::Descriptor;
+                }
                 args.erase(args.begin());
             }
         }

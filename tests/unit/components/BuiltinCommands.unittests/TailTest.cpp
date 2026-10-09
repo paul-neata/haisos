@@ -56,7 +56,7 @@ TEST_F(BuiltinCommandsTest, TailHeaders) {
     EXPECT_EQ(RunCaptured("tail", {"-q", "-n1", "/abc", "/n12"}).out, "c12\n");
     EXPECT_EQ(RunCaptured("tail", {"-v", "-n1", "/abc"}).out, "==> /abc <==\nc");
     EXPECT_EQ(RunCaptured("tail", {"-n1", "-", "/n12"}, "a\nb\n").out,
-        "==> standard input <==\nb\n==> /n12 <==\n12\n");
+        "==> standard input <==\nb\n\n==> /n12 <==\n12\n");
 }
 
 TEST_F(BuiltinCommandsTest, TailErrorsAndWarnings) {

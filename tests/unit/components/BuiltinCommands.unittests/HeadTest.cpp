@@ -35,7 +35,7 @@ TEST_F(BuiltinCommandsTest, HeadHeaders) {
     EXPECT_EQ(RunCaptured("head", {"-v", "-n1", "/abc"}).out, "==> /abc <==\na\n");
     // The obsolete spelling takes -q and -v too.
     EXPECT_EQ(RunCaptured("head", {"-2v", "/n12"}).out, "==> /n12 <==\n1\n2\n");
-    EXPECT_EQ(RunCaptured("head", {"-2q", "/n12", "/abc"}).out, "1\n2\na\n");
+    EXPECT_EQ(RunCaptured("head", {"-2q", "/n12", "/abc"}).out, "1\n2\na\nb\n");
     EXPECT_EQ(RunCaptured("head", {"-n1", "-", "/n12"}, "a\nb\n").out,
         "==> standard input <==\na\n\n==> /n12 <==\n1\n");
 }

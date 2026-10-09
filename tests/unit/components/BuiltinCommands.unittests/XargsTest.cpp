@@ -350,7 +350,7 @@ TEST_F(BuiltinCommandsTest, XargsPromptWithoutTerminal) {
     EXPECT_EQ(prompted.err,
         "echo X axargs: failed to open /dev/tty for reading: No such device or address\n");
     EXPECT_EQ(prompted.status, 1);
-    // -o opens /dev/tty for each command it runs; with none, the first
+    // -o gives each child the terminal; standard input is none, so the first
     // command fails -- and with -r and nothing to run, none is tried.
     const auto openTty = RunCaptured("xargs", {"-o", "echo", "X"}, "a\n", "/", env);
     EXPECT_EQ(openTty.out, "");
@@ -382,11 +382,11 @@ TEST_F(BuiltinCommandsTest, XargsArgFileAndSlotVar) {
     EXPECT_EQ(directory.out, "X\n");
     EXPECT_EQ(directory.err, "");
     EXPECT_EQ(directory.status, 0);
-    // --process-slot-var numbers the commands 0, 1, ... in the child's
-    // environment.
+    // --process-slot-var: one child at a time, so GNU's reused slot is
+    // always 0.
     const auto slots = RunCaptured("xargs", {"--process-slot-var=SLOT", "-n", "1",
                                    "hsh", "-c", "echo $SLOT"}, "a\nb\n", "/", env);
-    EXPECT_EQ(slots.out, "0\n1\n");
+    EXPECT_EQ(slots.out, "0\n0\n");
     EXPECT_EQ(slots.status, 0);
 }
 
@@ -398,6 +398,16 @@ TEST_F(BuiltinCommandsTest, XargsChildGetsEmptyInput) {
                                       "a\n", "/", env);
     EXPECT_EQ(captured.out, "done\n");
     EXPECT_EQ(captured.status, 0);
+}
+
+TEST_F(BuiltinCommandsTest, XargsRunningXargsKeepsItsOwnState) {
+    const auto env = PathEnvironment(factory);
+    // One command object serves every xargs process: the inner run must not
+    // touch the outer one's items, command or settings.
+    const auto nested = RunCaptured("xargs", {"-n", "1", "xargs", "echo"}, "a b\n", "/", env);
+    EXPECT_EQ(nested.out, "a\nb\n");
+    EXPECT_EQ(nested.err, "");
+    EXPECT_EQ(nested.status, 0);
 }
 
 TEST_F(BuiltinCommandsTest, XargsShowLimitsAndValidation) {

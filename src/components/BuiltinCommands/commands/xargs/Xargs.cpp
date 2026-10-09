@@ -2,8 +2,9 @@
 // after GNU findutils 4.9.0's xargs -- its messages byte for byte in the C
 // locale, including the -I size ladder and the mutual-exclusion warnings.
 // Programs run only through RunProgramAndWait (never the OS directly), and
-// files -- the -a input, /dev/tty -- only through context.IO().
+// files -- the -a input -- only through context.IO().
 #include "BuiltinCommand.h"
+#include "BuiltinPrompt.h"
 #include "BuiltinRunProgram.h"
 #include "BuiltinText.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
@@ -394,17 +395,24 @@ public:
             "build and execute command lines from standard input",
             {"xargs [OPTION]... COMMAND [INITIAL-ARGS]..."},
             "-P runs one command at a time: Haisos has no parallel children,\n"
-            "but the number is still checked and --process-slot-var still\n"
-            "counts 0, 1, 2, ... per command. The limits come from a fixed\n"
-            "ARG_MAX of 2097152, as Linux's own, less 2048 and the\n"
-            "environment's bytes. Haisos has no /dev/tty, so -p and -o fail\n"
-            "their first command and exit 1, where GNU xargs would ask or\n"
-            "crash. A signal is an exit code 128+n; a child stopped by one\n"
-            "makes xargs exit 125. Each child reads an empty input, never\n"
-            "xargs's own."};
+            "but the number is still checked; --process-slot-var is always 0.\n"
+            "The limits come from a fixed ARG_MAX of 2097152, as Linux's own,\n"
+            "less 2048 and the environment's bytes. Haisos has no /dev/tty:\n"
+            "-p and -o take standard input as the terminal when it is one,\n"
+            "and otherwise fail their first command and exit 1. A signal is\n"
+            "an exit code 128+n; a child stopped by one makes xargs exit 125.\n"
+            "Each child reads an empty input, never xargs's own."};
     }
 
     int Run(BuiltinContext& context) override {
+        // One instance serves every process running the command -- several
+        // at once, and xargs running xargs -- so each run gets its own state.
+        XargsCommand run;
+        return run.RunOnce(context);
+    }
+
+private:
+    int RunOnce(BuiltinContext& context) {
         int exitStatus = 0;
         auto parsed = BeginBuiltin(context, *this, /*usageErrorStatus=*/1, exitStatus,
             /*stopAtFirstOperand=*/true);
@@ -412,13 +420,6 @@ public:
             return exitStatus;
         }
         m_context = &context;
-        // One instance serves every process running the command, so the run
-        // state starts clean here -- never carried over from a previous run.
-        m_items.clear();
-        m_everHadItems = false;
-        m_abort = 0;
-        m_childFailed = false;
-        m_slot = 0;
         Settings settings;
         if (!ProcessOptions(*parsed, settings)) {
             return 1;
@@ -513,7 +514,6 @@ public:
         return m_childFailed ? 123 : 0;
     }
 
-private:
     // The options, in the order given: GNU's own validations and warnings,
     // each message under the option's short name as getopt reports it.
     bool ProcessOptions(const ParsedBuiltinArgs& parsed, Settings& settings) {
@@ -1116,22 +1116,23 @@ private:
             line += " ";
             line += ShellQuoteArg(arg);
         }
+        // Haisos has no /dev/tty: the terminal is standard input, when it is one.
+        const auto stdIn = context.IO().GetDescriptor(IFileIO::kStdIn);
+        const bool stdInIsTerminal = stdIn && stdIn->IsTerminal();
         if (m_settings->interactive) {
-            // GNU prints the line, then asks on /dev/tty; Haisos has none, so
-            // the ask is always the failure GNU prints without one.
-            context.ErrorText(line);
-            const auto tty = context.IO().OpenFile("/dev/tty", kFileOpenReadOnly);
-            if (!tty) {
+            // GNU prints the line, then asks on the terminal; without one,
+            // the failure GNU prints.
+            if (!stdInIsTerminal) {
+                context.ErrorText(line);
                 context.Error("failed to open /dev/tty for reading: "
                     "No such device or address");
                 m_abort = 1;
                 return 1;
             }
-            context.ErrorText("?...");
-            DescriptorLineReader reader(tty);
-            const auto answer = reader.ReadLine();
-            if (!answer || answer->empty()
-                || (answer->front() != 'y' && answer->front() != 'Y')) {
+            if (!m_prompt) {
+                m_prompt.emplace(context);
+            }
+            if (!m_prompt->Ask(line + " ?...")) {
                 return 0;
             }
         } else if (m_settings->verbose) {
@@ -1143,12 +1144,13 @@ private:
             // A clone of the process's own, so the slot number never leaks
             // back; RunProgramAndWait would clone anyway when null.
             childEnvironment = context.Process().GetEnvironment();
-            childEnvironment->SetVariable(m_settings->slotVar, std::to_string(m_slot++));
+            // One child at a time: GNU reuses the freed slot, so always 0.
+            childEnvironment->SetVariable(m_settings->slotVar, "0");
         }
 
         std::shared_ptr<IFileDescriptor> childInput;
         if (m_settings->openTty) {
-            childInput = context.IO().OpenFile("/dev/tty", kFileOpenReadOnly);
+            childInput = stdInIsTerminal ? stdIn : nullptr;
             if (!childInput) {
                 context.Error(GnuQuote("/dev/tty") + ": No such device or address");
                 m_abort = 1;
@@ -1212,7 +1214,7 @@ private:
     bool m_everHadItems = false;
     int m_abort = 0;
     bool m_childFailed = false;
-    long m_slot = 0;
+    std::optional<BuiltinPrompt> m_prompt; // -p's, over standard input
 };
 
 } // namespace

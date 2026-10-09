@@ -11,6 +11,29 @@ Platform support:
 - **Windows**: Uses WinHTTP API
 - **WASM**: Uses emscripten_fetch
 
+## Clean-room rule: all code is written from scratch
+
+**This rule comes before every other one.** No code is copied from any other
+program or project -- whatever its licence: the same as Haisos's, a compatible
+one, or an incompatible one. Every line of Haisos is written from scratch.
+
+- What another program *does* may be matched: its documented and observable
+  behaviour -- man pages, POSIX and other specifications, published papers and
+  algorithms (e.g. Myers' diff), and the output of running the real program.
+  That is how the builtins match GNU (see "Builtin Commands").
+- What another program *is* may not be used: its source code is never read in
+  order to reproduce it -- not copied, translated, ported, paraphrased, or
+  rewritten line by line or function by function. That includes code recalled
+  from memory, snippets found online, and libraries' internals (coreutils,
+  gnulib, diffutils, findutils, sed, gawk, ripgrep, jq, tar, procps, ...).
+- Plans and reviews describe behaviour, never another program's code
+  structure (its functions, how they are split, their order); comments name
+  the behaviour matched, not another program's functions.
+- The libraries in `extern/` are used as dependencies, never copied into
+  `src/`.
+
+Code that looks copied is a critical finding in a review.
+
 ## External Dependencies
 
 | Repository | Purpose | Version |
@@ -728,3 +751,4 @@ When Claude Code performs automatic development (where a single prompt drives al
 7. **Use only paths relative to the repo root** in all edits, documentation, commit messages, and skill prompts. Never record absolute paths like `/mnt/c/src/haisos1/...`.
 8. **The develop skills** (`/develop-*`, see "Develop workflow") are the explicit instruction to commit, push, open, comment on and merge PRs, each within the scope it describes; only `/develop-close` merges into `master`. Code from a task container is never built or run on the host before its review has cleared it (Linux builds and tests of task code happen in the container), task branches never touch `develop-plan/`, `notes/`, `HAISOS_VERSION`, `.claude/`, `.github/` or `scripts/`, and `develop` is never rebased, squashed or force-pushed.
 9. **Every builtin command must appear in the haisosfile `haisos --init` writes**, as a commented `# BUILTIN rootfs <name> /bin/<name>` line after `# CREATE_DIR /bin`. That list is generated from `IBuiltinCommands::GetCommands()`, so registering a new builtin in `CreateStandardBuiltinCommands()` (`src/components/BuiltinCommands/BuiltinCommandList.h`) is what keeps it current -- never hand-write builtin lines into `GetHaisosFileTemplate`. The test `TheInitTemplatesBuiltinsAllApplyOnceUncommented` checks it. Also add the builtin to the Builtin Commands table above.
+10. **Clean room: never copy code from another program**, whatever its licence -- write everything from scratch, matching only documented or observed behaviour (see "Clean-room rule" at the top).

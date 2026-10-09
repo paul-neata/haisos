@@ -106,3 +106,4 @@
 - 2026-10-09 20:27 UTC -- diff--diff-core: PR #72 complete after 4 runs (+2273), windows-failed (ignored)
 - 2026-10-09 21:02 UTC -- diff--diff-core merged #72 as 0.5.30: 1C 2H 2M 1L fixed, 1M 2L open, 4 tries
 - 2026-10-09 21:04 UTC -- start diff--diff-recursive (0.5.31)
+- 2026-10-09 22:00 UTC -- diff--diff-recursive: PR #73, windows-failed (ignored per Direction)

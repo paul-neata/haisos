@@ -8,60 +8,16 @@
 #include "BuiltinCommand.h"
 #include "BuiltinCommandList.h"
 #include "BuiltinDate.h"
+#include "FindTestTree.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
 
 namespace Haisos {
 namespace {
 
-// The tree every find test walks: /proj/a holding b/ (which holds empty)
-// and the files x.txt and y.md, and /proj/z.h. Runs work in /proj, so that
-// is where the relative starting points and the default "." are.
-void MakeProj(const std::shared_ptr<IFileSystem>& fs) {
-    ASSERT_EQ(fs->CreateDirectory("/proj", kDirMode), 0);
-    ASSERT_EQ(fs->CreateDirectory("/proj/a", kDirMode), 0);
-    ASSERT_EQ(fs->CreateDirectory("/proj/a/b", kDirMode), 0);
-    auto write = [&](const std::string& path, const std::string& content) {
-        auto file = fs->OpenFile(path, kFileOpenWriteCreateTruncate, kFileCreateMode);
-        ASSERT_NE(file, nullptr) << path;
-        file->Write(content.data(), content.size());
-    };
-    write("/proj/a/x.txt", "hi\n");
-    write("/proj/a/b/empty", "");
-    write("/proj/a/y.md", std::string(1100, 'y'));
-    write("/proj/z.h", "h\n");
-}
-
-// The default listing of /proj: every file once, "." first, a parent before
-// its children. The order among the entries of one directory is the
-// filesystem's own (GNU's is readdir's), so tests compare that as a set.
-const char* kProjTree =
-    ".\n./a\n./a/b\n./a/b/empty\n./a/x.txt\n./a/y.md\n./z.h\n";
-
-// Two outputs with the same lines, whatever order the filesystem listed
-// each directory's entries in. The order find itself is responsible for (a
-// parent before its children, -depth's, the starting points' own order) is
-// asserted on its own.
-void ExpectSameLines(const std::string& actual, const std::string& expected) {
-    Lines left = SplitLines(actual);
-    Lines right = SplitLines(expected);
-    std::sort(left.begin(), left.end());
-    std::sort(right.begin(), right.end());
-    EXPECT_EQ(left, right);
-}
-
 // A line's place in a listing, for the order checks.
 size_t PositionOf(const Lines& lines, const std::string& line) {
     return static_cast<size_t>(
         std::distance(lines.begin(), std::find(lines.begin(), lines.end(), line)));
-}
-
-// Sets a path's access and modification times now plus |offsetSeconds|
-// (negative: that long ago). The change time becomes now, as utimensat's.
-void SetFileTimes(const std::shared_ptr<IFileSystem>& fs, const std::string& path,
-                  int64_t offsetSeconds) {
-    FileDateTime when = CurrentFileDateTime();
-    when.seconds += offsetSeconds;
-    ASSERT_EQ(fs->SetTimes(path, when, when), 0) << path;
 }
 
 // True when the local time of day is within two minutes of midnight: the
@@ -244,6 +200,29 @@ TEST_F(BuiltinCommandsTest, FindTypeAndEmpty) {
     EXPECT_EQ(RunCaptured("find", {"-type", ""}, std::nullopt, "/proj").err,
         "find: Arguments to -type should contain at least one letter\n");
     EXPECT_EQ(RunCaptured("find", {"-type", "q"}, std::nullopt, "/proj").status, 1);
+}
+
+TEST_F(BuiltinCommandsTest, FindTypeDoorsRefused) {
+    MakeProj(root);
+    // GNU dies on a door too, with the message find has had since Solaris
+    // doors were a thing; a list is refused at its D, and -xtype as well.
+    const char* message =
+        "find: -type D is not supported because Solaris doors are not supported"
+        " on the platform find was compiled on.\n";
+    const auto type = RunCaptured("find", {".", "-maxdepth", "0", "-type", "D"}, std::nullopt, "/proj");
+    EXPECT_EQ(type.out, "");
+    EXPECT_EQ(type.err, message);
+    EXPECT_EQ(type.status, 1);
+    const auto list = RunCaptured("find", {".", "-maxdepth", "0", "-type", "d,D"}, std::nullopt, "/proj");
+    EXPECT_EQ(list.out, "");
+    EXPECT_EQ(list.err, message);
+    EXPECT_EQ(list.status, 1);
+    const auto xtype = RunCaptured("find", {".", "-maxdepth", "0", "-xtype", "D"}, std::nullopt, "/proj");
+    EXPECT_EQ(xtype.out, "");
+    EXPECT_EQ(xtype.err,
+        "find: -xtype D is not supported because Solaris doors are not supported"
+        " on the platform find was compiled on.\n");
+    EXPECT_EQ(xtype.status, 1);
 }
 
 TEST_F(BuiltinCommandsTest, FindSize) {
@@ -453,7 +432,7 @@ TEST_F(BuiltinCommandsTest, FindRegex) {
     const auto sed = RunCaptured("find", {"-regextype", "sed", "-regex", ".*"}, std::nullopt, "/proj");
     ExpectSameLines(sed.out, kProjTree);
     EXPECT_EQ(sed.err,
-        "Parameter -regextype sed is not treated by HaisosOS find v. 1.0.0\n");
+        "Parameter -regextype sed is not treated by HaisosOS find v. 1.1.0\n");
     EXPECT_EQ(sed.status, 0);
 }
 
@@ -548,8 +527,8 @@ TEST_F(BuiltinCommandsTest, FindLeadingOptions) {
         {"-H", "-L", "-P", "-O3", "-D", "stat", ".", "-maxdepth", "0"}, std::nullopt, "/proj");
     EXPECT_EQ(captured.out, ".\n");
     EXPECT_EQ(captured.err,
-        "Parameter -O3 is not treated by HaisosOS find v. 1.0.0\n"
-        "Parameter -D is not treated by HaisosOS find v. 1.0.0\n");
+        "Parameter -O3 is not treated by HaisosOS find v. 1.1.0\n"
+        "Parameter -D is not treated by HaisosOS find v. 1.1.0\n");
     EXPECT_EQ(captured.status, 0);
     // "--" ends the leading options; "." is a starting point again.
     const auto dashDash = RunCaptured("find", {"--", ".", "-maxdepth", "0"}, std::nullopt, "/proj");
@@ -613,7 +592,7 @@ TEST_F(BuiltinCommandsTest, FindHelpAndVersion) {
     EXPECT_EQ(inExpression.out, BuiltinHelpText(*CreateFindCommand()));
     EXPECT_EQ(inExpression.status, 0);
     const auto version = RunCaptured("find", {"-version"}, std::nullopt, "/proj");
-    EXPECT_EQ(version.out, "find (HaisosOS builtin) 1.0.0\n");
+    EXPECT_EQ(version.out, "find (HaisosOS builtin) 1.1.0\n");
     EXPECT_EQ(version.status, 0);
 }
 

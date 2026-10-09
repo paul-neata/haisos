@@ -285,19 +285,22 @@ bool FindParser::HasArgument() const {
 namespace {
 
 const FindPrimaryEntry* LookupPrimary(const std::string& name) {
-    static const std::vector<FindPrimaryEntry>& rows = FindTestPrimaries();
+    static const std::vector<FindPrimaryEntry>& tests = FindTestPrimaries();
+    static const std::vector<FindPrimaryEntry>& actions = FindActionPrimaries();
     // --help and --version are the long spellings of the two.
     const std::string canonical = name == "--help" ? std::string("-help")
         : (name == "--version" ? std::string("-version") : name);
-    for (const auto& row : rows) {
-        if (std::string(row.name) == canonical) {
-            return &row;
+    for (const std::vector<FindPrimaryEntry>* rows : {&tests, &actions}) {
+        for (const auto& row : *rows) {
+            if (std::string(row.name) == canonical) {
+                return &row;
+            }
         }
     }
     // -newerXY, whatever x and y are, is one row that reads them off its own
     // spelling; a -newer... of another length is not one of them.
     if (name.size() == 8 && name.compare(0, 6, "-newer") == 0) {
-        for (const auto& row : rows) {
+        for (const auto& row : tests) {
             if (std::string(row.name) == "-newerXY") {
                 return &row;
             }
@@ -443,6 +446,18 @@ bool FindParser::Parse(FindSettings& settings, std::unique_ptr<FindNode>& expres
     if (!impl.failed && !impl.stop) {
         TreeBuilder builder(impl.context, tokens);
         if (builder.Build(expression) && builder.Done()) {
+            // -delete turns -depth on, where -prune does nothing: GNU refuses
+            // the two together, before the walk, unless -depth was written
+            // outright.
+            if (FindDeleteWasGiven(impl.state) && !settings.depthGiven) {
+                for (const Token& token : tokens) {
+                    if (token.spelling == "-prune") {
+                        impl.context.Error("The -delete action automatically turns on -depth, but -prune does nothing when -depth is in effect.  If you want to carry on anyway, just explicitly use the -depth option.");
+                        exitStatus = 1;
+                        return false;
+                    }
+                }
+            }
             return true;
         }
         impl.failed = true;

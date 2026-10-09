@@ -26,7 +26,7 @@ Pause: no
 | 18 | [coreutils--tr-tee-nl](tasks/coreutils--tr-tee-nl.md) | done | 0.5.14 | 4, 3 | #56 | 1 | 0C 3H fixed, 2M 2L open | Linux CI hung once in Build (runner); green on re-run |
 | 19 | [search--grep-core](tasks/search--grep-core.md) | done | 0.5.15 | 3, 4, 16 | #57 | 1 | 0C 3H fixed, 1M 2L open | MSVC compile errors fixed in review |
 | 20 | [search--grep-recursive](tasks/search--grep-recursive.md) | done | 0.5.16 | 19 | #58 | 1 | 0C 3H fixed, 2M 3L open | Windows green |
-| 21 | [search--find-tests](tasks/search--find-tests.md) | in-review | 0.5.22 | 3, 20, 1, 8, 4 | #64 | 1 | | Windows not checked |
+| 21 | [search--find-tests](tasks/search--find-tests.md) | done | 0.5.22 | 3, 20, 1, 8, 4 | #64 | 1 | 0C 3H 2M fixed, 0M 5L open | Windows red, not checked; 2843 lines, 1.8M Ollama tokens |
 | 22 | [search--find-actions](tasks/search--find-actions.md) | todo | | 21, 9, 11, 6, 12, 4 | | | | |
 | 23 | [search--xargs](tasks/search--xargs.md) | todo | | 22, 9, 4, 6 | | | | |
 | 24 | [search--sed-core](tasks/search--sed-core.md) | todo | | 3, 4 | | | | |

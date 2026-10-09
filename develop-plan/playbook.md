@@ -31,7 +31,7 @@ Pause: no
 | 23 | [search--xargs](tasks/search--xargs.md) | done | 0.5.24 | 22, 9, 4, 6 | #66 | 1 | 1C 2H fixed, 4M 2L open | Windows red, not checked |
 | 24 | [search--sed-core](tasks/search--sed-core.md) | done | 0.5.25 | 3, 4 | #67 | 1 | 1C 4H 3M 1L fixed, 4M 1L open | Windows red, not checked; plan wrong on `2,~2p` (GNU prints 2-4) |
 | 25 | [search--sed-advanced](tasks/search--sed-advanced.md) | done | 0.5.26 | 24, 1 | #68 | 1 | 0C 2H fixed, 4M 3L open | Windows red, not checked |
-| 26 | [search--rg-search](tasks/search--rg-search.md) | in-review | 0.5.27 | 20 | #69 | 1 | | |
+| 26 | [search--rg-search](tasks/search--rg-search.md) | done | 0.5.27 | 20 | #69 | 1 | 0C 2H fixed, 0M 3L open | Windows red, not checked; grep -q fix (#58) included, grep 1.2.0 |
 | 27 | [search--rg-regex](tasks/search--rg-regex.md) | todo | | 26 | | | | |
 | 28 | [search--rg-ignore](tasks/search--rg-ignore.md) | todo | | 26 | | | | |
 | 29 | [diff--diff-core](tasks/diff--diff-core.md) | todo | | 4, 12 | | | | |

@@ -92,3 +92,4 @@
 - 2026-10-09 11:51 UTC -- search--sed-advanced merged #68 as 0.5.26: 0C 2H fixed, 4M 3L open, 1 try
 - 2026-10-09 11:53 UTC -- start search--rg-search (0.5.27)
 - 2026-10-09 14:44 UTC -- search--rg-search: PR #69, windows-failed (ignored per Direction)
+- 2026-10-09 14:58 UTC -- search--rg-search merged #69 as 0.5.27: 0C 2H fixed, 0M 3L open, 1 try

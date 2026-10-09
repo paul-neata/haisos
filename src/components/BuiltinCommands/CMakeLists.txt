@@ -46,6 +46,8 @@ add_library(BuiltinCommands STATIC
     commands/rg/Rg.cpp
     commands/rg/RgSearch.cpp
     commands/rg/RgRegex.cpp
+    commands/rg/RgIgnore.cpp
+    commands/rg/RgTypes.cpp
     commands/rm/Rm.cpp
     commands/rmdir/Rmdir.cpp
     commands/sed/Sed.cpp

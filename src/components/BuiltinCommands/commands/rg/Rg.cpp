@@ -10,6 +10,7 @@
 #include "commands/grep/GrepMatcher.h"
 #include "commands/rg/RgRegex.h"
 #include "commands/rg/RgSearch.h"
+#include "commands/rg/RgTypes.h"
 #include "interfaces/IFileDescriptor.h"
 #include "interfaces/IFileIO.h"
 
@@ -70,6 +71,31 @@ enum RgOptionId {
     kSort,               // --sort
     kSortFiles,          // --sort-files
     kNoSortFiles,        // --no-sort-files
+    kFollow,             // -L --follow (accepted: no effect)
+    kNoFollow,           // --no-follow
+    kGlob,               // -g --glob
+    kGlobCaseInsensitive,  // --glob-case-insensitive
+    kNoGlobCaseInsensitive,  // --no-glob-case-insensitive
+    kIglob,              // --iglob
+    kHidden,             // -. --hidden
+    kNoHidden,           // --no-hidden
+    kMaxDepth,           // -d --max-depth (maxdepth its hidden alias)
+    kNoIgnore,           // --no-ignore
+    kIgnore,             // --ignore
+    kNoIgnoreDot,        // --no-ignore-dot
+    kIgnoreDot,          // --ignore-dot
+    kNoIgnoreExclude,    // --no-ignore-exclude
+    kIgnoreExclude,      // --ignore-exclude
+    kNoIgnoreParent,     // --no-ignore-parent
+    kIgnoreParent,       // --ignore-parent
+    kNoIgnoreVcs,        // --no-ignore-vcs
+    kIgnoreVcs,          // --ignore-vcs
+    kNoRequireGit,       // --no-require-git
+    kRequireGit,         // --require-git
+    kType,               // -t --type
+    kTypeNot,            // -T --type-not
+    kTypeList,           // --type-list
+    kUnrestricted,       // -u
 };
 
 // rg's message for one pattern that cannot be a regex: its four lines
@@ -201,7 +227,7 @@ bool ParseNumberFlag(BuiltinContext& context, const std::string& text, const std
 class RgCommand : public IBuiltinCommand {
 public:
     std::string Name() const override { return "rg"; }
-    std::string Version() const override { return "1.1.0"; }
+    std::string Version() const override { return "1.2.0"; }
 
     const std::vector<BuiltinOption>& Options() const override {
         static const std::vector<BuiltinOption> options = {
@@ -261,48 +287,65 @@ public:
             {0, "no-auto-hybrid-regex", kBuiltinNotTreated, BuiltinArgument::None, "", "", true},
             {0, "no-pcre2-unicode", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
             {0, "pcre2-unicode", kBuiltinNotTreated, BuiltinArgument::None, "", "", true},
-            // Filter options (search--rg-ignore treats them).
+            // Filter options.
             {0, "binary", kBinary, BuiltinArgument::None, "",
                 "search binary files, reporting the first match"},
             {0, "no-binary", kNoBinary, BuiltinArgument::None, "", "", true},
-            {'L', "follow", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
-            {0, "no-follow", kBuiltinNotTreated, BuiltinArgument::None, "", "", true},
-            {'g', "glob", kBuiltinNotTreated, BuiltinArgument::Required, "GLOB", ""},
-            {0, "glob-case-insensitive", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
-            {0, "no-glob-case-insensitive", kBuiltinNotTreated, BuiltinArgument::None, "", "", true},
-            {'.', "hidden", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
-            {0, "no-hidden", kBuiltinNotTreated, BuiltinArgument::None, "", "", true},
-            {0, "iglob", kBuiltinNotTreated, BuiltinArgument::Required, "GLOB", ""},
+            {'L', "follow", kFollow, BuiltinArgument::None, "",
+                "accepted: HaisosOS follows the disk's links itself"},
+            {0, "no-follow", kNoFollow, BuiltinArgument::None, "", "", true},
+            {'g', "glob", kGlob, BuiltinArgument::Required, "GLOB",
+                "include or exclude files by a glob ('!' excludes)"},
+            {0, "glob-case-insensitive", kGlobCaseInsensitive, BuiltinArgument::None, "",
+                "globs match insensitively"},
+            {0, "no-glob-case-insensitive", kNoGlobCaseInsensitive, BuiltinArgument::None,
+                "", "", true},
+            {'.', "hidden", kHidden, BuiltinArgument::None, "",
+                "search hidden files and directories"},
+            {0, "no-hidden", kNoHidden, BuiltinArgument::None, "", "", true},
+            {0, "iglob", kIglob, BuiltinArgument::Required, "GLOB",
+                "a glob matched insensitively"},
             {0, "ignore-file", kBuiltinNotTreated, BuiltinArgument::Required, "PATH", ""},
             {0, "ignore-file-case-insensitive", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
             {0, "no-ignore-file-case-insensitive", kBuiltinNotTreated, BuiltinArgument::None, "", "", true},
-            {'d', "max-depth", kBuiltinNotTreated, BuiltinArgument::Required, "NUM", ""},
-            {0, "maxdepth", kBuiltinNotTreated, BuiltinArgument::Required, "NUM", "", true},
+            {'d', "max-depth", kMaxDepth, BuiltinArgument::Required, "NUM",
+                "descend at most NUM levels below each operand"},
+            {0, "maxdepth", kMaxDepth, BuiltinArgument::Required, "NUM", "", true},
             {0, "max-filesize", kBuiltinNotTreated, BuiltinArgument::Required, "NUM", ""},
-            {0, "no-ignore", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
-            {0, "ignore", kBuiltinNotTreated, BuiltinArgument::None, "", "", true},
-            {0, "no-ignore-dot", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
-            {0, "ignore-dot", kBuiltinNotTreated, BuiltinArgument::None, "", "", true},
-            {0, "no-ignore-exclude", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
-            {0, "ignore-exclude", kBuiltinNotTreated, BuiltinArgument::None, "", "", true},
+            {0, "no-ignore", kNoIgnore, BuiltinArgument::None, "",
+                "respect no ignore file at all"},
+            {0, "ignore", kIgnore, BuiltinArgument::None, "", "", true},
+            {0, "no-ignore-dot", kNoIgnoreDot, BuiltinArgument::None, "",
+                ".ignore and .rgignore not respected"},
+            {0, "ignore-dot", kIgnoreDot, BuiltinArgument::None, "", "", true},
+            {0, "no-ignore-exclude", kNoIgnoreExclude, BuiltinArgument::None, "",
+                ".git/info/exclude not respected"},
+            {0, "ignore-exclude", kIgnoreExclude, BuiltinArgument::None, "", "", true},
             {0, "no-ignore-files", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
             {0, "ignore-files", kBuiltinNotTreated, BuiltinArgument::None, "", "", true},
             {0, "no-ignore-global", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
             {0, "ignore-global", kBuiltinNotTreated, BuiltinArgument::None, "", "", true},
-            {0, "no-ignore-parent", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
-            {0, "ignore-parent", kBuiltinNotTreated, BuiltinArgument::None, "", "", true},
-            {0, "no-ignore-vcs", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
-            {0, "ignore-vcs", kBuiltinNotTreated, BuiltinArgument::None, "", "", true},
-            {0, "no-require-git", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
-            {0, "require-git", kBuiltinNotTreated, BuiltinArgument::None, "", "", true},
+            {0, "no-ignore-parent", kNoIgnoreParent, BuiltinArgument::None, "",
+                "no ignore file above the operand respected"},
+            {0, "ignore-parent", kIgnoreParent, BuiltinArgument::None, "", "", true},
+            {0, "no-ignore-vcs", kNoIgnoreVcs, BuiltinArgument::None, "",
+                ".gitignore and .git/info/exclude not respected"},
+            {0, "ignore-vcs", kIgnoreVcs, BuiltinArgument::None, "", "", true},
+            {0, "no-require-git", kNoRequireGit, BuiltinArgument::None, "",
+                "respect .gitignore outside a git repository"},
+            {0, "require-git", kRequireGit, BuiltinArgument::None, "", "", true},
             {0, "one-file-system", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
             {0, "no-one-file-system", kBuiltinNotTreated, BuiltinArgument::None, "", "", true},
-            {'t', "type", kBuiltinNotTreated, BuiltinArgument::Required, "TYPE", ""},
-            {'T', "type-not", kBuiltinNotTreated, BuiltinArgument::Required, "TYPE", ""},
+            {'t', "type", kType, BuiltinArgument::Required, "TYPE",
+                "only search files of a type (--type-list shows them)"},
+            {'T', "type-not", kTypeNot, BuiltinArgument::Required, "TYPE",
+                "skip files of a type"},
             {0, "type-add", kBuiltinNotTreated, BuiltinArgument::Required, "TYPESPEC", ""},
             {0, "type-clear", kBuiltinNotTreated, BuiltinArgument::Required, "TYPE", ""},
-            {0, "type-list", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
-            {'u', "unrestricted", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
+            {0, "type-list", kTypeList, BuiltinArgument::None, "",
+                "print the known file types and exit"},
+            {'u', "unrestricted", kUnrestricted, BuiltinArgument::None, "",
+                "relax the filters: -u ignore files, -uu hidden, -uuu binary"},
             // Output options.
             {'A', "after-context", kAfterContext, BuiltinArgument::Required, "NUM",
                 "show NUM lines after each match"},
@@ -420,7 +463,14 @@ public:
             "printed. Patterns are read as Rust's regex syntax, onto Haisos's\n"
             "byte-wise Perl subset: \\w, . and -i work on bytes, not Unicode;\n"
             "\\<, \\> and \\b{...} are \\b; \\p{...} classes, class set operations\n"
-            "and nested classes are refused, with rg's parse-error frame. With no\n"
+            "and nested classes are refused, with rg's parse-error frame.\n"
+            "The walk skips what ripgrep skips: hidden names, what .gitignore\n"
+            "(inside a git repository), .git/info/exclude, .ignore and .rgignore\n"
+            "say, and the -g globs and -t types decide -- operands are never\n"
+            "filtered. The file types are a subset of ripgrep's own\n"
+            "(--type-list shows it); no global gitignore (core.excludesFile) is\n"
+            "read; -L is accepted and changes nothing, for HaisosOS's\n"
+            "filesystems follow the disk's links themselves. With no\n"
             "PATH, the standard input is searched only when it is not a terminal\n"
             "and its first read returns data: an input that is empty at once --\n"
             "/dev/null's case, for a descriptor has no type in HaisosOS -- means\n"
@@ -464,6 +514,8 @@ public:
         std::optional<uint64_t> afterGiven;
         std::optional<uint64_t> beforeGiven;
         std::optional<uint64_t> contextGiven;
+        int unrestricted = 0;  // -u, counted
+        bool globFold = false;  // --glob-case-insensitive
 
         for (const auto& option : parsed.options) {
             switch (option.id) {
@@ -624,7 +676,80 @@ public:
                     }
                     break;
                 case kSortFiles: case kNoSortFiles: break;  // the walk is in path order
+                case kFollow: case kNoFollow: break;  // accepted: HaisosOS follows links
+                case kGlob: settings.globs.push_back({option.argument, false}); break;
+                case kIglob: settings.globs.push_back({option.argument, true}); break;
+                case kGlobCaseInsensitive: globFold = true; break;
+                case kNoGlobCaseInsensitive: globFold = false; break;
+                case kHidden: settings.hidden = true; break;
+                case kNoHidden: settings.hidden = false; break;
+                case kMaxDepth: {
+                    uint64_t value = 0;
+                    if (!ParseNumberFlag(context, option.argument, option.spelling, value)) {
+                        return 2;
+                    }
+                    settings.maxDepth = value;
+                    break;
+                }
+                case kNoIgnore:
+                    settings.noIgnoreDot = true;
+                    settings.noIgnoreVcs = true;
+                    settings.noIgnoreExclude = true;
+                    break;
+                case kIgnore:
+                    settings.noIgnoreDot = false;
+                    settings.noIgnoreVcs = false;
+                    settings.noIgnoreExclude = false;
+                    break;
+                case kNoIgnoreDot: settings.noIgnoreDot = true; break;
+                case kIgnoreDot: settings.noIgnoreDot = false; break;
+                case kNoIgnoreExclude: settings.noIgnoreExclude = true; break;
+                case kIgnoreExclude: settings.noIgnoreExclude = false; break;
+                case kNoIgnoreParent: settings.noIgnoreParent = true; break;
+                case kIgnoreParent: settings.noIgnoreParent = false; break;
+                case kNoIgnoreVcs: settings.noIgnoreVcs = true; break;
+                case kIgnoreVcs: settings.noIgnoreVcs = false; break;
+                case kNoRequireGit: settings.requireGit = false; break;
+                case kRequireGit: settings.requireGit = true; break;
+                case kType:
+                case kTypeNot: {
+                    const std::vector<std::string_view>* typeGlobs =
+                        FindRgTypeGlobs(option.argument);
+                    if (!typeGlobs) {
+                        context.ErrorText("rg: unrecognized file type: " + option.argument + "\n");
+                        return 2;
+                    }
+                    std::vector<std::string>& into =
+                        option.id == kType ? settings.typeSelected : settings.typeNegated;
+                    for (const auto& glob : *typeGlobs) {
+                        into.emplace_back(glob);
+                    }
+                    break;
+                }
+                case kTypeList:
+                    context.Out(RgTypeListText());
+                    return 0;
+                case kUnrestricted: ++unrestricted; break;
                 default: break;
+            }
+        }
+
+        // -u, counted: 1 = --no-ignore, 2 = also --hidden, 3 = also --binary.
+        if (unrestricted > 0) {
+            settings.noIgnoreDot = true;
+            settings.noIgnoreVcs = true;
+            settings.noIgnoreExclude = true;
+        }
+        if (unrestricted > 1) {
+            settings.hidden = true;
+        }
+        if (unrestricted > 2) {
+            settings.binary = true;
+        }
+        // --glob-case-insensitive folds every -g glob (--iglob's own always).
+        if (globFold) {
+            for (auto& glob : settings.globs) {
+                glob.caseFold = true;
             }
         }
 

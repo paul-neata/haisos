@@ -199,14 +199,36 @@ TEST(RgRegexTest, Translations) {
     // \x{...}, \u{...}: the code point's bytes.
     EXPECT_TRUE(Matches(Translated({"\\x{41}"}), "A"));
     EXPECT_TRUE(Matches(Translated({"\\u{e9}"}), "\xc3\xa9"));
-    // A quantifier on a zero-width assertion is the assertion itself (or
-    // nothing at all, for {0}): rg accepts what a count would repeat.
+    // A quantifier with a 0 minimum on a zero-width assertion makes it
+    // optional, as Rust's regex does (^*abc matches xabc); a non-zero
+    // minimum leaves the assertion itself.
     EXPECT_TRUE(Matches(Translated({"\\b{2}word"}), "word"));
     EXPECT_FALSE(Matches(Translated({"\\b{2}word"}), "sword"));
     EXPECT_TRUE(Matches(Translated({"\\b{0}"}), ""));
     EXPECT_TRUE(Matches(Translated({"^*"}), ""));
     EXPECT_TRUE(Matches(Translated({"$*"}), ""));
     EXPECT_TRUE(Matches(Translated({"\\A*x"}), "x"));
+    // ... and the optional assertion may be skipped anywhere
+    EXPECT_TRUE(Matches(Translated({"^*abc"}), "xabc"));
+    EXPECT_TRUE(Matches(Translated({"\\b?x"}), "ax"));
+    EXPECT_TRUE(Matches(Translated({"^{0,2}abc"}), "xabc"));
+    EXPECT_FALSE(Matches(Translated({"^+abc"}), "xabc"));
+    EXPECT_FALSE(Matches(Translated({"\\b{1,2}x"}), "ax"));
+    // a code point outside a class is one atom: a quantifier repeats its
+    // whole UTF-8 sequence, not its last byte (a literal in the pattern
+    // or a \u{...}/\x{...} above 0x7f)
+    {
+        std::string error;
+        const std::shared_ptr<const Regex> repeated = Regex::Compile(
+            Translated({"\xc3\xa9+"}), RegexOptions{RegexSyntax::Perl}, error);
+        ASSERT_NE(repeated, nullptr);
+        RegexMatch match;
+        ASSERT_TRUE(repeated->Search("\xc3\xa9\xc3\xa9", 0, match));
+        EXPECT_EQ(match.groups[0].second, 4);  // both bytes of both code points
+    }
+    EXPECT_TRUE(Matches(Translated({"\\u{e9}{2}"}), "\xc3\xa9\xc3\xa9"));
+    EXPECT_FALSE(Matches(Translated({"\\u{e9}{2}"}), "\xc3\xa9\xa9"));
+    EXPECT_TRUE(Matches(Translated({"\\u{e9}?x"}), "x"));
     // Outside a class, [:name:] is a class of its literal bytes, as Rust
     // reads it: ':', 'a', 'l', 'p', 'h'
     EXPECT_TRUE(Matches(Translated({"[:alpha:]"}), ":"));

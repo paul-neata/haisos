@@ -1,10 +1,13 @@
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <cstdint>
 #include <memory>
-#include <regex>
 #include <optional>
+#include <random>
 #include <string>
 #include <vector>
 #include "BuiltinCommandsFixture.h"
+#include "BuiltinDate.h"
 #include "commands/diff/DiffEngine.h"
 
 namespace Haisos {
@@ -103,6 +106,111 @@ TEST_F(BuiltinCommandsTest, DiffBriefAndDeleteInsert) {
     EXPECT_EQ(captured.status, 1);
 }
 
+// The fixed ends (the horizon) keep a change from sliding into the lines
+// both files share; a wider horizon lets it move lower.
+TEST_F(BuiltinCommandsTest, DiffHorizonMovesChanges) {
+    WriteFile("/h1", "b\na\n");
+    WriteFile("/h2", "a\nb\na\na\n");
+    auto captured = RunCaptured("diff", {"h1", "h2"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "0a1\n> a\n1a3\n> a\n");
+    EXPECT_EQ(captured.status, 1);
+
+    // Unified output widens the horizon to the context length, so the
+    // second insertion lands one line lower.
+    captured = RunCaptured("diff", {"-u", "-L", "x", "-L", "y", "h1", "h2"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out,
+              "--- x\n"
+              "+++ y\n"
+              "@@ -1,2 +1,4 @@\n"
+              "+a\n"
+              " b\n"
+              " a\n"
+              "+a\n");
+
+    captured = RunCaptured("diff", {"-U0", "-L", "x", "-L", "y", "h1", "h2"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out,
+              "--- x\n"
+              "+++ y\n"
+              "@@ -0,0 +1 @@\n"
+              "+a\n"
+              "@@ -1,0 +3 @@\n"
+              "+a\n");
+
+    // The same widening asked for outright.
+    captured = RunCaptured("diff", {"--horizon-lines=3", "h1", "h2"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "0a1\n> a\n2a4\n> a\n");
+    EXPECT_EQ(captured.status, 1);
+}
+
+// Two scripts of four changed lines are possible here (keep the `b` or keep
+// the `c`); the engine takes the one that deletes earlier.
+TEST_F(BuiltinCommandsTest, DiffPicksMyersScript) {
+    WriteFile("/p1", "a\nb\nc\n");
+    WriteFile("/p2", "c\nb\nb\n");
+    const auto captured = RunCaptured("diff", {"p1", "p2"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "1,2d0\n< a\n< b\n3a2,3\n> b\n> b\n");
+    EXPECT_EQ(captured.status, 1);
+}
+
+// Blocks slide to the lowest position they can reach, and line up with the
+// other file's changes where one is possible.
+TEST_F(BuiltinCommandsTest, DiffPlacesBlocks) {
+    WriteFile("/q1", "a\nb\n");
+    WriteFile("/q2", "a\nb\na\nb\n");
+    auto captured = RunCaptured("diff", {"q1", "q2"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "2a3,4\n> a\n> b\n");
+    EXPECT_EQ(captured.status, 1);
+
+    WriteFile("/q3", "x\ny\nx\ny\n");
+    WriteFile("/q4", "x\ny\n");
+    captured = RunCaptured("diff", {"q3", "q4"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "3,4d2\n< x\n< y\n");
+    EXPECT_EQ(captured.status, 1);
+
+    // The deleted `a` could be line 1 or 2; at line 1 it forms one change
+    // with the inserted `c`, so it sits there.
+    WriteFile("/q5", "a\na\nb\n");
+    WriteFile("/q6", "c\na\nb\nc\n");
+    captured = RunCaptured("diff", {"q5", "q6"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "1c1\n< a\n---\n> c\n3a4\n> c\n");
+    EXPECT_EQ(captured.status, 1);
+
+    WriteFile("/q7", "{\n  a;\n}\n{\n  b;\n}\n");
+    WriteFile("/q8", "{\n  a;\n}\n{\n  x;\n}\n{\n  b;\n}\n");
+    captured = RunCaptured("diff", {"q7", "q8"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "4a5,7\n>   x;\n> }\n> {\n");
+    EXPECT_EQ(captured.status, 1);
+}
+
+// The documented exception: the hunks are always the minimal script, which
+// is what GNU's diff -d prints. GNU's default (no -d) prints 1d0, 2a2,4,
+// 4,6c6 on this pair, placing the same number of changed lines differently.
+TEST_F(BuiltinCommandsTest, DiffIsMinimalWhereGnuDefaultDiffers) {
+    WriteFile("/m1", ".\na\na\na\n.\n.\n");
+    WriteFile("/m2", "a\nc\nc\nc\na\nd\n");
+    const std::string expected =
+        "1,2d0\n"
+        "< .\n"
+        "< a\n"
+        "3a2,4\n"
+        "> c\n"
+        "> c\n"
+        "> c\n"
+        "5,6c6\n"
+        "< .\n"
+        "< .\n"
+        "---\n"
+        "> d\n";
+    auto captured = RunCaptured("diff", {"m1", "m2"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, expected);
+    EXPECT_EQ(captured.status, 1);
+
+    // -d asks for minimality, which is what diff always prints.
+    captured = RunCaptured("diff", {"-d", "m1", "m2"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, expected);
+    EXPECT_EQ(captured.status, 1);
+}
+
 TEST_F(BuiltinCommandsTest, DiffUnifiedWithLabels) {
     MakeDiffFiles(root);
     // Two labels replace both header lines whole: no tabs, no times.
@@ -137,7 +245,7 @@ TEST_F(BuiltinCommandsTest, DiffUnifiedWithLabels) {
 
 TEST_F(BuiltinCommandsTest, DiffUnifiedZeroContextRanges) {
     MakeDiffFiles(root);
-    const auto captured = RunCaptured("diff", {"-U0", "a", "b"}, std::nullopt, "/");
+    auto captured = RunCaptured("diff", {"-U0", "a", "b"}, std::nullopt, "/");
     EXPECT_EQ(BodyFrom(captured.out, "@@"),
               "@@ -2 +2 @@\n"
               "-b\n"
@@ -146,19 +254,38 @@ TEST_F(BuiltinCommandsTest, DiffUnifiedZeroContextRanges) {
               "+d\n"
               "\\ No newline at end of file\n");
     EXPECT_EQ(captured.status, 1);
+
+    // An empty file: the old range is the line before the start, with a
+    // count of zero -- the shape patch relies on.
+    WriteFile("/e0", "");
+    captured = RunCaptured("diff", {"-u", "-L", "x", "-L", "y", "e0", "a"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out,
+              "--- x\n"
+              "+++ y\n"
+              "@@ -0,0 +1,3 @@\n"
+              "+a\n"
+              "+b\n"
+              "+c\n");
+    EXPECT_EQ(captured.status, 1);
 }
 
 TEST_F(BuiltinCommandsTest, DiffUnifiedHeaderTimes) {
     MakeDiffFiles(root);
-    const auto captured = RunCaptured("diff", {"-u", "s1", "s2"}, std::nullopt, "/");
-    // The header times are the files' own: ISO format with nanoseconds and
-    // a numeric zone, exactly as GNU prints them.
-    const std::regex header(
-        "^--- s1\t[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{9}"
-        " [+-][0-9]{4}\n"
-        "\\+\\+\\+ s2\t[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{9}"
-        " [+-][0-9]{4}\n");
-    EXPECT_TRUE(std::regex_search(captured.out, header)) << captured.out;
+    auto captured = RunCaptured("diff", {"-u", "s1", "s2"}, std::nullopt, "/");
+    // The header times are the files' own, in the ISO form with nanoseconds
+    // and a numeric zone, exactly as FormatDateTime renders them.
+    FileStatus status;
+    ASSERT_EQ(root->Stat("/s1", status), 0);
+    const FileDateTime t1 = status.modificationTime;
+    ASSERT_EQ(root->Stat("/s2", status), 0);
+    const FileDateTime t2 = status.modificationTime;
+    const std::string first =
+        "--- s1\t" + FormatDateTime("%Y-%m-%d %H:%M:%S.%N %z", t1, false) + "\n";
+    const std::string second =
+        "+++ s2\t" + FormatDateTime("%Y-%m-%d %H:%M:%S.%N %z", t2, false) + "\n";
+    ASSERT_GE(captured.out.size(), first.size() + second.size());
+    EXPECT_EQ(captured.out.substr(0, first.size()), first) << captured.out;
+    EXPECT_EQ(captured.out.substr(first.size(), second.size()), second) << captured.out;
     EXPECT_EQ(BodyFrom(captured.out, "@@"),
               "@@ -1,7 +1,7 @@\n"
               " 1\n"
@@ -169,6 +296,25 @@ TEST_F(BuiltinCommandsTest, DiffUnifiedHeaderTimes) {
               " 5\n"
               " 6\n"
               " 7\n");
+
+    // Names that need quoting are quoted in headers, with the special bytes
+    // as C escapes and the others as octal -- only the first line is checked
+    // (it holds the name; the second is the same shape).
+    auto firstLineIs = [&](const std::string& name, const std::string& line) {
+        const auto quoted = RunCaptured("diff", {"-u", name, "a"}, std::nullopt, "/");
+        EXPECT_EQ(quoted.out.substr(0, line.size()), line) << quoted.out;
+    };
+    WriteFile("/sp ace", "q\n");
+    firstLineIs("sp ace", "--- \"sp ace\"\t");
+    WriteFile(std::string("/x") + '\x01' + "y", "q\n");
+    firstLineIs(std::string("x") + '\x01' + "y", "--- \"x\\001y\"\t");
+    WriteFile("/\xC3\xA9", "q\n");
+    firstLineIs("\xC3\xA9", "--- \"\\303\\251\"\t");
+
+    // The -q report names the file plainly, quotes and all dropped.
+    captured = RunCaptured("diff", {"-q", "sp ace", "b"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "Files sp ace and b differ\n");
+    EXPECT_EQ(captured.status, 1);
 }
 
 TEST_F(BuiltinCommandsTest, DiffContextFormat) {
@@ -197,6 +343,70 @@ TEST_F(BuiltinCommandsTest, DiffContextFormat) {
               "--- 4 ----\n"
               "! X\n");
     EXPECT_EQ(captured.status, 1);
+
+    // With labels, the whole output is fixed text.
+    captured = RunCaptured("diff", {"-c", "-L", "a", "-L", "b", "a", "b"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out,
+              "*** a\n"
+              "--- b\n"
+              "***************\n"
+              "*** 1,3 ****\n"
+              "  a\n"
+              "! b\n"
+              "  c\n"
+              "--- 1,4 ----\n"
+              "  a\n"
+              "! B\n"
+              "  c\n"
+              "+ d\n"
+              "\\ No newline at end of file\n");
+    EXPECT_EQ(captured.status, 1);
+
+    // No context: two hunks, the first showing only the changed line on
+    // each side, the second only the insertion.
+    captured = RunCaptured("diff", {"-C", "0", "-L", "a", "-L", "b", "a", "b"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out,
+              "*** a\n"
+              "--- b\n"
+              "***************\n"
+              "*** 2 ****\n"
+              "! b\n"
+              "--- 2 ----\n"
+              "! B\n"
+              "***************\n"
+              "*** 3 ****\n"
+              "--- 4 ----\n"
+              "+ d\n"
+              "\\ No newline at end of file\n");
+    EXPECT_EQ(captured.status, 1);
+
+    // Deletion alone: the second range is the line before the start.
+    WriteFile("/e0", "");
+    captured = RunCaptured("diff", {"-c", "-L", "x", "-L", "y", "a", "e0"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out,
+              "*** x\n"
+              "--- y\n"
+              "***************\n"
+              "*** 1,3 ****\n"
+              "- a\n"
+              "- b\n"
+              "- c\n"
+              "--- 0 ----\n");
+    EXPECT_EQ(captured.status, 1);
+
+    // Without labels the headers carry the files' own times, in the C
+    // locale's default form.
+    captured = RunCaptured("diff", {"-c", "a", "b"}, std::nullopt, "/");
+    FileStatus status;
+    ASSERT_EQ(root->Stat("/a", status), 0);
+    const std::string first =
+        "*** a\t" + FormatDateTime("%a %b %e %T %Y", status.modificationTime, false) + "\n";
+    ASSERT_EQ(root->Stat("/b", status), 0);
+    const std::string second =
+        "--- b\t" + FormatDateTime("%a %b %e %T %Y", status.modificationTime, false) + "\n";
+    ASSERT_GE(captured.out.size(), first.size() + second.size());
+    EXPECT_EQ(captured.out.substr(0, first.size()), first) << captured.out;
+    EXPECT_EQ(captured.out.substr(first.size(), second.size()), second) << captured.out;
 }
 
 TEST_F(BuiltinCommandsTest, DiffEdScript) {
@@ -237,6 +447,15 @@ TEST_F(BuiltinCommandsTest, DiffEdScript) {
     EXPECT_EQ(captured.out, "");
     EXPECT_EQ(captured.err, "");
     EXPECT_EQ(captured.status, 0);
+
+    // A line that is exactly "." is written "..", the insertion is closed,
+    // the line is emptied with s/.//, and insertion resumes before the rest.
+    WriteFile("/dot1", "y\n");
+    WriteFile("/dot2", ".\nx\n");
+    captured = RunCaptured("diff", {"-e", "dot1", "dot2"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "1c\n..\n.\ns/.//\na\nx\n.\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 1);
 }
 
 TEST_F(BuiltinCommandsTest, DiffWhiteSpaceOptions) {
@@ -272,6 +491,77 @@ TEST_F(BuiltinCommandsTest, DiffWhiteSpaceOptions) {
     captured = RunCaptured("diff", {"i1", "i2"}, std::nullopt, "/");
     EXPECT_EQ(captured.out, "1c1\n< A\n---\n> a\n");
     EXPECT_EQ(captured.status, 1);
+
+    // The three-line pair the whitespace options each judge differently.
+    WriteFile("/w3", "a b\nfoo  bar\nend \n");
+    WriteFile("/w4", "a  b\nfoo bar\nend\n");
+    captured = RunCaptured("diff", {"w3", "w4"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out,
+              "1,3c1,3\n"
+              "< a b\n"
+              "< foo  bar\n"
+              "< end \n"
+              "---\n"
+              "> a  b\n"
+              "> foo bar\n"
+              "> end\n");
+    EXPECT_EQ(captured.status, 1);
+
+    // -b and -w see all three lines as equal.
+    captured = RunCaptured("diff", {"-b", "w3", "w4"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.status, 0);
+
+    captured = RunCaptured("diff", {"-w", "w3", "w4"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.status, 0);
+
+    // -Z only drops the trailing run, so the first two lines still differ.
+    captured = RunCaptured("diff", {"-Z", "w3", "w4"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "1,2c1,2\n< a b\n< foo  bar\n---\n> a  b\n> foo bar\n");
+    EXPECT_EQ(captured.status, 1);
+
+    // -E expands tabs to the next column; a backspace ends the column
+    // counting, so no spaces equal a tab after one.
+    WriteFile("/w5", "a\tb\n");
+    WriteFile("/w6", "a       b\n");
+    captured = RunCaptured("diff", {"-E", "w5", "w6"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.status, 0);
+
+    captured = RunCaptured("diff", {"-E", "-Z", "w5", "w6"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "1c1\n< a\tb\n---\n> a       b\n");
+    EXPECT_EQ(captured.status, 1);
+
+    captured = RunCaptured("diff", {"-Z", "-E", "w5", "w6"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "1c1\n< a\tb\n---\n> a       b\n");
+    EXPECT_EQ(captured.status, 1);
+
+    WriteFile("/w7", "a\bc\tb\n");
+    WriteFile("/w8", "a\bc       b\n");
+    captured = RunCaptured("diff", {"-E", "w7", "w8"}, std::nullopt, "/");
+    EXPECT_EQ(captured.status, 1);
+
+    // An incomplete last line equals only the other file's incomplete one:
+    // -b and -Z key it like any line, -i keeps the marker.
+    WriteFile("/w9", "a\nb");
+    WriteFile("/w10", "a\nb\n");
+    captured = RunCaptured("diff", {"-b", "w9", "w10"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.status, 0);
+
+    captured = RunCaptured("diff", {"-Z", "w9", "w10"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.status, 0);
+
+    captured = RunCaptured("diff", {"-i", "w9", "w10"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out,
+              "2c2\n"
+              "< b\n"
+              "\\ No newline at end of file\n"
+              "---\n"
+              "> b\n");
+    EXPECT_EQ(captured.status, 1);
 }
 
 TEST_F(BuiltinCommandsTest, DiffIgnoreBlankLines) {
@@ -288,6 +578,90 @@ TEST_F(BuiltinCommandsTest, DiffIgnoreBlankLines) {
     // Without -B the blank run is a change like any other.
     captured = RunCaptured("diff", {"B1", "B2"}, std::nullopt, "/");
     EXPECT_EQ(captured.out, "2,3d1\n< \n< \n");
+    EXPECT_EQ(captured.status, 1);
+
+    // A blank line on one side against the other: -B drops the change whole.
+    WriteFile("/g1", "a\n\nb\n");
+    WriteFile("/g2", "a\nb\n\n");
+    captured = RunCaptured("diff", {"g1", "g2"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "2d1\n< \n3a3\n> \n");
+    EXPECT_EQ(captured.status, 1);
+
+    captured = RunCaptured("diff", {"-B", "g1", "g2"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.status, 0);
+
+    captured = RunCaptured("diff", {"-B", "-q", "g1", "g2"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.status, 0);
+
+    // A real change next to an ignorable one: the ignorable is dropped from
+    // normal output but kept, marked as usual, in the unified hunk.
+    WriteFile("/g3", "a\n\nb\nc\n");
+    WriteFile("/g4", "a\nb\nX\nc\n");
+    captured = RunCaptured("diff", {"-B", "g3", "g4"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "3a3\n> X\n");
+    EXPECT_EQ(captured.status, 1);
+
+    captured = RunCaptured("diff", {"-B", "-u", "-L", "x", "-L", "y", "g3", "g4"},
+                           std::nullopt, "/");
+    EXPECT_EQ(captured.out,
+              "--- x\n"
+              "+++ y\n"
+              "@@ -1,4 +1,4 @@\n"
+              " a\n"
+              "-\n"
+              " b\n"
+              "+X\n"
+              " c\n");
+    EXPECT_EQ(captured.status, 1);
+
+    // A line of spaces counts as blank only with -Z or stronger.
+    WriteFile("/g5", "a\n  \nb\n");
+    WriteFile("/g6", "a\nb\n");
+    captured = RunCaptured("diff", {"-B", "g5", "g6"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "2d1\n<   \n");
+    EXPECT_EQ(captured.status, 1);
+
+    for (const char* option : {"-Z", "-b", "-w"}) {
+        captured = RunCaptured("diff", {"-B", option, "g5", "g6"}, std::nullopt, "/");
+        EXPECT_EQ(captured.out, "") << option;
+        EXPECT_EQ(captured.status, 0) << option;
+    }
+
+    // An ignorable change joins a nearby hunk: with context 3, the blank
+    // line 2 lines below the real change is pulled in; one line lower still.
+    WriteFile("/j1", "R1\n1\n2\n\n3\n4\n5\n6\n7\n8\n9\n10\n11\n");
+    WriteFile("/j2", "Q1\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n");
+    captured = RunCaptured("diff", {"-B", "-u", "-L", "x", "-L", "y", "j1", "j2"},
+                           std::nullopt, "/");
+    EXPECT_EQ(captured.out,
+              "--- x\n"
+              "+++ y\n"
+              "@@ -1,7 +1,6 @@\n"
+              "-R1\n"
+              "+Q1\n"
+              " 1\n"
+              " 2\n"
+              "-\n"
+              " 3\n"
+              " 4\n"
+              " 5\n");
+    EXPECT_EQ(captured.status, 1);
+
+    // Moved 3 lines below the real change, it no longer joins the hunk.
+    WriteFile("/j3", "R1\n1\n2\n3\n\n4\n5\n6\n7\n8\n9\n10\n11\n");
+    captured = RunCaptured("diff", {"-B", "-u", "-L", "x", "-L", "y", "j3", "j2"},
+                           std::nullopt, "/");
+    EXPECT_EQ(captured.out,
+              "--- x\n"
+              "+++ y\n"
+              "@@ -1,4 +1,4 @@\n"
+              "-R1\n"
+              "+Q1\n"
+              " 1\n"
+              " 2\n"
+              " 3\n");
     EXPECT_EQ(captured.status, 1);
 }
 
@@ -311,6 +685,63 @@ TEST_F(BuiltinCommandsTest, DiffTabsAndMarks) {
               " a\n"
               "-\n"
               "+ \n");
+    EXPECT_EQ(captured.status, 1);
+
+    // -T on the usual pair: a tab between every mark and its text.
+    captured = RunCaptured("diff", {"-T", "a", "b"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out,
+              "2c2\n"
+              "<\tb\n"
+              "---\n"
+              ">\tB\n"
+              "3a4\n"
+              ">\td\n"
+              "\\ No newline at end of file\n");
+    EXPECT_EQ(captured.status, 1);
+
+    // -uT: the context line's tab replaces the leading space, too.
+    captured = RunCaptured("diff", {"-uT", "-L", "a", "-L", "b", "a", "b"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out,
+              "--- a\n"
+              "+++ b\n"
+              "@@ -1,3 +1,4 @@\n"
+              "\ta\n"
+              "-\tb\n"
+              "+\tB\n"
+              "\tc\n"
+              "+\td\n"
+              "\\ No newline at end of file\n");
+    EXPECT_EQ(captured.status, 1);
+
+    // -t with a carriage return: the column count restarts at it, and in
+    // normal output the mark is written again after it, nine spaces deep.
+    WriteFile("/r1", "a\r\tc\n");
+    WriteFile("/r2", "x\n");
+    captured = RunCaptured("diff", {"-t", "r1", "r2"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out,
+              "1c1\n"
+              "< a\r<" + std::string(9, ' ') + "c\n"
+              "---\n"
+              "> x\n");
+    EXPECT_EQ(captured.status, 1);
+
+    // --suppress-blank-empty in both styles: the mark stands alone.
+    WriteFile("/k1", "a\n\nb\n");
+    WriteFile("/k2", "a\nb\n\n");
+    captured = RunCaptured("diff", {"--suppress-blank-empty", "-u", "-L", "x", "-L", "y", "k1", "k2"},
+                           std::nullopt, "/");
+    EXPECT_EQ(captured.out,
+              "--- x\n"
+              "+++ y\n"
+              "@@ -1,3 +1,3 @@\n"
+              " a\n"
+              "-\n"
+              " b\n"
+              "+\n");
+    EXPECT_EQ(captured.status, 1);
+
+    captured = RunCaptured("diff", {"--suppress-blank-empty", "k1", "k2"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "2d1\n<\n3a3\n>\n");
     EXPECT_EQ(captured.status, 1);
 }
 
@@ -390,6 +821,45 @@ TEST_F(BuiltinCommandsTest, DiffErrors) {
               "diff: missing1: No such file or directory\n"
               "diff: missing2: No such file or directory\n");
     EXPECT_EQ(captured.status, 2);
+
+    captured = RunCaptured("diff", {"a", "nope"}, std::nullopt, "/");
+    EXPECT_EQ(captured.err, "diff: nope: No such file or directory\n");
+    EXPECT_EQ(captured.status, 2);
+
+    // No operands at all: the command itself is named.
+    captured = RunCaptured("diff", {}, std::nullopt, "/");
+    EXPECT_EQ(captured.err, "diff: missing operand after 'diff'\n" + tryHelp);
+    EXPECT_EQ(captured.status, 2);
+
+    captured = RunCaptured("diff", {"-U", "x", "a", "b"}, std::nullopt, "/");
+    EXPECT_EQ(captured.err, "diff: invalid context length 'x'\n" + tryHelp);
+    EXPECT_EQ(captured.status, 2);
+
+    // Too many labels: reported without the Try line.
+    captured = RunCaptured("diff", {"-L", "1", "-L", "2", "-L", "3", "a", "b"}, std::nullopt, "/");
+    EXPECT_EQ(captured.err, "diff: too many file label options\n");
+    EXPECT_EQ(captured.status, 2);
+
+    captured = RunCaptured("diff", {"--tabsize=0", "a", "b"}, std::nullopt, "/");
+    EXPECT_EQ(captured.err, "diff: invalid tabsize '0'\n" + tryHelp);
+    EXPECT_EQ(captured.status, 2);
+
+    // A not treated option is parsed and reported, and the diff goes on.
+    captured = RunCaptured("diff", {"-y", "a", "b"}, std::nullopt, "/");
+    EXPECT_EQ(captured.err, "Parameter -y is not treated by HaisosOS diff v. 1.0.0\n");
+    EXPECT_EQ(captured.out,
+              "2c2\n"
+              "< b\n"
+              "---\n"
+              "> B\n"
+              "3a4\n"
+              "> d\n"
+              "\\ No newline at end of file\n");
+    EXPECT_EQ(captured.status, 1);
+
+    captured = RunCaptured("diff", {"-v"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "diff (HaisosOS builtin) 1.0.0\n");
+    EXPECT_EQ(captured.status, 0);
 }
 
 TEST_F(BuiltinCommandsTest, DiffHelpAndVersion) {
@@ -452,6 +922,64 @@ std::string LineTextOf(const DiffText& text, size_t line) {
     return text.bytes.substr(start, end - start);
 }
 
+// |count| lines out of |distinct| equally likely ones, from a generator with
+// a fixed seed, so every run sees the same texts.
+std::string MakeLines(std::mt19937& rng, size_t count, unsigned distinct) {
+    std::string text;
+    for (size_t i = 0; i < count; ++i) {
+        text += "L" + std::to_string(rng() % distinct) + "\n";
+    }
+    return text;
+}
+
+// Rebuilds file 1 from file 0 and the change list, checking as it walks that
+// each change's line numbers are exactly where the walk is.
+std::string Apply(const DiffText& a, const DiffText& b, const std::vector<DiffChange>& changes) {
+    std::string result;
+    size_t i0 = 0;
+    size_t i1 = 0;
+    for (const DiffChange& change : changes) {
+        while (i0 < static_cast<size_t>(change.line0)) {
+            result += LineTextOf(a, i0);
+            ++i0;
+            ++i1;
+        }
+        EXPECT_EQ(change.line0, static_cast<int64_t>(i0));
+        EXPECT_EQ(change.line1, static_cast<int64_t>(i1));
+        EXPECT_GE(change.deleted, 0);
+        EXPECT_GE(change.inserted, 0);
+        EXPECT_LE(static_cast<size_t>(change.line0 + change.deleted), a.LineCount());
+        EXPECT_LE(static_cast<size_t>(change.line1 + change.inserted), b.LineCount());
+        i0 += static_cast<size_t>(change.deleted);
+        for (int64_t j = 0; j < change.inserted && i1 < b.LineCount(); ++j) {
+            result += LineTextOf(b, i1);
+            ++i1;
+        }
+    }
+    while (i0 < a.LineCount()) {
+        result += LineTextOf(a, i0);
+        ++i0;
+        ++i1;
+    }
+    return result;
+}
+
+// The longest common subsequence of the two files' lines, by the classic
+// quadratic table over the lines' bytes.
+size_t Lcs(const DiffText& a, const DiffText& b) {
+    const size_t n = a.LineCount();
+    const size_t m = b.LineCount();
+    std::vector<std::vector<uint32_t>> table(n + 1, std::vector<uint32_t>(m + 1, 0));
+    for (size_t i = n; i-- > 0;) {
+        for (size_t j = m; j-- > 0;) {
+            table[i][j] = LineTextOf(a, i) == LineTextOf(b, j)
+                              ? table[i + 1][j + 1] + 1
+                              : std::max(table[i + 1][j], table[i][j + 1]);
+        }
+    }
+    return table[0][0];
+}
+
 } // namespace
 
 // The engine on its own, without the command around it.
@@ -488,56 +1016,51 @@ TEST(DiffEngineTest, AllInserted) {
 }
 
 TEST(DiffEngineTest, MinimalAgainstLcs) {
-    // The longest common subsequence of "a b" and "b a" is one line, so no
-    // script can do better than one deletion and one insertion.
-    const DiffText a = TextOf("a\nb\n");
-    const DiffText b = TextOf("b\na\n");
-    bool stopped = false;
-    const auto script = ComputeDiff(a, b, DiffAnalysisOptions{},
-                                    []() { return false; }, stopped);
-    size_t operations = 0;
-    for (const DiffChange& change : script) {
-        operations += change.deleted + change.inserted;
+    // 300 random pairs over four distinct lines: the script's changed lines
+    // are exactly what the longest common subsequence leaves behind, and
+    // applying it rebuilds file 1 -- with and without a horizon.
+    std::mt19937 rng(20240102);
+    for (int pair = 0; pair < 300; ++pair) {
+        const std::string aText = MakeLines(rng, rng() % 41, 4);
+        const std::string bText = MakeLines(rng, rng() % 41, 4);
+        const DiffText a = TextOf(aText);
+        const DiffText b = TextOf(bText);
+        const size_t lcs = Lcs(a, b);
+        const int64_t minimal = static_cast<int64_t>(a.LineCount() + b.LineCount() - 2 * lcs);
+        DiffAnalysisOptions options;
+        for (int pass = 0; pass < 2; ++pass, options.horizonLines = 3) {
+            bool stopped = false;
+            const auto script = ComputeDiff(a, b, options, []() { return false; }, stopped);
+            ASSERT_FALSE(stopped) << pair;
+            int64_t operations = 0;
+            for (const DiffChange& change : script) {
+                operations += change.deleted + change.inserted;
+            }
+            EXPECT_EQ(operations, minimal) << pair << ", pass " << pass;
+            EXPECT_EQ(Apply(a, b, script), bText) << pair << ", pass " << pass;
+        }
     }
-    EXPECT_EQ(operations, 2u);
 }
 
 TEST(DiffEngineTest, LargeInputsStillCorrect) {
-    // A thousand lines with every tenth changed: the script must move the
-    // unchanged lines across whole, and delete and insert exactly the
-    // changed ones (100 deletions, 100 insertions).
-    std::string aText, bText;
-    for (int i = 0; i < 1000; ++i) {
-        aText += "line " + std::to_string(i) + "\n";
-        bText += "line " + std::to_string(i) + (i % 10 == 5 ? " changed" : "") + "\n";
-    }
+    // Two 5,000-line files over 40 distinct lines: applying the script
+    // rebuilds file 1, and no change names a line outside its file.
+    std::mt19937 rng(20240103);
+    const std::string aText = MakeLines(rng, 5000, 40);
+    const std::string bText = MakeLines(rng, 5000, 40);
     const DiffText a = TextOf(aText);
     const DiffText b = TextOf(bText);
     bool stopped = false;
     const auto script = ComputeDiff(a, b, DiffAnalysisOptions{},
                                     []() { return false; }, stopped);
-    ASSERT_FALSE(script.empty());
-
-    // Every change replaces one line, and the matched lines between the
-    // changes are equal in both files.
-    size_t deleted = 0;
-    size_t inserted = 0;
-    size_t prevEnd0 = 0;
-    size_t prevEnd1 = 0;
+    ASSERT_FALSE(stopped);
     for (const DiffChange& change : script) {
-        // The unchanged run before this change matches.
-        const std::string beforeA = LineTextOf(a, prevEnd0);
-        const std::string beforeB = LineTextOf(b, prevEnd1);
-        EXPECT_EQ(beforeA, beforeB);
-        EXPECT_EQ(change.deleted, 1);
-        EXPECT_EQ(change.inserted, 1);
-        deleted += static_cast<size_t>(change.deleted);
-        inserted += static_cast<size_t>(change.inserted);
-        prevEnd0 = static_cast<size_t>(change.line0 + change.deleted);
-        prevEnd1 = static_cast<size_t>(change.line1 + change.inserted);
+        EXPECT_GE(change.line0, 0);
+        EXPECT_LE(static_cast<size_t>(change.line0 + change.deleted), a.LineCount());
+        EXPECT_GE(change.line1, 0);
+        EXPECT_LE(static_cast<size_t>(change.line1 + change.inserted), b.LineCount());
     }
-    EXPECT_EQ(deleted, 100u);
-    EXPECT_EQ(inserted, 100u);
+    EXPECT_EQ(Apply(a, b, script), bText);
 }
 
 TEST(DiffEngineTest, StopEndsEarly) {
@@ -548,5 +1071,15 @@ TEST(DiffEngineTest, StopEndsEarly) {
                                     []() { return true; }, stopped);
     EXPECT_TRUE(stopped);
     EXPECT_TRUE(script.empty());
+
+    // The same on the large pair: stopped at once, nothing comes out.
+    std::mt19937 rng(20240104);
+    const DiffText bigA = TextOf(MakeLines(rng, 5000, 40));
+    const DiffText bigB = TextOf(MakeLines(rng, 5000, 40));
+    stopped = false;
+    const auto empty = ComputeDiff(bigA, bigB, DiffAnalysisOptions{},
+                                   []() { return true; }, stopped);
+    EXPECT_TRUE(stopped);
+    EXPECT_TRUE(empty.empty());
 }
 } // namespace Haisos

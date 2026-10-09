@@ -36,6 +36,7 @@ std::shared_ptr<IBuiltinCommand> CreateManCommand();
 std::shared_ptr<IBuiltinCommand> CreateMkdirCommand();
 std::shared_ptr<IBuiltinCommand> CreateMvCommand();
 std::shared_ptr<IBuiltinCommand> CreateNlCommand();
+std::shared_ptr<IBuiltinCommand> CreatePatchCommand();
 std::shared_ptr<IBuiltinCommand> CreatePrintfCommand();
 std::shared_ptr<IBuiltinCommand> CreatePwdCommand();
 std::shared_ptr<IBuiltinCommand> CreateRealpathCommand();
@@ -88,6 +89,7 @@ inline std::vector<std::shared_ptr<IBuiltinCommand>> CreateStandardBuiltinComman
         CreateMkdirCommand(),
         CreateMvCommand(),
         CreateNlCommand(),
+        CreatePatchCommand(),
         CreatePrintfCommand(),
         CreatePwdCommand(),
         CreateRealpathCommand(),

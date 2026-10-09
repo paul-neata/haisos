@@ -28,7 +28,7 @@ haisos/
 ├── src/
 │   ├── components/        - Component implementations (each has its own CLAUDE.md)
 │   │   ├── Agent/
-│   │   ├── BuiltinCommands/ - The builtin commands ([, basename, cat, chmod, cmp, cp, cut, date, dirname, du, echo, egrep, env, false, fgrep, grep, hsh, ls, man, mkdir, mv, nl, printf, pwd, realpath, rm, rmdir, seq, sleep, sort, stat, tee, test, touch, tr, true, uniq, wc, which; each in commands/<name>/) and what places them on filesystems
+│   │   ├── BuiltinCommands/ - The builtin commands ([, basename, cat, chmod, cmp, cp, cut, date, dirname, du, echo, egrep, env, false, fgrep, grep, head, hsh, ls, man, mkdir, mv, nl, printf, pwd, realpath, rm, rmdir, seq, sleep, sort, stat, tail, tee, test, touch, tr, true, uniq, wc, which; each in commands/<name>/) and what places them on filesystems
 │   │   ├── Console/
 │   │   ├── Environment/
 │   │   ├── Factory/
@@ -537,8 +537,8 @@ returned by `IHaisosOS`'s `OSToolFactory` and merged with an agent's tools
 
 Commands compiled into Haisos (`[`, `basename`, `cat`, `chmod`, `cmp`, `cp`,
 `cut`, `date`, `dirname`, `du`, `echo`, `egrep`, `env`, `false`, `fgrep`,
-`grep`, `hsh`, `ls`, `man`, `mkdir`, `mv`, `nl`, `printf`, `pwd`, `realpath`,
-`rm`, `rmdir`, `seq`, `sleep`, `sort`, `stat`, `tee`, `test`, `touch`, `tr`,
+`grep`, `head`, `hsh`, `ls`, `man`, `mkdir`, `mv`, `nl`, `printf`, `pwd`, `realpath`,
+`rm`, `rmdir`, `seq`, `sleep`, `sort`, `stat`, `tail`, `tee`, `test`, `touch`, `tr`,
 `true`, `uniq`, `wc`, `which`), implemented in
 `src/components/BuiltinCommands/`
 (see its `CLAUDE.md`). A builtin is not a file on disk: it is placed on a
@@ -609,6 +609,7 @@ use a builtin with what it already knows about the real command:
 | `false` | Does nothing, exits 1 (`--help`/`--version` only as the sole argument, and 1 even after them) |
 | `fgrep` | `grep -F`: grep with fixed strings preselected (see `grep`) |
 | `grep` | Prints lines matching patterns (`-E -F -G -P -e -f -i -v -w -x -c -l -L -q -o -n -b -H -h --label -T -m -s -a -I --binary-files -U -z --line-buffered -r -R -d -D --include --exclude --exclude-from --exclude-dir -Z`), several patterns (one per line of an argument or file), GNU's prefixes, binary files by the first NUL, exit statuses 0/1/2; recursive search (`.` by default, `-d read/recurse/skip`, `-D read/skip` for devices, the `--include`/`--exclude` filters GNU's way), context (`-A -B -C -NUM` with `--` group separators, `--group-separator`, `--no-group-separator`) and colour (`--color`/`--colour` with `GREP_COLORS`) |
+| `head` | Outputs the first part of files (`-c -n -q -v -z`, obsolete `-NUM[bckmlqvz]...`): the first NUM lines/bytes, or all but the last NUM (a leading `-`); size suffixes `1k`, `1kB`, `1KiB`, `b`; `==> NAME <==` headers with more than one FILE, `-q` never, `-v` always |
 | `hsh` | The Haisos shell, after dash: `-c`, scripts, stdin or interactive (`RUN -i /bin/hsh`); quoting, expansions, pipelines, redirections, heredocs, lists, control flow, functions; commands found in `PATH` |
 | `ls` | Lists directories as GNU ls prints them to a terminal: columns, `-l` with `total`/links/owner/group/size/time, sorting, time styles, quoting; to a pipe or file, one name per line, unquoted |
 | `man` | Prints a builtin's manual page (`man ls`, `man 1 ls`, `-f`, `-k`): its `--help` text, or a full page for `hsh` |
@@ -624,6 +625,7 @@ use a builtin with what it already knows about the real command:
 | `sleep` | Sleeps for the summed NUMBERs (`s m h d` suffixes; `inf` until stopped) |
 | `sort` | Sorts lines (keys `-k`/`-t`, `-b -d -f -g -h -i -M -n -r -R -s -u -V -z`, `--sort=WORD`, `-c -C --check`, `-m`, `-o`, `--files0-from`), byte order, the numeric/general/human/month/version orders, GNU's last-resort comparison |
 | `stat` | Reports file or file system status (`-L -f -c --printf -t`), GNU 9.4's format directives, each with flags, a width and a precision, `--printf` interpreting backslash escapes and adding no newline; device and inode numbers 0, permissions 0777, owner and group `haisos`, the I/O block 4096, the birth time `-`, and with `-f` fixed values (ID 0, Namelen 255, Type haisos, block sizes 4096, counts 0) |
+| `tail` | Outputs the last part of files (`-c -n -f --follow[=descriptor|name] -F --pid -q --retry -s -v -z`, obsolete `[+-]NUM[bcl][f]`): the last NUM lines/bytes, or from the NUM'th on (a leading `+`); `-f` follows appended data by polling the files every `-s` seconds (default 1.0), `--follow=name` also noticing a file's truncation, removal and reappearance, `--pid` ending the follow once that process finishes |
 | `tee` | Copies standard input to standard output and files (`-a -p --output-error`) |
 | `tr` | Translates, deletes or squeezes bytes (`-c -d -s -t`, ranges, classes, `[c*n]`) |
 | `test` | Checks file types and compares values: GNU coreutils' expression (`!`, `-a`, `-o`, parentheses, string and integer comparisons, `-l STRING` its length, the file primaries, `-t FD`); no options, syntax errors exit 2 |

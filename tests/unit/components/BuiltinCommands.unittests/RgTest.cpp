@@ -220,6 +220,11 @@ TEST_F(BuiltinCommandsTest, RgStdin) {
     EXPECT_EQ(plain.status, 0);
     const Captured named = RunCaptured("rg", {"-H", "-n", "TODO"}, "a TODO\n", "/r");
     EXPECT_EQ(named.out, "<stdin>:1:a TODO\n");
+    // -m stops at its match, an unterminated last line of the deciding read
+    // included.
+    const Captured maxed = RunCaptured("rg", {"-m1", "TODO"}, "a TODO\nb TODO", "/r");
+    EXPECT_EQ(maxed.out, "a TODO\n");
+    EXPECT_EQ(maxed.status, 0);
 }
 
 // --- rg: binary files ---
@@ -238,6 +243,11 @@ TEST_F(BuiltinCommandsTest, RgBinary) {
     EXPECT_EQ(walked.status, 0);
     // The counts keep going: -c counts the matching line of a binary operand.
     EXPECT_EQ(RunCaptured("rg", {"-c", "TODO", "src/bin.dat"}, std::nullopt, "/r").out, "1\n");
+    // Standard input is searched as an operand is: its deciding read holds
+    // the NUL, and its first match ends it with the message.
+    const Captured piped = RunCaptured("rg", {"TODO"}, std::string("x\0y TODO\n", 9), "/r");
+    EXPECT_EQ(piped.out, "binary file matches (found \"\\0\" byte around offset 1)\n");
+    EXPECT_EQ(piped.status, 0);
     // -a: no binary detection, the line printed raw.
     EXPECT_EQ(RunCaptured("rg", {"-a", "TODO", "src/bin.dat"}, std::nullopt, "/r").out,
         std::string("x\0y TODO\n", 9));

@@ -320,6 +320,10 @@ FileOutcome SearchFile(BuiltinContext& context, const RgSettings& settings, cons
 
     std::string data = initialData;  // the carry: the partial line so far
     bool eof = false;
+    bool stopInput = false;  // processLine asked to stop: nothing more is taken
+    // The bytes at the end of data not yet checked for a NUL: the standard
+    // input's deciding read first, then each read.
+    size_t unchecked = initialData.size();
     // -m 0: the input is not read at all.
     const bool readAtAll = !settings.maxCount || *settings.maxCount > 0;
 
@@ -347,28 +351,29 @@ FileOutcome SearchFile(BuiltinContext& context, const RgSettings& settings, cons
                 eof = true;
             } else {
                 data.append(buffer.data(), static_cast<size_t>(n));
-                if (!binary && !settings.text
-                    && std::memchr(buffer.data(), '\0', static_cast<size_t>(n)) != nullptr) {
-                    firstNul = offset + data.find('\0');
-                    if (!binaryAsOperand) {
-                        // A binary file met while walking ends silently: lines
-                        // already printed stay, nothing else comes.
-                        data.clear();
-                        break;
-                    }
-                    // An operand (or stdin, or --binary): from here a NUL
-                    // ends a line too, nothing is printed, and the first
-                    // match ends the input with ripgrep's message.
-                    binary = true;
-                }
+                unchecked += static_cast<size_t>(n);
             }
+            if (!binary && !settings.text && unchecked > 0
+                && std::memchr(data.data() + data.size() - unchecked, '\0', unchecked) != nullptr) {
+                firstNul = offset + data.find('\0');
+                if (!binaryAsOperand) {
+                    // A binary file met while walking ends silently: lines
+                    // already printed stay, nothing else comes.
+                    data.clear();
+                    break;
+                }
+                // An operand (or stdin, or --binary): from here a NUL
+                // ends a line too, nothing is printed, and the first
+                // match ends the input with ripgrep's message.
+                binary = true;
+            }
+            unchecked = 0;
             // Split what is held into complete lines -- at the end of input
             // too, so a carry already read (the standard input's deciding
             // read) is split before its last line is taken as unterminated.
             // Once binary, a NUL ends a line too (for matching, counting
             // and line numbers).
             size_t pos = 0;
-            bool stopInput = false;
             while (pos < data.size()) {
                 if (context.StopRequested()) {
                     result.stopped = true;
@@ -400,7 +405,7 @@ FileOutcome SearchFile(BuiltinContext& context, const RgSettings& settings, cons
         }
     }
 
-    if (eof && !data.empty() && !result.stopped) {
+    if (eof && !stopInput && !data.empty() && !result.stopped) {
         // A last line without its terminator is printed with one added.
         processLine(data);
     }

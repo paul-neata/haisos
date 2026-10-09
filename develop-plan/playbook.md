@@ -98,3 +98,4 @@ Pause: no
 - 2026-10-09 (implement) search--find-actions refreshed against 04e3300 (aligned with #64's find code: LookupPrimary/FindActionPrimaries, -prune, slots, shared FindTestTree.h); folded in #64 lows (firstNonOption removed; -type/-xtype D refused as GNU 4.9) and #53's ParsePrintfSpec `q` (-printf scans its own directives)
 - 2026-10-09 (implement) search--find-actions and search--xargs: the planned helper EmptyInputDescriptor renamed OpenEmptyInput -- a class of that name already exists in the same namespace (Console/ConsoleDescriptors.h)
 - 2026-10-09 (implement) search--xargs refreshed against a092a28 (OpenEmptyInput in BuiltinRunProgram.h, slots); folded in #65 medium: a null OpenEmptyInput fails the run instead of handing over the caller's stdin, in xargs and find -ok
+- 2026-10-09 (implement) search--xargs: its first container run (06:29 UTC) was interrupted with the previous implement session; restarted, version 0.5.24 kept.

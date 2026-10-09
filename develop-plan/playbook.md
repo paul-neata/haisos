@@ -19,7 +19,7 @@ Pause: no
 | 11 | [coreutils--printf-seq](tasks/coreutils--printf-seq.md) | done | 0.5.11 | 4 | #53 | 1 | 0C 1H fixed, 2M 3L open | |
 | 12 | [coreutils--date](tasks/coreutils--date.md) | done | 0.5.18 | 8, 4 | #60 | 1 | 0C 0H fixed, 6M 5L open | Windows red, not checked |
 | 13 | [coreutils--stat](tasks/coreutils--stat.md) | done | 0.5.19 | 12, 11, 4 | #61 | 1 | 0C 1H fixed, 3M 2L open | Windows red, not checked |
-| 14 | [coreutils--du-cmp](tasks/coreutils--du-cmp.md) | in-review | 0.5.20 | 12, 4 | #62 | 1 | | Windows not checked |
+| 14 | [coreutils--du-cmp](tasks/coreutils--du-cmp.md) | done | 0.5.20 | 12, 4 | #62 | 1 | 0C 1H fixed, 3M 6L open | Windows red, not checked |
 | 15 | [coreutils--test-program](tasks/coreutils--test-program.md) | done | 0.5.12 | 4 | #54 | 1 | 0C 2H fixed, 1M 2L open | |
 | 16 | [coreutils--uniq-cut](tasks/coreutils--uniq-cut.md) | done | 0.5.13 | 4 | #55 | 1 | 0C 0H fixed, 2M 6L open | |
 | 17 | [coreutils--head-tail](tasks/coreutils--head-tail.md) | todo | | 14, 4, 16 | | | | |

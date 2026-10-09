@@ -22,7 +22,7 @@ Pause: no
 | 14 | [coreutils--du-cmp](tasks/coreutils--du-cmp.md) | done | 0.5.20 | 12, 4 | #62 | 1 | 0C 1H fixed, 3M 6L open | Windows red, not checked |
 | 15 | [coreutils--test-program](tasks/coreutils--test-program.md) | done | 0.5.12 | 4 | #54 | 1 | 0C 2H fixed, 1M 2L open | |
 | 16 | [coreutils--uniq-cut](tasks/coreutils--uniq-cut.md) | done | 0.5.13 | 4 | #55 | 1 | 0C 0H fixed, 2M 6L open | |
-| 17 | [coreutils--head-tail](tasks/coreutils--head-tail.md) | in-review | 0.5.21 | 14, 4, 16 | #63 | 1 | | Windows not checked |
+| 17 | [coreutils--head-tail](tasks/coreutils--head-tail.md) | done | 0.5.21 | 14, 4, 16 | #63 | 1 | 0C 2H fixed, 3M 5L open | Windows red, not checked (Tail.cpp lacks `<cerrno>`?) |
 | 18 | [coreutils--tr-tee-nl](tasks/coreutils--tr-tee-nl.md) | done | 0.5.14 | 4, 3 | #56 | 1 | 0C 3H fixed, 2M 2L open | Linux CI hung once in Build (runner); green on re-run |
 | 19 | [search--grep-core](tasks/search--grep-core.md) | done | 0.5.15 | 3, 4, 16 | #57 | 1 | 0C 3H fixed, 1M 2L open | MSVC compile errors fixed in review |
 | 20 | [search--grep-recursive](tasks/search--grep-recursive.md) | done | 0.5.16 | 19 | #58 | 1 | 0C 3H fixed, 2M 3L open | Windows green |

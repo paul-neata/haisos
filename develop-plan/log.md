@@ -98,3 +98,4 @@
 - 2026-10-09 16:25 UTC -- search--rg-regex: PR #70, windows-failed (ignored per Direction)
 - 2026-10-09 16:39 UTC -- search--rg-regex merged #70 as 0.5.28: 0C 1H fixed, 3M 4L open, 1 try
 - 2026-10-09 16:40 UTC -- start search--rg-ignore (0.5.29)
+- 2026-10-09 17:49 UTC -- search--rg-ignore: PR #71, windows-failed (ignored per Direction), 2 runs

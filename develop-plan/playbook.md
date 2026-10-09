@@ -34,7 +34,7 @@ Pause: no
 | 26 | [search--rg-search](tasks/search--rg-search.md) | done | 0.5.27 | 20 | #69 | 1 | 0C 2H fixed, 0M 3L open | Windows red, not checked; grep -q fix (#58) included, grep 1.2.0 |
 | 27 | [search--rg-regex](tasks/search--rg-regex.md) | done | 0.5.28 | 26 | #70 | 1 | 0C 1H fixed, 3M 4L open | Windows red, not checked; clean-room checked |
 | 28 | [search--rg-ignore](tasks/search--rg-ignore.md) | done | 0.5.29 | 26 | #71 | 2 | 0C 2H fixed, 4M 3L open | Windows red, not checked; clean-room checked |
-| 29 | [diff--diff-core](tasks/diff--diff-core.md) | todo | | 4, 12 | | | | |
+| 29 | [diff--diff-core](tasks/diff--diff-core.md) | in-progress | 0.5.30 | 4, 12 | | | | |
 | 30 | [diff--diff-recursive](tasks/diff--diff-recursive.md) | todo | | 29, 20 | | | | |
 | 31 | [diff--patch-core](tasks/diff--patch-core.md) | todo | | 1, 4, 29 | | | | |
 | 32 | [diff--patch-fuzz-rej](tasks/diff--patch-fuzz-rej.md) | todo | | 31, 7 | | | | |
@@ -107,3 +107,4 @@ Pause: no
 - 2026-10-09 (implement) search--rg-search refreshed against 82119e0 (GrepContext::SetPrinters, GrepFile.h/GrepSettings.h, rg keeps its own read loop, list/CMake/test slots); folded in #58 medium as a separate item: grep -q stops after a recursive match (GrepQuietStopsAfterRecursiveMatch)
 - 2026-10-09 (implement) search--rg-regex refreshed against b089568 (rg-search's real names, CMake/test slots, Regex Perl now takes \cX/\e/\1); folded in #69's three lows (--no-messages, -f open failures via a shared OpenFailureText, unreadable directory reported, exit 2)
 - 2026-10-09 (implement) search--rg-ignore refreshed against d6c7924 (rg 1.2.0, walk lambda in RgSearch(), CMake/test slots); clean-room: ignore-crate mentions reworded as observed behaviour, rule added to Context; folded in #70's two regex mediums (0-minimum quantifier on an assertion, quantified multi-byte code point)
+- 2026-10-09 (implement) diff--diff-core re-planned clean-room against e62c40e (Opus): GNU's internal steps removed; Myers' published linear-space algorithm plus output rules verified on the host's GNU diff 3.10 (byte-identical with diff -d in ~2000 cases, with GNU's default in 946/950 real-source cases); documented exception: hunks may be placed differently (same change count) around repeated lines with mixed edits, and on huge very different files GNU's default gives up minimality; -d accepted, no effect; three wrong format statements corrected (-E -Z, -E after \b/\r, octal-quoted names, -t after \r)

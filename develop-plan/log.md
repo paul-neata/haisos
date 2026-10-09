@@ -83,3 +83,4 @@
 - 2026-10-09 06:43 UTC -- implement session started
 - 2026-10-09 06:44 UTC -- restart search--xargs (0.5.24) after an interrupted run
 - 2026-10-09 07:38 UTC -- search--xargs: PR #66, windows-failed (ignored per Direction)
+- 2026-10-09 07:56 UTC -- search--xargs merged #66 as 0.5.24: 1C 2H fixed, 4M 2L open, 1 try

@@ -16,6 +16,8 @@ const char* const kSetOperationsMessage =
 const char* const kUnicodeClassMessage = "Unicode classes are not supported by HaisosOS rg";
 const char* const kNonAsciiClassMessage =
     "non-ASCII characters in a class are not supported by HaisosOS rg";
+const char* const kInvalidRangeMessage =
+    "invalid character class range, the start must be <= the end";
 
 bool IsAlpha(char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
@@ -99,6 +101,11 @@ public:
     Translator(std::string_view wrapped, RgRegexError& error, bool& hasUpper)
         : m_w(wrapped), m_error(error), m_hasUpper(hasUpper) {}
 
+    // Whether some class held nothing but '\n'. rg strips its line
+    // terminator out of every class, and a class left empty matches nothing:
+    // rg's multiline message, not a frame.
+    bool NewlineOnlyClass() const { return m_sawNewlineOnlyClass; }
+
     bool Parse(std::string& out) {
         while (m_i < m_w.size()) {
             SkipFlaggedSpace();
@@ -150,9 +157,11 @@ private:
         m_lastItemStart = m_out.size();
         m_lastRepeatable = true;
         m_lastQuantified = false;
+        m_lastItemBoundary = false;
     }
 
     bool EmitQuantifier(const std::string& base, bool lazy) {
+        if (m_lastItemBoundary) return true;  // a repeated assertion is itself
         if (m_lastQuantified) {
             // stacked: wrap what the previous quantifier took first
             m_out.insert(m_lastItemStart, "(?:");
@@ -204,6 +213,7 @@ private:
                 ++m_i;
                 StartAtom();
                 m_out += c;
+                if (c != '.') m_lastItemBoundary = true;  // an anchor
                 return true;
             default: break;
         }
@@ -311,6 +321,7 @@ private:
         static const char kLetters[] = "imsxuUR";
         Flags next = m_flags;
         bool negated = false;
+        bool negatedAny = false;
         size_t minusPos = 0;
         size_t firstSeen[7] = {};
         bool seen[7] = {};
@@ -333,6 +344,7 @@ private:
             seen[index] = true;
             firstSeen[index] = m_i;
             const bool on = !negated;
+            if (negated) negatedAny = true;
             switch (f) {
                 case 'i': next.ignoreCase = on; break;
                 case 'm': next.multiline = on; break;
@@ -396,6 +408,7 @@ private:
         m_groups.pop_back();
         m_lastRepeatable = true;
         m_lastQuantified = false;
+        m_lastItemBoundary = false;
         return true;
     }
 
@@ -430,8 +443,11 @@ private:
     }
 
     // m_i at the '{'. Spaces inside the braces are dropped always, and what
-    // stops the counts short of '}' is "unclosed" from '{' to there.
-    bool ParseCountedQuantifier() {
+    // stops the counts short of '}' is "unclosed" from '{' to there. A count
+    // on a zero-width assertion (\b{2}, \b{0}) is the assertion itself --
+    // \b{0} the empty match -- since Haisos's engine takes no '{m}' after
+    // one; |boundaryRepeat| says the assertion is this quantifier's own.
+    bool ParseCountedQuantifier(bool boundaryRepeat = false) {
         const size_t openPos = m_i++;
         if (!m_lastRepeatable) return Fail(openPos, 1, "repetition operator missing expression");
         SkipBraceSpace();
@@ -466,6 +482,10 @@ private:
         }
         const bool lazy = m_i < m_w.size() && m_w[m_i] == '?';
         if (lazy) ++m_i;
+        if (m_lastItemBoundary) {
+            if (boundaryRepeat && min == 0) m_out.resize(m_lastItemStart);
+            return true;  // EmitQuantifier swallows it either way
+        }
         return EmitQuantifier(base, lazy);
     }
 
@@ -487,9 +507,13 @@ private:
             StartAtom();
             switch (e) {
                 case 'd': case 'D': case 's': case 'S': case 'w': case 'W':
-                case 'B': case 'A': case 'z':
                     m_out += '\\';
                     m_out += e;
+                    return true;
+                case 'B': case 'A': case 'z':  // assertions: no '{m}' of their own
+                    m_out += '\\';
+                    m_out += e;
+                    m_lastItemBoundary = true;
                     return true;
                 case 't': m_out += "\\t"; return true;
                 case 'r': m_out += "\\r"; return true;
@@ -518,6 +542,7 @@ private:
         StartAtom();
         if (e == '<' || e == '>') {
             m_out += "\\b";  // Haisos's Perl subset has no one-sided boundary
+            m_lastItemBoundary = true;
             return true;
         }
         m_out += '\\';
@@ -530,6 +555,7 @@ private:
     bool ParseWordBoundary() {
         if (m_i >= m_w.size() || m_w[m_i] != '{') {
             m_out += "\\b";
+            m_lastItemBoundary = true;
             return true;
         }
         const size_t bracePos = m_i;
@@ -537,7 +563,12 @@ private:
         size_t p = nameStart;
         while (p < m_w.size() && (IsAlpha(m_w[p]) || m_w[p] == '-')) ++p;
         const size_t nameLength = p - nameStart;
-        if (nameLength == 0) return ParseCountedQuantifier();  // m_i at the '{'
+        if (nameLength == 0) {
+            // m_i at the '{': \b{2} is the boundary, \b{0} the empty match
+            m_out += "\\b";
+            m_lastItemBoundary = true;
+            return ParseCountedQuantifier(true);
+        }
         const std::string name(m_w.substr(nameStart, nameLength));
         if (p >= m_w.size() || m_w[p] != '}') {
             return Fail(bracePos, 1 + nameLength,
@@ -551,6 +582,7 @@ private:
         }
         m_i = p + 1;
         m_out += "\\b";
+        m_lastItemBoundary = true;
         return true;
     }
 
@@ -623,16 +655,17 @@ private:
     }
 
     // \p / \P: the span runs through the '}' when there is one.
-    bool FailUnicodeClass(size_t escPos, char kind) {
+    bool FailUnicodeClass(size_t escPos, char kind,
+                          const char* message = kUnicodeClassMessage) {
         (void)kind;
         if (m_i < m_w.size() && m_w[m_i] == '{') {
             size_t p = m_i + 1;
             while (p < m_w.size() && m_w[p] != '}') ++p;
             const size_t end = p < m_w.size() ? p + 1 : p;
-            return Fail(escPos, end - escPos, kUnicodeClassMessage);
+            return Fail(escPos, end - escPos, message);
         }
-        if (m_i < m_w.size() && IsAlpha(m_w[m_i])) return Fail(escPos, 3, kUnicodeClassMessage);
-        return Fail(escPos, 2, kUnicodeClassMessage);
+        if (m_i < m_w.size() && IsAlpha(m_w[m_i])) return Fail(escPos, 3, message);
+        return Fail(escPos, 2, message);
     }
 
     // ---- classes ----
@@ -659,11 +692,14 @@ private:
         PrevKind prevKind = kPrevNone;
         unsigned char prevByte = 0;
         size_t prevPos = 0;
+        m_classAllNewline = !negated;  // a class of only '\n' matches nothing
         if (m_i < m_w.size() && m_w[m_i] == ']') {
             cls += "\\]";
             ++m_i;
-            prevKind = kPrevLiteral;
-            prevByte = ']';
+            // a plain member: rg starts no range from it ([]-a] is
+            // ']', '-' and 'a', not ] to a)
+            prevKind = kPrevNone;
+            m_classAllNewline = false;
         }
         m_classes.push_back(ClassEntry{start, m_i - start});
         m_hasRecord = false;
@@ -680,6 +716,7 @@ private:
                     if (m_hasRecord) {
                         return Fail(m_record.position, m_record.length, m_record.message);
                     }
+                    if (!negated && m_classAllNewline) m_sawNewlineOnlyClass = true;
                     StartAtom();
                     m_out += negated ? "[^" : "[";
                     m_out += cls;
@@ -710,6 +747,7 @@ private:
                 const std::string name(m_w.substr(nameStart, p < m_w.size() ? p - nameStart : 0));
                 if (complete && KnownPosixName(name)) {
                     m_i = p + 2;
+                    m_classAllNewline = false;
                     if (name == "word") {
                         cls += caret ? "\\W" : "\\w";
                     } else if (name == "ascii") {
@@ -727,6 +765,7 @@ private:
                     m_classes.push_back(ClassEntry{itemPos, 1});
                     ++m_i;
                     prevKind = kPrevNone;
+                    m_classAllNewline = false;
                 }
                 continue;
             }
@@ -735,6 +774,7 @@ private:
                 Record(m_i, 2, kSetOperationsMessage);
                 m_i += 2;
                 prevKind = kPrevNone;
+                m_classAllNewline = false;
                 continue;
             }
 
@@ -743,6 +783,7 @@ private:
                     Record(m_i, 2, kSetOperationsMessage);
                     m_i += 2;
                     prevKind = kPrevNone;
+                    m_classAllNewline = false;
                     continue;
                 }
                 const size_t dashPos = m_i;
@@ -753,9 +794,11 @@ private:
                         cls += "\\-";  // no end in sight: the dash is a member
                         prevKind = kPrevLiteral;
                         prevByte = '-';
+                        prevPos = dashPos;
+                        m_classAllNewline = false;
                         continue;
                     }
-                    if (!ParseRangeEnd(cls, prevByte, dashPos)) return false;
+                    if (!ParseRangeEnd(cls, prevByte, prevPos)) return false;
                     prevKind = kPrevNone;  // a dash after a range is a member
                     continue;
                 }
@@ -765,6 +808,8 @@ private:
                 cls += "\\-";
                 prevKind = kPrevLiteral;
                 prevByte = '-';
+                prevPos = dashPos;
+                m_classAllNewline = false;
                 continue;
             }
 
@@ -781,7 +826,11 @@ private:
                 continue;
             }
             if (byte >= 'A' && byte <= 'Z') m_hasUpper = true;
-            cls += ClassByte(byte);
+            if (byte != 0x0a) m_classAllNewline = false;
+            // a ':' opening the class would read to Haisos's engine as a
+            // misplaced POSIX class; escaped, it is the literal Rust reads
+            // ([:alpha:] outside a class is a class of ':', 'a', 'l', ...)
+            cls += (cls.empty() && byte == ':') ? "\\:" : ClassByte(byte);
             prevKind = kPrevLiteral;
             prevByte = byte;
             prevPos = m_i - 1;
@@ -790,16 +839,18 @@ private:
         return Fail(front.start, front.prefixLength, "unclosed character class");
     }
 
-    // m_i at the end item of a range, its start |startByte| behind a '-' at
-    // |dashPos|.
-    bool ParseRangeEnd(std::string& cls, unsigned char startByte, size_t dashPos) {
+    // m_i at the end item of a range, its start |startByte| (at
+    // |startItemPos|) behind a '-'.
+    bool ParseRangeEnd(std::string& cls, unsigned char startByte, size_t startItemPos) {
         const char e = m_w[m_i];
         unsigned char endByte = 0;
         bool endLiteral = false;
         if (e == '\\') {
             const size_t escPos = m_i++;
             if (m_i >= m_w.size()) {
-                return Fail(escPos, 2, "invalid range boundary, must be a literal");
+                // the end never arrives: the range is the error, through the
+                // end of the pattern (rg's caret lands on the wrapper's ')')
+                return Fail(startItemPos, m_w.size() - startItemPos, kInvalidRangeMessage);
             }
             const char esc = m_w[m_i++];
             if (IsDigit(esc)) return Fail(escPos, 2, "backreferences are not supported", true);
@@ -808,6 +859,7 @@ private:
                 if (!ReadHexValue(esc, value)) return false;
                 if (value > 0xff) {
                     Record(escPos, m_i - escPos, kNonAsciiClassMessage);
+                    m_classAllNewline = false;
                     return true;  // the refusal fires when the class closes
                 }
                 endByte = static_cast<unsigned char>(value);
@@ -818,7 +870,12 @@ private:
             else if (esc == 'a') { endByte = 0x07; endLiteral = true; }
             else if (esc == 'f') { endByte = 0x0c; endLiteral = true; }
             else if (esc == 'v') { endByte = 0x0b; endLiteral = true; }
-            else if (esc == 'p' || esc == 'P') return FailUnicodeClass(escPos, esc);
+            // a unicode class can bound no range: Rust's message, the
+            // whole escape under its caret
+            else if (esc == 'p' || esc == 'P') {
+                return FailUnicodeClass(escPos, esc,
+                                         "invalid range boundary, must be a literal");
+            }
             else if (IsAlpha(esc) || static_cast<unsigned char>(esc) >= 0x80) {
                 if (esc == 'd' || esc == 'D' || esc == 's' || esc == 'S' || esc == 'w'
                     || esc == 'W' || esc == 'b' || esc == 'B' || esc == 'A' || esc == 'z'
@@ -832,6 +889,7 @@ private:
             }
         } else if (static_cast<unsigned char>(e) >= 0x80) {
             Record(m_i, 1, kNonAsciiClassMessage);
+            m_classAllNewline = false;
             ++m_i;
             return true;
         } else {
@@ -842,14 +900,14 @@ private:
         }
         if (endLiteral) {
             if (startByte > endByte) {
-                const size_t classStart = m_classes.front().start;
-                Record(classStart, dashPos + 1 - classStart,
-                       "invalid character class range, the start must be <= the end");
-            } else {
-                cls += HexByte(startByte);
-                cls += '-';
-                cls += HexByte(endByte);
+                // rg's caret runs from the range's start item through its
+                // end item, both whole
+                return Fail(startItemPos, m_i - startItemPos, kInvalidRangeMessage);
             }
+            if (startByte != 0x0a || endByte != 0x0a) m_classAllNewline = false;
+            cls += HexByte(startByte);
+            cls += '-';
+            cls += HexByte(endByte);
         }
         return true;
     }
@@ -868,6 +926,7 @@ private:
                     cls += esc;
                     prevKind = kPrevSet;
                     prevPos = escPos;
+                    m_classAllNewline = false;
                     return true;
                 case 't': prevByte = 0x09; break;
                 case 'n': prevByte = 0x0a; break;
@@ -881,6 +940,7 @@ private:
                     if (value > 0xff) {
                         Record(escPos, m_i - escPos, kNonAsciiClassMessage);
                         prevKind = kPrevNone;
+                        m_classAllNewline = false;
                         return true;
                     }
                     prevByte = static_cast<unsigned char>(value);
@@ -899,6 +959,7 @@ private:
                         Record(escPos, 2, kUnicodeClassMessage);
                     }
                     prevKind = kPrevNone;
+                    m_classAllNewline = false;
                     return true;
                 }
                 case 'b': case 'B': case 'A': case 'z':
@@ -908,6 +969,8 @@ private:
             }
             cls += HexByte(prevByte);
             prevKind = kPrevLiteral;
+            prevPos = escPos;
+            if (prevByte != 0x0a) m_classAllNewline = false;
             return true;
         }
         const unsigned char byte = static_cast<unsigned char>(esc);
@@ -919,6 +982,7 @@ private:
         prevKind = kPrevLiteral;
         prevByte = byte;
         prevPos = escPos;
+        if (byte != 0x0a) m_classAllNewline = false;
         return true;
     }
 
@@ -935,6 +999,9 @@ private:
     size_t m_lastItemStart = 0;
     bool m_lastRepeatable = false;
     bool m_lastQuantified = false;
+    bool m_lastItemBoundary = false;  // the last item is a zero-width assertion
+    bool m_classAllNewline = false;   // this class holds nothing but '\n'
+    bool m_sawNewlineOnlyClass = false;
     RgRegexError& m_error;
     bool& m_hasUpper;
 };
@@ -958,6 +1025,11 @@ std::optional<std::string> TranslateRgPattern(const std::vector<std::string>& pa
     Translator translator(wrapped, error, hasUppercaseLiteral);
     std::string perl;
     if (!translator.Parse(perl)) return std::nullopt;
+    if (translator.NewlineOnlyClass()) {
+        // a class rg's line terminator is stripped from, left empty
+        error.multiline = true;
+        return std::nullopt;
+    }
 
     // What Regex itself refuses -- a size limit -- takes the frame with the
     // caret at column 0.

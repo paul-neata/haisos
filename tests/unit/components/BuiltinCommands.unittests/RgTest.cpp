@@ -319,6 +319,12 @@ TEST_F(BuiltinCommandsTest, RgRegexNewlineEscape) {
         "Consider enabling multiline mode with the --multiline flag (or -U for short).\n"
         "When multiline mode is enabled, new line characters can be matched.\n");
     EXPECT_EQ(captured.status, 2);
+    // a class holding only '\n' is left empty by the strip: the same message
+    const Captured onlyNewline = RunCaptured("rg", {"[\\n]", "t1"}, std::nullopt, "/r");
+    EXPECT_EQ(onlyNewline.err, captured.err);
+    EXPECT_EQ(onlyNewline.status, 2);
+    // other members survive the strip: the class matches them
+    EXPECT_EQ(RunCaptured("rg", {"[\\nT]", "t1"}, std::nullopt, "/r").out, "TODO\n");
 }
 
 TEST_F(BuiltinCommandsTest, RgPatternFileFailures) {

@@ -119,6 +119,29 @@ TEST(RgRegexTest, Frames) {
         ExpectedFrame("(?:(?-i-s)a)", TwoCarets(5, 7), "flag negation operator repeated"));
 }
 
+// The frames a range prints: the carets run from the range's start item
+// through its end item, both whole (each verified against the reference).
+TEST(RgRegexTest, RangeFrames) {
+    const char* const range =
+        "invalid character class range, the start must be <= the end";
+    EXPECT_EQ(Frame("[z-a]"), ExpectedFrame("(?:[z-a])", Carets(4, 3), range));
+    EXPECT_EQ(Frame("[z-\\x61]"), ExpectedFrame("(?:[z-\\x61])", Carets(4, 6), range));
+    // a raw '[' at a range's end is a literal byte, so 'a-[' is the span
+    EXPECT_EQ(Frame("[a-[:alpha:]]"),
+        ExpectedFrame("(?:[a-[:alpha:]])", Carets(4, 3), range));
+    // the end never arrives: through the pattern's end, the wrapper's ')'
+    EXPECT_EQ(Frame("[z-"), ExpectedFrame("(?:[z-)", Carets(4, 3), range));
+    // an escape cut short by the end is the same error, a byte more under it
+    EXPECT_EQ(Frame("[z-\\\\"), ExpectedFrame("(?:[z-\\\\)", Carets(4, 4), range));
+    // a unicode class can bound no range: the whole escape under the carets
+    EXPECT_EQ(Frame("[a-\\p{L}]"),
+        ExpectedFrame("(?:[a-\\p{L}])", Carets(6, 5),
+                      "invalid range boundary, must be a literal"));
+    EXPECT_EQ(Frame("[a-\\pL]"),
+        ExpectedFrame("(?:[a-\\pL])", Carets(6, 3),
+                      "invalid range boundary, must be a literal"));
+}
+
 TEST(RgRegexTest, Pcre2Hint) {
     const std::string hint =
         "\nConsider enabling PCRE2 with the --pcre2 flag, which can handle "
@@ -176,8 +199,44 @@ TEST(RgRegexTest, Translations) {
     // \x{...}, \u{...}: the code point's bytes.
     EXPECT_TRUE(Matches(Translated({"\\x{41}"}), "A"));
     EXPECT_TRUE(Matches(Translated({"\\u{e9}"}), "\xc3\xa9"));
+    // A quantifier on a zero-width assertion is the assertion itself (or
+    // nothing at all, for {0}): rg accepts what a count would repeat.
+    EXPECT_TRUE(Matches(Translated({"\\b{2}word"}), "word"));
+    EXPECT_FALSE(Matches(Translated({"\\b{2}word"}), "sword"));
+    EXPECT_TRUE(Matches(Translated({"\\b{0}"}), ""));
+    EXPECT_TRUE(Matches(Translated({"^*"}), ""));
+    EXPECT_TRUE(Matches(Translated({"$*"}), ""));
+    EXPECT_TRUE(Matches(Translated({"\\A*x"}), "x"));
+    // Outside a class, [:name:] is a class of its literal bytes, as Rust
+    // reads it: ':', 'a', 'l', 'p', 'h'
+    EXPECT_TRUE(Matches(Translated({"[:alpha:]"}), ":"));
+    EXPECT_TRUE(Matches(Translated({"[:alpha:]"}), "h"));
+    EXPECT_FALSE(Matches(Translated({"[:alpha:]"}), "z"));
+    // rg starts no range from a leading ']': three literal members
+    EXPECT_FALSE(Matches(Translated({"[]-a]"}), "_"));
+    EXPECT_TRUE(Matches(Translated({"[]-a]"}), "a"));
+    EXPECT_TRUE(Matches(Translated({"[]-a]"}), "]"));
     // A 100000-byte pattern, in one pass with no recursion per byte.
     EXPECT_EQ(Translated({std::string(100000, 'a')}).size(), 100004u);
+}
+
+// rg strips its line terminator out of every class; one left holding
+// nothing but '\n' matches nothing, and takes the multiline message, not
+// a parse frame (a class with other members, or negated, still parses).
+TEST(RgRegexTest, NewlineOnlyClass) {
+    std::string wrapped;
+    RgRegexError error;
+    bool hasUppercaseLiteral = false;
+    EXPECT_FALSE(TranslateRgPattern({"[\\n]"}, wrapped, error, hasUppercaseLiteral));
+    EXPECT_TRUE(error.multiline);
+    EXPECT_FALSE(TranslateRgPattern({"[\\x0a]"}, wrapped, error, hasUppercaseLiteral));
+    EXPECT_TRUE(error.multiline);
+    EXPECT_FALSE(TranslateRgPattern({"[\\n-\\x0a]"}, wrapped, error, hasUppercaseLiteral));
+    EXPECT_TRUE(error.multiline);
+    EXPECT_TRUE(TranslateRgPattern({"[\\nab]"}, wrapped, error, hasUppercaseLiteral));
+    EXPECT_FALSE(error.multiline);
+    EXPECT_TRUE(TranslateRgPattern({"[^\\n]"}, wrapped, error, hasUppercaseLiteral));
+    EXPECT_FALSE(error.multiline);
 }
 
 TEST(RgRegexTest, HaisosRefusals) {

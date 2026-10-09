@@ -3,7 +3,7 @@
 - Rock: search
 - Depends on: search--rg-search
 - Size: ~500 changed lines in ~5 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ b089568
 - PR title: rg: Rust regex syntax onto Regex Perl, rg's parse errors
 
 ## Goal
@@ -21,12 +21,14 @@ the error text it knows from ripgrep, and `rg '\bCreate\b'` works.
 ## Context
 
 Read first: `develop-plan/tasks/search--rg-search.md` and
-`src/components/BuiltinCommands/commands/rg/` (`Rg.cpp`: where patterns
-are joined, escaped for `-F`, checked for newlines, compiled through
-`GrepMatcher` with `GrepSyntax::Perl`, and where the interim error frame
-`rg: regex parse error:` ... is printed), `src/components/Regex/CLAUDE.md`
+`src/components/BuiltinCommands/commands/rg/` (`Rg.cpp`: its anonymous-namespace
+`JoinPatterns`, `EscapeLiteral` (-F), `SmartCaseHasUppercase` and
+`MultilinePatternError`, and the end of `Run` where the patterns are checked for
+newlines, compiled through `GrepMatcher::Create` with `GrepSyntax::Perl`, and
+the interim `rg: regex parse error:` frame is printed; `RgSearch.cpp` is the
+walk/print side, `RgSearch.h` its settings), `src/components/Regex/CLAUDE.md`
 (what the Perl subset accepts: `\d \D \s \S \w \W \b \B \A \z`, `\xhh`,
-`\x{h..}`, classes with `[:name:]`/`[:^name:]`, `(?:)`, named groups
+`\x{h..}` (Regex's Perl also takes `\cX`, `\e` and `\1` back references: the translator refuses the last two itself, as Rust does), classes with `[:name:]`/`[:^name:]`, `(?:)`, named groups
 `(?<n>)`/`(?P<n>)`, `(?i)`/`(?s)`/`(?m)` and scoped `(?i:...)`, lazy
 quantifiers; a `{` that is not a quantifier is literal; no `\<`, no
 lookaround).
@@ -65,8 +67,8 @@ Accepted and emitted as is: literals (an ASCII punctuation byte that is a
 Perl metacharacter is emitted escaped), `.`, `^`, `$`, `|`, `(`, `(?:`,
 `(?<name>`, `(?P<name>`, `)`, `*`, `+`, `?`, `{m}`, `{m,}`, `{m,n}` and
 their lazy `?` forms, `\d \D \s \S \w \W \b \B \A \z`, `\t \n \r \a \f`
-(`\n` and anything else matching a newline byte is refused earlier by
-rg-search's newline rule: extend that rule here to `\n`, `\x0a`,
+(`\n` and anything else matching a newline byte: rg-search's rule is only a
+`pattern.find('\n')` before compiling, in `Rg.cpp` -> `MultilinePatternError`; extend it here to `\n`, `\x0a`,
 `\x{a}`, `\u000a` -> the same "literal \"\\n\" is not allowed" message),
 `\xhh`, `\x{h..}` (above 0x7f: its UTF-8 bytes as `\xhh` each, outside
 classes), escaped ASCII punctuation and space (`\.`, `\-`, `\ `, `\_`,
@@ -150,23 +152,45 @@ and look-around.
 
 ### `commands/rg/Rg.cpp`
 
-Replace the interim path: build `wrapped` and the Perl pattern with
+Replace the interim path (`JoinPatterns`, `SmartCaseHasUppercase` and the
+`GrepMatcher::Create` error frame at the end of `Run`; keep `EscapeLiteral` and
+`MultilinePatternError`): build `wrapped` and the Perl pattern with
 `TranslateRgPattern`; on error write `FormatRgRegexError` to stderr, exit
 2; compile the result with `GrepMatcher` (`GrepSyntax::Perl`, one
 pattern -- the translation of the whole `wrapped`). `-S` uses
 `hasUppercaseLiteral` instead of rg-search's byte scan. `-F` patterns are
-escaped before, so they never fail. Bump `rg` to `1.1.0`; `Help()` notes:
+escaped before, so they never fail. Bump `rg` from `1.0.0` (`Version()`) to `1.1.0`; drop the `Help()` note "(Rust-regex syntax and rg's exact regex errors come later)"; `Help()` notes:
 Rust syntax over Haisos's byte-wise Perl subset -- `\w`, `.`, `-i` are
 ASCII/byte-wise; `\<`/`\>`/`\b{...}` are `\b`; `\p{...}` refused.
 
 ### `CMakeLists.txt`
 
-`commands/rg/RgRegex.cpp`.
+`src/components/BuiltinCommands/CMakeLists.txt`: add `commands/rg/RgRegex.cpp` after `commands/rg/RgSearch.cpp` (no glob; Regex is already linked).
+
+### Folded in from #69's lows (`Rg.cpp`, `RgSearch.cpp`)
+
+Small, each with a `TEST_F(BuiltinCommandsTest, ...)` in `RgTest.cpp`:
+- `--no-messages` also suppresses "No files were searched ..." (`RgSearch.cpp`
+  end of `RgSearch`, guard with `!settings.noMessages`); exit stays 2.
+  Test: every file filtered/empty tree with `--no-messages` -> empty stderr, 2.
+- `-f FILE` open failure (`Rg.cpp`, `kPatternFile`): print
+  `rg: FILE: ` + text of `failure` (`No such file or directory`, `Is a
+  directory`, `Permission denied`, `Bad file descriptor`) with rg's
+  ` (os error N)` suffix (2, 21, 13, 9) instead of the fixed ENOENT text.
+  `OpenFailureText` is private to `grep/Grep.cpp` (anonymous namespace): move it
+  next to `InputOpenFailure` in `BuiltinText.h` (inline) and use it from both.
+  Test: `-f dir` and `-f missing`.
+- An unreadable directory in the walk (`RgSearch.cpp`, `walk`: `ReadDirectory`
+  returns only a vector, so decide how failure is told -- e.g. a directory that
+  `Stat`s but whose listing the filesystem refuses): report
+  `rg: PATH: Permission denied (os error 13)` (unless `--no-messages`), set
+  `result.error` so the exit is 2. Wording is unverified: ripgrep is not on the
+  host (`which rg` empty); check it in the container before fixing the text.
 
 ## Tests
 
-`tests/unit/components/BuiltinCommands.unittests/RgRegexTest.cpp` (new, in
-the CMakeLists): plain `TEST(RgRegexTest, ...)` on `TranslateRgPattern` +
+`tests/unit/components/BuiltinCommands.unittests/RgRegexTest.cpp` (new; add `RgRegexTest.cpp` to the single `add_executable(BuiltinCommands.unittests ...)` line of
+`tests/unit/components/BuiltinCommands.unittests/CMakeLists.txt`, after `RgTest.cpp`): plain `TEST(RgRegexTest, ...)` on `TranslateRgPattern` +
 `FormatRgRegexError`, and a few `TEST_F(BuiltinCommandsTest, RgRegex...)`
 through `rg` itself. Exact frames, verified with ripgrep 14.1.1 (each line ends in `\n`; the lines are
 written `/`-separated below):

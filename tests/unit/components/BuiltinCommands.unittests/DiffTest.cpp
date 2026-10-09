@@ -50,6 +50,52 @@ void MakeDiffFiles(const std::shared_ptr<IFileSystem>& fs) {
     write("/d2", "a\nc\n");
 }
 
+// The directory tree the directory-comparison tests run against, under /t
+// (run with workingDirectory "/t"). ra and rb hold the pairs: a differing
+// file pair (x), a differing pair under a common subdirectory (s/y), a file
+// only in ra (only), a directory only in ra (onlydir), a directory only in
+// rb (t), a file against a directory (kind), a binary pair (bin). The
+// extras: x a plain file, xf one that no ra entry matches, exl an -X
+// pattern list, na/nb a pair for -N, ta/tb a file-against-directory pair
+// met inside the walk. Each expectation below was observed from GNU
+// diffutils 3.10 under LC_ALL=C TZ=UTC on this very tree.
+void MakeDiffTree(const std::shared_ptr<IFileSystem>& fs) {
+    auto write = [&](const std::string& path, const std::string& content) {
+        auto file = fs->OpenFile(path, kFileOpenWriteCreateTruncate, kFileCreateMode);
+        ASSERT_NE(file, nullptr) << path;
+        file->Write(content.data(), content.size());
+    };
+    auto makeDir = [&](const std::string& path) {
+        ASSERT_EQ(fs->CreateDirectory(path, kDirMode), 0) << path;
+    };
+    makeDir("/t");
+    makeDir("/t/ra");
+    makeDir("/t/rb");
+    makeDir("/t/ra/s");
+    makeDir("/t/rb/s");
+    makeDir("/t/ra/onlydir");
+    makeDir("/t/rb/t");
+    makeDir("/t/rb/kind");
+    write("/t/ra/x", "1\n");
+    write("/t/rb/x", "2\n");
+    write("/t/ra/s/y", "a\n");
+    write("/t/rb/s/y", "b\n");
+    write("/t/ra/only", "q\n");
+    write("/t/ra/kind", "k\n");
+    write("/t/ra/bin", std::string("x\0y\n", 5));
+    write("/t/rb/bin", std::string("x\0z\n", 5));
+    write("/t/x", "1\n");
+    write("/t/xf", "1\n");
+    write("/t/exl", "only\ns*\n");
+    makeDir("/t/na");
+    makeDir("/t/nb");
+    write("/t/nb/new", "n\n");
+    makeDir("/t/ta");
+    makeDir("/t/tb");
+    makeDir("/t/tb/e");
+    write("/t/ta/e", "");
+}
+
 // The body of an output: everything from |marker| on, dropping the file
 // header lines whose times change from run to run.
 std::string BodyFrom(const std::string& out, const std::string& marker) {
@@ -900,6 +946,281 @@ TEST_F(BuiltinCommandsTest, DiffHelpAndVersion) {
     EXPECT_EQ(captured.err, "Parameter -l is not treated by HaisosOS diff v. 1.1.0\n");
     EXPECT_EQ(captured.out, "");
     EXPECT_EQ(captured.status, 0);
+}
+
+// One level of two directories, without -r: every kind of entry pair in
+// byte order of the names, and the differing file pair's output.
+TEST_F(BuiltinCommandsTest, DiffDirOneLevel) {
+    MakeDiffTree(root);
+    const auto captured = RunCaptured("diff", {"ra", "rb"}, std::nullopt, "/t");
+    EXPECT_EQ(captured.out,
+              "Binary files ra/bin and rb/bin differ\n"
+              "File ra/kind is a regular file while file rb/kind is a directory\n"
+              "Only in ra: only\n"
+              "Only in ra: onlydir\n"
+              "Common subdirectories: ra/s and rb/s\n"
+              "Only in rb: t\n"
+              "diff ra/x rb/x\n"
+              "1c1\n"
+              "< 1\n"
+              "---\n"
+              "> 2\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 1);
+}
+
+// -r descends into the common subdirectory, and the pair header carries the
+// options as typed. No header goes before a binary or type-mismatch report.
+TEST_F(BuiltinCommandsTest, DiffDirRecursive) {
+    MakeDiffTree(root);
+    const auto captured = RunCaptured("diff", {"-r", "ra", "rb"}, std::nullopt, "/t");
+    EXPECT_EQ(captured.out,
+              "Binary files ra/bin and rb/bin differ\n"
+              "File ra/kind is a regular file while file rb/kind is a directory\n"
+              "Only in ra: only\n"
+              "Only in ra: onlydir\n"
+              "diff -r ra/s/y rb/s/y\n"
+              "1c1\n"
+              "< a\n"
+              "---\n"
+              "> b\n"
+              "Only in rb: t\n"
+              "diff -r ra/x rb/x\n"
+              "1c1\n"
+              "< 1\n"
+              "---\n"
+              "> 2\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 1);
+}
+
+// -q briefs the file pairs (the binary one without its "Binary"), -x drops
+// the names a pattern covers, and -X takes the same patterns from a file,
+// one per line.
+TEST_F(BuiltinCommandsTest, DiffDirBriefAndExclude) {
+    MakeDiffTree(root);
+    const auto brief = RunCaptured("diff", {"-rq", "-x", "s", "-x", "only", "ra", "rb"},
+                                  std::nullopt, "/t");
+    EXPECT_EQ(brief.out,
+              "Files ra/bin and rb/bin differ\n"
+              "File ra/kind is a regular file while file rb/kind is a directory\n"
+              "Only in ra: onlydir\n"
+              "Only in rb: t\n"
+              "Files ra/x and rb/x differ\n");
+    EXPECT_EQ(brief.status, 1);
+
+    const auto excluded = RunCaptured("diff", {"-X", "exl", "-r", "ra", "rb"}, std::nullopt, "/t");
+    EXPECT_EQ(excluded.out,
+              "Binary files ra/bin and rb/bin differ\n"
+              "File ra/kind is a regular file while file rb/kind is a directory\n"
+              "Only in ra: onlydir\n"
+              "Only in rb: t\n"
+              "diff -X exl -r ra/x rb/x\n"
+              "1c1\n"
+              "< 1\n"
+              "---\n"
+              "> 2\n");
+    EXPECT_EQ(excluded.err, "");
+    EXPECT_EQ(excluded.status, 1);
+}
+
+// -N fakes a file that is only on one side, as empty bytes, with the pair
+// header and the epoch time in its place.
+TEST_F(BuiltinCommandsTest, DiffDirNewFile) {
+    MakeDiffTree(root);
+    const auto captured = RunCaptured("diff", {"-rN", "na", "nb"}, std::nullopt, "/t");
+    EXPECT_EQ(captured.out,
+              "diff -rN na/new nb/new\n"
+              "0a1\n"
+              "> n\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 1);
+}
+
+// -N at the top level too: a directory operand that is not there is faked
+// as an empty directory of the same shape, so the walk covers the other
+// side's entries -- one-sided directories becoming "Common subdirectories".
+TEST_F(BuiltinCommandsTest, DiffDirNewFileTopLevel) {
+    MakeDiffTree(root);
+    const auto file = RunCaptured("diff", {"-r", "-N", "nb", "nofile"}, std::nullopt, "/t");
+    EXPECT_EQ(file.out,
+              "diff -r -N nb/new nofile/new\n"
+              "1d0\n"
+              "< n\n");
+    EXPECT_EQ(file.err, "");
+    EXPECT_EQ(file.status, 1);
+
+    const auto walk = RunCaptured("diff", {"-N", "ra", "nofile"}, std::nullopt, "/t");
+    EXPECT_EQ(walk.out,
+              "Binary files ra/bin and nofile/bin differ\n"
+              "diff -N ra/kind nofile/kind\n"
+              "1d0\n"
+              "< k\n"
+              "diff -N ra/only nofile/only\n"
+              "1d0\n"
+              "< q\n"
+              "Common subdirectories: ra/onlydir and nofile/onlydir\n"
+              "Common subdirectories: ra/s and nofile/s\n"
+              "diff -N ra/x nofile/x\n"
+              "1d0\n"
+              "< 1\n");
+    EXPECT_EQ(walk.err, "");
+    EXPECT_EQ(walk.status, 1);
+}
+
+// A file and a directory operand: the file is compared with the same-named
+// entry under the directory, which must be there even with -N.
+TEST_F(BuiltinCommandsTest, DiffDirAndFile) {
+    MakeDiffTree(root);
+    const auto same = RunCaptured("diff", {"x", "ra"}, std::nullopt, "/t");
+    EXPECT_EQ(same.out, "");
+    EXPECT_EQ(same.err, "");
+    EXPECT_EQ(same.status, 0);
+
+    const auto flipped = RunCaptured("diff", {"ra", "x"}, std::nullopt, "/t");
+    EXPECT_EQ(flipped.out, "");
+    EXPECT_EQ(flipped.status, 0);
+
+    const auto differ = RunCaptured("diff", {"x", "rb"}, std::nullopt, "/t");
+    EXPECT_EQ(differ.out,
+              "1c1\n"
+              "< 1\n"
+              "---\n"
+              "> 2\n");
+    EXPECT_EQ(differ.status, 1);
+
+    // The joined entry is missing: the error names it, whichever side the
+    // directory is on.
+    const auto missing = RunCaptured("diff", {"xf", "ra"}, std::nullopt, "/t");
+    EXPECT_EQ(missing.out, "");
+    EXPECT_EQ(missing.err, "diff: ra/xf: No such file or directory\n");
+    EXPECT_EQ(missing.status, 2);
+
+    const auto missingFlipped = RunCaptured("diff", {"ra", "xf"}, std::nullopt, "/t");
+    EXPECT_EQ(missingFlipped.out, "");
+    EXPECT_EQ(missingFlipped.err, "diff: ra/xf: No such file or directory\n");
+    EXPECT_EQ(missingFlipped.status, 2);
+}
+
+// -S starts the top level at FILE: in either directory, the names that sort
+// before it are skipped. The header still carries the option.
+TEST_F(BuiltinCommandsTest, DiffDirStartingFile) {
+    MakeDiffTree(root);
+    const auto captured = RunCaptured("diff", {"-r", "-S", "only", "ra", "rb"}, std::nullopt, "/t");
+    EXPECT_EQ(captured.out,
+              "Only in ra: only\n"
+              "Only in ra: onlydir\n"
+              "diff -r -S only ra/s/y rb/s/y\n"
+              "1c1\n"
+              "< a\n"
+              "---\n"
+              "> b\n"
+              "Only in rb: t\n"
+              "diff -r -S only ra/x rb/x\n"
+              "1c1\n"
+              "< 1\n"
+              "---\n"
+              "> 2\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 1);
+}
+
+// Two directories whose same-named entries are a file and a directory: the
+// type mismatch is reported inside the walk.
+TEST_F(BuiltinCommandsTest, DiffDirTypes) {
+    MakeDiffTree(root);
+    const auto captured = RunCaptured("diff", {"ta", "tb"}, std::nullopt, "/t");
+    EXPECT_EQ(captured.out,
+              "File ta/e is a regular empty file while file tb/e is a directory\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 1);
+}
+
+// The pair header carries every option word as typed, shell-quoted when a
+// word needs it; the file headers under -u show the files' own times.
+TEST_F(BuiltinCommandsTest, DiffDirSwitchString) {
+    MakeDiffTree(root);
+    const auto quoted = RunCaptured("diff", {"-x", "o*", "-r", "ra", "rb"}, std::nullopt, "/t");
+    EXPECT_EQ(quoted.out,
+              "Binary files ra/bin and rb/bin differ\n"
+              "File ra/kind is a regular file while file rb/kind is a directory\n"
+              "diff -x 'o*' -r ra/s/y rb/s/y\n"
+              "1c1\n"
+              "< a\n"
+              "---\n"
+              "> b\n"
+              "Only in rb: t\n"
+              "diff -x 'o*' -r ra/x rb/x\n"
+              "1c1\n"
+              "< 1\n"
+              "---\n"
+              "> 2\n");
+    EXPECT_EQ(quoted.err, "");
+    EXPECT_EQ(quoted.status, 1);
+
+    // The header times under -u are the files' own, each as FormatDateTime
+    // renders them.
+    const auto unified = RunCaptured("diff", {"-u", "-r", "ra", "rb"}, std::nullopt, "/t");
+    const auto headerTime = [&](const std::string& path) {
+        FileStatus status;
+        EXPECT_EQ(root->Stat(path, status), 0);
+        return FormatDateTime("%Y-%m-%d %H:%M:%S.%N %z", status.modificationTime, false);
+    };
+    EXPECT_EQ(unified.out,
+              "Binary files ra/bin and rb/bin differ\n"
+              "File ra/kind is a regular file while file rb/kind is a directory\n"
+              "Only in ra: only\n"
+              "Only in ra: onlydir\n"
+              "diff -u -r ra/s/y rb/s/y\n"
+              "--- ra/s/y\t" + headerTime("/t/ra/s/y") + "\n"
+              "+++ rb/s/y\t" + headerTime("/t/rb/s/y") + "\n"
+              "@@ -1 +1 @@\n"
+              "-a\n"
+              "+b\n"
+              "Only in rb: t\n"
+              "diff -u -r ra/x rb/x\n"
+              "--- ra/x\t" + headerTime("/t/ra/x") + "\n"
+              "+++ rb/x\t" + headerTime("/t/rb/x") + "\n"
+              "@@ -1 +1 @@\n"
+              "-1\n"
+              "+2\n");
+    EXPECT_EQ(unified.err, "");
+    EXPECT_EQ(unified.status, 1);
+}
+
+// --from-file/--to-file compare one file with every operand, a directory
+// operand through its same-named entry; with no operand there is nothing to
+// compare and the status is 0.
+TEST_F(BuiltinCommandsTest, DiffFromToFile) {
+    MakeDiffTree(root);
+    const auto from = RunCaptured("diff", {"--from-file=x", "ra", "rb"}, std::nullopt, "/t");
+    EXPECT_EQ(from.out,
+              "1c1\n"
+              "< 1\n"
+              "---\n"
+              "> 2\n");
+    EXPECT_EQ(from.err, "");
+    EXPECT_EQ(from.status, 1);
+
+    const auto to = RunCaptured("diff", {"--to-file=x", "rb", "x"}, std::nullopt, "/t");
+    EXPECT_EQ(to.out,
+              "1c1\n"
+              "< 2\n"
+              "---\n"
+              "> 1\n");
+    EXPECT_EQ(to.err, "");
+    EXPECT_EQ(to.status, 1);
+
+    const auto none = RunCaptured("diff", {"--from-file=x"}, std::nullopt, "/t");
+    EXPECT_EQ(none.out, "");
+    EXPECT_EQ(none.err, "");
+    EXPECT_EQ(none.status, 0);
+
+    // The joined entry is missing: the error names it.
+    const auto missing = RunCaptured("diff", {"--from-file=xf", "ra"}, std::nullopt, "/t");
+    EXPECT_EQ(missing.out, "");
+    EXPECT_EQ(missing.err, "diff: ra/xf: No such file or directory\n");
+    EXPECT_EQ(missing.status, 2);
 }
 
 // Review regressions, each expectation printed by GNU diff 3.10 (LC_ALL=C).

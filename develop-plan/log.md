@@ -101,3 +101,4 @@
 - 2026-10-09 17:49 UTC -- search--rg-ignore: PR #71, windows-failed (ignored per Direction), 2 runs
 - 2026-10-09 18:05 UTC -- search--rg-ignore merged #71 as 0.5.29: 0C 2H fixed, 4M 3L open, 2 tries
 - 2026-10-09 18:23 UTC -- start diff--diff-core (0.5.30), re-planned clean-room
+- 2026-10-09 19:09 UTC -- diff--diff-core: PR #72 holds only a 56-line header (model exited 1); fix round to implement the plan

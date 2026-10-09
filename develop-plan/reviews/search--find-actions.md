@@ -1,7 +1,7 @@
 # Review: search--find-actions (PR #65)
 - Verdict: merged
 - Merged as: 5974e5c, version 0.5.23
-- Tokens: claude 153268, ollama input 352413, ollama output 138683
+- Tokens: claude 297522, ollama input 352413, ollama output 138683
 
 | Severity | Status | Where | Finding |
 |----------|--------|-------|---------|

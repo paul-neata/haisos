@@ -2,8 +2,8 @@
 
 - Rock: search
 - Depends on: coreutils--names-env (contract 5: `BuiltinRunProgram.h`, `stopAtFirstOperand`), coreutils--sort (`BuiltinText.h`), coreutils--rm-rmdir (`BuiltinPrompt`), search--find-actions (`OpenEmptyInput` in `BuiltinRunProgram.h`)
-- Size: ~550 changed lines in ~5 files
-- Plan checked against: develop @ ccb9dbe
+- Size: ~570 changed lines in ~7 files
+- Plan checked against: develop @ a092a28
 - PR title: Add the xargs builtin
 
 ## Goal
@@ -20,8 +20,8 @@ Read first: root `CLAUDE.md` ("Security", "Exit codes", "Builtin
 Commands", rule 9), `src/components/BuiltinCommands/CLAUDE.md`,
 `commands/cat/Cat.cpp` (reading stdin, stopping).
 
-What earlier tasks provide, as if on develop (their plans in
-`develop-plan/tasks/` are the authority):
+What earlier tasks provide (all landed on develop; the headers in
+`src/components/BuiltinCommands/` are the authority):
 - `BuiltinRunProgram.h` (coreutils--names-env):
   `std::optional<std::string> FindProgramInPath(BuiltinContext&, const std::string& name, const IEnvironment* environment = nullptr)`;
   `struct RunProgramOptions { std::shared_ptr<IFileDescriptor> stdIn, stdOut, stdErr; std::optional<std::string> workingDirectory; std::shared_ptr<IEnvironment> environment; }`;
@@ -30,11 +30,15 @@ What earlier tasks provide, as if on develop (their plans in
   stopped; 127 and `*started = false` when it could not start);
   `ParseBuiltinArgs(args, options, bool stopAtFirstOperand)` and
   `BeginBuiltin(context, command, usageErrorStatus, exitStatus, bool stopAtFirstOperand)`.
-  And from search--find-actions, in the same header:
+  And from search--find-actions (#65), in the same header
+  (`src/components/BuiltinCommands/BuiltinRunProgram.h`):
   `std::shared_ptr<IFileDescriptor> OpenEmptyInput(BuiltinContext& context);`
-  -- an input at its end at once (what `/dev/null` gives).
+  -- the read end of a pipe whose write end is already released, so an input
+  at its end at once (what `/dev/null` gives); **null if no pipe could be
+  made**. An options slot left null means the caller's own descriptor
+  (`RunProgramAndWait`), so a null from `OpenEmptyInput` must never be passed on.
 - `BuiltinPrompt.h` (coreutils--rm-rmdir): `BuiltinPrompt(context)`, `bool Ask(const std::string&)`.
-- `BuiltinText.h` (coreutils--sort): `GnuQuote`.
+- `BuiltinText.h` (coreutils--sort): `std::string GnuQuote(std::string_view)`.
 - `IProcess::GetEnvironment()` (a clone of the process's environment),
   `IEnvironment::GetVariableNames`/`GetVariable`/`SetVariable`.
 
@@ -130,7 +134,10 @@ the line -- arguments joined by single spaces -- to stderr, `-t` with
 ?...")` (a no skips the command); otherwise write the line, then `xargs:
 failed to open /dev/tty for reading: No such device or address`, exit 1
 (documented: the terminal is standard input when it is one). The child's
-stdin is `OpenEmptyInput`, or with `-o` xargs's descriptor 0 when it
+stdin is `OpenEmptyInput(context)` -- **if that returns null, the child must
+never get xargs's own descriptor 0** (where `-p` answers and the items come
+from): that run fails with `xargs: cannot make an empty input for COMMAND`
+(GnuQuote'd), exit 1 at once -- or with `-o` xargs's descriptor 0 when it
 is a terminal (documented). `--process-slot-var=VAR`: the child's
 environment is a clone of xargs's with VAR=`0`. `-P N` is accepted and
 validated; commands always run one after the other (documented), so the
@@ -149,15 +156,30 @@ that does not fit -> `xargs: argument list too long`, exit 1.
 Help notes: `-P` runs one at a time; ARG_MAX is Linux's default; `-p`/`-o`
 use standard input as the terminal; signal exits are 128+n codes.
 
+### `commands/find/FindActions.cpp` (the same gap in `-ok`)
+
+~line 737, `options.stdIn = OpenEmptyInput(run.context);` leaves `stdIn`
+null when no pipe could be made, and `RunProgramAndWait` then gives the
+child find's own standard input (where the `-ok` answers come from). Fix it
+with the same rule: when `OpenEmptyInput` returns null, report
+`find: cannot make an empty input for 'COMMAND'` (via `GnuQuote`) and fail
+that action (return false), without starting the child.
+
 ### Registration and build
 
-`BuiltinCommandList.h`: `CreateXargsCommand()` declared and registered
-(alphabetical). `CMakeLists.txt`: `commands/xargs/Xargs.cpp`.
+`src/components/BuiltinCommands/BuiltinCommandList.h`: `CreateXargsCommand()`
+declared after `CreateWhichCommand()` and added to
+`CreateStandardBuiltinCommands()` after `CreateWhichCommand()` (alphabetical,
+last). `src/components/BuiltinCommands/CMakeLists.txt`:
+`commands/xargs/Xargs.cpp` after `commands/which/Which.cpp`.
+`tests/unit/components/BuiltinCommands.unittests/CMakeLists.txt`: `XargsTest.cpp`
+in `add_executable` after `WhichSleepTrueFalseTest.cpp`.
 
 ## Tests
 
 `tests/unit/components/BuiltinCommands.unittests/XargsTest.cpp` (new, in
-the CMakeLists), `TEST_F(BuiltinCommandsTest, Xargs...)` on `RunCaptured`,
+the CMakeLists; includes `BuiltinCommandsFixture.h`, as `FindActionsTest.cpp`
+does), `TEST_F(BuiltinCommandsTest, Xargs...)` on `RunCaptured`,
 input through its third argument, an environment holding `PATH=/bin`
 through its last. Each expected output checked with `LC_ALL=C xargs` in the
 container.
@@ -173,10 +195,15 @@ container.
 - `XargsPromptWithoutTerminal`: `-p echo` with stdin a file -> stderr `echoxargs: failed to open /dev/tty for reading: No such device or address\n` (the line has no newline: GNU's), exit 1.
 - `XargsArgFileAndSlotVar`: `-a` a file `/proj/args` = `x y\n` with `echo` -> `x y\n`; `-a nosuch`; `--process-slot-var=SLOT hsh -c 'echo $SLOT'` -> `0\n`.
 - `XargsChildGetsEmptyInput`: `xargs -I X hsh -c 'cat; echo X'` on stdin `q\nmore\n` -> `q\nmore\n` (two runs; `cat` reads nothing in either, rather than the rest of xargs's input).
+- `XargsNoEmptyInputNeverPassesOwnStdin`: unless a pipe failure can be
+  injected in the fixture (then: `-I X hsh -c 'cat'` on `q\n` prints the
+  message, exit 1, and `q` is never read by the child), checked by reading
+  the code: the only `OpenEmptyInput` use has a null branch. Likewise for
+  find's `-ok` (next to `OpenEmptyInputReadsNothing` in `FindActionsTest.cpp`).
 - `XargsIsStoppedPromptly`: `xargs sleep` fed `100\n`, `TriggerStop()`, 143 within 1 s.
 
 
-Update `ListsEveryBuiltinSortedWithAVersion` with `"xargs"`.
+Update `ListsEveryBuiltinSortedWithAVersion` in `BuiltinCommandsTest.cpp` with `"xargs"` (after `"which"`).
 
 Commands:
 ```
@@ -193,9 +220,13 @@ bash ./scripts/test_linux.sh L U
   default 2097152, `-p`/`-o` take standard input as the terminal, a child's
   exit code above 128 is reported as a signal).
 - Root `CLAUDE.md`: Builtin Commands table row and the command lists.
+- `src/components/BuiltinCommands/CLAUDE.md`, the `BuiltinRunProgram.h` entry:
+  `OpenEmptyInput` returns null when no pipe could be made, and its callers
+  (find's `-ok`, xargs) fail the run rather than pass the caller's stdin.
 
 ## Acceptance
 
+- [ ] When `OpenEmptyInput` returns null, neither xargs nor find's `-ok` starts a child on the caller's own stdin (message, failed run).
 - [ ] Programs run only through `RunProgramAndWait`; files only through `context.IO()`.
 - [ ] Every message, output and exit status in this plan is byte for byte GNU xargs 4.9.0's (C locale), checked in the container.
 - [ ] `find ... -print0 | xargs -0 wc -l` works in an `hsh -c` pipeline.

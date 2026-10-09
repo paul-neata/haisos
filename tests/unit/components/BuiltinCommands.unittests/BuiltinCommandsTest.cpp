@@ -92,7 +92,7 @@ std::shared_ptr<IBuiltinCommand> FindStandardCommand(const std::string& name) {
 
 TEST_F(BuiltinCommandsTest, ListsEveryBuiltinSortedWithAVersion) {
     const auto commands = builtins->GetCommands();
-    EXPECT_EQ(commands, (Lines{"[", "basename", "cat", "chmod", "cp", "cut", "date", "dirname", "echo",
+    EXPECT_EQ(commands, (Lines{"[", "basename", "cat", "chmod", "cmp", "cp", "cut", "date", "dirname", "du", "echo",
         "egrep", "env", "false", "fgrep", "grep", "hsh", "ls", "man", "mkdir", "mv", "nl", "printf", "pwd", "realpath", "rm",
         "rmdir", "seq", "sleep", "sort", "stat", "tee", "test", "touch", "tr", "true", "uniq", "wc", "which"}));
     for (const auto& name : commands) {

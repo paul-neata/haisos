@@ -15,10 +15,12 @@ std::shared_ptr<IBuiltinCommand> CreateBracketCommand();
 std::shared_ptr<IBuiltinCommand> CreateBasenameCommand();
 std::shared_ptr<IBuiltinCommand> CreateCatCommand();
 std::shared_ptr<IBuiltinCommand> CreateChmodCommand();
+std::shared_ptr<IBuiltinCommand> CreateCmpCommand();
 std::shared_ptr<IBuiltinCommand> CreateCpCommand();
 std::shared_ptr<IBuiltinCommand> CreateCutCommand();
 std::shared_ptr<IBuiltinCommand> CreateDateCommand();
 std::shared_ptr<IBuiltinCommand> CreateDirnameCommand();
+std::shared_ptr<IBuiltinCommand> CreateDuCommand();
 std::shared_ptr<IBuiltinCommand> CreateEchoCommand();
 std::shared_ptr<IBuiltinCommand> CreateEgrepCommand();
 std::shared_ptr<IBuiltinCommand> CreateEnvCommand();
@@ -58,10 +60,12 @@ inline std::vector<std::shared_ptr<IBuiltinCommand>> CreateStandardBuiltinComman
         CreateBasenameCommand(),
         CreateCatCommand(),
         CreateChmodCommand(),
+        CreateCmpCommand(),
         CreateCpCommand(),
         CreateCutCommand(),
         CreateDateCommand(),
         CreateDirnameCommand(),
+        CreateDuCommand(),
         CreateEchoCommand(),
         CreateEgrepCommand(),
         CreateEnvCommand(),

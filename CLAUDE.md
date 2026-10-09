@@ -28,7 +28,7 @@ haisos/
 ├── src/
 │   ├── components/        - Component implementations (each has its own CLAUDE.md)
 │   │   ├── Agent/
-│   │   ├── BuiltinCommands/ - The builtin commands ([, basename, cat, chmod, cp, cut, date, dirname, echo, egrep, env, false, fgrep, grep, hsh, ls, man, mkdir, mv, nl, printf, pwd, realpath, rm, rmdir, seq, sleep, sort, stat, tee, test, touch, tr, true, uniq, wc, which; each in commands/<name>/) and what places them on filesystems
+│   │   ├── BuiltinCommands/ - The builtin commands ([, basename, cat, chmod, cmp, cp, cut, date, dirname, du, echo, egrep, env, false, fgrep, grep, hsh, ls, man, mkdir, mv, nl, printf, pwd, realpath, rm, rmdir, seq, sleep, sort, stat, tee, test, touch, tr, true, uniq, wc, which; each in commands/<name>/) and what places them on filesystems
 │   │   ├── Console/
 │   │   ├── Environment/
 │   │   ├── Factory/
@@ -535,12 +535,11 @@ returned by `IHaisosOS`'s `OSToolFactory` and merged with an agent's tools
 
 ## Builtin Commands
 
-Commands compiled into Haisos (`[`, `basename`, `cat`, `chmod`, `cp`, `cut`,
-`date`, `dirname`, `echo`, `egrep`, `env`, `false`, `fgrep`, `grep`, `hsh`,
-`ls`, `man`, `mkdir`, `mv`, `nl`, `printf`, `pwd`, `realpath`, `rm`, `rmdir`,
-`seq`, `sleep`, `sort`, `stat`, `tee`, `test`, `touch`, `tr`, `true`, `uniq`,
-`wc`,
-`which`), implemented in
+Commands compiled into Haisos (`[`, `basename`, `cat`, `chmod`, `cmp`, `cp`,
+`cut`, `date`, `dirname`, `du`, `echo`, `egrep`, `env`, `false`, `fgrep`,
+`grep`, `hsh`, `ls`, `man`, `mkdir`, `mv`, `nl`, `printf`, `pwd`, `realpath`,
+`rm`, `rmdir`, `seq`, `sleep`, `sort`, `stat`, `tee`, `test`, `touch`, `tr`,
+`true`, `uniq`, `wc`, `which`), implemented in
 `src/components/BuiltinCommands/`
 (see its `CLAUDE.md`). A builtin is not a file on disk: it is placed on a
 filesystem at a path (`IBuiltinConfigurator`, or the haisosfile's `BUILTIN`),
@@ -598,10 +597,12 @@ use a builtin with what it already knows about the real command:
 | `basename` | Strips directories and a suffix from names (`-a -s SUFFIX -z`), GNU's trailing-slash rules |
 | `cat` | Concatenates files and standard input (`-A -b -e -E -n -s -t -T -u -v`) |
 | `chmod` | Changes file mode bits (`-c -f -v --no-preserve-root --preserve-root --reference=RFILE -R`), GNU 9.4's mode grammar; Haisos has no permissions: the mode is validated and nothing changes, every mode taken as 0777, the umask as 0 |
+| `cmp` | Compares two files byte by byte (`-b -c -i -l -n -s -v`, SKIP1/SKIP2 operands), diffutils 3.10's `differ` and EOF messages, `-l`'s difference list, exit 0/1/2 |
 | `cp` | Copies files and directories (`-a -b --backup[=CONTROL] -d -f -H -i -L -l -s -n -P -p --preserve[=LIST] --no-preserve=LIST --parents -R -r --remove-destination --strip-trailing-slashes -S -t -T -u --update[=UPDATE] -v`), GNU's messages, prompts, backups and the `--parents` walk |
 | `cut` | Selects bytes or fields of each line (`-b -c -f -d -s -n, --complement, --output-delimiter, -z`), a LIST of `N`, `N-`, `N-M`, `-M` items; a line with no field delimiter is printed whole unless `-s` drops it |
 | `date` | Prints the date and time (`-d -f -I[FMT] -r -R -s -u --resolution --rfc-3339=FMT`, `+FORMAT`); the date sources `-d`/`-f`/`-r`/`--resolution` mutually exclusive, `+FORMAT` through `BuiltinDate`'s `FormatDateTime` as GNU date's own; `-u` in UTC; setting the time (or the `MMDDhhmm[[CC]YY][.ss]` operand) is refused: the parsed time printed, then `Operation not permitted` |
 | `dirname` | Strips the last component from names (`-z`), GNU's dir_len: empty `.`, slashes-only `/` |
+| `du` | Estimates file space usage (`-a -s -c -d -h -k -m -b -0 -x -S -L -l -P -H -D -B -t --apparent-size --si --inodes --exclude -X --files0-from --time --time-style`), sizes from `FileStatus.blocks`, GNU 9.4's messages |
 | `echo` | Prints its arguments (`-n -e -E`) |
 | `egrep` | `grep -E`: grep with the extended matcher preselected (see `grep`) |
 | `env` | Runs a program in a modified environment (`-i -0 -u NAME -C DIR -S STRING`), the child looked up in the new PATH; with no COMMAND, prints the variables sorted by name |

@@ -30,7 +30,7 @@ Pause: no
 | 22 | [search--find-actions](tasks/search--find-actions.md) | done | 0.5.23 | 21, 9, 11, 6, 12, 4 | #65 | 1 | 0C 1H fixed, 1M 4L open | Windows red, not checked |
 | 23 | [search--xargs](tasks/search--xargs.md) | done | 0.5.24 | 22, 9, 4, 6 | #66 | 1 | 1C 2H fixed, 4M 2L open | Windows red, not checked |
 | 24 | [search--sed-core](tasks/search--sed-core.md) | done | 0.5.25 | 3, 4 | #67 | 1 | 1C 4H 3M 1L fixed, 4M 1L open | Windows red, not checked; plan wrong on `2,~2p` (GNU prints 2-4) |
-| 25 | [search--sed-advanced](tasks/search--sed-advanced.md) | todo | | 24, 1 | | | | |
+| 25 | [search--sed-advanced](tasks/search--sed-advanced.md) | in-progress | 0.5.26 | 24, 1 | | | | |
 | 26 | [search--rg-search](tasks/search--rg-search.md) | todo | | 20 | | | | |
 | 27 | [search--rg-regex](tasks/search--rg-regex.md) | todo | | 26 | | | | |
 | 28 | [search--rg-ignore](tasks/search--rg-ignore.md) | todo | | 26 | | | | |
@@ -101,3 +101,4 @@ Pause: no
 - 2026-10-09 (implement) search--xargs: its first container run (06:29 UTC) was interrupted with the previous implement session; restarted, version 0.5.24 kept.
 - 2026-10-09 (implement) user: Windows stays ignored on task PRs and CI for the rest of the develop; fixed at the end (final--windows-fix) or in a separate PR
 - 2026-10-09 (implement) search--sed-core refreshed against f6f5bec (Regex already linked; list/CMake/test slots after rmdir/rm, before seq)
+- 2026-10-09 (implement) search--sed-advanced refreshed against c68238e (sed-core's real names, CMake/test slots, sed 1.1.0); folded in #67's follow-ups: s///w and w FILE to end of line, SedIsStoppedPromptly on a held-open stdin pipe, a Regex multiline . / [^...] test, the /[/p error row

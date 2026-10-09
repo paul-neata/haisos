@@ -3,7 +3,7 @@
 - Rock: search
 - Depends on: search--sed-core (`commands/sed/`), base--fs-rename-times (`IFileIO::Rename`)
 - Size: ~800 changed lines in ~6 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ c68238e
 - PR title: Complete sed: hold space, branches, text and file commands, -i
 
 ## Goal
@@ -20,19 +20,26 @@ src/a.cpp` (acceptance scenario 2) edits the file as GNU sed does, and
 ## Context
 
 Read first: the plan `develop-plan/tasks/search--sed-core.md` and the code
-it produced in `src/components/BuiltinCommands/commands/sed/`
-(`SedScript.h` -- `Command`, `Script`; `SedParser.cpp` -- `ParseScript`, the
-error-location rules; `SedExecutor.cpp` -- `RunScript`, `SedInput` with its
-one-line lookahead and missing-newline rule), root `CLAUDE.md` ("Security",
+it produced (merged, PR #67) in `src/components/BuiltinCommands/commands/sed/`
+(`SedScript.h` -- `Command`, `Script`, whose `labels` and comments already
+leave room for this task; `SedParser.cpp` -- `ParseScript`, `ParseS` (its
+`w` flag currently consumes the filename and calls `NotTreated("s///w")`),
+the error-location rules; `SedExecutor.h/.cpp` -- `RunScript(context, script,
+inputs, ExecSettings)` with `ExecSettings{quiet, separate}` to grow,
+`SedOutput` (`WritePatternSpace`, `WriteLine`, `QuitWrite`: the missing-newline
+state lives there, and all output goes through `context.Out`), `SedInput`
+with its one-line lookahead; `Sed.cpp` -- the `SedOption` ids, the
+`kBuiltinNotTreated` options, `ReadScriptFile`), root `CLAUDE.md` ("Security",
 "Builtin Commands"), `src/components/BuiltinCommands/CLAUDE.md`.
 
-What earlier tasks provide, as if on develop:
-- `IFileIO::Rename(oldPath, newPath)` (base--fs-rename-times): as rename(),
+What earlier tasks provide (all on develop now):
+- `IFileIO::Rename(oldPath, newPath)` (`interfaces/IFileIO.h`): as rename(),
   replaces an existing newPath; 0, `kFileSystemError`, or
   `kFileSystemCrossDevice` across mounts (cannot happen here: the
   temporary file is created in the same directory).
-- `BuiltinText.h` (coreutils--sort): `WriteFully(descriptor, bytes)`,
-  `OpenInputOperand`, `BuiltinLineReader`.
+- `src/components/BuiltinCommands/BuiltinText.h`: `WriteFully(descriptor, bytes)`,
+  `OpenInputOperand` (with `InputOpenFailure`), `BuiltinLineReader`
+  (already used by sed-core).
 
 Rules that bite: files only through `context.IO()` (no `IFileSystem`);
 nothing in Haisos creates a link (no `--follow-symlinks` work is needed: no
@@ -66,12 +73,16 @@ take two addresses in GNU 4.9; `}` and `:` none):
   is an empty text that adds nothing (GNU: `sed '2a\'` prints the input
   unchanged -- verify).
 - `r R w W FILE`: the file name is the rest of the line (to newline, not
-  `;`). `w`/`W` open their file at parse time (created/truncated), one
+  `;`, `}` or a blank: `w a;b` writes the file `a;b`, as GNU; verified). `w`/`W` open their file at parse time (created/truncated), one
   descriptor per distinct name shared by every `w`, `W` and `s///w` naming
   it; `/dev/stdout` and `/dev/stderr` are sed's own streams (whatever the
   filesystem holds there). Unopenable: `sed: couldn't open file
   /nonexist/x: No such file or directory`, exit 4.
-- `s` flag `w FILE` (the rest of the line), the same registry.
+- `s` flag `w FILE`: today accepted but ignored, its filename stopping at
+  `;`/`}`/blank (`ParseS`); now the filename runs to the end of the line,
+  exactly as for the `w` command (`s/x/y/w /tmp/a;b` writes the file `a;b`,
+  and nothing after it on the line is script), and it is written, through the
+  same registry. The `NotTreated("s///w")` call goes.
 - `y/src/dst/`: any delimiter; in both strings `\\` is a backslash, `\n`
   newline, `\delim` the delimiter, other escapes as in s; lengths must
   match: ``strings for `y' command are different lengths``; unterminated
@@ -142,7 +153,9 @@ The options sed-core listed as `kBuiltinNotTreated` become treated, with
 descriptions: `-i, --in-place[=SUFFIX]`, `-l, --line-length=N`, `-z,
 --null-data` / `--zero-terminated`, `-u, --unbuffered`, `--follow-symlinks`
 (accepted: there are no links -- documented), `--sandbox`. `--debug` and
-`--posix` stay not treated. `-l` is read as GNU reads it, with
+`--posix` stay not treated. `SedNotTreatedOptions` in `SedTest.cpp` is
+updated: `-i`, `-z`, `-u` and `s///w` are no longer reported, and the version
+in its expected messages is `1.1.0`; `SedHelpAndVersion` expects `1.1.0`. `-l` is read as GNU reads it, with
 `atoi` (`-l x` is 0: no wrapping, no error -- verified). Version `1.1.0`.
 
 **`-i[SUFFIX]`** (implies `-s`):
@@ -182,19 +195,26 @@ it over the file; `--follow-symlinks` has nothing to follow; `e` and
 ## Tests
 
 Extend `tests/unit/components/BuiltinCommands.unittests/SedTest.cpp` (or a
-new `SedAdvancedTest.cpp`, listed in the CMakeLists). Each expected output
+new `SedAdvancedTest.cpp`, appended to the one-line `add_executable` list in
+`tests/unit/components/BuiltinCommands.unittests/CMakeLists.txt`; any new
+source under `commands/sed/` goes into `src/components/BuiltinCommands/CMakeLists.txt`
+next to `Sed.cpp`, `SedExecutor.cpp`, `SedParser.cpp`). Tests use
+`BuiltinCommandsTest`, `RunCaptured`, `WriteFile`. Each expected output
 verified with `LC_ALL=C sed` in the container.
 
 - `SedNextAppendAndDelete`: `$!N;P;D` on three lines (unchanged); `N;N;N` (all three printed); `:a;N;$!ba;s/\n/,/g` -> `one,two,three`; `N;s/^b/X/M` on `a\nb` -> `a\nX`; `N;s/a$/X/M` -> `X\nb`.
 - `SedHoldSpace`: `-n 'x;p'` -> empty line, `one`, `two`; `G` on `a\nb` -> `a\n\nb\n\n`; `1!G;h;$!d` (tac) -> reversed; `H;$!d;x` style.
 - `SedBranches`: `b end; s/o/0/; :end` (unchanged); `s/o/0/;t;s/$/!/` -> `0ne`, `tw0`, `three!`; `s/o/0/;T;s/$/!/` -> `0ne!`, `tw0!`, `three`; `b foo` -> the label error, exit 4.
 - `SedTextCommands`: `2i\  hello`, `2i hello`, `2a\` + newline + `X\` + newline + `Y`, `2c\` forms, `2,3c X` -> `one\nX\n`; `a foo` on input without a final newline -> `line\nfoo\n`; `-e 'a\' -e 'foo'`; `a` alone -> ``expected \ after `a', `c' or `i'``, 1.
-- `SedFiles`: `R in.txt` interleaves; `2r nosuch` silent; `r /dev/stdin` with stdin `x\n` and a file operand; `w out` then read `out` back; `W /dev/stdout` duplicates the first line; `s/e/E/w /dev/stdout` -> `onE\nonE\ntwo\nthrEe\nthrEe\n`; `w /nonexist/x` -> exit 4 message; `--sandbox 'w x'` -> exit 1 message.
+- `SedFiles`: `R in.txt` interleaves; `2r nosuch` silent; `r /dev/stdin` with stdin `x\n` and a file operand; `w out` then read `out` back; `W /dev/stdout` duplicates the first line; `s/e/E/w /dev/stdout` -> `onE\nonE\ntwo\nthrEe\nthrEe\n`; `w /nonexist/x` -> exit 4 message; `w a;b` and `s/e/E/w a;b` write the file named `a;b` (filename to end of line; read it back), and `w out` followed by `}` on the same line likewise; `--sandbox 'w x'` -> exit 1 message.
 - `SedTransliterate`: `y/abc/xyz/`; `y/o\n/0_/`; `y/abc/\n\t\\/` -> bytes `\n\t\\`; `y/abc/de/` and `y/abc/xyz` errors.
 - `SedList`: `l` on `a\tb\001c` -> `a\tb\001c$` then the line; `-n 'l 5'` on `abcdefghij` -> `abcd\`, `efgh\`, `ij$`; `-l 4 -n l`; default wrapping of 80 `a`s; `-l 0`; `l 1`.
 - `SedZapFileVersion`: `z;s/^$/E/` -> three `E`; `F` on a file and on stdin (`-`); `v`; `v 9.0` -> ``expected newer version of sed``, 1; `e echo` -> reported not treated, no effect.
 - `SedNullData`: `-z 's/\n/,/g'` on `one\ntwo\nthree\n` -> `one,two,three,` with no NUL (the input held none, so its one record had no delimiter: the missing-newline rule); `-z 'N;l;d'`; `-z G`.
 - `SedInPlace`: `-i.bak 's/a/A/' f` -> f changed, f.bak the original; `--in-place='old_*'`; `-i s/x/y/ /docs` -> `sed: couldn't edit /docs: not a regular file`, 4; `-i -n '$p' f g` (each its own last line, `-s` implied); `-i '1F;1='` writes the name and number into the file; `-i 'w /dev/stdout'` prints to stdout and leaves the file as is; `sed -i` with no files -> `sed: no input files`, 4; `-i 2q f` on `1\n2\n3\n` leaves `1\n2\n`; `-i'nodir/*' p f` -> `sed: cannot rename f: No such file or directory`, 4, f unchanged; no `sed??????` file is left in the directory after any of these (list it).
+- `SedScriptErrors` (existing test, extended): the unterminated address regex `/[/p` -> `sed: -e expression #1, char 4: unterminated address regex`, 1 (verify the char with `LC_ALL=C sed`).
+- `SedIsStoppedPromptly` (existing test, changed): instead of reading a 20000-line file, run `sed p` on a stdin pipe (`IFileIO::CreatePipe` / the fixture's pipe) whose write end stays open and unwritten, so the process is certainly still running when `TriggerStop()` lands; expect 143. Close the write end afterwards.
+- `RegexMatchTest` in `tests/unit/components/Regex.unittests/RegexMatchTest.cpp` (new test, e.g. `MultilineDotAndListsSkipNewline`): with `RegexOptions::multiline`, Basic and Extended `.` and `[^a]` do not match `\n` (`a.b` on `a\nb`, `a[^x]b` on `a\nb` no match; without the flag they match), while `^`/`$` still match around it.
 - `SedUnbuffered`: `-u p` with stdout a pipe read while sed still waits for more input: the first line arrives before stdin is closed (or simply: output is complete and identical with and without `-u`).
 
 Commands:
@@ -218,6 +238,8 @@ bash ./scripts/test_linux.sh L U
 - [ ] Every command and option of GNU sed 4.9 is parsed; all but `e`/`--posix`/`--debug` act as GNU's.
 - [ ] `-i` never leaves a temporary file behind and never writes the original until the new content is complete; it uses only `context.IO()` (`OpenFile`, `Rename`, `RemoveFile`).
 - [ ] Every message, output and exit status in the tests matches `LC_ALL=C sed` 4.9.
+- [ ] `s///w FILE` writes, and its filename (like `w`'s) runs to the end of the line.
+- [ ] Follow-up tests from #67's review exist: `/[/p` error, the stdin-pipe `SedIsStoppedPromptly`, the Regex multiline `.`/`[^...]` test.
 - [ ] Generic builtin tests green (the newly treated options have descriptions).
 - [ ] Both CLAUDE.md files updated.
 

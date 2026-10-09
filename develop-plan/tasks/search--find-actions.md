@@ -2,8 +2,8 @@
 
 - Rock: search
 - Depends on: search--find-tests (`commands/find/`, `FindExpression.h`), coreutils--names-env (contract 5: `BuiltinRunProgram.h`), coreutils--printf-seq (contract 3: `BuiltinPrintf.h`), coreutils--rm-rmdir (`BuiltinPrompt`), coreutils--date (`FormatDateTime`), coreutils--sort (`BuiltinText.h`)
-- Size: ~650 changed lines in ~6 files
-- Plan checked against: develop @ ccb9dbe
+- Size: ~700 changed lines in ~8 files
+- Plan checked against: develop @ 04e3300
 - PR title: Add find's actions: -exec, -ok, -delete, -printf, -fprint, -ls
 
 ## Goal
@@ -14,7 +14,7 @@
 messages byte for byte (C locale). `find . -name '*.o' -delete` and `find
 . -name '*.h' -exec wc -l {} +` work as on Linux. Programs are run only
 through contract 5, i.e. `ICurrentProcess::OS()->StartProcess`. xargs is
-the next task (search--xargs); it reuses `EmptyInputDescriptor`, which this
+the next task (search--xargs); it reuses `OpenEmptyInput`, which this
 task introduces.
 
 ## Context
@@ -22,9 +22,18 @@ task introduces.
 Read first: root `CLAUDE.md` ("Security", "Exit codes", "Builtin
 Commands"), `src/components/BuiltinCommands/CLAUDE.md`, the plan
 `develop-plan/tasks/search--find-tests.md` and the code it produced in
-`commands/find/` (`FindExpression.h`: `FindFile`, `FindSettings`, `FindRun`,
-`FindPrimary` with `Finish`, `FindPrimaryEntry`, `FindParser` with
-`NextArgument`/`Fail`/`Warn`, `FindTestPrimaries()`).
+`commands/find/` (`FindExpression.h`, namespace `Haisos::Find`: `FindFile`
+{`path`, `name`, `startingPoint`, `depth`, `status` -- a `FileStatus`:
+`size`, `blocks`, `linkCount`, `accessTime`/`modificationTime`/`changeTime`,
+`deviceMajor`/`deviceMinor`, `type`}, `FindSettings` {`depthFirst`,
+`depthGiven`, ...}, `FindRun` {`context`, `settings`, `exitStatus`, `quit`,
+`prune`}, `FindPrimary` with `Evaluate`/`Finish`, `FindPrimaryEntry` {`name`,
+`kind`, `suppressesDefaultPrint`, `parse`}, `FindParser` with
+`NextArgument`/`HasArgument`/`Fail`/`Warn`/`Context()`/`Settings()`/`State()`,
+`FindParseState` {`warnings`, `startTime`, ...}, `FindTestPrimaries()` in
+`FindTests.cpp`, `MakePrimary<T>` there). `FindParser::Warn` prints only
+with `-warn`; the actions' own warnings (below) are always on and call
+`parser.Context().Error("warning: ...")`.
 
 What earlier tasks provide, as if on develop (their plans in
 `develop-plan/tasks/` are the authority):
@@ -36,14 +45,18 @@ What earlier tasks provide, as if on develop (their plans in
   `int RunProgramAndWait(BuiltinContext&, const std::string& programPath, const std::vector<std::string>& args, const RunProgramOptions& = {}, bool* started = nullptr)`
   -- flushes the caller's stdout first, stops the child when the caller is
   stopped, 127 and `*started = false` when it could not start.
-- `BuiltinPrintf.h` (coreutils--printf-seq): `PrintfSpec`, `ParsePrintfSpec`,
-  `FormatPrintfSigned`, `FormatPrintfUnsigned`, `FormatPrintfFloat`,
-  `FormatPrintfString`.
-- `BuiltinDate.h` (coreutils--date): `std::string FormatDateTime(std::string_view format, FileDateTime t, bool utc)`.
-- `BuiltinPrompt.h` (coreutils--rm-rmdir): `BuiltinPrompt(context)`,
+- `BuiltinPrintf.h` (coreutils--printf-seq): `PrintfSpec` {`flags`, `width`,
+  `precision`, `conversion`, ...}, `FormatPrintfSigned`, `FormatPrintfUnsigned`,
+  `FormatPrintfFloat`, `FormatPrintfString`. Find does **not** use
+  `ParsePrintfSpec` (see -printf below).
+- `BuiltinDate.h` (coreutils--date): `std::string FormatDateTime(std::string_view format, FileDateTime t, bool utc)`
+  (`FileDateTime` {`seconds`, `nanoseconds`} is in `interfaces/IFileSystemService.h`).
+- `BuiltinPrompt.h` (coreutils--rm-rmdir): `explicit BuiltinPrompt(BuiltinContext&)`,
   `bool Ask(const std::string& question)` -- writes the question to stderr,
-  reads a line from stdin, true when it starts with `y`/`Y`.
-- `BuiltinText.h` (coreutils--sort): `GnuQuote`, `WriteFully`.
+  reads a line from stdin, true when it starts with `y`/`Y`; one instance per
+  run (it keeps lines read ahead), so `-ok`/`-okdir` primaries share one
+  `std::shared_ptr<BuiltinPrompt>` made at parse.
+- `BuiltinText.h` (coreutils--sort): `GnuQuote`, `WriteFully(IFileDescriptor&, std::string_view)`.
 
 Rules that bite: programs only through `RunProgramAndWait` (never another
 way); files only through `context.IO()`; GNU's output and messages byte for
@@ -59,8 +72,11 @@ C++17; stop promptly on `TriggerStop()`.
 // made through IFileIO::CreatePipe: the read end of a pipe whose write end
 // is already released. Its two slots are closed again before returning.
 // Null if no pipe could be made.
-std::shared_ptr<IFileDescriptor> EmptyInputDescriptor(BuiltinContext& context);
+std::shared_ptr<IFileDescriptor> OpenEmptyInput(BuiltinContext& context);
 ```
+(Not named `OpenEmptyInput`: that is already a class in
+`src/components/Console/ConsoleDescriptors.h`, in the same namespace.
+search--xargs uses this exact name, `OpenEmptyInput`.)
 Used as `RunProgramOptions::stdIn` by `-ok`/`-okdir` and xargs (GNU gives
 those children `/dev/null`).
 
@@ -68,8 +84,9 @@ those children `/dev/null`).
 ### `commands/find/FindActions.cpp` (new) -- `FindActionPrimaries()`
 
 Declare `const std::vector<FindPrimaryEntry>& FindActionPrimaries();` in
-`FindExpression.h`; `FindParser.cpp` looks a name up in
-`FindTestPrimaries()` and then here. Every row is an Action with
+`FindExpression.h` (beside `FindTestPrimaries()`, whose comment already
+announces it); `FindParser.cpp`'s `LookupPrimary` (the static-rows lookup,
+which now searches only `FindTestPrimaries()`) searches here after it. Every row is an Action with
 `suppressesDefaultPrint = true`.
 
 **-exec / -execdir / -ok / -okdir.** Arguments up to a `;`, or up to a `+`
@@ -100,15 +117,18 @@ argument); `-ok`/`-okdir` with `+`: ``find: missing argument to `-ok'``.
   remove ".", doubled colons, or leading or trailing colons)` and exit 1 at
   once; another relative entry: the corresponding GNU message for a
   relative entry (verify the exact text with `PATH=x:$PATH find . -execdir
-  true \;`).
+  true \;`). The check runs at parse of the first `-execdir`/`-okdir`
+  (GNU's; verified: it fires even when no file is ever visited), through
+`parser.Fail`.
 - `-ok`/`-okdir`: `BuiltinPrompt::Ask("< " + CMD + " ... " + path + " > ? ")`
   (GNU 4.9 shows the command name, `...`, and the path as find prints it,
   even for `-okdir`); no -> false without running; yes -> run with
-  `stdIn = EmptyInputDescriptor(context)`.
+  `stdIn = OpenEmptyInput(context)`.
 - `Finish` runs the pending `+` batch(es).
 
-**-delete.** Sets `depthFirst` at parse. If `-prune` is in the expression
-and `-depth` was not given explicitly (`depthGiven`): `find: The -delete
+**-delete.** Sets `Settings().depthFirst` at parse. If `-prune` is in the
+expression (`FindParser::Parse` looks for a `-prune` token once the tree is
+built) and `-depth` was not given explicitly (`Settings().depthGiven`): `find: The -delete
 action automatically turns on -depth, but -prune does nothing when -depth is
 in effect.  If you want to carry on anyway, just explicitly use the -depth
 option.` and exit 1 before the walk (check after parsing). At a file: the
@@ -118,13 +138,21 @@ it is a directory with entries, else `...: Permission denied` (GnuQuote);
 false, exit status 1.
 
 **-printf FMT / -fprintf FILE FMT.** The format is parsed once at parse
-time into pieces. Escapes: `\a \b \f \n \r \t \v \\`, `\0` NUL, `\NNN`
+time into pieces. Find scans the format itself and does **not** call
+`ParsePrintfSpec`: that skips the length modifiers `h l L j z t` (and, as
+found in #53's review, not `q`) and accepts the flags `'` and `I`, but GNU
+find has none of them -- `%ld` is `%l` (empty, no links) then a literal `d`,
+`%hd` is `%h` then `d`, `%qd` warns for `%q` then prints `d`, `%'d` and `%Id`
+warn for `%'` / `%I` (verified with `/usr/bin/find` 4.9.0, `LC_ALL=C`).
+Escapes: `\a \b \f \n \r \t \v \\`, `\0` NUL, `\NNN`
 octal (1-3 digits), `\c` (stop this format's output for this file at once);
 an unknown one warns at parse ``find: warning: unrecognized escape `\q'``
 (always, not only with -warn) and prints as written. Directives: `%`, then
-flags/width/precision read with `ParsePrintfSpec`'s rules, then the letter.
+the flags `-+ #0` only, an optional width and `.precision` (digits), then
+the letter; the scan fills a `PrintfSpec` by hand (flags, width, precision,
+conversion) for the `FormatPrintf*` functions.
 An unknown letter warns ``find: warning: unrecognized format directive
-`%q'`` and prints as written. Formatting (verified with GNU 4.9.0):
+`%q'`` and prints as written (`%q` then the rest). Formatting (verified with GNU 4.9.0):
 - integer directives -- `%d` depth and `%m` (permission bits in octal:
   `777`; `%#m` -> `0777`) -- with `FormatPrintfSigned`/`FormatPrintfUnsigned`
   and the spec's flags (`%05d` -> `00000`, `%+5d` -> `   +0`);
@@ -171,34 +199,59 @@ old and not in the future, else `"%b %e  %Y"`. E.g. `        0      4
 between columns; verify the line, and a character device's size column,
 against `LC_ALL=C find -ls`).
 
-**Help.** Version `1.1.0`; the notes now list the actions and their
+**-type D (fold-in from #64's review, `FindTests.cpp`'s
+`ParseTypePrimary`).** `D` no longer parses as a type that never matches: it
+fails at parse as GNU find 4.9 on Linux does, ``find: -type D is not
+supported because Solaris doors are not supported on the platform find was
+compiled on.`` (via `parser.Fail`, exit 1, nothing else printed; also inside
+a list such as `-type d,D`, and for `-xtype`, whose message begins
+`-xtype D is not supported ...` -- both verified with `/usr/bin/find`). Drop the "GNU dies on it" comments in
+`FindTests.cpp` (`FindTypePrimary`, the `'D'` case).
+
+**`FindParseState::firstNonOption` (fold-in from #64's review).** It is
+unused: `FindParser::Parse` keeps its own local `firstNonOption`
+(`FindParser.cpp` ~line 371). Remove the member from `FindParseState` in
+`FindExpression.h`; the local stays.
+
+**Help** (`Find.cpp`: `Version()` `1.0.0` -> `1.1.0`; the `Actions: -print
+-print0 -prune -quit.` line becomes GNU's list `-delete -exec -execdir -fls
+-fprint -fprint0 -fprintf -ls -ok -okdir -print -print0 -printf -prune
+-quit`). Version `1.1.0`; the notes now list the actions and their
 exceptions (`-ok` prompts on stderr and reads stdin; `-exec ... +` batches
 of at most 131072 bytes; `-ls`/`%`-directives with the inode/owner/mode
 facts).
 
 ### Build
 
-`CMakeLists.txt`: `commands/find/FindActions.cpp`.
+`src/components/BuiltinCommands/CMakeLists.txt`: `commands/find/FindActions.cpp`
+after `commands/find/FindParser.cpp` (`BuiltinRunProgram.cpp` and
+`BuiltinPrompt.cpp` are already listed). `tests/unit/components/BuiltinCommands.unittests/CMakeLists.txt`:
+`FindActionsTest.cpp` after `FindTest.cpp` in its single `add_executable`.
 
 ## Tests
 
 `tests/unit/components/BuiltinCommands.unittests/FindActionsTest.cpp` (new,
 in the CMakeLists), `TEST_F(BuiltinCommandsTest, Find...)` on
 `RunCaptured`, with an environment holding `PATH=/bin` passed as its last
-argument. The `/proj` tree as in FindTest.cpp (move its helper to a small
-`FindTestTree.h` in the test directory and include it from both). Each
+argument. The `/proj` tree as in FindTest.cpp (move its `MakeProj`, `kProjTree`,
+`ExpectSameLines` and `SetFileTimes` helpers from FindTest.cpp's anonymous
+namespace to a small header-only `FindTestTree.h` in the test directory and
+include it from both). The order among one directory's entries is the
+filesystem's, so multi-file outputs are compared as sets (`ExpectSameLines`). Each
 expected output checked with `LC_ALL=C /usr/bin/find` in the container.
 
-- `FindExecSemicolon`: `-name '*.h' -exec echo found {} \;` -> `found ./z.h\n`; `-exec echo 'x{}y' \; -quit` -> `x.y\n`; `-maxdepth 1 -print -exec echo E{} \;` with stdout a file -> `.\nE.\n./a\nE./a\n./z.h\nE./z.h\n` (find's buffered output reaches the file before each child's: `RunProgramAndWait` flushes).
+- `FindExecSemicolon`: `-name '*.h' -exec echo found {} \;` -> `found ./z.h\n`; `-exec echo 'x{}y' \; -quit` -> `x.y\n`; `-name z.h -print -exec echo E{} \;` with stdout a file -> `./z.h\nE./z.h\n` (find's buffered output reaches the file before each child's: `RunProgramAndWait` flushes).
 - `FindExecPlus`: `-type f -exec echo {} +` -> one line of every file; `-exec echo {} {} +` and `-exec echo a{} +` (the two messages, 1); `-exec false {} +` -> exit 1; `-exec false {} \; -print` -> nothing printed, exit 0.
 - `FindExecMissingCommand`: `-maxdepth 0 -exec nocmd {} \;` -> `find: 'nocmd': No such file or directory\n`, exit 0.
 - `FindExecdir`: `-execdir echo {} \;` from `/proj` -> `./.`, `./a`, `./b`, `./empty`, ... (the base names); `a -execdir pwd \;` prints `/proj` then `/proj/a` lines; PATH `:/bin` -> the insecure-PATH message, 1.
-- `FindOk`: stdin `n\ny\n`, `-name '*.h' -o -name x.txt` with `-ok echo {} \;` -> stderr holds `< echo ... ./a/x.txt > ? ` and `< echo ... ./z.h > ? `, stdout only `./z.h`; `-ok echo {} +` -> missing argument, 1.
+- `FindOk`: stdin `n\ny\n`, `a/x.txt z.h -ok echo {} \;` (starting points keep their order) -> stderr holds `< echo ... a/x.txt > ? ` and `< echo ... z.h > ? `, stdout only `z.h`; `-ok echo {} +` -> missing argument, 1.
 - `FindDelete`: a scratch tree under `/proj/d`: `find d -name e -delete` on a non-empty `e` -> `find: cannot delete 'd/e': Directory not empty\n`, 1; `find d -delete -print` prints depth-first and removes everything; `find d -delete -prune` -> the -prune message, 1.
-- `FindPrintf`: `a/x.txt -printf '%p|%f|%h|%P|%H|%d|%s|%k|%b|%n|%m|%M|%u|%g|%U|%G|%y|%Y|%l|%i|%D\n'` -> `a/x.txt|x.txt|a||a/x.txt|0|3|1|1|1|777|-rwxrwxrwx|haisos|haisos|0|0|f|f||0|0\n` (blocks as the in-memory filesystem reports: 1 for 3 bytes); widths `[%10p][%-10f][%5s][%-5d][%05s][%.3p]`; `%05d`, `%#m`; `\c` stops; `%q` and `\q` warnings; `. -maxdepth 0 -printf '%h|%f|%P|%H\n'` -> `.|.||.`; `%T@` and `%t` for a file whose mtime is set to 1704157445 s + 0 ns (local-zone fields: build the expected text with `FormatDateTime`).
+- `FindPrintf`: `a/x.txt -printf '%p|%f|%h|%P|%H|%d|%s|%k|%b|%n|%m|%M|%u|%g|%U|%G|%y|%Y|%l|%i|%D\n'` -> `a/x.txt|x.txt|a||a/x.txt|0|3|1|1|1|777|-rwxrwxrwx|haisos|haisos|0|0|f|f||0|0\n` (blocks as the in-memory filesystem reports: 1 for 3 bytes); widths `[%10p][%-10f][%5s][%-5d][%05s][%.3p]`; `%05d`, `%#m`; `\c` stops; `%q` and `\q` warnings (always, with or without `-warn`); `%ld` -> `d`, `%hd` -> `.d`, `%qd` -> warning and `%qd`, `%'d` and `%Id` -> warning and as written (find's own scan, not `ParsePrintfSpec`); `. -maxdepth 0 -printf '%h|%f|%P|%H\n'` -> `.|.||.`; `%T@` and `%t` for a file whose mtime is set to 1704157445 s + 0 ns (local-zone fields: build the expected text with `FormatDateTime`).
 - `FindFprintAndLs`: `-fprint out1 -fprint0 out2 -fprintf out3 '%f\n' -fls out4` then read the files back; `-fprint /nonexist/x` -> message, 1; `-fprint /dev/stdout` interleaves with `-print`; `-ls` line for `a/x.txt` with the exact column layout.
 
-- `EmptyInputDescriptorReadsNothing`: from inside a run (e.g. through `-ok` with answer `y` running `hsh -c 'cat; echo done'`): only `done` is printed.
+- `FindTypeDoorsRefused` (in FindTest.cpp): `-type D`, `-type d,D`, `-xtype D` -> `find: -type D is not supported because Solaris doors are not supported on the platform find was compiled on.\n`, exit 1, no output `-type d` and the other letters unchanged.
+
+- `OpenEmptyInputReadsNothing`: from inside a run (e.g. through `-ok` with answer `y` running `hsh -c 'cat; echo done'`): only `done` is printed.
 
 Commands:
 ```
@@ -213,15 +266,16 @@ bash ./scripts/test_linux.sh L U
 - `src/components/BuiltinCommands/CLAUDE.md`: `find` row to 1.1.0 with the
   actions and their exceptions (`-exec ... +` batches of at most 131072
   bytes; `-ls`/`-printf` show inode 0, owner haisos, uid/gid 0, mode 0777,
-  `%F` `unknown`, `%Z` and `%B` empty); `EmptyInputDescriptor` under
+  `%F` `unknown`, `%Z` and `%B` empty); `OpenEmptyInput` under
   `BuiltinRunProgram`.
-- Root `CLAUDE.md`: the `find` row of the Builtin Commands table.
+- Root `CLAUDE.md`: the `find` row of the Builtin Commands table (the actions list; `-type D` refused).
 
 ## Acceptance
 
 - [ ] Programs run only through `RunProgramAndWait`; files only through `context.IO()`.
 - [ ] Every message and output in this plan is byte for byte GNU findutils 4.9.0's (C locale), checked in the container.
-- [ ] `EmptyInputDescriptor` exists with the exact signature above (search--xargs uses it).
+- [ ] `OpenEmptyInput` exists with the exact signature above (search--xargs uses it).
+- [ ] `-type D` is refused with GNU's message, exit 1; `FindParseState::firstNonOption` is gone (or used); `-printf` scans its own directives (no `ParsePrintfSpec`).
 - [ ] Generic builtin tests green; both CLAUDE.md files updated.
 
 ## Out of scope

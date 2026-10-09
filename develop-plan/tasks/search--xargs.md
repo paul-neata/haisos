@@ -1,7 +1,7 @@
 # Task search--xargs: xargs
 
 - Rock: search
-- Depends on: coreutils--names-env (contract 5: `BuiltinRunProgram.h`, `stopAtFirstOperand`), coreutils--sort (`BuiltinText.h`), coreutils--rm-rmdir (`BuiltinPrompt`), search--find-actions (`EmptyInputDescriptor` in `BuiltinRunProgram.h`)
+- Depends on: coreutils--names-env (contract 5: `BuiltinRunProgram.h`, `stopAtFirstOperand`), coreutils--sort (`BuiltinText.h`), coreutils--rm-rmdir (`BuiltinPrompt`), search--find-actions (`OpenEmptyInput` in `BuiltinRunProgram.h`)
 - Size: ~550 changed lines in ~5 files
 - Plan checked against: develop @ ccb9dbe
 - PR title: Add the xargs builtin
@@ -31,7 +31,7 @@ What earlier tasks provide, as if on develop (their plans in
   `ParseBuiltinArgs(args, options, bool stopAtFirstOperand)` and
   `BeginBuiltin(context, command, usageErrorStatus, exitStatus, bool stopAtFirstOperand)`.
   And from search--find-actions, in the same header:
-  `std::shared_ptr<IFileDescriptor> EmptyInputDescriptor(BuiltinContext& context);`
+  `std::shared_ptr<IFileDescriptor> OpenEmptyInput(BuiltinContext& context);`
   -- an input at its end at once (what `/dev/null` gives).
 - `BuiltinPrompt.h` (coreutils--rm-rmdir): `BuiltinPrompt(context)`, `bool Ask(const std::string&)`.
 - `BuiltinText.h` (coreutils--sort): `GnuQuote`.
@@ -130,7 +130,7 @@ the line -- arguments joined by single spaces -- to stderr, `-t` with
 ?...")` (a no skips the command); otherwise write the line, then `xargs:
 failed to open /dev/tty for reading: No such device or address`, exit 1
 (documented: the terminal is standard input when it is one). The child's
-stdin is `EmptyInputDescriptor`, or with `-o` xargs's descriptor 0 when it
+stdin is `OpenEmptyInput`, or with `-o` xargs's descriptor 0 when it
 is a terminal (documented). `--process-slot-var=VAR`: the child's
 environment is a clone of xargs's with VAR=`0`. `-P N` is accepted and
 validated; commands always run one after the other (documented), so the

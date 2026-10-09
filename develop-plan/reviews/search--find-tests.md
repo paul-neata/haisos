@@ -1,7 +1,7 @@
 # Review: search--find-tests (PR #64)
 - Verdict: merged
 - Merged as: 087edfc, version 0.5.22
-- Tokens: claude 168591, ollama input 1302128, ollama output 492209
+- Tokens: claude 347022, ollama input 1302128, ollama output 492209
 
 | Severity | Status | Where | Finding |
 |----------|--------|-------|---------|

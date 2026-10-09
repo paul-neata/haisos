@@ -27,7 +27,7 @@ Pause: no
 | 19 | [search--grep-core](tasks/search--grep-core.md) | done | 0.5.15 | 3, 4, 16 | #57 | 1 | 0C 3H fixed, 1M 2L open | MSVC compile errors fixed in review |
 | 20 | [search--grep-recursive](tasks/search--grep-recursive.md) | done | 0.5.16 | 19 | #58 | 1 | 0C 3H fixed, 2M 3L open | Windows green |
 | 21 | [search--find-tests](tasks/search--find-tests.md) | done | 0.5.22 | 3, 20, 1, 8, 4 | #64 | 1 | 0C 3H 2M fixed, 0M 5L open | Windows red, not checked; 2843 lines, 1.8M Ollama tokens |
-| 22 | [search--find-actions](tasks/search--find-actions.md) | todo | | 21, 9, 11, 6, 12, 4 | | | | |
+| 22 | [search--find-actions](tasks/search--find-actions.md) | in-progress | 0.5.23 | 21, 9, 11, 6, 12, 4 | | | | |
 | 23 | [search--xargs](tasks/search--xargs.md) | todo | | 22, 9, 4, 6 | | | | |
 | 24 | [search--sed-core](tasks/search--sed-core.md) | todo | | 3, 4 | | | | |
 | 25 | [search--sed-advanced](tasks/search--sed-advanced.md) | todo | | 24, 1 | | | | |
@@ -95,3 +95,5 @@ Pause: no
 - 2026-10-09 (implement) coreutils--du-cmp refreshed against f561090 (FnMatch from BuiltinFnmatch.h for --exclude, InputOpenFailure/FileStatus fields, both ls HumanSize uses move to FormatHumanSize, list/CMake/test slots)
 - 2026-10-09 (implement) coreutils--head-tail refreshed against 6221bce (ArgMatch/BuiltinLineReader/WriteFully signatures, hidden digit options as uniq's, list/CMake/test slots, init-template test filter `haisos`)
 - 2026-10-09 (implement) search--find-tests refreshed against a24afec (reuse FnMatch/ParseDateString/Regex; -size keeps its own grammar; Regex already linked; list/CMake/test slots; IFileIO::kStdIn)
+- 2026-10-09 (implement) search--find-actions refreshed against 04e3300 (aligned with #64's find code: LookupPrimary/FindActionPrimaries, -prune, slots, shared FindTestTree.h); folded in #64 lows (firstNonOption removed; -type/-xtype D refused as GNU 4.9) and #53's ParsePrintfSpec `q` (-printf scans its own directives)
+- 2026-10-09 (implement) search--find-actions and search--xargs: the planned helper EmptyInputDescriptor renamed OpenEmptyInput -- a class of that name already exists in the same namespace (Console/ConsoleDescriptors.h)

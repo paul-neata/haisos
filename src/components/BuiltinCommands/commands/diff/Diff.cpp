@@ -621,13 +621,11 @@ int DiffTwoFiles(BuiltinContext& context, const DiffSettings& settings,
     };
     if (!settings.text && (isBinary(bytes[0]) || isBinary(bytes[1]))) {
         if (bytes[0] == bytes[1]) {
-            outHeader();
             if (settings.reportIdentical) {
                 context.Out("Files " + shown0 + " and " + shown1 + " are identical\n");
             }
             return 0;
         }
-        outHeader();
         if (settings.brief) {
             context.Out("Files " + shown0 + " and " + shown1 + " differ\n");
         } else {
@@ -658,22 +656,21 @@ int DiffTwoFiles(BuiltinContext& context, const DiffSettings& settings,
     const bool newlineTrouble = !robust && !settings.brief && !same
         && (texts[0].missingNewline || texts[1].missingNewline);
     if (same) {
-        outHeader();
         if (settings.reportIdentical) {
             context.Out("Files " + shown0 + " and " + shown1 + " are identical\n");
         }
         return 0;
     }
-    if (!same) {
-        outHeader();
-        if (settings.brief) {
-            context.Out("Files " + shown0 + " and " + shown1 + " differ\n");
-            return 1;
-        }
-        context.Out(FormatDiff(script, texts[0], texts[1],
-            DiffHeaderFile{name0, settings.label0, times[0]},
-            DiffHeaderFile{name1, settings.label1, times[1]}, settings.output));
+    if (settings.brief) {
+        context.Out("Files " + shown0 + " and " + shown1 + " differ\n");
+        return 1;
     }
+    // The pair header goes before a text difference's output alone: GNU
+    // prints none before a binary, brief or identical report.
+    outHeader();
+    context.Out(FormatDiff(script, texts[0], texts[1],
+        DiffHeaderFile{name0, settings.label0, times[0]},
+        DiffHeaderFile{name1, settings.label1, times[1]}, settings.output));
     if (newlineTrouble) {
         for (int i = 0; i < 2; ++i) {
             if (texts[i].missingNewline) {
@@ -683,7 +680,7 @@ int DiffTwoFiles(BuiltinContext& context, const DiffSettings& settings,
         }
         return 2;
     }
-    return same ? 0 : 1;
+    return 1;
 }
 
 } // namespace Haisos

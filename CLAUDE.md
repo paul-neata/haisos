@@ -51,7 +51,7 @@ haisos/
 ├── src/
 │   ├── components/        - Component implementations (each has its own CLAUDE.md)
 │   │   ├── Agent/
-│   │   ├── BuiltinCommands/ - The builtin commands ([, basename, cat, chmod, cmp, cp, cut, date, diff, dirname, du, echo, egrep, env, false, fgrep, find, grep, head, hsh, ls, man, mkdir, mv, nl, printf, pwd, realpath, rg, rm, rmdir, sed, seq, sleep, sort, stat, tail, tee, test, touch, tr, true, uniq, wc, which, xargs; each in commands/<name>/) and what places them on filesystems
+│   │   ├── BuiltinCommands/ - The builtin commands ([, basename, cat, chmod, cmp, cp, cut, date, diff, dirname, du, echo, egrep, env, false, fgrep, find, grep, head, hsh, ls, man, mkdir, mv, nl, patch, printf, pwd, realpath, rg, rm, rmdir, sed, seq, sleep, sort, stat, tail, tee, test, touch, tr, true, uniq, wc, which, xargs; each in commands/<name>/) and what places them on filesystems
 │   │   ├── Console/
 │   │   ├── Environment/
 │   │   ├── Factory/
@@ -560,7 +560,8 @@ returned by `IHaisosOS`'s `OSToolFactory` and merged with an agent's tools
 
 Commands compiled into Haisos (`[`, `basename`, `cat`, `chmod`, `cmp`, `cp`,
 `cut`, `date`, `diff`, `dirname`, `du`, `echo`, `egrep`, `env`, `false`, `fgrep`,
-`find`, `grep`, `head`, `hsh`, `ls`, `man`, `mkdir`, `mv`, `nl`, `printf`, `pwd`, `realpath`,
+`find`, `grep`, `head`, `hsh`, `ls`, `man`, `mkdir`, `mv`, `nl`, `patch`, `printf`, `pwd`,
+`realpath`,
 `rg`, `rm`, `rmdir`, `sed`, `seq`, `sleep`, `sort`, `stat`, `tail`, `tee`, `test`, `touch`, `tr`,
 `true`, `uniq`, `wc`, `which`, `xargs`), implemented in
 `src/components/BuiltinCommands/`
@@ -643,6 +644,7 @@ use a builtin with what it already knows about the real command:
 | `mkdir` | Creates directories (`-p -v`) |
 | `mv` | Moves (renames) files (`-b --backup[=CONTROL] -f -i -n --no-copy --strip-trailing-slashes -S -t -T -u --update[=UPDATE] -v`); across a mount, copies then removes as GNU does across devices |
 | `nl` | Numbers lines (`-b -h -f styles incl. pBRE, -d -i -l -n -p -s -v -w`) |
+| `patch` | Applies unified diffs (plain, `Index:`, `diff --git`) to files (`-d --directory -E --remove-empty-files -f --force -i --input -N --forward -o --output -p --strip -R --reverse -s --quiet --silent -t --batch -u --unified -v --version --binary --dry-run`), GNU patch 2.7.6's behaviours: the file chosen among the headers' names and the ORIGFILE operand (`-p`'s component stripping, `Index:` and `diff --git` headers), the hunk locator's search outward from the stated place, reversal detection on the first hunk with its questions (every question printing with its assumed answer, nothing read back), the create/delete conflicts, `.orig`/`.rej` files (`-o`'s one output with `(read from NAME)` and no `.orig`), `-E` removing an emptied file, `--dry-run`, CRLF patches stripped unless `--binary`, a malformed hunk fatal at its input line; exit 0 / 1 (a hunk failed or ignored, a patch skipped) / 2 (a fatal) | only unified diffs are read and a hunk applies only where its context matches exactly (no fuzz factor); the backup options and the other diff formats are not treated, and the answers questions assume are patch's no-terminal ones |
 | `printf` | Formats and prints data (FORMAT reused until the arguments run out; every conversion with flags, widths, precisions, `%b`, `%q`, `\` escapes, character constants; GNU's diagnostics) |
 | `pwd` | Prints the working directory (`-L -P`) |
 | `realpath` | Resolves names to absolute paths (`-e -m -L -P -q --relative-to=DIR --relative-base=DIR -s -z`) from the working directory, with existence checks; no symbolic links, so `-L`, `-P` and `-s` change nothing |

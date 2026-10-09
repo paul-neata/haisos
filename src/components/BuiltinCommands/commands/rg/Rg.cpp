@@ -8,6 +8,7 @@
 #include "BuiltinCommand.h"
 #include "BuiltinText.h"
 #include "commands/grep/GrepMatcher.h"
+#include "commands/rg/RgRegex.h"
 #include "commands/rg/RgSearch.h"
 #include "interfaces/IFileDescriptor.h"
 #include "interfaces/IFileIO.h"
@@ -80,14 +81,16 @@ void MultilinePatternError(BuiltinContext& context) {
         "When multiline mode is enabled, new line characters can be matched.\n");
 }
 
-// A literal for -F, as one Perl-subset regex: every byte that is not
-// [A-Za-z0-9_] written \xhh, so no metacharacter of the pattern is read.
+// A literal for -F, as one Rust-syntax regex: every ASCII byte that is not
+// [A-Za-z0-9_] written \xhh, so no metacharacter of the pattern is read. A
+// byte above 0x7f stays as it is: \xhh there would be a code point, its
+// UTF-8 bytes, to TranslateRgPattern -- not the byte itself.
 std::string EscapeLiteral(const std::string& pattern) {
     std::string out;
     for (const char c : pattern) {
         const unsigned char byte = static_cast<unsigned char>(c);
         if ((byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z')
-            || (byte >= '0' && byte <= '9') || byte == '_') {
+            || (byte >= '0' && byte <= '9') || byte == '_' || byte >= 0x80) {
             out += c;
         } else {
             char hex[8];
@@ -96,42 +99,6 @@ std::string EscapeLiteral(const std::string& pattern) {
         }
     }
     return out;
-}
-
-// rg's own joining of the patterns, one regex of them all: leftmost-first
-// across the alternation, as rg -o -e a -e ab on "ab" prints "a".
-std::string JoinPatterns(const std::vector<std::string>& patterns) {
-    std::string joined;
-    for (size_t i = 0; i < patterns.size(); ++i) {
-        if (i > 0) {
-            joined += "|";
-        }
-        joined += "(?:" + patterns[i] + ")";
-    }
-    return joined;
-}
-
-// -S: the pattern is all lowercase when no ASCII uppercase letter of it
-// stands on its own (one not right after an unescaped \ -- \S and \W are
-// classes, not letters).
-bool SmartCaseHasUppercase(const std::vector<std::string>& patterns) {
-    for (const auto& pattern : patterns) {
-        for (size_t i = 0; i < pattern.size(); ++i) {
-            const char c = pattern[i];
-            if (c < 'A' || c > 'Z') {
-                continue;
-            }
-            size_t backslashes = 0;
-            while (backslashes < i && pattern[i - backslashes - 1] == '\\') {
-                ++backslashes;
-            }
-            if (backslashes % 2 == 1) {
-                continue;  // escaped: part of a class like \S
-            }
-            return true;
-        }
-    }
-    return false;
 }
 
 // The value a "--name=value" argument gave |longName| (which the parser
@@ -234,7 +201,7 @@ bool ParseNumberFlag(BuiltinContext& context, const std::string& text, const std
 class RgCommand : public IBuiltinCommand {
 public:
     std::string Name() const override { return "rg"; }
-    std::string Version() const override { return "1.0.0"; }
+    std::string Version() const override { return "1.1.0"; }
 
     const std::vector<BuiltinOption>& Options() const override {
         static const std::vector<BuiltinOption> options = {
@@ -450,15 +417,18 @@ public:
             "directory's entries in byte order (rg's --sort path order; rg itself\n"
             "searches in parallel, so its own order varies). Long flags may be\n"
             "abbreviated (rg wants them whole); rg's \"similar flags\" hint is not\n"
-            "printed. Patterns use Haisos's Perl-subset regex (Rust-regex syntax\n"
-            "and rg's exact regex errors come later). With no PATH, the standard\n"
-            "input is searched only when it is not a terminal and its first read\n"
-            "returns data: an input that is empty at once -- /dev/null's case, for\n"
-            "a descriptor has no type in HaisosOS -- means . is searched instead.\n"
-            "A binary file named as an operand (or with --binary, or the standard\n"
-            "input) prints rg's message at its first match and ends there; a\n"
-            "binary file met while walking ends silently. Exit status is 0 when a\n"
-            "line matched, 1 when none did, 2 on trouble.";
+            "printed. Patterns are read as Rust's regex syntax, onto Haisos's\n"
+            "byte-wise Perl subset: \\w, . and -i work on bytes, not Unicode;\n"
+            "\\<, \\> and \\b{...} are \\b; \\p{...} classes, class set operations\n"
+            "and nested classes are refused, with rg's parse-error frame. With no\n"
+            "PATH, the standard input is searched only when it is not a terminal\n"
+            "and its first read returns data: an input that is empty at once --\n"
+            "/dev/null's case, for a descriptor has no type in HaisosOS -- means\n"
+            ". is searched instead. A binary file named as an operand (or with\n"
+            "--binary, or the standard input) prints rg's message at its first\n"
+            "match and ends there; a binary file met while walking ends\n"
+            "silently. Exit status is 0 when a line matched, 1 when none did,\n"
+            "2 on trouble.";
         help.referenceUrl = "https://github.com/BurntSushi/ripgrep/blob/14.1.1/GUIDE.md";
         return help;
     }
@@ -515,7 +485,8 @@ public:
                         input = OpenInputOperand(context, file, failure);
                     }
                     if (!input) {
-                        context.ErrorText("rg: " + file + ": No such file or directory (os error 2)\n");
+                        context.ErrorText("rg: " + file + ": " + OpenFailureText(failure)
+                            + " (os error " + std::to_string(OpenFailureErrno(failure)) + ")\n");
                         return 2;
                     }
                     BuiltinLineReader reader(context, *input, '\n');
@@ -701,8 +672,6 @@ public:
 
         GrepMatcherOptions matcherOptions;
         matcherOptions.syntax = GrepSyntax::Perl;
-        matcherOptions.ignoreCase = caseFlag == kIgnoreCase
-            || (caseFlag == kSmartCase && !SmartCaseHasUppercase(patterns));
         if (wordRegexp) {
             matcherOptions.wholeWord = GrepWholeWord::NonWordNeighbours;
         }
@@ -712,14 +681,38 @@ public:
                 pattern = EscapeLiteral(pattern);
             }
         }
-        const std::string joined = JoinPatterns(patterns);
+        // The patterns as Rust's regex syntax, onto the Perl subset: rg's
+        // wrapped pattern, or its parse-error frame. -S looks at the parsed
+        // literals -- an uppercase letter spelled as an escape does not turn
+        // case sensitivity on.
+        std::string wrapped;
+        RgRegexError regexError;
+        bool hasUppercaseLiteral = false;
+        std::optional<std::string> perlPattern;
+        if (!patterns.empty()) {
+            perlPattern = TranslateRgPattern(patterns, wrapped, regexError, hasUppercaseLiteral);
+            if (!perlPattern) {
+                if (regexError.multiline) {
+                    MultilinePatternError(context);
+                } else {
+                    context.ErrorText(FormatRgRegexError(wrapped, regexError));
+                }
+                return 2;
+            }
+        }
+        matcherOptions.ignoreCase = caseFlag == kIgnoreCase
+            || (caseFlag == kSmartCase && !hasUppercaseLiteral);
         std::string matcherError;
         std::shared_ptr<const GrepMatcher> matcher = GrepMatcher::Create(
-            patterns.empty() ? std::vector<std::string>() : std::vector<std::string>{joined},
+            patterns.empty() ? std::vector<std::string>() : std::vector<std::string>{*perlPattern},
             matcherOptions, matcherError);
         if (!matcher) {
-            context.ErrorText("rg: regex parse error:\n    " + joined + "\nerror: "
-                + matcherError + "\n");
+            // TranslateRgPattern pre-compiles its result, so this is only a
+            // wrapper Regex adds (-x's anchors): the frame rg would still
+            // print, with Regex's own message.
+            regexError = RgRegexError{};
+            regexError.message = matcherError;
+            context.ErrorText(FormatRgRegexError(wrapped, regexError));
             return 2;
         }
 

@@ -81,17 +81,6 @@ void AddPatterns(std::vector<std::string>& patterns, const std::string& text) {
     }
 }
 
-const char* OpenFailureText(InputOpenFailure failure) {
-    switch (failure) {
-        case InputOpenFailure::Missing: return "No such file or directory";
-        case InputOpenFailure::Directory: return "Is a directory";
-        case InputOpenFailure::Denied: return "Permission denied";
-        case InputOpenFailure::BadDescriptor: return "Bad file descriptor";
-        case InputOpenFailure::None: break;
-    }
-    return "";
-}
-
 // A value GREP_COLORS accepts for a capability: digits and ';' only, possibly
 // empty. (GREP_COLOR takes the same.)
 bool IsSgrValue(const std::string& value) {

@@ -419,18 +419,6 @@ FileOutcome SearchFile(BuiltinContext& context, const RgSettings& settings, cons
     return result;
 }
 
-// The os error text of a path that cannot be opened, rg's wording.
-const char* OpenFailureText(InputOpenFailure failure) {
-    switch (failure) {
-        case InputOpenFailure::Missing: return "No such file or directory (os error 2)";
-        case InputOpenFailure::Directory: return "Is a directory (os error 21)";
-        case InputOpenFailure::Denied: return "Permission denied (os error 13)";
-        case InputOpenFailure::BadDescriptor: return "No such file or directory (os error 2)";
-        case InputOpenFailure::None: break;
-    }
-    return "";
-}
-
 } // namespace
 
 RgResult RgSearch(BuiltinContext& context, const RgSettings& settings, const GrepMatcher& matcher,
@@ -565,7 +553,8 @@ RgResult RgSearch(BuiltinContext& context, const RgSettings& settings, const Gre
         auto input = OpenInputOperand(context, file, failure);
         if (!input) {
             if (!settings.noMessages) {
-                const std::string text = OpenFailureText(failure);
+                const std::string text = std::string(OpenFailureText(failure)) + " (os error "
+                    + std::to_string(OpenFailureErrno(failure)) + ")";
                 if (operand && effective.size() == 1) {
                     context.ErrorText("rg: " + file + ": IO error for operation on " + file
                         + ": " + text + "\n");
@@ -687,11 +676,14 @@ RgResult RgSearch(BuiltinContext& context, const RgSettings& settings, const Gre
         return result;
     }
     // The implicit path, and nothing searched at all (every file filtered):
-    // rg's message. --files just comes back empty-handed.
+    // rg's message, unless --no-messages. --files just comes back
+    // empty-handed.
     if (implicitDot && filesSearched == 0 && settings.mode != RgMode::Files) {
-        context.ErrorText("rg: No files were searched, which means ripgrep probably applied "
-            "a filter you didn't expect.\nRunning with --debug will show why files are "
-            "being skipped.\n");
+        if (!settings.noMessages) {
+            context.ErrorText("rg: No files were searched, which means ripgrep probably applied "
+                "a filter you didn't expect.\nRunning with --debug will show why files are "
+                "being skipped.\n");
+        }
         result.noFilesSearched = true;
     }
     return result;

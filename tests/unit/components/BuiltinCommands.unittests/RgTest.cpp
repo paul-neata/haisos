@@ -184,6 +184,10 @@ TEST_F(BuiltinCommandsTest, RgCaseFlags) {
     EXPECT_EQ(RunCaptured("rg", {"-i", "-s", "todo", "t1"}, std::nullopt, "/r").status, 1);
     EXPECT_EQ(RunCaptured("rg", {"-s", "-i", "todo", "t1"}, std::nullopt, "/r").out, "TODO\n");
     EXPECT_EQ(RunCaptured("rg", {"-F", "T.D", "t1"}, std::nullopt, "/r").status, 1);
+    // A non-ASCII literal is its own bytes, not \xhh code points.
+    WriteTo(root, "/r/cafe", "caf\xc3\xa9 (x)\n");
+    EXPECT_EQ(RunCaptured("rg", {"-F", "\xc3\xa9 (", "cafe"}, std::nullopt, "/r").out,
+              "caf\xc3\xa9 (x)\n");
     EXPECT_EQ(RunCaptured("rg", {"-w", "-o", "f\\w*", "src/a.c"}, std::nullopt, "/r").out,
         "four\nfive\n");
     EXPECT_EQ(RunCaptured("rg", {"-x", "six", "src/a.c"}, std::nullopt, "/r").out, "six\n");
@@ -295,6 +299,64 @@ TEST_F(BuiltinCommandsTest, RgErrors) {
     EXPECT_EQ(color.status, 2);
 }
 
+// --- rg: Rust-regex patterns ---
+
+TEST_F(BuiltinCommandsTest, RgRegexErrorExitsTwo) {
+    MakeRgTree(root);
+    // A pattern Rust refuses, with ripgrep's frame.
+    const Captured captured = RunCaptured("rg", {"(", "t1"}, std::nullopt, "/r");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err,
+        "rg: regex parse error:\n    (?:()\n    ^\nerror: unclosed group\n");
+    EXPECT_EQ(captured.status, 2);
+    // -S: no uppercase letter a literal spells, so the search is insensitive.
+    EXPECT_EQ(RunCaptured("rg", {"-S", "\\btodo", "t1"}, std::nullopt, "/r").out, "TODO\n");
+}
+
+TEST_F(BuiltinCommandsTest, RgRegexNewlineEscape) {
+    MakeRgTree(root);
+    // \n spelled as an escape: rg's multiline message, as a raw newline is.
+    const Captured captured = RunCaptured("rg", {"a\\nb", "t1"}, std::nullopt, "/r");
+    EXPECT_EQ(captured.err,
+        "rg: the literal \"\\n\" is not allowed in a regex\n"
+        "\n"
+        "Consider enabling multiline mode with the --multiline flag (or -U for short).\n"
+        "When multiline mode is enabled, new line characters can be matched.\n");
+    EXPECT_EQ(captured.status, 2);
+    // a class holding only '\n' is left empty by the strip: the same message
+    const Captured onlyNewline = RunCaptured("rg", {"[\\n]", "t1"}, std::nullopt, "/r");
+    EXPECT_EQ(onlyNewline.err, captured.err);
+    EXPECT_EQ(onlyNewline.status, 2);
+    // other members survive the strip: the class matches them
+    EXPECT_EQ(RunCaptured("rg", {"[\\nT]", "t1"}, std::nullopt, "/r").out, "TODO\n");
+}
+
+TEST_F(BuiltinCommandsTest, RgPatternFileFailures) {
+    MakeRgTree(root);
+    const Captured directory = RunCaptured("rg", {"-f", "src", "TODO", "t1"}, std::nullopt, "/r");
+    EXPECT_EQ(directory.err, "rg: src: Is a directory (os error 21)\n");
+    EXPECT_EQ(directory.status, 2);
+    const Captured missing = RunCaptured("rg", {"-f", "nosuch", "TODO", "t1"}, std::nullopt, "/r");
+    EXPECT_EQ(missing.err, "rg: nosuch: No such file or directory (os error 2)\n");
+    EXPECT_EQ(missing.status, 2);
+}
+
+TEST_F(BuiltinCommandsTest, RgNoMessagesOnAnEmptyTree) {
+    MakeRgTree(root);
+    ASSERT_EQ(root->CreateDirectory("/r/empty", kDirMode), 0);
+    // Nothing searched at all: rg's message, and --no-messages suppresses
+    // it (the exit stays 2).
+    const Captured quiet = RunCaptured("rg", {"--no-messages", "TODO"}, std::nullopt, "/r/empty");
+    EXPECT_EQ(quiet.out, "");
+    EXPECT_EQ(quiet.err, "");
+    EXPECT_EQ(quiet.status, 2);
+    const Captured loud = RunCaptured("rg", {"TODO"}, std::nullopt, "/r/empty");
+    EXPECT_EQ(loud.err,
+        "rg: No files were searched, which means ripgrep probably applied a filter you "
+        "didn't expect.\nRunning with --debug will show why files are being skipped.\n");
+    EXPECT_EQ(loud.status, 2);
+}
+
 TEST_F(BuiltinCommandsTest, RgFilesLists) {
     MakeRgTree(root);
     const Captured one = RunCaptured("rg", {"--files", "src"}, std::nullopt, "/r");
@@ -347,14 +409,14 @@ TEST_F(BuiltinCommandsTest, RgColor) {
 
 TEST_F(BuiltinCommandsTest, RgHelpAndVersion) {
     const Captured version = RunCaptured("rg", {"--version"});
-    EXPECT_EQ(version.out, "rg (HaisosOS builtin) 1.0.0\n");
+    EXPECT_EQ(version.out, "rg (HaisosOS builtin) 1.1.0\n");
     EXPECT_EQ(version.status, 0);
     // ripgrep has no man7 page: the reference line links its guide.
     int status = -1;
     const Lines help = Run("rg", {"--help"}, &status);
     EXPECT_EQ(status, 0);
     ASSERT_GE(help.size(), 5u);
-    EXPECT_EQ(help[0], "HaisosOS rg version 1.0.0 - recursively search the current directory "
+    EXPECT_EQ(help[0], "HaisosOS rg version 1.1.0 - recursively search the current directory "
                        "for lines matching a pattern");
     EXPECT_EQ(help[1], "Based on Linux rg: https://github.com/BurntSushi/ripgrep/blob/14.1.1/GUIDE.md");
     EXPECT_EQ(help[3], "Usage: rg [OPTIONS] PATTERN [PATH ...]");

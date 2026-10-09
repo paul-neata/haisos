@@ -395,7 +395,7 @@ bool ParseFindFormat(FindParser& parser, const std::string& format,
 // %d, %m and %S are formatted as integer, unsigned and float; everything
 // else is a string (FormatPrintfString, whose padding is GNU's own, spaces
 // even under the 0 flag).
-std::string DirectiveValue(const FindFile& file, const FindFormatPiece& piece) {
+std::string RawDirectiveValue(const FindFile& file, const FindFormatPiece& piece) {
     const FileStatus& status = file.status;
     const char directive = piece.spec.conversion;
     switch (directive) {
@@ -471,6 +471,16 @@ std::string DirectiveValue(const FindFile& file, const FindFormatPiece& piece) {
     case '%': return FormatPrintfString(piece.spec, "%");
     }
     return "";
+}
+
+// The value padded and truncated by the spec it was scanned with: %d, %m, %S
+// and %% applied theirs already; every other directive is a plain string.
+std::string DirectiveValue(const FindFile& file, const FindFormatPiece& piece) {
+    switch (piece.spec.conversion) {
+    case 'd': case 'm': case 'S': case '%':
+        return RawDirectiveValue(file, piece);
+    }
+    return FormatPrintfString(piece.spec, RawDirectiveValue(file, piece));
 }
 
 // -printf FMT and -fprintf FILE FMT: the format's bytes, directive by

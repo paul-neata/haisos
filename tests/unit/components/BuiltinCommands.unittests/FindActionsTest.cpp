@@ -215,7 +215,7 @@ TEST_F(BuiltinCommandsTest, FindPrintf) {
         "%p|%f|%h|%P|%H|%d|%s|%k|%b|%n|%m|%M|%u|%g|%U|%G|%y|%Y|%l|%i|%D|%F|%Z|%%\\n"},
         std::nullopt, "/proj", PathEnvironment(factory));
     EXPECT_EQ(captured.out,
-        "a/x.txt|x.txt|a||a/x.txt|0|3|1|1|1|777|-rwxrwxrwx|haisos|haisos|0|0|f|f||0|0|unknown||%|\n");
+        "a/x.txt|x.txt|a||a/x.txt|0|3|1|1|1|777|-rwxrwxrwx|haisos|haisos|0|0|f|f||0|0|unknown||%\n");
     EXPECT_EQ(captured.err, "");
     EXPECT_EQ(captured.status, 0);
     // %S: the blocks-to-size ratio, and 1 for an empty file.
@@ -231,7 +231,7 @@ TEST_F(BuiltinCommandsTest, FindPrintf) {
         "[%10p][%-10f][%5s][%-5d][%05s][%05d][%#m][%.3p]\\n"},
         std::nullopt, "/proj", PathEnvironment(factory));
     EXPECT_EQ(widths.out,
-        "[   a/x.txt][x.txt    ][    3][0    ][    3][00000][0777][a/x]\n");
+        "[   a/x.txt][x.txt     ][    3][0    ][    3][00000][0777][a/x]\n");
     // The time directives, with a time the test sets: %T@ is the seconds
     // and the nanoseconds (nine digits, with GNU's own tenth digit 0), %t
     // is ctime's shape, %TY is the strftime kind.

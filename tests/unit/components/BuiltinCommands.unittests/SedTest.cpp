@@ -673,6 +673,7 @@ TEST_F(BuiltinCommandsTest, SedScriptErrors) {
         {"/[/p"},
         {"y/a"},
         {"v5.0"},
+        {"a"},
     };
     const std::vector<std::string> errors = {
         "sed: -e expression #1, char 1: unknown command: `u'\n",
@@ -717,6 +718,7 @@ TEST_F(BuiltinCommandsTest, SedScriptErrors) {
         "sed: -e expression #1, char 4: unterminated address regex\n",
         "sed: -e expression #1, char 3: unterminated `y' command\n",
         "sed: -e expression #1, char 4: expected newer version of sed\n",
+        "sed: -e expression #1, char 1: expected \\ after `a', `c' or `i'\n",
     };
     for (size_t i = 0; i < cases.size(); ++i) {
         Captured captured = RunCaptured("sed", cases[i], kFour);
@@ -769,22 +771,22 @@ TEST_F(BuiltinCommandsTest, SedHelpAndVersion) {
 }
 
 TEST_F(BuiltinCommandsTest, SedIsStoppedPromptly) {
-    // Input large enough that the run cannot finish before the stop lands.
-    std::string big;
-    for (int i = 0; i < 20000; ++i) {
-        big += "line\n";
-    }
-    WriteFile("/big", big);
+    // Standard input a pipe whose write end stays open and unwritten, so the
+    // run is certainly still waiting for a line when the stop lands.
+    auto ends = os->GetPipeService()->CreatePipe();
     StartProcessOptions options;
+    options.stdIn = ends.readEnd;
     options.stdOut = streams->OpenFile("/out", kFileOpenWriteCreateTruncate, kFileCreateMode);
     options.stdErr = streams->OpenFile("/err", kFileOpenWriteCreateTruncate, kFileCreateMode);
     ASSERT_NE(options.stdOut, nullptr);
     ASSERT_NE(options.stdErr, nullptr);
     auto process = os->StartProcess(os->GetOsEnvironment()->Clone(), "/bin/sed",
-        {"p", "/big"}, "/", options);
+        {"p"}, "/", options);
     ASSERT_NE(process, nullptr);
     process->TriggerStop();
     EXPECT_TRUE(process->WaitToFinish(kWaitMs));
+    // Only now does the pipe reach its end; nothing more is waiting on it.
+    ends.writeEnd.reset();
     ASSERT_TRUE(process->ExitCode().has_value());
     EXPECT_EQ(process->ExitCode().value(), 143);
 }
@@ -815,6 +817,12 @@ TEST_F(BuiltinCommandsTest, SedNextAppendAndDelete) {
     captured = RunCaptured("sed", {"s/a/a/;n;t;d"}, "a\nb\n");
     EXPECT_EQ(captured.out, "a\n");
     EXPECT_EQ(captured.status, 0);
+    // The sliding window: the input unchanged, one line held back at a time.
+    captured = RunCaptured("sed", {"$!N;P;D"}, "one\ntwo\nthree\n");
+    EXPECT_EQ(captured.out, "one\ntwo\nthree\n");
+    // The join-lines idiom, a loop through b and $.
+    captured = RunCaptured("sed", {":a;N;$!ba;s/\\n/,/g"}, "one\ntwo\nthree\n");
+    EXPECT_EQ(captured.out, "one,two,three\n");
 }
 
 TEST_F(BuiltinCommandsTest, SedHoldSpace) {
@@ -833,6 +841,9 @@ TEST_F(BuiltinCommandsTest, SedHoldSpace) {
     EXPECT_EQ(captured.out, "\na\nb\n\n");
     captured = RunCaptured("sed", {"1h;2x;p"}, "a\nb\n");
     EXPECT_EQ(captured.out, "a\na\na\na\n");
+    // The hold space as a stack, one line per cycle: tac.
+    captured = RunCaptured("sed", {"1!G;h;$!d"}, "one\ntwo\nthree\n");
+    EXPECT_EQ(captured.out, "three\ntwo\none\n");
     EXPECT_EQ(captured.status, 0);
 }
 
@@ -880,6 +891,17 @@ TEST_F(BuiltinCommandsTest, SedTextCommands) {
     // range, once, discarding the pattern space.
     captured = RunCaptured("sed", {"1i intro"}, "a\nb\n");
     EXPECT_EQ(captured.out, "intro\na\nb\n");
+    // Without the introducer the leading blanks are skipped, with it they
+    // are kept; a's queue pays the newline an undelimited line lacks.
+    captured = RunCaptured("sed", {"2i   hello"}, "x\ny\n");
+    EXPECT_EQ(captured.out, "x\nhello\ny\n");
+    captured = RunCaptured("sed", {"2i\\  hello"}, "x\ny\n");
+    EXPECT_EQ(captured.out, "x\n  hello\ny\n");
+    captured = RunCaptured("sed", {"a foo"}, "x");
+    EXPECT_EQ(captured.out, "x\nfoo\n");
+    // A '\' at the very end of a piece continues into the next -e.
+    captured = RunCaptured("sed", {"-e", "a\\", "-e", "foo"}, "x\n");
+    EXPECT_EQ(captured.out, "x\nfoo\n");
     captured = RunCaptured("sed", {"1i one\\ttwo"}, "a\n");
     EXPECT_EQ(captured.out, "one\ttwo\na\n");
     captured = RunCaptured("sed", {"1,2c mid"}, "a\nb\nc\n");
@@ -911,6 +933,12 @@ TEST_F(BuiltinCommandsTest, SedAppendReadFiles) {
     EXPECT_EQ(captured.out, "a\nx\ny\nb\n");
     captured = RunCaptured("sed", {"1r /missing"}, "a\nb\n");
     EXPECT_EQ(captured.out, "a\nb\n");
+    EXPECT_EQ(captured.status, 0);
+    // r /dev/stdin reads the rest of standard input, the lines coming from
+    // a file operand.
+    WriteFile("/infile", "one\ntwo\nthree\n");
+    captured = RunCaptured("sed", {"-e", "1r /dev/stdin", "-e", "p", "/infile"}, "IX\n");
+    EXPECT_EQ(captured.out, "one\none\nIX\ntwo\ntwo\nthree\nthree\n");
     EXPECT_EQ(captured.status, 0);
     // A directory is GNU's read error: what was printed stays and the run
     // ends at once with exit 4.
@@ -972,6 +1000,19 @@ TEST_F(BuiltinCommandsTest, SedWriteFiles) {
     EXPECT_EQ(captured.out, "");
     EXPECT_EQ(captured.err, "sed: couldn't open file /nodir/f: No such file or directory\n");
     EXPECT_EQ(captured.status, 4);
+    // s///w to /dev/stdout interleaves right after the pattern's own print.
+    captured = RunCaptured("sed", {"s/e/E/w /dev/stdout"}, "one\ntwo\nthree\n");
+    EXPECT_EQ(captured.out, "onE\nonE\ntwo\nthrEe\nthrEe\n");
+    // w's filename is the rest of the line, ';' included, and the '}' of a
+    // block goes with it, leaving the block unmatched.
+    captured = RunCaptured("sed", {"w /a;b"}, "x\n");
+    EXPECT_EQ(captured.status, 0);
+    ASSERT_TRUE(ReadWholeFile(*root, "/a;b", content));
+    EXPECT_EQ(content, "x\n");
+    captured = RunCaptured("sed", {"1{p;w /out}"}, "x\n");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "sed: -e expression #1, char 0: unmatched `{'\n");
+    EXPECT_EQ(captured.status, 1);
 }
 
 TEST_F(BuiltinCommandsTest, SedSandbox) {
@@ -1153,4 +1194,30 @@ TEST_F(BuiltinCommandsTest, SedInPlace) {
     EXPECT_EQ(captured.status, 4);
     ASSERT_TRUE(ReadWholeFile(*root, "/edit.txt", content));
     EXPECT_EQ(content, "1\n2\n3\n");
+    // F and = write into the file being built, its own name in it.
+    WriteFile("/f", "1\n2\n3\n");
+    captured = RunCaptured("sed", {"-i", "1F;1=", "/f"});
+    EXPECT_EQ(captured.status, 0);
+    ASSERT_TRUE(ReadWholeFile(*root, "/f", content));
+    EXPECT_EQ(content, "/f\n1\n1\n2\n3\n");
+    // A failed backup rename: the file as given in the message, the
+    // original untouched, the temporary gone.
+    WriteFile("/f", "1\n2\n3\n");
+    captured = RunCaptured("sed", {"-inodir/*", "p", "f"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "sed: cannot rename f: No such file or directory\n");
+    EXPECT_EQ(captured.status, 4);
+    ASSERT_TRUE(ReadWholeFile(*root, "/f", content));
+    EXPECT_EQ(content, "1\n2\n3\n");
+    // Each file alone (-s implied): -n keeps only what was printed.
+    WriteFile("/f", "1\n2\n3\n");
+    WriteFile("/g", "a\nb\n");
+    captured = RunCaptured("sed", {"-i", "-n", "$p", "/f", "/g"});
+    EXPECT_EQ(captured.status, 0);
+    ASSERT_TRUE(ReadWholeFile(*root, "/f", content));
+    EXPECT_EQ(content, "3\n");
+    ASSERT_TRUE(ReadWholeFile(*root, "/g", content));
+    EXPECT_EQ(content, "b\n");
+    // No temporary sedXXXXXX is left anywhere.
+    EXPECT_EQ(RunCaptured("find", {"/", "-name", "sed??????"}).out, "");
 }

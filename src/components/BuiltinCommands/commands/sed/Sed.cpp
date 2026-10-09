@@ -72,11 +72,12 @@ public:
         help.summary = "stream editor for filtering and transforming text";
         help.usage.push_back("sed [OPTION]... {script-only-if-no-other-script} [input-file]...");
         help.notes =
-            "Every command of GNU sed 4.9 but e (which HaisosOS does not treat, reported on --help "
-            "as such): the advanced commands N D P h H g G x, b t T, a i c (GNU's one-line and "
-            "classic \\ forms), r R w W (with /dev/stdout and /dev/stderr), s///w, y, l, z, F and "
-            "v -- with -i (through a temp file), -l, -u, -z and --sandbox. --posix and --debug "
-            "are not treated.";
+            "Every command of GNU sed 4.9 but e (which HaisosOS does not treat): the advanced "
+            "commands N D P h H g G x, b t T, a i c (GNU's one-line and classic \\ forms), "
+            "r R w W (with /dev/stdout and /dev/stderr), s///w, y, l, z, F and v -- with -i "
+            "(a sedXXXXXX file in the original's directory, renamed over it), -l, -u, -z and "
+            "--sandbox. --follow-symlinks is accepted but there are no links to follow; "
+            "--posix and --debug are not treated.";
         return help;
     }
 

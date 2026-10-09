@@ -618,7 +618,10 @@ private:
                 }
                 return !(m_settings.noIgnoreParent && entry.aboveOperand);
             case 2:  // .gitignore
-                if (m_settings.noIgnoreVcs) {
+                // --no-ignore-parent: none above the operand, as for the
+                // dot files (rg's manual: ignore files in parent directories)
+                if (m_settings.noIgnoreVcs
+                    || (m_settings.noIgnoreParent && entry.aboveOperand)) {
                     return false;
                 }
                 if (repoRoot >= 0) {

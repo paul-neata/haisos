@@ -174,6 +174,53 @@ TEST_F(BuiltinCommandsTest, RgIgnoreDotFileWins) {
     EXPECT_EQ(captured.status, 0);
 }
 
+TEST_F(BuiltinCommandsTest, RgIgnoreKinds) {
+    MakeIgnoreTree(root, true);
+    // .rgignore wins over .ignore, which still decides what .rgignore does
+    // not; .git/info/exclude of the repository root adds its own patterns.
+    WriteTo(root, "/repo/a/.ignore", "keep.log\ndeep.md\n");
+    WriteTo(root, "/repo/a/.rgignore", "!keep.log\n");
+    ASSERT_EQ(root->CreateDirectory("/repo/.git/info", kDirMode), 0);
+    WriteTo(root, "/repo/.git/info/exclude", "B.TXT\n");
+    EXPECT_EQ(RunCaptured("rg", {"--files"}, std::nullopt, "/repo").out,
+        "a/keep.log\nx/build.txt\n");
+    EXPECT_EQ(RunCaptured("rg", {"--no-ignore-exclude", "--files"}, std::nullopt, "/repo").out,
+        "a/B.TXT\na/keep.log\nx/build.txt\n");
+    EXPECT_EQ(RunCaptured("rg", {"--no-ignore-dot", "--files"}, std::nullopt, "/repo").out,
+        "a/b/deep.md\na/keep.log\nx/build.txt\n");
+    EXPECT_EQ(RunCaptured("rg", {"--no-ignore-vcs", "--files"}, std::nullopt, "/repo").out,
+        "a/B.TXT\na/b/c/f.txt\na/drop.log\na/keep.log\nbuild/o.txt\ntop.txt\n"
+        "x/build/o.txt\nx/build.txt\n");
+    // The last of --no-ignore / --ignore wins.
+    EXPECT_EQ(RunCaptured("rg", {"--no-ignore", "--ignore", "--files"}, std::nullopt, "/repo").out,
+        "a/keep.log\nx/build.txt\n");
+}
+
+TEST_F(BuiltinCommandsTest, RgIgnoreNoParent) {
+    MakeIgnoreTree(root, true);
+    WriteTo(root, "/repo/.ignore", "B.TXT\n");
+    // From /repo/a the parent's .ignore and .gitignore apply ...
+    EXPECT_EQ(RunCaptured("rg", {"--files"}, std::nullopt, "/repo/a").out,
+        "b/deep.md\nkeep.log\n");
+    // ... and --no-ignore-parent respects no ignore file above the operand.
+    EXPECT_EQ(RunCaptured("rg", {"--no-ignore-parent", "--files"}, std::nullopt, "/repo/a").out,
+        "B.TXT\nb/c/f.txt\nb/deep.md\ndrop.log\nkeep.log\n");
+}
+
+TEST_F(BuiltinCommandsTest, RgIgnoreUnrestrictedBinary) {
+    MakeIgnoreTree(root, true);
+    WriteTo(root, "/repo/x/bin.dat", std::string("x\0y hi\n", 7));
+    // -uuu is --no-ignore --hidden --binary: a binary file met while walking
+    // is searched as an operand is, not ended silently.
+    const Captured three = RunCaptured("rg", {"-uuu", "hi", "x"}, std::nullopt, "/repo");
+    const Captured spelled = RunCaptured(
+        "rg", {"--no-ignore", "--hidden", "--binary", "hi", "x"}, std::nullopt, "/repo");
+    const Captured two = RunCaptured("rg", {"-uu", "hi", "x"}, std::nullopt, "/repo");
+    EXPECT_EQ(three.out, spelled.out);
+    EXPECT_NE(three.out.find("binary file matches"), std::string::npos);
+    EXPECT_EQ(two.out.find("binary file matches"), std::string::npos);
+}
+
 TEST_F(BuiltinCommandsTest, RgIgnoreUnrestricted) {
     MakeIgnoreTree(root, true);
     const Captured once = RunCaptured("rg", {"-u", "--files"}, std::nullopt, "/repo");

@@ -176,8 +176,7 @@ private:
                 } else if (m_pending.empty()) {
                     Fail("you have too many ')'");
                 } else {
-                    Fail("invalid expression; expected an expression between '" + m_pending
-                        + "' and ')'");
+                    Fail("expected an expression between '" + m_pending + "' and ')'");
                 }
                 return false;
             default:  // -a, -o or "," with nothing before it
@@ -312,7 +311,9 @@ const FindPrimaryEntry* LookupPrimary(const std::string& name) {
 // expression token seen, whatever it was.
 void PathsMustPrecede(BuiltinContext& context, const std::string& arg,
                       const std::string& lastToken) {
-    context.Error("paths must precede expression: " + GnuQuote(arg));
+    // GNU prints these with the argument raw, between its own backtick and
+    // apostrophe, not through the quoting of its other messages.
+    context.Error("paths must precede expression: `" + arg + "'");
     FileStatus status;
     if (context.IO().Stat(arg, status) == 0) {
         context.Error("possible unquoted pattern after predicate `" + lastToken + "'?");
@@ -355,6 +356,11 @@ bool FindParser::Parse(FindSettings& settings, std::unique_ptr<FindNode>& expres
         } else {
             break;
         }
+        if (impl.failed) {
+            // A -D without its argument: GNU ends here, with exit status 1.
+            exitStatus = 1;
+            return false;
+        }
     }
 
     // The first pass: every argument is a starting point or an expression
@@ -363,7 +369,7 @@ bool FindParser::Parse(FindSettings& settings, std::unique_ptr<FindNode>& expres
     std::vector<Token> tokens;
     bool leading = true;
     std::string firstNonOption;  // the first test or action, for the warning below
-    while (impl.pos < impl.args.size()) {
+    while (!impl.failed && impl.pos < impl.args.size()) {
         const std::string arg = impl.args[impl.pos];
         if (!LooksLikeExpression(arg, leading)) {
             if (leading) {

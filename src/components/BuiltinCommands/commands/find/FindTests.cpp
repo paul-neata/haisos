@@ -31,7 +31,7 @@ enum class FindComparison { Equal, Greater, Less };
 // same deduced type.
 template <typename T, typename... A>
 std::unique_ptr<FindPrimary> MakePrimary(A&&... args) {
-    return MakePrimary<T>(std::forward<A>(args)...);
+    return std::make_unique<T>(std::forward<A>(args)...);
 }
 
 // GNU's get_num: an optional single sign, then digits only.
@@ -63,6 +63,7 @@ bool ParseTimeCount(const std::string& raw, FindComparison& kind, double& value)
         kind = raw[i] == '+' ? FindComparison::Greater : FindComparison::Less;
         ++i;
     }
+    const size_t numberStart = i;
     bool sawDot = false;
     bool sawDigit = false;
     for (; i < raw.size(); ++i) {
@@ -80,7 +81,7 @@ bool ParseTimeCount(const std::string& raw, FindComparison& kind, double& value)
     if (!sawDigit) {
         return false;
     }
-    value = std::strtod(raw.c_str(), nullptr);
+    value = std::strtod(raw.c_str() + numberStart, nullptr);
     return true;
 }
 
@@ -246,11 +247,14 @@ public:
                     FileDateTime origin)
         : m_field(field), m_kind(kind), m_origin(origin) {
         const int64_t unit = unitSeconds * 1000000000;
+        // -N: newer than N units, both families (GNU drops the 86399 seconds
+        // the -time one adds to the origin; the plan keeps none of it).
+        m_lessThan = static_cast<int64_t>(std::llround(count * unit));
+        // N: the window is [N*u, (N+1)*u) for the -time family (its origin
+        // is a day early), [(N-1)*u, N*u) for the -min one.
         m_equalLow = static_cast<int64_t>(std::llround((count - 1.0) * unit));
         m_equalHigh = static_cast<int64_t>(std::llround(count * unit));
         if (unitSeconds == 86400) {
-            // The time family: N is the age [N*D, (N+1)*D), +N older than
-            // (N+1)*D, -N newer than N*D.
             m_equalLow = static_cast<int64_t>(std::llround(count * unit));
             m_equalHigh = static_cast<int64_t>(std::llround((count + 1.0) * unit));
         }
@@ -264,7 +268,7 @@ public:
         case FindComparison::Greater:
             return age > m_equalHigh;
         case FindComparison::Less:
-            return age < m_equalLow;
+            return age < m_lessThan;
         }
         return false;
     }
@@ -273,6 +277,7 @@ private:
     FindField m_field;
     FindComparison m_kind;
     FileDateTime m_origin;
+    int64_t m_lessThan = 0;
     int64_t m_equalLow = 0;
     int64_t m_equalHigh = 0;
 };
@@ -884,13 +889,16 @@ const std::vector<FindPrimaryEntry>& FindTestPrimaries() {
             }},
         {"-version", FindPrimaryKind::GlobalOption, false,
             [](FindParser& parser, const std::string&) {
-                parser.Context().Out(BuiltinVersionText(*CreateFindCommand()) + "\n");
+                parser.Context().Out(BuiltinVersionText(*CreateFindCommand()));
                 return std::unique_ptr<FindPrimary>();
             }},
         {"-daystart", FindPrimaryKind::PositionalOption, false,
             [](FindParser& parser, const std::string&) {
                 FindParseState& state = parser.State();
                 if (state.timeOrigin == state.startTime) {  // the first -daystart only
+                    // The start of tomorrow, local: GNU's cur_day_start plus a
+                    // day, the origin both time families measure their ages
+                    // from, so that a window [0, D) is today.
                     int64_t seconds = state.startTime.seconds + 86400;
                     const std::tm local = LocalTimeOf(seconds);
                     seconds -= local.tm_sec + local.tm_min * 60 + local.tm_hour * 3600;

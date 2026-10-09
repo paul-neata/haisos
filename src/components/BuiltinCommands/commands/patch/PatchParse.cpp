@@ -7,25 +7,18 @@
 namespace Haisos {
 namespace {
 
-// One line of the input: its text without the '\n', and whether the input
-// ended it with one (the last line may not).
-struct InputLine {
-    std::string text;
-    bool delimited = true;
-};
-
-std::vector<InputLine> SplitInputLines(const std::string& text) {
-    std::vector<InputLine> lines;
+std::vector<PatchReader::InputLine> SplitInputLines(const std::string& text) {
+    std::vector<PatchReader::InputLine> lines;
     size_t start = 0;
     while (start <= text.size()) {
         const size_t found = text.find('\n', start);
         if (found == std::string::npos) {
             if (start < text.size()) {
-                lines.push_back(InputLine{text.substr(start), false});
+                lines.push_back(PatchReader::InputLine{text.substr(start), false});
             }
             break;
         }
-        lines.push_back(InputLine{text.substr(start, found - start), true});
+        lines.push_back(PatchReader::InputLine{text.substr(start, found - start), true});
         start = found + 1;
     }
     return lines;
@@ -252,6 +245,16 @@ bool IsEpochStamp(const std::string& timeText) {
         return false;
     }
     return seconds > -25 * 60 * 60 && seconds < 26 * 60 * 60;
+}
+
+// A header line's own line ending is never part of a name it holds, so even
+// --binary, which keeps the patch's CRs, loses it here: the names of a patch
+// written with CRLF line endings still come out without their '\r'.
+std::string HeaderText(const std::string& text) {
+    if (!text.empty() && text.back() == '\r') {
+        return text.substr(0, text.size() - 1);
+    }
+    return text;
 }
 
 } // namespace
@@ -560,14 +563,18 @@ std::optional<FilePatch> PatchReader::Next(int strip, bool& garbage) {
             if (patch && !patch->hunks.empty()) {
                 break;  // a new patch begins here
             }
-            std::string name = text.substr(7);
+            std::string name = HeaderText(text).substr(7);
             while (!name.empty() && (name.front() == ' ' || name.front() == '\t')) {
                 name.erase(name.begin());
             }
             while (!name.empty() && (name.back() == ' ' || name.back() == '\t')) {
                 name.pop_back();
             }
-            pendingIndex = StripFileName(name, strip);
+            // The Index name is a candidate only when the headers gave none,
+            // and it is taken as it stands, never reduced to its last
+            // component.
+            pendingIndex = strip < 0 ? std::optional<std::string>(name)
+                : StripFileName(name, strip);
             ++i;
             continue;
         }
@@ -583,9 +590,10 @@ std::optional<FilePatch> PatchReader::Next(int strip, bool& garbage) {
                 patch->stripTrailingCr = true;
             }
             const int gitStrip = strip < 0 ? 1 : strip;  // -p1 by default
+            const std::string gitText = HeaderText(text);
             size_t at = 10;  // strlen("diff --git")
-            const std::optional<std::string> nameA = ParseGitName(text, at);
-            const std::optional<std::string> nameB = ParseGitName(text, at);
+            const std::optional<std::string> nameA = ParseGitName(gitText, at);
+            const std::optional<std::string> nameB = ParseGitName(gitText, at);
             patch->oldName = nameA ? StripFileName(*nameA, gitStrip) : std::nullopt;
             patch->newName = nameB ? StripFileName(*nameB, gitStrip) : std::nullopt;
             lastHeader = static_cast<int64_t>(i);
@@ -629,8 +637,8 @@ std::optional<FilePatch> PatchReader::Next(int strip, bool& garbage) {
                     patch->stripTrailingCr = true;
                 }
                 const int effStrip = (strip < 0 && patch->gitDiff) ? 1 : strip;
-                const HeaderName oldSide = ParseHeaderName(text.substr(3));
-                const HeaderName newSide = ParseHeaderName(next.substr(3));
+                const HeaderName oldSide = ParseHeaderName(HeaderText(text).substr(3));
+                const HeaderName newSide = ParseHeaderName(HeaderText(next).substr(3));
                 patch->oldName = oldSide.name ? StripFileName(*oldSide.name, effStrip)
                     : std::nullopt;
                 patch->newName = newSide.name ? StripFileName(*newSide.name, effStrip)
@@ -731,13 +739,16 @@ void SwapFilePatch(FilePatch& patch) {
             }
             std::vector<PatchLine> reordered;
             reordered.reserve(runEnd - j);
+            // The Insert lines become the deletions and come first, the
+            // Delete lines become the insertions: deletions first in the
+            // swapped run, as in any unified diff.
             for (size_t k = j; k < runEnd; ++k) {
-                if (lines[k].kind == PatchLineKind::Delete) {
+                if (lines[k].kind == PatchLineKind::Insert) {
                     reordered.push_back(std::move(lines[k]));
                 }
             }
             for (size_t k = j; k < runEnd; ++k) {
-                if (lines[k].kind == PatchLineKind::Insert) {
+                if (lines[k].kind == PatchLineKind::Delete) {
                     reordered.push_back(std::move(lines[k]));
                 }
             }

@@ -62,12 +62,6 @@ class PatchReader {
 public:
     PatchReader(std::string text, bool binary);
 
-    // The next file patch, or nullopt at the end of the input. |strip| is
-    // -p (-1: not given). Sets |garbage| when the input is not empty and
-    // holds no patch at all.
-    std::optional<FilePatch> Next(int strip, bool& garbage);
-
-private:
     // One line of the input: its text without the '\n', and whether the
     // input ended it with one (the last line may not).
     struct InputLine {
@@ -75,6 +69,12 @@ private:
         bool delimited = true;
     };
 
+    // The next file patch, or nullopt at the end of the input. |strip| is
+    // -p (-1: not given). Sets |garbage| when the input is not empty and
+    // holds no patch at all.
+    std::optional<FilePatch> Next(int strip, bool& garbage);
+
+private:
     // The line |index| holds for the parser: without its trailing '\r' when
     // this patch's lines carry one and --binary was not given.
     std::string LineText(size_t index, bool& stripCr) const;

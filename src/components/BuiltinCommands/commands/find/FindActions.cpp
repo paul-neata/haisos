@@ -735,6 +735,10 @@ public:
         }
         if (m_prompt) {
             options.stdIn = OpenEmptyInput(run.context);
+            if (!options.stdIn) {
+                run.context.Error("cannot make an empty input for " + GnuQuote(arguments.front()));
+                return false;
+            }
         }
         return RunSemicolon(run, arguments, options);
     }

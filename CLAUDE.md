@@ -28,7 +28,7 @@ haisos/
 ├── src/
 │   ├── components/        - Component implementations (each has its own CLAUDE.md)
 │   │   ├── Agent/
-│   │   ├── BuiltinCommands/ - The builtin commands ([, basename, cat, chmod, cmp, cp, cut, date, dirname, du, echo, egrep, env, false, fgrep, find, grep, head, hsh, ls, man, mkdir, mv, nl, printf, pwd, realpath, rm, rmdir, seq, sleep, sort, stat, tail, tee, test, touch, tr, true, uniq, wc, which; each in commands/<name>/) and what places them on filesystems
+│   │   ├── BuiltinCommands/ - The builtin commands ([, basename, cat, chmod, cmp, cp, cut, date, dirname, du, echo, egrep, env, false, fgrep, find, grep, head, hsh, ls, man, mkdir, mv, nl, printf, pwd, realpath, rm, rmdir, seq, sleep, sort, stat, tail, tee, test, touch, tr, true, uniq, wc, which, xargs; each in commands/<name>/) and what places them on filesystems
 │   │   ├── Console/
 │   │   ├── Environment/
 │   │   ├── Factory/
@@ -539,7 +539,7 @@ Commands compiled into Haisos (`[`, `basename`, `cat`, `chmod`, `cmp`, `cp`,
 `cut`, `date`, `dirname`, `du`, `echo`, `egrep`, `env`, `false`, `fgrep`,
 `find`, `grep`, `head`, `hsh`, `ls`, `man`, `mkdir`, `mv`, `nl`, `printf`, `pwd`, `realpath`,
 `rm`, `rmdir`, `seq`, `sleep`, `sort`, `stat`, `tail`, `tee`, `test`, `touch`, `tr`,
-`true`, `uniq`, `wc`, `which`), implemented in
+`true`, `uniq`, `wc`, `which`, `xargs`), implemented in
 `src/components/BuiltinCommands/`
 (see its `CLAUDE.md`). A builtin is not a file on disk: it is placed on a
 filesystem at a path (`IBuiltinConfigurator`, or the haisosfile's `BUILTIN`),
@@ -635,6 +635,7 @@ use a builtin with what it already knows about the real command:
 | `uniq` | Filters adjacent repeated lines (`-c -d -D -u -i -f -s -w -z, --group, --all-repeated`); the obsolete `-N`/`+N` spellings work but are never documented |
 | `wc` | Counts lines, words, characters, bytes and the widest line (`-c -m -l -L -w`, `--files0-from`, `--total`), GNU's columns |
 | `which` | Locates a command in PATH (`-a -s`), as Debian's which (debianutils): exit 1 when any operand is missed, 2 on an unknown option |
+| `xargs` | Builds and runs command lines from the standard input (`-0 -a -d -e -E -I -i -L -l -n -o -P -p -r -s -t -x --arg-file --delimiter --eof --exit --interactive --max-args --max-chars --max-lines --max-procs --no-run-if-empty --null --open-tty --process-slot-var --replace --show-limits --verbose`), findutils 4.9.0's item grammar (quotes and `\` escapes, `-0`/`-d` raw items, `-L` line continuation, `-I` replacement), GNU's size arithmetic of `-s`/`-x` (`argument line too long`, `argument list too long`), the mode-takeover warnings, `-a`, `-E`, `-o`, `-p`, `-r`, `-t`, `--show-limits`, `--process-slot-var`, the exit statuses 123/124/125/126/127, COMMAND defaulted `echo` | `-P` checked, not acted on (one command at a time); a fixed ARG_MAX of 2097152; Haisos has no `/dev/tty`: `-p` and `-o` take standard input as the terminal when it is one, otherwise fail their first command and exit 1 (as GNU's `-p` does without one; GNU's `-o` crashes on its assertion); a child's exit code 129-254 is taken as a signal death, a stop being 143 and indistinguishable |
 
 ## Planning skills
 

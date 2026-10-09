@@ -53,6 +53,7 @@ std::shared_ptr<IBuiltinCommand> CreateTrueCommand();
 std::shared_ptr<IBuiltinCommand> CreateUniqCommand();
 std::shared_ptr<IBuiltinCommand> CreateWcCommand();
 std::shared_ptr<IBuiltinCommand> CreateWhichCommand();
+std::shared_ptr<IBuiltinCommand> CreateXargsCommand();
 
 // Every builtin Haisos has. Adding one here is all it takes for it to be
 // runnable, listed by IBuiltinCommands::GetCommands() -- and so written into
@@ -101,6 +102,7 @@ inline std::vector<std::shared_ptr<IBuiltinCommand>> CreateStandardBuiltinComman
         CreateUniqCommand(),
         CreateWcCommand(),
         CreateWhichCommand(),
+        CreateXargsCommand(),
     };
 }
 

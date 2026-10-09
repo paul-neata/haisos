@@ -59,6 +59,7 @@ add_library(BuiltinCommands STATIC
     commands/uniq/Uniq.cpp
     commands/wc/Wc.cpp
     commands/which/Which.cpp
+    commands/xargs/Xargs.cpp
     commands/hsh/HshWord.cpp
     commands/hsh/HshLexer.cpp
     commands/hsh/HshAst.cpp

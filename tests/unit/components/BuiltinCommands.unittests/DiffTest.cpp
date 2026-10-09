@@ -868,7 +868,7 @@ TEST_F(BuiltinCommandsTest, DiffErrors) {
 
     // A not treated option is parsed and reported, and the diff goes on.
     captured = RunCaptured("diff", {"-y", "a", "b"}, std::nullopt, "/");
-    EXPECT_EQ(captured.err, "Parameter -y is not treated by HaisosOS diff v. 1.0.0\n");
+    EXPECT_EQ(captured.err, "Parameter -y is not treated by HaisosOS diff v. 1.1.0\n");
     EXPECT_EQ(captured.out,
               "2c2\n"
               "< b\n"
@@ -880,7 +880,7 @@ TEST_F(BuiltinCommandsTest, DiffErrors) {
     EXPECT_EQ(captured.status, 1);
 
     captured = RunCaptured("diff", {"-v"}, std::nullopt, "/");
-    EXPECT_EQ(captured.out, "diff (HaisosOS builtin) 1.0.0\n");
+    EXPECT_EQ(captured.out, "diff (HaisosOS builtin) 1.1.0\n");
     EXPECT_EQ(captured.status, 0);
 }
 
@@ -888,16 +888,16 @@ TEST_F(BuiltinCommandsTest, DiffHelpAndVersion) {
     MakeDiffFiles(root);
     const auto help = RunCaptured("diff", {"--help"}, std::nullopt, "/");
     EXPECT_EQ(help.status, 0);
-    EXPECT_NE(help.out.find("HaisosOS diff version 1.0.0"), std::string::npos);
+    EXPECT_NE(help.out.find("HaisosOS diff version 1.1.0"), std::string::npos);
     EXPECT_NE(help.out.find("Not treated arguments:"), std::string::npos);
 
     const auto version = RunCaptured("diff", {"--version"}, std::nullopt, "/");
-    EXPECT_EQ(version.out, "diff (HaisosOS builtin) 1.0.0\n");
+    EXPECT_EQ(version.out, "diff (HaisosOS builtin) 1.1.0\n");
     EXPECT_EQ(version.status, 0);
 
     // A not treated option is parsed, reported and gone past.
     const auto captured = RunCaptured("diff", {"-l", "a", "c"}, std::nullopt, "/");
-    EXPECT_EQ(captured.err, "Parameter -l is not treated by HaisosOS diff v. 1.0.0\n");
+    EXPECT_EQ(captured.err, "Parameter -l is not treated by HaisosOS diff v. 1.1.0\n");
     EXPECT_EQ(captured.out, "");
     EXPECT_EQ(captured.status, 0);
 }

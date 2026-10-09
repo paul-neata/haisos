@@ -241,10 +241,11 @@ bool FindMiddleSnake(const std::vector<int64_t>& a, const std::vector<int64_t>& 
             // Down from k+1 (an insertion) and right from k-1 (a deletion):
             // usable when that diagonal has a step D-1 value and the move
             // stays inside the box.
-            const bool downPossible = k + 1 >= -d + 1 && k + 1 <= d - 1;
+            // A diagonal outside [-M, N] never has a value (and is not in the table).
+            const bool downPossible = k + 1 >= -d + 1 && k + 1 <= d - 1 && k + 1 <= n;
             const int64_t downReach = downPossible ? prevVf[static_cast<size_t>(k + 1 + vf.offset)] : kNoReach;
             const bool haveDown = downReach != kNoReach && downReach - k <= m;
-            const bool rightPossible = k - 1 >= -(d - 1) && k - 1 <= d - 1;
+            const bool rightPossible = k - 1 >= -(d - 1) && k - 1 <= d - 1 && k - 1 >= -m;
             const int64_t rightReach = rightPossible ? prevVf[static_cast<size_t>(k - 1 + vf.offset)] + 1 : kNoReach;
             const bool haveRight = rightReach != kNoReach && rightReach <= n;
             if (!haveDown && !haveRight) {
@@ -284,10 +285,10 @@ bool FindMiddleSnake(const std::vector<int64_t>& a, const std::vector<int64_t>& 
                 continue;
             }
             vb.At(k) = kNoReach;
-            const bool downPossible = k + 1 >= -d + 1 && k + 1 <= d - 1;
+            const bool downPossible = k + 1 >= -d + 1 && k + 1 <= d - 1 && k + 1 <= n;
             const int64_t downReach = downPossible ? prevVb[static_cast<size_t>(k + 1 + vb.offset)] : kNoReach;
             const bool haveDown = downReach != kNoReach && downReach - k <= m;
-            const bool rightPossible = k - 1 >= -(d - 1) && k - 1 <= d - 1;
+            const bool rightPossible = k - 1 >= -(d - 1) && k - 1 <= d - 1 && k - 1 >= -m;
             const int64_t rightReach = rightPossible ? prevVb[static_cast<size_t>(k - 1 + vb.offset)] + 1 : kNoReach;
             const bool haveRight = rightReach != kNoReach && rightReach <= n;
             if (!haveDown && !haveRight) {
@@ -329,6 +330,8 @@ namespace {
 // other file: line e pairs with the other file's unchanged line |j| that has
 // |u| unchanged lines before it in the region, and the block lines up when
 // the line before j is changed -- the two changes would print as one hunk.
+// With no such line left in the region, j is the region's end (the first
+// fixed line after it, or the end of the file).
 bool LinesUp(const std::vector<bool>& other, int64_t u, int64_t regionStart, int64_t otherRegionEnd) {
     int64_t j = regionStart;
     int64_t seen = 0;
@@ -341,7 +344,7 @@ bool LinesUp(const std::vector<bool>& other, int64_t u, int64_t regionStart, int
         }
         ++j;
     }
-    return j < otherRegionEnd && j > regionStart && other[static_cast<size_t>(j - 1)];
+    return j > regionStart && other[static_cast<size_t>(j - 1)];
 }
 
 // Unchanged lines of |flags| in [regionStart, e).

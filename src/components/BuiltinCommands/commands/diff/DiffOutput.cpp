@@ -399,18 +399,19 @@ std::string FormatUnified(const std::vector<DiffChange>& script, const DiffText&
     for (const DiffHunk& hunk : hunks) {
         out += "@@ -" + UnifiedRangeText(hunk.start0, hunk.end0 - hunk.start0);
         out += " +" + UnifiedRangeText(hunk.start1, hunk.end1 - hunk.start1) + " @@\n";
-        int64_t p0 = hunk.start0, p1 = hunk.start1;
-        const auto contextLine = [&](int64_t i, int64_t j) {
+        int64_t p0 = hunk.start0;
+        const auto contextLine = [&](int64_t i) {
             const std::string_view text = LineTextOf(a, static_cast<size_t>(i));
-            const bool incomplete = (i + 1 == n0 && a.missingNewline) || (j + 1 == n1 && b.missingNewline);
-            AppendMarkedLine(out, options, UnifiedMark(options, ' ', text), false, text, incomplete);
+            // The line is printed from file 0, so only file 0's missing
+            // newline is marked (as GNU does under -Z/-b/-w).
+            AppendMarkedLine(out, options, UnifiedMark(options, ' ', text), false, text,
+                             i + 1 == n0 && a.missingNewline);
         };
         for (size_t k = hunk.first; k <= hunk.last; ++k) {
             const DiffChange& change = script[k];
             while (p0 < change.line0) {
-                contextLine(p0, p1);
+                contextLine(p0);
                 ++p0;
-                ++p1;
             }
             for (int64_t i = 0; i < change.deleted; ++i) {
                 const int64_t line = change.line0 + i;
@@ -425,12 +426,10 @@ std::string FormatUnified(const std::vector<DiffChange>& script, const DiffText&
                                  line + 1 == n1 && b.missingNewline);
             }
             p0 = change.line0 + change.deleted;
-            p1 = change.line1 + change.inserted;
         }
         while (p0 < hunk.end0) {
-            contextLine(p0, p1);
+            contextLine(p0);
             ++p0;
-            ++p1;
         }
     }
     return out;

@@ -410,6 +410,34 @@ TEST_F(BuiltinCommandsTest, DiffHelpAndVersion) {
     EXPECT_EQ(captured.status, 0);
 }
 
+// Review regressions, each expectation printed by GNU diff 3.10 (LC_ALL=C).
+TEST_F(BuiltinCommandsTest, DiffReviewRegressions) {
+    MakeDiffFiles(root);
+    // A block lines up with an insertion at the very end of the region.
+    WriteFile("/e1", "a\na\n");
+    WriteFile("/e2", "c\na\nc\n");
+    auto captured = RunCaptured("diff", {"e1", "e2"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "0a1\n> c\n2c3\n< a\n---\n> c\n");
+    WriteFile("/e3", "x\na\na\ny\n");
+    WriteFile("/e4", "x\nc\na\nc\ny\n");
+    captured = RunCaptured("diff", {"e3", "e4"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "1a2\n> c\n3c4\n< a\n---\n> c\n");
+    // Boxes far taller or wider than they are deep.
+    WriteFile("/o1", "a\nb\nc\nd\ne\n");
+    WriteFile("/o2", "x\n");
+    captured = RunCaptured("diff", {"o1", "o2"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "1,5c1\n< a\n< b\n< c\n< d\n< e\n---\n> x\n");
+    captured = RunCaptured("diff", {"o2", "o1"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "1c1,5\n< x\n---\n> a\n> b\n> c\n> d\n> e\n");
+    // A common line is printed from file 0: only its missing newline is marked.
+    WriteFile("/c0", "x\na\nb");
+    WriteFile("/c1", "y\na\nb\n");
+    captured = RunCaptured("diff", {"-u", "-b", "-L", "a", "-L", "b", "c0", "c1"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "--- a\n+++ b\n@@ -1,3 +1,3 @@\n-x\n+y\n a\n b\n\\ No newline at end of file\n");
+    captured = RunCaptured("diff", {"-u", "-b", "-L", "a", "-L", "b", "c1", "c0"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "--- a\n+++ b\n@@ -1,3 +1,3 @@\n-y\n+x\n a\n b\n");
+}
+
 namespace {
 
 DiffText TextOf(const std::string& bytes) {

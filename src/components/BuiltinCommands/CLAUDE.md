@@ -5,7 +5,7 @@ The commands compiled into Haisos itself -- `[`, `basename`, `cat`, `chmod`,
 `fgrep`, `find`, `grep`, `head`, `hsh`, `ls`, `man`, `mkdir`, `mv`, `nl`, `printf`, `pwd`,
 `realpath`, `rm`, `rmdir`, `seq`, `sleep`, `sort`, `stat`, `tail`, `tee`, `test`,
 `touch`, `tr`, `true`,
-`uniq`, `wc`, `which` -- and what places them on filesystems. Implements `IBuiltinCommands`
+`uniq`, `wc`, `which`, `xargs` -- and what places them on filesystems. Implements `IBuiltinCommands`
 and `IBuiltinConfigurator` (`interfaces/IBuiltinCommands.h`); both are created
 through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
 
@@ -130,8 +130,8 @@ through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
   the message helpers `CopyQuoted` (GNU's quoteaf), `CopyJoinPath`,
   `CopyStatMissingReason` and `CopyCreateFailedReason` -- each declared
   here once, so cp and mv share them with no copies of their own.
-- `BuiltinRunProgram.h` - how a builtin runs another program, for env and
-  find -exec now, for xargs and awk's `system()` later:
+- `BuiltinRunProgram.h` - how a builtin runs another program, for env,
+  find -exec and xargs now, for awk's `system()` later:
   `SearchPathEntries` (a
   PATH split at ':' keeping empty entries, `kBuiltinDefaultSearchPath` when
   unset), `FindProgramInPath` (a name with a '/' taken as it is, otherwise
@@ -139,8 +139,9 @@ through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
   directory), `OpenEmptyInput` (the read end of a pipe whose write end is
   released at once: an input a child may read and find only its end, made
   through `IFileIO::CreatePipe` with both slots closed again before
-  returning, null when no pipe could be made -- find's `-ok` runs its
-  command on one, so the program cannot read find's own standard input)
+  returning, null when no pipe could be made -- a caller whose child must
+  not read its own standard input gives it one and fails its command when
+  none could be made, as find's `-ok` and xargs's every child do)
   and `RunProgramAndWait` (flushes the caller's buffered stdout
   first, so the child's output lands after it; starts the program only
   through `context.Process().OS()->StartProcess` -- the OS is asked for and
@@ -294,6 +295,7 @@ command and links its man page.
 | `uniq` | 1.0.0 | `-c --count -d --repeated -D --all-repeated[=METHOD] -f --skip-fields=N -s --skip-chars=N -u --unique -i --ignore-case -w --check-chars=N -z --zero-terminated --group[=METHOD]`; adjacent lines compared after the skipped fields (blanks then non-blanks each) and chars, limited to `-w` bytes, `-c`'s count right-aligned in seven columns; streamed one group at a time, so a file bigger than memory reads a line at a time; an OUTPUT operand is opened before the input is read | the obsolete `-N` (skip N fields) and `+N` (skip N chars) spellings work as GNU's but are never documented (`BuiltinOption::hidden`); `-i` folds ASCII case only, there being no locale |
 | `wc` | 1.0.1 | `-c -m -l -L -w`, `--files0-from`, `--total`; with no FILE, or a FILE of `-`, the standard input is read | standard input has no size, so with it the columns are at least 7 wide (GNU sizes a redirected file); character classes and display widths come from the `Unicode` component's compact tables (unassigned code points count as printable; rare scripts' widths are approximate); `--debug` not treated |
 | `which` | 1.0.0 | `-a -s`; a name with a `/` taken as it is when a file is there, otherwise each PATH entry in order, an empty one the working directory, the candidate printed as built; exit 1 when any operand is missed or there is none, 2 on an unknown option | Debian's which (debianutils), not GNU's: `Illegal option -x` on stderr and `Usage: <path> [-as] args` on stdout, its own shape; `--help`/`--version` are Haisos's (Debian's which has none) |
+| `xargs` | 1.0.0 | findutils 4.9.0's `-0 --null -a --arg-file=FILE -d --delimiter=CHARACTER -e[eof] -E END -I R -i[r] -L MAX-LINES -l[MAX-LINES] -n --max-args=N -o --open-tty -P --max-procs=N -p --interactive --process-slot-var=VAR -r --no-run-if-empty -s --max-chars=N -t --verbose -x --exit --show-limits`; the item grammar GNU's (blanks separating, `'...'`/`"..."` and `\` escapes; unmatched quotes the error, the items before them still running), `-0`/`-d` raw items every one kept, empty included (`-d` its `\a \b \f \n \r \t \v \\ \NNN` escapes), `-L` non-blank lines with the trailing-blank continuation, `-I` the whole line its leading blanks trimmed, R replaced in every initial argument, one command per item; grouping by `-n`'s count, `-L`'s lines or `-s`'s bytes (a command line's every word's length + 1), the mode takeovers with GNU's mutual-exclusion warnings (`-n 1` after `-I` silently kept), `-x` forbidding the split (`argument list too long`, nothing runs; `-I` implies it, a later `-n` or `-L` un-implying it unless given outright) and an item too long alone `argument line too long` (the word modes still running what they had); `-E` the logical EOF line, inert under `-0`/`-d` with GNU's warning; `-a FILE` (missing `Cannot open input file ...`, exit 1; a directory reads nothing), `-r`, `-t` the line shell-quoted GNU's way before it runs, `-p` the line then the ask, `-o` the child's input `/dev/tty`, `--process-slot-var` numbering the commands 0, 1, ... in the child's environment, `--show-limits` its six lines on stderr then carried on; COMMAND defaulted `echo` (found in PATH as a shell would), each child given an empty input, never xargs's own; exit 1 usage and size errors, 123 any child 1-125, 124 a child 255, 125 a signal death, 126 cannot start, 127 not found | `-P` is checked, not acted on: one command runs at a time, the slot variable still counting; ARG_MAX is fixed 2097152 (Linux's), less 2048 and the environment's own bytes; Haisos has no `/dev/tty`, so `-p` fails its first command as GNU's does without one and exits 1, and `-o` too (GNU crashes on its assertion); a child's exit code 129-254 is read as a signal death, a stop being 143 and indistinguishable from `exit(143)`; `-I` checks its replaced line against GNU's clean ladder, not the raw-item-length quirk GNU's leaked size state shows after the first item |
 
 `man` reaches the pages through `CreateStandardBuiltinCommands()` directly: a
 pure function returning fresh, stateless command objects compiled into Haisos

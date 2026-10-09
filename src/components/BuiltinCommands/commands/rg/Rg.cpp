@@ -81,14 +81,16 @@ void MultilinePatternError(BuiltinContext& context) {
         "When multiline mode is enabled, new line characters can be matched.\n");
 }
 
-// A literal for -F, as one Perl-subset regex: every byte that is not
-// [A-Za-z0-9_] written \xhh, so no metacharacter of the pattern is read.
+// A literal for -F, as one Rust-syntax regex: every ASCII byte that is not
+// [A-Za-z0-9_] written \xhh, so no metacharacter of the pattern is read. A
+// byte above 0x7f stays as it is: \xhh there would be a code point, its
+// UTF-8 bytes, to TranslateRgPattern -- not the byte itself.
 std::string EscapeLiteral(const std::string& pattern) {
     std::string out;
     for (const char c : pattern) {
         const unsigned char byte = static_cast<unsigned char>(c);
         if ((byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z')
-            || (byte >= '0' && byte <= '9') || byte == '_') {
+            || (byte >= '0' && byte <= '9') || byte == '_' || byte >= 0x80) {
             out += c;
         } else {
             char hex[8];

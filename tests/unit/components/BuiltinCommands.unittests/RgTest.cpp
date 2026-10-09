@@ -184,6 +184,10 @@ TEST_F(BuiltinCommandsTest, RgCaseFlags) {
     EXPECT_EQ(RunCaptured("rg", {"-i", "-s", "todo", "t1"}, std::nullopt, "/r").status, 1);
     EXPECT_EQ(RunCaptured("rg", {"-s", "-i", "todo", "t1"}, std::nullopt, "/r").out, "TODO\n");
     EXPECT_EQ(RunCaptured("rg", {"-F", "T.D", "t1"}, std::nullopt, "/r").status, 1);
+    // A non-ASCII literal is its own bytes, not \xhh code points.
+    WriteTo(root, "/r/cafe", "caf\xc3\xa9 (x)\n");
+    EXPECT_EQ(RunCaptured("rg", {"-F", "\xc3\xa9 (", "cafe"}, std::nullopt, "/r").out,
+              "caf\xc3\xa9 (x)\n");
     EXPECT_EQ(RunCaptured("rg", {"-w", "-o", "f\\w*", "src/a.c"}, std::nullopt, "/r").out,
         "four\nfive\n");
     EXPECT_EQ(RunCaptured("rg", {"-x", "six", "src/a.c"}, std::nullopt, "/r").out, "six\n");

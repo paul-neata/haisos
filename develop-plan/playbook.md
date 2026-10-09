@@ -28,7 +28,7 @@ Pause: no
 | 20 | [search--grep-recursive](tasks/search--grep-recursive.md) | done | 0.5.16 | 19 | #58 | 1 | 0C 3H fixed, 2M 3L open | Windows green |
 | 21 | [search--find-tests](tasks/search--find-tests.md) | done | 0.5.22 | 3, 20, 1, 8, 4 | #64 | 1 | 0C 3H 2M fixed, 0M 5L open | Windows red, not checked; 2843 lines, 1.8M Ollama tokens |
 | 22 | [search--find-actions](tasks/search--find-actions.md) | done | 0.5.23 | 21, 9, 11, 6, 12, 4 | #65 | 1 | 0C 1H fixed, 1M 4L open | Windows red, not checked |
-| 23 | [search--xargs](tasks/search--xargs.md) | in-progress | 0.5.24 | 22, 9, 4, 6 | | | | |
+| 23 | [search--xargs](tasks/search--xargs.md) | in-review | 0.5.24 | 22, 9, 4, 6 | #66 | 1 | | |
 | 24 | [search--sed-core](tasks/search--sed-core.md) | todo | | 3, 4 | | | | |
 | 25 | [search--sed-advanced](tasks/search--sed-advanced.md) | todo | | 24, 1 | | | | |
 | 26 | [search--rg-search](tasks/search--rg-search.md) | todo | | 20 | | | | |

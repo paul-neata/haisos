@@ -102,3 +102,4 @@
 - 2026-10-09 18:05 UTC -- search--rg-ignore merged #71 as 0.5.29: 0C 2H fixed, 4M 3L open, 2 tries
 - 2026-10-09 18:23 UTC -- start diff--diff-core (0.5.30), re-planned clean-room
 - 2026-10-09 19:09 UTC -- diff--diff-core: PR #72 holds only a 56-line header (model exited 1); fix round to implement the plan
+- 2026-10-09 19:53 UTC -- diff--diff-core: 3 runs (32000-token cap twice, then Ollama 429; account changed by the user); engine committed, fix round 4 for the rest

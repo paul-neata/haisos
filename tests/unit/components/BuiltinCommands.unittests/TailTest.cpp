@@ -40,6 +40,13 @@ TEST_F(BuiltinCommandsTest, TailLinesAndBytes) {
     EXPECT_EQ(RunCaptured("tail", {"-n", "2", "/abc"}).out, "b\nc");
     EXPECT_EQ(RunCaptured("tail", {"-n", "0", "/n12"}).out, "");
     EXPECT_EQ(RunCaptured("tail", {"-n", "+0", "/abc"}).out, "a\nb\nc");
+    // The obsolete form with no number: 10 of the unit, so -b is 5120 bytes.
+    EXPECT_EQ(RunCaptured("tail", {"-b", "/n12"}).out,
+        "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n");
+    // "-c" alone is the regular option, so the FILE is its missing argument.
+    Captured regularC = RunCaptured("tail", {"-c", "/n12"});
+    EXPECT_EQ(regularC.err, "tail: invalid number of bytes: '/n12'\n");
+    EXPECT_EQ(regularC.status, 1);
     EXPECT_EQ(RunCaptured("tail", {"-z", "-n", "2"}, std::string("x\0y\0z", 5)).out,
         std::string("y\0z", 3));
     // No FILE: the standard input.

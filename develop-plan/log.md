@@ -105,3 +105,4 @@
 - 2026-10-09 19:53 UTC -- diff--diff-core: 3 runs (32000-token cap twice, then Ollama 429; account changed by the user); engine committed, fix round 4 for the rest
 - 2026-10-09 20:27 UTC -- diff--diff-core: PR #72 complete after 4 runs (+2273), windows-failed (ignored)
 - 2026-10-09 21:02 UTC -- diff--diff-core merged #72 as 0.5.30: 1C 2H 2M 1L fixed, 1M 2L open, 4 tries
+- 2026-10-09 21:04 UTC -- start diff--diff-recursive (0.5.31)

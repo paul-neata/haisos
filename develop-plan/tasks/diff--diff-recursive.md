@@ -1,9 +1,9 @@
 # Task diff--diff-recursive: diff on directories -- -r, -N, -x, -S, a directory and a file
 
 - Rock: diff
-- Depends on: diff--diff-core (`DiffTwoFiles`, `DiffSettings`), search--grep-recursive (`FnMatch`, contract 6 -- earlier in the playbook)
+- Depends on: diff--diff-core (`DiffTwoFiles`, `DiffSettings`; done, PR #72), search--grep-recursive (`FnMatch`; done)
 - Size: ~550 changed lines in ~4 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ e8bb4a5
 - PR title: diff: directories, -r, -N, --unidirectional-new-file, -x/-X, -S
 
 ## Goal
@@ -22,27 +22,44 @@ reads).
 
 ## Context
 
+**Clean-room rule (the user's, above every other rule; root `CLAUDE.md`
+"Clean-room rule"):** no code is copied from any other program, whatever its
+licence, and GNU diffutils' source is never read or reproduced. Everything
+here is *behaviour* -- the GNU diffutils manual, the man pages, and what GNU
+diff 3.10 prints on this host (`LC_ALL=C`); verify any doubt by running it.
+Write the code from scratch, shaped by Haisos's own structure.
+
+**Write in pieces:** never write more than ~250 lines in one Write/Edit call
+(build a file up with several Edits), and commit after each file or step --
+earlier runs died on "response exceeded the 32000 output token maximum".
+
 Read first: the root `CLAUDE.md` ("Builtin Commands", "Security"),
 `src/components/BuiltinCommands/CLAUDE.md`, the plan
 `develop-plan/tasks/diff--diff-core.md` and its code in
 `src/components/BuiltinCommands/commands/diff/` (`Diff.h`: `DiffSettings`,
 `DiffTwoFiles(context, settings, name0, name1, header)`; `Diff.cpp`'s option
-table and `Run`), `commands/ls/Ls.cpp` (walking a directory with
+table `Options()` and `DiffCommand::Run`, which ends with the two-operand
+check and `DiffTwoFiles`; `DiffOutput.h`'s `DiffHeaderFile`), `BuiltinText.h`
+(`OpenInputOperand`, `OpenFailureText`, `GnuQuote`), `commands/ls/Ls.cpp` (walking a directory with
 `IO().ReadDirectory` and `IO().Stat`).
 
 What earlier tasks provide, as if on develop:
 - diff--diff-core: everything in `commands/diff/`; the options of this task
   are already in `Options()` as `kBuiltinNotTreated` -- give them ids.
-  `DiffTwoFiles` currently refuses a directory operand with `diff: NAME: Is a
-  directory`; this task takes directories before it is called.
-- search--grep-recursive, `src/components/BuiltinCommands/BuiltinFnmatch.h`:
+  `DiffTwoFiles` refuses a directory operand through `OpenInputOperand`'s
+  `InputOpenFailure::Directory` (`diff: NAME: Is a directory`); that stays as
+  the safety net -- this task takes directories before it is called.
+- search--grep-recursive, `src/components/BuiltinCommands/BuiltinFnmatch.h`
+  (`#include "BuiltinFnmatch.h"`, namespace `Haisos`):
   `bool FnMatch(std::string_view pattern, std::string_view text, int flags = 0);`
-  with `kFnmPathname`, `kFnmPeriod`, `kFnmCaseFold`, `kFnmLeadingDir` (glibc
-  fnmatch).
+  with `kFnmPathname`, `kFnmNoEscape`, `kFnmPeriod`, `kFnmLeadingDir`,
+  `kFnmCaseFold`. Grep's directory walk (`commands/grep/Grep.cpp`, around its
+  `ReadDirectory` call) and `commands/du/Du.cpp` show the idiom for listing
+  with `context.IO()`.
 
-Reference: GNU diffutils 3.10 `src/diff.c` (`compare_files`) and `src/dir.c`
-(`diff_dirs`). The container has GNU diff 3.10: check anything not spelled
-out here with `LC_ALL=C TZ=UTC diff ...`.
+Reference: the GNU diffutils manual ("Comparing Directories", "Options to diff
+for directories") and GNU diff 3.10 run on this host. The container has it:
+check anything not spelled out here with `LC_ALL=C TZ=UTC diff ...`.
 
 ## Changes
 
@@ -65,8 +82,7 @@ struct DiffTreeSettings {
     std::string switchString;            // " -r -x 'o*'" -- see below; empty without options
 };
 
-// GNU's compare_files for two operands as given on the command line (no
-// parent): files, directories, "-", a missing one (with -N/-P). Prints
+// Compares two operands as given on the command line: files, directories, "-", a missing one (with -N/-P). Prints
 // everything; returns the exit status 0/1/2.
 int DiffOperands(BuiltinContext& context, const DiffSettings& settings,
                  const DiffTreeSettings& tree, const std::string& name0, const std::string& name1);
@@ -76,8 +92,11 @@ int DiffOperands(BuiltinContext& context, const DiffSettings& settings,
 1. Stat both (`-` is standard input, never a directory). Missing -> with
    `-N`, or `--unidirectional-new-file` for name0 only, and the other one
    existing (or `-`): treat it as *nonexistent* (an empty file, header time
-   the epoch: `FileDateTime{0, 0}`, printed through `FormatDateTime` in
-   local time as every header time is); otherwise `diff: NAME: No such file
+   the epoch: `FileDateTime{0, 0}`, printed through `FormatDateTime` as every
+   header time is). `DiffTwoFiles` opens its operands itself, so give it two
+   trailing parameters, `bool missing0 = false, bool missing1 = false`: a
+   missing side is read as empty bytes (no open, no `Stat`) and shows the
+   epoch time in a header; otherwise `diff: NAME: No such file
    or directory`, 2 (both reported).
 2. Exactly one is a directory: `-` with a directory -> `diff: cannot compare
    '-' to a directory` (no Try), 2. Else replace the directory operand by
@@ -112,15 +131,18 @@ top level):
        `regular file`, `regular empty file` (size 0), `directory` or
        `character special file`; labels replace the paths when given;
      - two files: `DiffTwoFiles(context, settings, P0, P1, header)` with
-       `header = "diff" + switchString + " " + P0 + " " + P1` (each path as
-       diff--diff-core escapes header names, GNU's `c_escape`; with
+       `header = "diff" + switchString + " " + P0 + " " + P1` (each path quoted as
+       the `---`/`+++` header lines quote file names -- `QuoteHeaderName`, now in
+       `DiffOutput.cpp`'s anonymous namespace: move it to `DiffOutput.h` (declared
+       in `namespace Haisos`) so this file can use it; with
        `--label`, the label in place of the path, escaped the same way --
        GNU prints `diff -r -L 'x y' "x y" rb/s/y`). The header is printed
        only when the pair produces output (not with `-q`, not for `Binary
        files ... differ`, not when identical).
 4. The status of a directory comparison is the maximum of its entries'.
 
-**The switch string** (GNU's `option_list`): every command-line word that
+**The switch string** (the options echoed in the `diff [OPTIONS] A B` line;
+observed: they appear as typed): every command-line word that
 is an option or an option's separate argument, in the order given, each
 preceded by a space and written with `ShellEscapeQuoted(word)` (quoted only
 when needed: `-x 'o*'`, `'--exclude=a b'`); operands and a `--` are left
@@ -128,7 +150,11 @@ out. Classify the words with the same rules `ParseBuiltinArgs` uses (a
 cluster ending in an option taking an argument takes the next word; a long
 option with a Required argument and no `=` takes the next word) -- write a
 small `std::vector<std::string> DiffOptionWords(const std::vector<std::string>& args, const std::vector<BuiltinOption>& options)`
-in `Diff.cpp` for it. Example: `diff ra -r -x 'o*' rb` -> `diff -r -x 'o*'
+in `Diff.cpp` for it (`ParsedBuiltinOption::spelling` in `BuiltinCommand.h`
+is the option as given without its argument, but the parsed result records
+neither clusters nor which words were separate arguments, so classify the raw
+`context.Args()` yourself, or add what is missing to `ParsedBuiltinOption`).
+Example: `diff ra -r -x 'o*' rb` -> `diff -r -x 'o*'
 ra/x rb/x`.
 
 ### Changes to `src/components/BuiltinCommands/commands/diff/Diff.cpp`
@@ -150,18 +176,45 @@ ra/x rb/x`.
   `DiffOperands(op, T)`; the status is the maximum. Otherwise the two-operand
   rule of diff--diff-core, then `DiffOperands(op0, op1)` instead of
   `DiffTwoFiles`.
-- Remove diff--diff-core's interim `Is a directory` refusal from
-  `DiffTwoFiles` (a directory never reaches it now).
-- Bump the version to `1.1.0`.
+- Keep `DiffTwoFiles`'s `Is a directory` path (a directory never reaches it
+  now; it stays as the safety net).
+- Bump `Version()` (`DiffCommand`, `Diff.cpp`) from `1.0.0` to `1.1.0`.
+
+### Findings of #72 folded in (diff engine and `diff -e`)
+
+Each with a test in `DiffTest.cpp` and a commit of its own:
+- **Quadratic block placement** (`DiffEngine.cpp`, the block-sliding loop
+  that calls `UnchangedBefore(flags, regionStart, e)` before the slide and
+  again after a merge): the count of unchanged lines before the block is
+  recounted from the region start. Keep it as a running value moved with the
+  block (the loop already does `++u` per line slid) and, after a merge, update
+  it by the lines the merge swallowed rather than recounting from
+  `regionStart`. Test: two 20000-line files with a long run of equal lines
+  moved by an insertion finish quickly (a generous bound) with the same
+  script as before.
+- **Search tables copied every step** (`DiffEngine.cpp`, `prevVf = vf.values;
+  prevVb = vb.values;` at the start of each step D): avoid the full copy --
+  e.g. swap two tables per direction and re-initialise only the diagonals
+  `-D..D` the step visits, or keep one table and read each diagonal's old
+  value before overwriting it. Output must not change: the existing Diff tests
+  pass untouched, plus one test with a large, very different pair of files.
+- **`diff -e f f` on a file without a final newline** must exit 0 and print
+  nothing, as GNU does (verified on this host: `printf 'a\nb' > f; diff -e f
+  f; echo $?` prints `0`). Today `DiffTwoFiles` reports `No newline at end of
+  file` and exits 2 whenever `same && newlineTrouble`. Fix: identical files
+  return 0 silently in `-e` style too; the trouble is reported only when
+  there is a difference to print. Test: `diff -e f f` -> no output, 0;
+  `diff -e f g` (differing, `f` lacking the newline) keeps its behaviour.
 
 ### CMake
 
 Add `commands/diff/DiffDirectories.cpp` to
-`src/components/BuiltinCommands/CMakeLists.txt`.
+`src/components/BuiltinCommands/CMakeLists.txt`, in the `commands/diff/` group
+next to `Diff.cpp`, `DiffEngine.cpp`, `DiffOutput.cpp`.
 
 ## Tests
 
-In `tests/unit/components/BuiltinCommands.unittests/DiffTest.cpp` (exists),
+In `tests/unit/components/BuiltinCommands.unittests/DiffTest.cpp` (exists, already in the unit-test target: no CMake change there),
 `TEST_F(BuiltinCommandsTest, DiffDir...)`. A helper builds the tree used by
 most tests under `/t` (run in `/t`): `ra/x` = `1\n`, `rb/x` = `2\n`, `ra/s/y`
 = `a\n`, `rb/s/y` = `b\n`, `ra/only` = `q\n`, `ra/onlydir/` (empty dir),

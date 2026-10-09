@@ -2,8 +2,8 @@
 
 - Rock: search
 - Depends on: search--rg-search
-- Size: ~800 changed lines in ~6 files
-- Plan checked against: develop @ ccb9dbe
+- Size: ~900 changed lines in ~8 files
+- Plan checked against: develop @ d6c7924
 - PR title: rg: hidden files, .gitignore/.ignore/.rgignore, -g, -t, -u
 
 ## Goal
@@ -21,22 +21,55 @@ build output and `node_modules` left out exactly as ripgrep leaves them out.
 
 ## Context
 
+**Clean-room rule (the user's; root `CLAUDE.md`):** never read, copy, port or
+paraphrase another program's source -- ripgrep's, its `ignore` crate's,
+`globset`'s, git's, whatever the licence. Everything here is written from
+scratch from the behaviour this plan states and from the real program's
+observed output; where something is unclear, run `rg` and look at what it
+prints, not at how it is written.
+
 Read first: `develop-plan/tasks/search--rg-search.md` and its code in
-`src/components/BuiltinCommands/commands/rg/` (`RgSearch.cpp`: the walk,
-where each directory's entries are visited in byte order, and where an
-implicit `.` prints names without `./`), `src/components/BuiltinCommands/BuiltinFnmatch.h`
+`src/components/BuiltinCommands/commands/rg/`: `RgSearch.cpp` -- the walk is
+the `walk` lambda inside `RgSearch()` (it reads `context.IO().ReadDirectory(dir)`,
+drops `.`/`..`, sorts the `DirectoryEntry` list by name, recurses on
+`DirectoryEntryType::Dir`, skips `CharDevice`, and prints `--files` paths
+with `printer.Path(child)` or calls the `searchFile(child, false)` lambda;
+operands are handled in the loop after it; an implicit `.` has an empty
+prefix so names print without `./`; the "No files were searched" message
+already exists, driven by `filesSearched`); `RgSearch.h` (`RgSettings`,
+`RgResult`, `RgSearch(context, settings, matcher, paths)`); `Rg.cpp` (the
+`RgOptionId` enum and the option table -- a flag is treated by giving it an
+id there instead of `kBuiltinNotTreated`, and a `case` in `Run()`'s option
+loop; `ParseNumberFlag` reads `NUM` flags with rg's errors);
+`RgRegex.cpp` (the Rust-syntax translator, not touched except as under
+"Folded in"). Also `src/components/BuiltinCommands/BuiltinFnmatch.h`
 (`FnMatch(pattern, text, flags)`, `kFnmPathname`, `kFnmPeriod`,
 `kFnmCaseFold`, `kFnmLeadingDir`, `kFnmNoEscape` -- glibc fnmatch), the root
 `CLAUDE.md` ("Security", "Builtin Commands").
 
-What exists, by exact name: `rg` 1.1.0 (after `search--rg-regex`, or 1.0.0
-if this task runs first -- bump to the next minor either way), whose option
-table already lists every flag of this task as `kBuiltinNotTreated`;
+What exists, by exact name: `rg` 1.1.0 (both `search--rg-search` and
+`search--rg-regex` are done; this task makes it 1.2.0), whose option table
+already lists every flag of this task as `kBuiltinNotTreated` (`-L --follow
+--no-follow -g --glob --glob-case-insensitive --no-glob-case-insensitive
+-. --hidden --no-hidden --iglob -d --max-depth --maxdepth --no-ignore
+--ignore --no-ignore-dot --ignore-dot --no-ignore-exclude --ignore-exclude
+--no-ignore-parent --ignore-parent --no-ignore-vcs --ignore-vcs
+--no-require-git --require-git -t --type -T --type-not --type-list -u
+--unrestricted`; `--ignore-file*`, `--no-ignore-files`/`--ignore-files`,
+`--no-ignore-global`/`--ignore-global`, `--max-filesize`, `--one-file-system`,
+`--type-add`, `--type-clear` stay not treated); `--binary`/`--no-binary`
+are already treated (`RgSettings::binary`: a walked file is then searched as
+an operand is); `RgSettings` has no filter fields yet;
 `FnMatch`; `IFileIO::ReadDirectory`, `IFileIO::Stat`, `IFileIO::ResolvePath`
 (the absolute path inside the OS), `BuiltinLineReader` and
-`OpenInputOperand` (`BuiltinText.h`) for reading ignore files.
+`OpenInputOperand` (`BuiltinText.h`) for reading ignore files. The unit-test
+slots: `tests/unit/components/BuiltinCommands.unittests/RgTest.cpp` (fixture
+`BuiltinCommandsTest`, helpers `RunCaptured("rg", {...}, std::nullopt, cwd)`,
+`WriteTo`, the `root` in-memory filesystem) and `RgRegexTest.cpp`; the
+existing Rg tests hold no hidden or ignored files, so they must pass
+unchanged.
 
-Reference: ripgrep 14.1.1 run as `rg` (see `search--rg-search.md`), with
+Reference: ripgrep 14.1.1 run as `rg` (observed output only) (see `search--rg-search.md`), with
 `--sort path` and `LC_ALL=C`; every expected output below was produced so.
 
 ## Changes
@@ -67,7 +100,7 @@ public:
 };
 ```
 
-Pattern lines (gitignore(5), as the `ignore` crate reads them): a trailing
+Pattern lines (gitignore(5), as ripgrep is observed to read them): a trailing
 `\r` dropped; blank lines and lines starting with `#` skipped (`\#` is a
 literal `#`); trailing spaces dropped unless escaped (`\ `); a leading `!`
 negates (`\!` is a literal `!`); a trailing `/` makes the pattern match
@@ -88,11 +121,11 @@ mix: keep each pattern's own caseFold).
 
 ### The walk (`RgSearch.cpp`)
 
-Settings: `hidden` (`--hidden`/`-.`; `--no-hidden`), `noIgnoreDot`
+Settings (new fields of `RgSettings`, plus the globs and types, which `Rg.cpp` parses and hands over): `hidden` (`--hidden`/`-.`; `--no-hidden`), `noIgnoreDot`
 (`.ignore`, `.rgignore`), `noIgnoreVcs` (`.gitignore`,
 `.git/info/exclude`), `noIgnoreExclude` (`.git/info/exclude` only),
 `noIgnoreParent`, `requireGit` (default true; `--no-require-git`),
-`binaryWhileWalking` (`--binary`, `-uuu`), `maxDepth` (optional), the
+`binary` (the existing `RgSettings::binary`: `--binary`, `-uuu`), `maxDepth` (optional), the
 globs, the types. `--no-ignore` sets the three `noIgnore*`; `--ignore`,
 `--ignore-dot`, `--ignore-vcs`, `--ignore-exclude`, `--ignore-parent`,
 `--require-git` undo their counterparts; last one wins. `-u` counted: 1 =
@@ -125,7 +158,7 @@ each file once (cache by absolute directory), parse with `RgGitignore`,
 and match an entry by its path relative to the file's own directory
 (`.git/info/exclude`: relative to the repository root).
 
-**Deciding an entry met while walking** (the `ignore` crate's order):
+**Deciding an entry met while walking** (ripgrep's observed order):
 1. Globs (`-g`, `--iglob`), matched against the path relative to the
    working directory (the printed path without a leading `./`): Ignore ->
    skip; Whitelist -> search/descend, skipping steps 2-4; no match: a
@@ -140,7 +173,12 @@ and match an entry by its path relative to the file's own directory
 4. Hidden (a name starting with `.`), not `--hidden`, not whitelisted ->
    skip.
 A skipped directory is not descended. Then the binary rule of rg-search
-applies to files (`binaryWhileWalking` treats walked files as operands).
+applies to files (`settings.binary` treats walked files as operands, as
+`SearchFile`'s `binaryAsOperand` already does). The decision is made in the
+`walk` lambda, per entry, before the `Dir` / `--files` / `searchFile`
+branches; `--files` lists exactly what would be searched. A glob-only
+filter (`-g '*.zzz'`) that leaves nothing searched takes the existing
+`noFilesSearched` path.
 
 ### Types (`commands/rg/RgTypes.cpp`, new)
 
@@ -186,21 +224,27 @@ xml: *.dtd, *.rng, *.sch, *.xhtml, *.xjb, *.xml, *.xml.dist, *.xsd, *.xsl, *.xsl
 yaml: *.yaml, *.yml
 zig: *.zig
 ```
-(Each row is exactly rg 14.1.1's.) `-t`/`-T` with a name not in the table
+(Each row is what `rg --type-list` of 14.1.1 prints for that name.) `-t`/`-T` with a name not in the table
 -> `rg: unrecognized file type: foo`, exit 2. `--type-list` prints the
 table and exits 0 (no pattern needed). `--type-add`/`--type-clear` stay
 not treated.
 
 ### `Rg.cpp`
 
-Flip the flags above to treated ids; bump the version; `Help()` notes: the
+Flip the flags above to treated ids (new `RgOptionId` enumerators, `case`s in
+`Run()`; a `-t`/`-T` name is checked there, before the search, so the error
+exits 2 at once); bump the version to 1.2.0; `Help()` notes: the
 type list is a subset (`--type-list` shows it); no global gitignore
 (`core.excludesFile`) is read; `-L` has no effect.
 
 ## Tests
 
-`tests/unit/components/BuiltinCommands.unittests/RgIgnoreTest.cpp` (new,
-in the CMakeLists). Plain `TEST(RgGitignoreTest, ...)` on `RgGitignore`:
+`tests/unit/components/BuiltinCommands.unittests/RgIgnoreTest.cpp` (new; add
+it to `add_executable(BuiltinCommands.unittests ...)` in
+`tests/unit/components/BuiltinCommands.unittests/CMakeLists.txt`, after
+`RgRegexTest.cpp`; the new sources `commands/rg/RgIgnore.cpp` and
+`commands/rg/RgTypes.cpp` go in `src/components/BuiltinCommands/CMakeLists.txt`
+after `commands/rg/RgRegex.cpp`). Plain `TEST(RgGitignoreTest, ...)` on `RgGitignore`:
 `*.log` ignores `a/drop.log`; then `!keep.log` whitelists `a/keep.log`;
 `build/` ignores the directory `build` and `x/build` but not the file
 `x/build.txt`; `/top.txt` ignores `top.txt` only at the top (`a/top.txt`:
@@ -258,9 +302,33 @@ bash ./scripts/test_linux.sh L U BuiltinCommands
 bash ./scripts/test_linux.sh L U
 ```
 
+## Folded in: #70's open mediums (`RgRegex.cpp`, `RgRegexTest.cpp`)
+
+Two small fixes to the Rust-syntax translator, a few dozen lines each:
+- A quantifier with a 0 minimum on a zero-width assertion makes it
+  optional, as in Rust's regex: `^*abc`, `\b?x`, `^{0,2}`, `$*`, `\A*x`
+  accept input where the assertion does not hold (`^*abc` matches `xabc`;
+  `\b?x` matches `ax`). Today `EmitQuantifier` (line ~164, simple `* ? +`)
+  keeps the assertion, and `ParseCountedQuantifier` (~485) drops it only for
+  an explicit `{0}`-style minimum reached through `boundaryRepeat`. A
+  non-zero minimum (`+`, `{1,}`, `{2}`) still leaves the assertion itself.
+  Tighten `RgRegexTest.cpp` ~207-209 (`^*`, `$*`, `\A*x` matching only the
+  empty/`x` text) with cases that fail on the old reading: `^*abc` on
+  `xabc` true, `\b?x` on `ax` true, `^{0,2}abc` on `xabc` true, and
+  `^+abc` on `xabc` still false.
+- A quantifier after a multi-byte UTF-8 literal, or after `\u{..}` /
+  `\x{..}` naming a code point above 0x7f, repeats the whole code point,
+  not its last byte: the literal path (~221, bytes >= 0x80 emitted raw one
+  at a time) and `EmitCodePoint` (~637) must emit such a code point's bytes
+  as one atom (grouped `(?:...)`). Tests: `Ã©+` read as `é+` matches
+  `Ã©Ã©` fully (a match of 4 bytes); `\u{e9}{2}` matches
+  `Ã©Ã©` and not `Ã©©`; `\u{e9}?x` on `x` true.
+
 ## Docs
 
-`src/components/BuiltinCommands/CLAUDE.md`: the `rg` row (new version;
+`src/components/BuiltinCommands/CLAUDE.md`: the `rg` row (version 1.2.0; replace
+its "no ignore rules yet (`search--rg-ignore`) ... reported as not treated"
+sentence, and add the two regex fixes to its quantifier notes;
 hidden/ignore files/globs/types treated; documented exceptions: the type
 list is a subset, no global gitignore, `-L` without effect,
 `--ignore-file`/`--type-add` not treated); a short "rg's filters" paragraph
@@ -277,6 +345,7 @@ mentions `.gitignore`.
 - [ ] gitignore pattern rules (`!`, anchoring, trailing `/`, `**`) as tested;
       no recursion per byte.
 - [ ] Files read only through `context.IO()`.
+- [ ] The two folded-in regex fixes have the tests above.
 - [ ] Full unit suite passes; CLAUDE.md files updated.
 
 ## Out of scope
@@ -284,4 +353,5 @@ mentions `.gitignore`.
 - `--ignore-file`, `--type-add`, `--type-clear`, global gitignore,
   `--one-file-system`, symbolic links.
 - The search and output (`search--rg-search`) and the regex syntax
-  (`search--rg-regex`).
+  (`search--rg-regex`), apart from the two mediums folded in above; #70's
+  other open items.

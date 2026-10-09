@@ -33,7 +33,7 @@ Pause: no
 | 25 | [search--sed-advanced](tasks/search--sed-advanced.md) | done | 0.5.26 | 24, 1 | #68 | 1 | 0C 2H fixed, 4M 3L open | Windows red, not checked |
 | 26 | [search--rg-search](tasks/search--rg-search.md) | done | 0.5.27 | 20 | #69 | 1 | 0C 2H fixed, 0M 3L open | Windows red, not checked; grep -q fix (#58) included, grep 1.2.0 |
 | 27 | [search--rg-regex](tasks/search--rg-regex.md) | done | 0.5.28 | 26 | #70 | 1 | 0C 1H fixed, 3M 4L open | Windows red, not checked; clean-room checked |
-| 28 | [search--rg-ignore](tasks/search--rg-ignore.md) | todo | | 26 | | | | |
+| 28 | [search--rg-ignore](tasks/search--rg-ignore.md) | in-progress | 0.5.29 | 26 | | | | |
 | 29 | [diff--diff-core](tasks/diff--diff-core.md) | todo | | 4, 12 | | | | |
 | 30 | [diff--diff-recursive](tasks/diff--diff-recursive.md) | todo | | 29, 20 | | | | |
 | 31 | [diff--patch-core](tasks/diff--patch-core.md) | todo | | 1, 4, 29 | | | | |
@@ -106,3 +106,4 @@ Pause: no
 - 2026-10-09 (implement) search--sed-advanced refreshed against c68238e (sed-core's real names, CMake/test slots, sed 1.1.0); folded in #67's follow-ups: s///w and w FILE to end of line, SedIsStoppedPromptly on a held-open stdin pipe, a Regex multiline . / [^...] test, the /[/p error row
 - 2026-10-09 (implement) search--rg-search refreshed against 82119e0 (GrepContext::SetPrinters, GrepFile.h/GrepSettings.h, rg keeps its own read loop, list/CMake/test slots); folded in #58 medium as a separate item: grep -q stops after a recursive match (GrepQuietStopsAfterRecursiveMatch)
 - 2026-10-09 (implement) search--rg-regex refreshed against b089568 (rg-search's real names, CMake/test slots, Regex Perl now takes \cX/\e/\1); folded in #69's three lows (--no-messages, -f open failures via a shared OpenFailureText, unreadable directory reported, exit 2)
+- 2026-10-09 (implement) search--rg-ignore refreshed against d6c7924 (rg 1.2.0, walk lambda in RgSearch(), CMake/test slots); clean-room: ignore-crate mentions reworded as observed behaviour, rule added to Context; folded in #70's two regex mediums (0-minimum quantifier on an assertion, quantified multi-byte code point)

@@ -371,6 +371,11 @@ std::pair<int64_t, int64_t> PlaceBlock(std::vector<bool>& flags, const std::vect
             flags[static_cast<size_t>(i)] = value;
         }
     };
+    // Unchanged lines of |flags| in [regionStart, e), kept as a running value
+    // through the slides and merges below: a slide down turns the block's top
+    // line unchanged (+1), a slide up over an unchanged line takes one back,
+    // and a merge only takes in lines already changed.
+    int64_t u = UnchangedBefore(flags, regionStart, e);
     bool merged = true;
     std::vector<std::pair<int64_t, int64_t>> noted;  // positions lining up, top to bottom
     while (merged) {
@@ -379,10 +384,14 @@ std::pair<int64_t, int64_t> PlaceBlock(std::vector<bool>& flags, const std::vect
         // (a) slide up while the line above equals the last line, absorbing
         // any run reached.
         while (s > regionStart && keys[static_cast<size_t>(s - 1)] == keys[static_cast<size_t>(e - 1)]) {
+            const bool aboveChanged = flags[static_cast<size_t>(s - 1)];
             flags[static_cast<size_t>(s - 1)] = true;
             flags[static_cast<size_t>(e - 1)] = false;
             --s;
             --e;
+            if (!aboveChanged) {
+                --u;
+            }
             if (s > regionStart && flags[static_cast<size_t>(s - 1)]) {
                 int64_t p = s - 1;
                 while (p > regionStart && flags[static_cast<size_t>(p - 1)]) {
@@ -394,7 +403,6 @@ std::pair<int64_t, int64_t> PlaceBlock(std::vector<bool>& flags, const std::vect
         }
         // (b) slide down as far as the line below equals the first line,
         // noting every position where the block lines up (the top included).
-        int64_t u = UnchangedBefore(flags, regionStart, e);
         if (LinesUp(other, u, regionStart, otherRegionEnd)) {
             noted.emplace_back(s, e);
         }
@@ -403,7 +411,7 @@ std::pair<int64_t, int64_t> PlaceBlock(std::vector<bool>& flags, const std::vect
             flags[static_cast<size_t>(e)] = true;
             ++s;
             ++e;
-            ++u;  // the line slid over was unchanged
+            ++u;  // the block's top line, slid over, is unchanged now
             if (e < regionEnd && flags[static_cast<size_t>(e)]) {
                 int64_t q = e;
                 while (q < regionEnd && flags[static_cast<size_t>(q)]) {
@@ -411,7 +419,6 @@ std::pair<int64_t, int64_t> PlaceBlock(std::vector<bool>& flags, const std::vect
                 }
                 e = q;
                 merged = true;
-                u = UnchangedBefore(flags, regionStart, e);  // recount after a merge
             }
             if (LinesUp(other, u, regionStart, otherRegionEnd)) {
                 noted.emplace_back(s, e);

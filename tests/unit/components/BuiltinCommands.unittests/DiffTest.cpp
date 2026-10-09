@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -1061,6 +1062,60 @@ TEST(DiffEngineTest, LargeInputsStillCorrect) {
         EXPECT_LE(static_cast<size_t>(change.line1 + change.inserted), b.LineCount());
     }
     EXPECT_EQ(Apply(a, b, script), bText);
+}
+
+TEST(DiffEngineTest, BlockPlacementFinishesQuickly) {
+    // A long run of equal lines, its lower half interleaved with insertions
+    // in the second file: the run's changed lines slide and merge down
+    // through the placement, which keeps its unchanged-line count as a
+    // running value instead of recounting the region per merge.
+    const char* kExpected[] = {
+        "[1,1,0,1]", "[2,3,0,1]", "[3,5,0,1]", "[4,7,0,1]",
+        "[5,9,0,1]", "[6,11,0,1]", "[7,13,0,1]", "[8,15,8,1]",
+    };
+    std::string aText, bText;
+    for (int i = 0; i < 16; ++i) {
+        aText += "x\n";
+    }
+    for (int i = 0; i < 8; ++i) {
+        bText += "x\nu" + std::to_string(i) + "\n";
+    }
+    bool stopped = false;
+    const auto script = ComputeDiff(TextOf(aText), TextOf(bText), DiffAnalysisOptions{},
+                                     []() { return false; }, stopped);
+    ASSERT_EQ(script.size(), 8u);
+    for (size_t i = 0; i < script.size(); ++i) {
+        const std::string got = "[" + std::to_string(script[i].line0) + "," + std::to_string(script[i].line1)
+            + "," + std::to_string(script[i].deleted) + "," + std::to_string(script[i].inserted) + "]";
+        EXPECT_STREQ(got.c_str(), kExpected[i]);
+    }
+
+    // The same shape at 20,000 lines a side finishes well within the bound.
+    const int equal = 10000;
+    aText.clear();
+    bText.clear();
+    for (int i = 0; i < 2 * equal; ++i) {
+        aText += "x\n";
+    }
+    for (int i = 0; i < equal; ++i) {
+        bText += "x\nu" + std::to_string(i) + "\n";
+    }
+    const auto start = std::chrono::steady_clock::now();
+    const auto big = ComputeDiff(TextOf(aText), TextOf(bText), DiffAnalysisOptions{},
+                                 []() { return false; }, stopped);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start);
+    ASSERT_LT(elapsed.count(), 10000);
+    ASSERT_EQ(big.size(), static_cast<size_t>(equal));
+    int64_t deleted = 0, inserted = 0;
+    for (const DiffChange& change : big) {
+        deleted += change.deleted;
+        inserted += change.inserted;
+    }
+    EXPECT_EQ(deleted, equal);
+    EXPECT_EQ(inserted, equal);
+    EXPECT_EQ(big.back().deleted, equal);
+    EXPECT_EQ(Apply(TextOf(aText), TextOf(bText), big), bText);
 }
 
 TEST(DiffEngineTest, StopEndsEarly) {

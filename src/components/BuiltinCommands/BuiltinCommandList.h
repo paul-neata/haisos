@@ -19,6 +19,7 @@ std::shared_ptr<IBuiltinCommand> CreateCmpCommand();
 std::shared_ptr<IBuiltinCommand> CreateCpCommand();
 std::shared_ptr<IBuiltinCommand> CreateCutCommand();
 std::shared_ptr<IBuiltinCommand> CreateDateCommand();
+std::shared_ptr<IBuiltinCommand> CreateDiffCommand();
 std::shared_ptr<IBuiltinCommand> CreateDirnameCommand();
 std::shared_ptr<IBuiltinCommand> CreateDuCommand();
 std::shared_ptr<IBuiltinCommand> CreateEchoCommand();
@@ -70,6 +71,7 @@ inline std::vector<std::shared_ptr<IBuiltinCommand>> CreateStandardBuiltinComman
         CreateCpCommand(),
         CreateCutCommand(),
         CreateDateCommand(),
+        CreateDiffCommand(),
         CreateDirnameCommand(),
         CreateDuCommand(),
         CreateEchoCommand(),

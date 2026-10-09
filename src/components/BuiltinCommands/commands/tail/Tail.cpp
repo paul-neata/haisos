@@ -601,9 +601,6 @@ public:
             if (result == 0) {
                 status = 1;
             }
-            if (printed) {
-                lastOutputName = file;
-            }
             if (following && file != "-") {
                 // The standard input is never followed (see Help).
                 anyFollowable = true;
@@ -613,6 +610,10 @@ public:
         if (!following) {
             return status;
         }
+        // GNU's tail_forever starts with the last FILE as the one last
+        // printed, whatever the initial pass wrote: appending to it prints no
+        // header, appending to any other does.
+        lastOutputName = operands.back();
         for (const auto& name : givenUpNames) {
             context.Error(ShellEscapeQuoted(name) + ": cannot follow end of this type of file; "
                 "giving up on this name");

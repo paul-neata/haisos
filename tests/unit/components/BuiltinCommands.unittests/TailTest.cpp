@@ -221,6 +221,11 @@ TEST_F(BuiltinCommandsTest, TailFollowEndsWithThePidProcess) {
         options);
     ASSERT_NE(follower, nullptr);
 
+    // While the --pid process runs, the follower keeps following.
+    std::string content;
+    ASSERT_TRUE(WaitEndsWith(*streams, "/tailout", "\tthree\n", content)) << content;
+    EXPECT_FALSE(follower->WaitToFinish(200));
+
     watched->TriggerStop();
     EXPECT_TRUE(watched->WaitToFinish(kWaitMs));
     // The follower ends once the --pid process has, without an error.
@@ -251,6 +256,37 @@ TEST_F(BuiltinCommandsTest, TailFollowMultipleFilesPrintsHeadersOnSwitch) {
     appender.reset();
     // Only a file that writes something gets the switch header.
     ASSERT_TRUE(WaitEndsWith(*streams, "/tailout", "\n==> /h1 <==\nmore\n", content)) << content;
+
+    process->TriggerStop();
+    EXPECT_TRUE(process->WaitToFinish(kWaitMs));
+    ASSERT_TRUE(process->ExitCode().has_value());
+    EXPECT_EQ(process->ExitCode().value(), 143);
+}
+
+TEST_F(BuiltinCommandsTest, TailFollowStartsWithTheLastFileAsTheLastPrinted) {
+    // GNU's tail_forever takes the last FILE as the one last printed, even
+    // when the initial pass printed nothing of it: data appended to it then
+    // comes with no header of its own.
+    WriteFile("/h1", "1\n");
+    WriteFile("/h2", "2\n");
+    StartProcessOptions options;
+    options.stdOut = streams->OpenFile("/tailout", kFileOpenWriteCreateTruncate, kFileCreateMode);
+    options.stdErr = streams->OpenFile("/tailerr", kFileOpenWriteCreateTruncate, kFileCreateMode);
+    ASSERT_NE(options.stdOut, nullptr);
+    ASSERT_NE(options.stdErr, nullptr);
+    auto process = os->StartProcess(os->GetOsEnvironment()->Clone(), "/bin/tail",
+        {"-s", "0.01", "-n0", "-f", "/h1", "/h2"}, "/", options);
+    ASSERT_NE(process, nullptr);
+
+    std::string content;
+    ASSERT_TRUE(WaitEndsWith(*streams, "/tailout", "==> /h1 <==\n\n==> /h2 <==\n", content)) << content;
+
+    auto appender = root->OpenFile("/h2", kFileOpenWriteCreateAppend, kFileCreateMode);
+    ASSERT_NE(appender, nullptr);
+    ASSERT_EQ(appender->Write("more\n", 5), 5);
+    appender.reset();
+    ASSERT_TRUE(WaitEndsWith(*streams, "/tailout", "more\n", content)) << content;
+    EXPECT_EQ(content, "==> /h1 <==\n\n==> /h2 <==\nmore\n");
 
     process->TriggerStop();
     EXPECT_TRUE(process->WaitToFinish(kWaitMs));

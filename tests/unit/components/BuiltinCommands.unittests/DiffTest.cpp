@@ -459,6 +459,27 @@ TEST_F(BuiltinCommandsTest, DiffEdScript) {
     EXPECT_EQ(captured.status, 1);
 }
 
+TEST_F(BuiltinCommandsTest, DiffEdIdenticalMissingNewline) {
+    MakeDiffFiles(root);
+    // An identical pair is silently the same in -e style too: the missing
+    // final newline is trouble only when there is a difference to print.
+    auto captured = RunCaptured("diff", {"-e", "n1", "n1"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    // A differing pair without the newline keeps its behaviour: the script,
+    // the warning, and status 2.
+    captured = RunCaptured("diff", {"-e", "n1", "n2"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "1c\nb\n.\n");
+    EXPECT_EQ(captured.err,
+              "diff: n1: No newline at end of file\n"
+              "\n"
+              "diff: n2: No newline at end of file\n"
+              "\n");
+    EXPECT_EQ(captured.status, 2);
+}
+
 TEST_F(BuiltinCommandsTest, DiffWhiteSpaceOptions) {
     MakeDiffFiles(root);
     // A change in the amount of space: -b, -E and -w all call it even.

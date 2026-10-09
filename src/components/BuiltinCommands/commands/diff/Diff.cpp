@@ -463,9 +463,11 @@ int DiffTwoFiles(BuiltinContext& context, const DiffSettings& settings,
     }
 
     const bool same = !DiffHasRealChanges(script, texts[0], texts[1], settings.output);
-    const bool newlineTrouble = !robust && !settings.brief
+    // A missing final newline is trouble only when there is a difference to
+    // print: an identical pair is silently the same, in -e style too.
+    const bool newlineTrouble = !robust && !settings.brief && !same
         && (texts[0].missingNewline || texts[1].missingNewline);
-    if (same && !newlineTrouble) {
+    if (same) {
         outHeader();
         if (settings.reportIdentical) {
             context.Out("Files " + shown0 + " and " + shown1 + " are identical\n");

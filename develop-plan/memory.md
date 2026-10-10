@@ -7,7 +7,7 @@
 - 2026-10-08: WSL interop broken on the host (every .exe: "Exec format error"). Plan Direction: ignore task PRs' Windows checks (no waiting, re-runs or fixes); a PR green on Linux is reviewed and merged, Notes "Windows not checked". Windows built and tested once in the final phase; final--windows-fix (#54) runs last.
 - HaisosOS.unittests is flaky on Windows CI (#44, #51, #52 -- on #52 a 30 s timeout, a hang); a fix task is asked in Questions.
 - Windows' 1 MB stack: recursive parsers need low depth limits (Regex nesting 250). awk's kAwkMaxCallDepth 200 (#82) may overflow it: final--windows-fix checks UserFunctions/FunctionErrors f(199)/f(200) and lowers the limit or enlarges the builtin thread's stack.
-- When awk--printf-math is re-checked: fold in #82's medium (a bound parameter whose chain became an array: fatal in a scalar context, `length: received array argument`, split's own message; three tests) and lows (ScalarRefOf name built only on failure; CLAUDE.md split bullet backtick; FlowUnwind explicit in Run*Items).
+- When awk--io is re-checked: fold in #83 lows (AwkBuiltins.cpp:123 sprintf reads CONVFMT after its arguments; AwkInterpreter.cpp:463 noreturn fatal lambda; :1390 the "a, from x" string only when used).
 - Interim agent notifications ("may be interim") carry a token count: record with it at once and correct the record at the next publish -- don't wait.
 - glm-5.3 habit: GCC-only C++ (positional aggregate inits that narrow, a local named `stdin`) -- MSVC-only compile errors show up on Windows CI; the reviewer can fix them portably and CI verifies.
 - On this host plain `grep` is ugrep; GNU grep 3.11 is /usr/bin/grep (reference for reviews).

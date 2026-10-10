@@ -10,6 +10,7 @@
 #include "BuiltinCommandsFixture.h"
 #include "BuiltinDate.h"
 #include "commands/diff/DiffEngine.h"
+#include "commands/diff/Diff.h"
 
 namespace Haisos {
 namespace {
@@ -507,23 +508,88 @@ TEST_F(BuiltinCommandsTest, DiffEdScript) {
 
 TEST_F(BuiltinCommandsTest, DiffEdIdenticalMissingNewline) {
     MakeDiffFiles(root);
-    // An identical pair is silently the same in -e style too: the missing
-    // final newline is trouble only when there is a difference to print.
-    auto captured = RunCaptured("diff", {"-e", "n1", "n1"}, std::nullopt, "/");
+    // Two distinct files, identical, both missing the final newline: GNU
+    // warns for each and exits 2, with no script and no identical line
+    // even under -s. Only the same file stays silent.
+    WriteFile("/q1", "a\nb");
+    WriteFile("/q2", "a\nb");
+    WriteFile("/qm", "a\nb\n");
+    ASSERT_EQ(root->CreateDirectory("/qd", kDirMode), 0);
+
+    auto captured = RunCaptured("diff", {"-e", "q1", "q2"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err,
+              "diff: q1: No newline at end of file\n"
+              "\n"
+              "diff: q2: No newline at end of file\n"
+              "\n");
+    EXPECT_EQ(captured.status, 2);
+
+    // -s does not call them identical.
+    captured = RunCaptured("diff", {"-s", "-e", "q1", "q2"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err,
+              "diff: q1: No newline at end of file\n"
+              "\n"
+              "diff: q2: No newline at end of file\n"
+              "\n");
+    EXPECT_EQ(captured.status, 2);
+
+    // One side complete: only that side's warning.
+    captured = RunCaptured("diff", {"-e", "q1", "qm"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "diff: q1: No newline at end of file\n\n");
+    EXPECT_EQ(captured.status, 2);
+
+    // The standard input against a file: the input warns as its side does.
+    captured = RunCaptured("diff", {"-e", "-", "q2"}, "a\nb", "/");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err,
+              "diff: -: No newline at end of file\n"
+              "\n"
+              "diff: q2: No newline at end of file\n"
+              "\n");
+    EXPECT_EQ(captured.status, 2);
+
+    // The same file under every spelling: silent 0, and -s identical.
+    for (const std::string& second : {"q1", "./q1", "qd/../q1"}) {
+        captured = RunCaptured("diff", {"-e", "q1", second}, std::nullopt, "/");
+        EXPECT_EQ(captured.out, "") << second;
+        EXPECT_EQ(captured.err, "") << second;
+        EXPECT_EQ(captured.status, 0) << second;
+    }
+    captured = RunCaptured("diff", {"-e", "-", "-"}, "a\nb", "/");
     EXPECT_EQ(captured.out, "");
     EXPECT_EQ(captured.err, "");
     EXPECT_EQ(captured.status, 0);
+    captured = RunCaptured("diff", {"-s", "-e", "q1", "q1"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "Files q1 and q1 are identical\n");
+    EXPECT_EQ(captured.status, 0);
 
-    // A differing pair without the newline keeps its behaviour: the script,
-    // the warning, and status 2.
-    captured = RunCaptured("diff", {"-e", "n1", "n2"}, std::nullopt, "/");
-    EXPECT_EQ(captured.out, "1c\nb\n.\n");
-    EXPECT_EQ(captured.err,
-              "diff: n1: No newline at end of file\n"
-              "\n"
-              "diff: n2: No newline at end of file\n"
-              "\n");
-    EXPECT_EQ(captured.status, 2);
+    // -q compares the bytes as read: the identical pair is silent, the
+    // pair differing only in the final newline differs.
+    captured = RunCaptured("diff", {"-q", "-e", "q1", "q2"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+    captured = RunCaptured("diff", {"-q", "-e", "q1", "qm"}, std::nullopt, "/");
+    EXPECT_EQ(captured.out, "Files q1 and qm differ\n");
+    EXPECT_EQ(captured.status, 1);
+}
+
+TEST_F(BuiltinCommandsTest, DiffFindLongOptionExactFirst) {
+    // A table shaped so an exact match comes after two entries it prefixes:
+    // the exact match wins; a prefix of both is ambiguous.
+    const std::vector<BuiltinOption> table = {
+        {' ', "ab-x", 1, BuiltinArgument::None},
+        {' ', "ab-y", 2, BuiltinArgument::None},
+        {' ', "ab", 3, BuiltinArgument::None},
+    };
+    EXPECT_EQ(DiffFindLongOption("ab", table)->id, 3);
+    EXPECT_EQ(DiffFindLongOption("ab-x", table)->id, 1);
+    EXPECT_EQ(DiffFindLongOption("ab-y", table)->id, 2);
+    EXPECT_EQ(DiffFindLongOption("ab-", table), nullptr);
+    EXPECT_EQ(DiffFindLongOption("a", table), nullptr);
 }
 
 TEST_F(BuiltinCommandsTest, DiffWhiteSpaceOptions) {
@@ -914,7 +980,7 @@ TEST_F(BuiltinCommandsTest, DiffErrors) {
 
     // A not treated option is parsed and reported, and the diff goes on.
     captured = RunCaptured("diff", {"-y", "a", "b"}, std::nullopt, "/");
-    EXPECT_EQ(captured.err, "Parameter -y is not treated by HaisosOS diff v. 1.1.0\n");
+    EXPECT_EQ(captured.err, "Parameter -y is not treated by HaisosOS diff v. 1.1.1\n");
     EXPECT_EQ(captured.out,
               "2c2\n"
               "< b\n"
@@ -926,7 +992,7 @@ TEST_F(BuiltinCommandsTest, DiffErrors) {
     EXPECT_EQ(captured.status, 1);
 
     captured = RunCaptured("diff", {"-v"}, std::nullopt, "/");
-    EXPECT_EQ(captured.out, "diff (HaisosOS builtin) 1.1.0\n");
+    EXPECT_EQ(captured.out, "diff (HaisosOS builtin) 1.1.1\n");
     EXPECT_EQ(captured.status, 0);
 }
 
@@ -934,16 +1000,16 @@ TEST_F(BuiltinCommandsTest, DiffHelpAndVersion) {
     MakeDiffFiles(root);
     const auto help = RunCaptured("diff", {"--help"}, std::nullopt, "/");
     EXPECT_EQ(help.status, 0);
-    EXPECT_NE(help.out.find("HaisosOS diff version 1.1.0"), std::string::npos);
+    EXPECT_NE(help.out.find("HaisosOS diff version 1.1.1"), std::string::npos);
     EXPECT_NE(help.out.find("Not treated arguments:"), std::string::npos);
 
     const auto version = RunCaptured("diff", {"--version"}, std::nullopt, "/");
-    EXPECT_EQ(version.out, "diff (HaisosOS builtin) 1.1.0\n");
+    EXPECT_EQ(version.out, "diff (HaisosOS builtin) 1.1.1\n");
     EXPECT_EQ(version.status, 0);
 
     // A not treated option is parsed, reported and gone past.
     const auto captured = RunCaptured("diff", {"-l", "a", "c"}, std::nullopt, "/");
-    EXPECT_EQ(captured.err, "Parameter -l is not treated by HaisosOS diff v. 1.1.0\n");
+    EXPECT_EQ(captured.err, "Parameter -l is not treated by HaisosOS diff v. 1.1.1\n");
     EXPECT_EQ(captured.out, "");
     EXPECT_EQ(captured.status, 0);
 }

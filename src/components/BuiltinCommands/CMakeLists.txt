@@ -44,6 +44,9 @@ add_library(BuiltinCommands STATIC
     commands/mkdir/Mkdir.cpp
     commands/mv/Mv.cpp
     commands/nl/Nl.cpp
+    commands/patch/Patch.cpp
+    commands/patch/PatchApply.cpp
+    commands/patch/PatchParse.cpp
     commands/printf/Printf.cpp
     commands/pwd/Pwd.cpp
     commands/realpath/Realpath.cpp

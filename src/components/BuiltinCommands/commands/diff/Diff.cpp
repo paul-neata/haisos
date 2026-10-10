@@ -68,28 +68,6 @@ bool ParseCount(const std::string& text, int64_t& out) {
     return true;
 }
 
-// The long option |name| names: exact match, or an unambiguous prefix of it,
-// the way the parser finds it too.
-const BuiltinOption* DiffFindLongOption(const std::string& name,
-                                        const std::vector<BuiltinOption>& options) {
-    const BuiltinOption* prefix = nullptr;
-    for (const BuiltinOption& option : options) {
-        if (option.longName.empty()) {
-            continue;
-        }
-        if (option.longName == name) {
-            return &option;
-        }
-        if (option.longName.compare(0, name.size(), name) == 0) {
-            if (prefix) {
-                return nullptr;  // ambiguous: the parser has reported it
-            }
-            prefix = &option;
-        }
-    }
-    return prefix;
-}
-
 // The command-line words that are options or an option's separate argument,
 // in the order given -- what the recursive form echoes in its
 // "diff OPTIONS A B" lines. Operands and a "--" are left out; the words are
@@ -153,7 +131,7 @@ std::vector<std::string> DiffOptionWords(const std::vector<std::string>& args,
 class DiffCommand : public IBuiltinCommand {
 public:
     std::string Name() const override { return "diff"; }
-    std::string Version() const override { return "1.1.0"; }
+    std::string Version() const override { return "1.1.1"; }
 
     const std::vector<BuiltinOption>& Options() const override {
         using A = BuiltinArgument;
@@ -278,33 +256,32 @@ public:
     int Run(BuiltinContext& context) override;
 };
 
-// One input's bytes read whole, or why they could not be.
-enum class DiffReadOutcome { Done, Stopped, Error };
-
-// Reads |file| whole into |out|, 64 KiB at a time, with no size cap. A stop
-// asked for (or a read it interrupted) ends quietly; any other failed read
-// is the caller's error to report.
-DiffReadOutcome ReadWholeInput(BuiltinContext& context, IFileDescriptor& file, std::string& out) {
-    char buffer[64 * 1024];
-    for (;;) {
-        if (context.StopRequested()) {
-            return DiffReadOutcome::Stopped;
-        }
-        const ssize_t n = file.Read(buffer, sizeof(buffer));
-        if (n == 0) {
-            return DiffReadOutcome::Done;
-        }
-        if (n == kIOInterrupted) {
-            return DiffReadOutcome::Stopped;
-        }
-        if (n < 0) {
-            return DiffReadOutcome::Error;
-        }
-        out.append(buffer, static_cast<size_t>(n));
-    }
-}
-
 } // namespace
+
+// The long option |name| names: an exact match over the whole table first
+// (a later exact match must not lose to two earlier prefix matches), else an
+// unambiguous prefix of one, the way the shared parser finds it too.
+const BuiltinOption* DiffFindLongOption(const std::string& name,
+                                        const std::vector<BuiltinOption>& options) {
+    const BuiltinOption* prefix = nullptr;
+    for (const BuiltinOption& option : options) {
+        if (option.longName == name) {
+            return &option;
+        }
+    }
+    for (const BuiltinOption& option : options) {
+        if (option.longName.empty()) {
+            continue;
+        }
+        if (option.longName.compare(0, name.size(), name) == 0) {
+            if (prefix) {
+                return nullptr;  // ambiguous: the parser has reported it
+            }
+            prefix = &option;
+        }
+    }
+    return prefix;
+}
 
 std::shared_ptr<IBuiltinCommand> CreateDiffCommand() {
     return std::make_shared<DiffCommand>();
@@ -585,11 +562,11 @@ int DiffTwoFiles(BuiltinContext& context, const DiffSettings& settings,
             continue;
         }
         const std::string& name = i == 0 ? name0 : name1;
-        const DiffReadOutcome outcome = ReadWholeInput(context, *files[i], bytes[i]);
-        if (outcome == DiffReadOutcome::Stopped) {
+        const WholeReadOutcome outcome = ReadWholeInput(context, *files[i], bytes[i]);
+        if (outcome == WholeReadOutcome::Stopped) {
             return 2;  // a quiet stop
         }
-        if (outcome == DiffReadOutcome::Error) {
+        if (outcome == WholeReadOutcome::Error) {
             context.Error(name + ": Input/output error");
             return 2;
         }
@@ -639,6 +616,9 @@ int DiffTwoFiles(BuiltinContext& context, const DiffSettings& settings,
     // after the output (exit status 2) -- unless -q, which reports nothing
     // but the difference itself.
     const bool robust = settings.output.style != DiffStyle::Ed;
+    // The bytes as read, before an ed comparison's appended newline: what -q
+    // compares in -e style, where the script's comparison would call them even.
+    const bool rawBytesEqual = bytes[0] == bytes[1];
     DiffText texts[2] = {
         MakeDiffText(std::move(bytes[0]), settings.stripTrailingCr, robust),
         MakeDiffText(std::move(bytes[1]), settings.stripTrailingCr, robust),
@@ -651,11 +631,39 @@ int DiffTwoFiles(BuiltinContext& context, const DiffSettings& settings,
     }
 
     const bool same = !DiffHasRealChanges(script, texts[0], texts[1], settings.output);
-    // A missing final newline is trouble only when there is a difference to
-    // print: an identical pair is silently the same, in -e style too.
-    const bool newlineTrouble = !robust && !settings.brief && !same
-        && (texts[0].missingNewline || texts[1].missingNewline);
+    // Both names the same file: both "-", or neither "-" and one resolved
+    // path (GNU tells by its dev/ino, which Haisos has no counterpart of).
+    // The only pair a missing final newline leaves silent in -e style.
+    const bool sameFile = (name0 == "-" && name1 == "-")
+        || (name0 != "-" && name1 != "-"
+            && context.IO().ResolvePath(name0) == context.IO().ResolvePath(name1));
     if (same) {
+        // An ed comparison appends the missing final newline, so two
+        // distinct files can read the same while their bytes differ: -q
+        // compares the bytes as read, and without it a missing final
+        // newline is trouble even for an identical pair -- GNU warns and
+        // exits 2, with no "are identical" line.
+        if (!robust && !sameFile) {
+            if (settings.brief) {
+                if (!rawBytesEqual) {
+                    context.Out("Files " + shown0 + " and " + shown1 + " differ\n");
+                    return 1;
+                }
+                if (settings.reportIdentical) {
+                    context.Out("Files " + shown0 + " and " + shown1 + " are identical\n");
+                }
+                return 0;
+            }
+            if (texts[0].missingNewline || texts[1].missingNewline) {
+                for (int i = 0; i < 2; ++i) {
+                    if (texts[i].missingNewline) {
+                        context.Error((i == 0 ? shown0 : shown1) + ": No newline at end of file");
+                        context.ErrorText("\n");
+                    }
+                }
+                return 2;
+            }
+        }
         if (settings.reportIdentical) {
             context.Out("Files " + shown0 + " and " + shown1 + " are identical\n");
         }
@@ -671,7 +679,7 @@ int DiffTwoFiles(BuiltinContext& context, const DiffSettings& settings,
     context.Out(FormatDiff(script, texts[0], texts[1],
         DiffHeaderFile{name0, settings.label0, times[0]},
         DiffHeaderFile{name1, settings.label1, times[1]}, settings.output));
-    if (newlineTrouble) {
+    if (!robust && (texts[0].missingNewline || texts[1].missingNewline)) {
         for (int i = 0; i < 2; ++i) {
             if (texts[i].missingNewline) {
                 context.Error((i == 0 ? shown0 : shown1) + ": No newline at end of file");

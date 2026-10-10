@@ -30,6 +30,11 @@ int DiffTwoFiles(BuiltinContext& context, const DiffSettings& settings,
                  const std::string& name0, const std::string& name1, const std::string& header,
                  bool missing0 = false, bool missing1 = false);
 
+// The long option |name| names: an exact match over the whole table first,
+// else an unambiguous prefix of one, the way the shared parser finds it too.
+const BuiltinOption* DiffFindLongOption(const std::string& name,
+                                        const std::vector<BuiltinOption>& options);
+
 std::shared_ptr<IBuiltinCommand> CreateDiffCommand();
 
 } // namespace Haisos

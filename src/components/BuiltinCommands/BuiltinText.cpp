@@ -190,6 +190,26 @@ LineReadResult BuiltinLineReader::Next(std::string& line, bool& delimited) {
     }
 }
 
+WholeReadOutcome ReadWholeInput(BuiltinContext& context, IFileDescriptor& file, std::string& out) {
+    char buffer[64 * 1024];
+    for (;;) {
+        if (context.StopRequested()) {
+            return WholeReadOutcome::Stopped;
+        }
+        const ssize_t n = file.Read(buffer, sizeof(buffer));
+        if (n == 0) {
+            return WholeReadOutcome::Done;
+        }
+        if (n == kIOInterrupted) {
+            return WholeReadOutcome::Stopped;
+        }
+        if (n < 0) {
+            return WholeReadOutcome::Error;
+        }
+        out.append(buffer, static_cast<size_t>(n));
+    }
+}
+
 ssize_t WriteFully(IFileDescriptor& out, std::string_view bytes) {
     size_t written = 0;
     while (written < bytes.size()) {

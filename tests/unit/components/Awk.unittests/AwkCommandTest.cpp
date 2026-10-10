@@ -62,12 +62,12 @@ TEST_F(AwkCommandTest, UsageErrors) {
 TEST_F(AwkCommandTest, OptionsStopAtTheProgram) {
     // Everything after the program operand is an operand: no invalid option,
     // no not-treated report.
-    const auto after = RunCaptured("awk", {"BEGIN{} -x --lint"});
+    const auto after = RunCaptured("awk", {"BEGIN{}", "-x", "--lint"});
     EXPECT_EQ(after.status, 2);
     EXPECT_EQ(after.out, "");
     EXPECT_EQ(after.err, kNotImplemented);
 
-    const auto dashDash = RunCaptured("awk", {"--", "BEGIN{}"});
+    const auto dashDash = RunCaptured("awk", {"--", "BEGIN{}", "-x"});
     EXPECT_EQ(dashDash.status, 2);
     EXPECT_EQ(dashDash.out, "");
     EXPECT_EQ(dashDash.err, kNotImplemented);

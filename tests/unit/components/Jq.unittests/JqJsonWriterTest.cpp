@@ -37,9 +37,21 @@ TEST(JqJsonWriter, ComputedNumbers) {
     EXPECT_EQ(FormatNumber(Num(3.0)), "3");
     EXPECT_EQ(FormatNumber(Num(1000000000000000.5)), "1000000000000000.5");
     EXPECT_EQ(FormatNumber(Num(5e-324)), "5e-324");
+    EXPECT_EQ(FormatNumber(Num(1e17)), "1e+17");
+    EXPECT_EQ(FormatNumber(Num(123e-7)), "1.23e-05");
+    EXPECT_EQ(FormatNumber(Num(100.0 / 3.0)), "33.333333333333336");
+    EXPECT_EQ(FormatNumber(Num(1.0 / 30000.0)), "3.3333333333333335e-05");
+    EXPECT_EQ(FormatNumber(Num(123456789012345678.0)), "123456789012345680");
+    EXPECT_EQ(FormatNumber(Num(1e20)), "1e+20");
+    EXPECT_EQ(FormatNumber(Num(12345678901234567e14)),
+              "1234567890123456700000000000000");
+    EXPECT_EQ(FormatNumber(Num(123456789012345678e15)),
+              "1.2345678901234569e+32");
+    EXPECT_EQ(FormatNumber(Num(0.00001234)), "1.234e-05");
     // jq prints the infinities as the largest double it formats, and NaN
     // as null.
     EXPECT_EQ(FormatNumber(Num(1e300 * 1e300)), "1.7976931348623157e+308");
+    EXPECT_EQ(FormatNumber(Num(-(1e300 * 1e300))), "-1.7976931348623157e+308");
     EXPECT_EQ(FormatNumber(Num(0.0 / 0.0)), "null");
     // A literal keeps its own canonical text.
     std::string canonical;

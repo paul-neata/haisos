@@ -178,6 +178,42 @@ TEST(JqValue, CanonicalLiterals) {
     EXPECT_FALSE(CanonicalNumberLiteral("", canonical, value));
 }
 
+// The rest of the plan's literal pairs, checked by their canonical text
+// alone (the double is not part of what jq prints for a literal).
+void CheckCanonicalText(const char* text, const std::string& want) {
+    std::string canonical;
+    double value = 0.0;
+    ASSERT_TRUE(CanonicalNumberLiteral(text, canonical, value)) << text;
+    EXPECT_EQ(canonical, want) << text;
+}
+
+TEST(JqValue, CanonicalLiteralTexts) {
+    CheckCanonicalText("1.000", "1.000");
+    CheckCanonicalText("1.50", "1.50");
+    CheckCanonicalText("1E01", "1E+1");
+    CheckCanonicalText("1.e1", "1E+1");
+    CheckCanonicalText("100000000000000000000", "100000000000000000000");
+    CheckCanonicalText("1E1000", "1E+1000");
+    CheckCanonicalText("0.00001", "0.00001");
+    CheckCanonicalText("3.141592653589793238", "3.141592653589793238");
+    CheckCanonicalText("-00", "-0");
+    CheckCanonicalText("-0.0", "-0.0");
+    CheckCanonicalText("0.0e0", "0.0");
+    CheckCanonicalText("1E-6", "0.000001");
+    CheckCanonicalText("0.1e-6", "1E-7");
+    CheckCanonicalText("12.3400", "12.3400");
+    CheckCanonicalText("00", "0");
+    CheckCanonicalText("1.", "1");
+    CheckCanonicalText("-.5", "-0.5");
+    CheckCanonicalText("+.5e-1", "0.05");
+    CheckCanonicalText("+1", "1");
+    CheckCanonicalText("1.5e3", "1.5E+3");
+    CheckCanonicalText("0E5", "0E+5");
+    // A 1000-digit integer is printed whole.
+    const std::string thousand = "1" + std::string(999, '0');
+    CheckCanonicalText(thousand.c_str(), thousand);
+}
+
 TEST(JqValue, CopiesShareTheirPayload) {
     const Value a = Value::Array({Num(1), Num(2)});
     const Value b = a;

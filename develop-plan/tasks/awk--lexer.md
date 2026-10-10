@@ -1,9 +1,9 @@
 # Task awk--lexer: the awk builtin's invocation and the awk lexer
 
 - Rock: awk
-- Depends on: coreutils--names-env (`stopAtFirstOperand` of `ParseBuiltinArgs`), coreutils--sort (`BuiltinText.h`: `OpenInputOperand`)
+- Depends on: coreutils--names-env (`stopAtFirstOperand` of `ParseBuiltinArgs`), coreutils--sort (`BuiltinText.h`: `OpenInputOperand`) -- both on develop
 - Size: ~950 changed lines in ~13 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ 03f8369
 - PR title: Add the awk builtin's invocation and the awk lexer
 
 ## Goal
@@ -37,6 +37,23 @@ change an expected text to mawk's.
 
 ## Context
 
+**Clean-room rule (the user's, above every other rule; root `CLAUDE.md`
+"Clean-room rule"):** no code is copied from any other program, whatever its
+licence. Never read, copy, port, translate or paraphrase another program's
+source -- gawk's, mawk's, the one true awk's, busybox's, and code recalled
+from memory -- and never name another program's internal functions,
+variables or token names, in code, comments, tests or commit messages.
+Everything below is *behaviour*: POSIX awk, the gawk manual and man page,
+and what `gawk --posix` 5.2.1 printed on the planning host with `LC_ALL=C`.
+Write the code from scratch, shaped by Haisos's own structure (hsh's lexer
+is the model); the names here (`Lexer`, `TokenKind` and its members,
+`ScanRegex`, `AwkSource`, ...) are Haisos's own, the token kinds named for
+their spelling or meaning.
+
+**Write in pieces:** never more than ~250 lines in one Write/Edit call;
+build a file up with several Edits; commit after each file or step (earlier
+runs died on "response exceeded the 32000 output token maximum").
+
 Read first: root `CLAUDE.md` ("Security", "Builtin Commands", rule 9),
 `src/components/BuiltinCommands/CLAUDE.md`, `BuiltinCommand.h`
 (`ParseBuiltinArgs`, `BuiltinContext::Out/ErrorText/ReportNotTreated`,
@@ -46,17 +63,28 @@ parsing its own invocation, `BuiltinHelp::basedOn`),
 documented), `commands/hsh/HshLexer.h/.cpp` and
 `tests/unit/components/Hsh.unittests/` (the lexer/test style to follow).
 
-What earlier tasks provide, as if on develop (their plans in
-`develop-plan/tasks/` are the authority):
-- coreutils--names-env: `ParseBuiltinArgs(args, options, bool stopAtFirstOperand = false)`
+What is on develop to use (`src/components/BuiltinCommands/`):
+- `BuiltinCommand.h`: `ParseBuiltinArgs(args, options, bool stopAtFirstOperand = false)`
   -- with `true`, the first argument that is not an option (`-` alone
   included) and everything after it are operands, untouched; a `--` before
-  any operand ends the options and is dropped. Error texts are the existing
-  ones (`invalid option -- 'y'`, `option requires an argument -- 'f'`,
-  `unrecognized option '--x'`, `option '--file' requires an argument`).
-- coreutils--sort: `BuiltinText.h` -- `OpenInputOperand(context, name, failure)`
-  with `InputOpenFailure { None, Missing, Directory, Denied, BadDescriptor }`
-  (`-` is descriptor 0).
+  any operand ends the options and is dropped (env and xargs parse this
+  way). `ParsedBuiltinArgs { options (id, argument, hasArgument, spelling),
+  operands, error }`; error texts are the existing ones (`invalid option --
+  'y'`, `option requires an argument -- 'f'`, `unrecognized option '--x'`,
+  `option '--file' requires an argument`). `BuiltinOption { shortName,
+  longName, id, argument (None/Required/Optional/OptionalAttached),
+  argumentName, description, hidden }`; `BuiltinHelp::basedOn` and
+  `referenceUrl`. `BeginBuiltin` exists but is *not* used here: awk's usage
+  errors print gawk's usage lines, not the `Try` line.
+- `BuiltinText.h`: `OpenInputOperand(context, name, failure)` with
+  `InputOpenFailure { None, Missing, Directory, Denied, BadDescriptor }`
+  (`-` is descriptor 0), `OpenFailureText`, and `ReadWholeInput(context,
+  file, out)` -> `WholeReadOutcome { Done, Stopped, Error }` (stop-aware,
+  64 KiB at a time; diff and patch read whole files with it).
+- For the later awk tasks, not this one: the `Regex` component (GNU ERE,
+  awk--records), `BuiltinPrintf.h` (`ParsePrintfSpec`, `FormatPrintf*`,
+  awk--functions/printf-math), `BuiltinRunProgram.h` (`RunProgramAndWait`,
+  awk--io's `system()`).
 
 ## Changes
 
@@ -97,7 +125,7 @@ public:
     size_t Column() const;                 // byte offset of the caret in LineText()
 };
 
-// gawk's yyerror output, byte for byte:
+// gawk's syntax-error report, byte for byte:
 //   <prefix><lineText>\n
 //   <prefix><caret padding>^ <message>\n
 // <prefix> is AwkLocationPrefix(sourceName, line); the caret padding has one
@@ -213,9 +241,10 @@ as gawk `--posix`:
   of the POSIX built-in functions (`atan2 close cos exp fflush gsub index int
   length log match rand sin split sprintf sqrt srand sub substr system
   tolower toupper`) is `Builtin`, whatever follows. Any other name is
-  `FuncName` when the byte right after it is `(` (no blank between: POSIX's
-  FUNC_NAME), else `Name`. gawk's extension functions (`gensub`,
-  `strftime`, ...) are plain names under `--posix`.
+  `FuncName` when the byte right after it is `(` (no blank between: a
+  call of a user function must touch its `(`), else `Name`. gawk's
+  extension functions (`gensub`, `strftime`, ...) are plain names under
+  `--posix`.
 - **Numbers**: digits with an optional `.` and digits, or `.` and digits;
   then an exponent `e`/`E`, optional sign, digits -- only if digits follow
   (`1e` is the number `1` then the name `e`). `1.2.3` is `1.2` then `.3`;
@@ -328,12 +357,13 @@ Not treated (`kBuiltinNotTreated`), gawk's extensions: `-b
    `AwkUsageText()` on stderr, status 1. The other operands are `operands`.
 
 `LoadAwkSources`: for each `-f` name, `-` reads descriptor 0 to its end;
-otherwise `OpenInputOperand`: `Missing` (or `Denied`, `BadDescriptor`) ->
+otherwise `OpenInputOperand`, then `ReadWholeInput`: `Missing` (or `Denied`, `BadDescriptor`) ->
 ``awk: fatal: cannot open source file `<name>' for reading: No such file or
 directory\n`` (`Permission denied` for `Denied`), status 2; `Directory` ->
 ``awk: <name>:1: error: cannot read source file `<name>': Is a directory\n``,
-status 1. The file is read whole (stop promptly on `StopRequested()` or
-`kIOInterrupted`: return nullopt with status 143).
+status 1. The file is read whole (`WholeReadOutcome::Stopped`: return
+nullopt with status 143; `Error`: the `cannot open source file` message
+with `Input/output error`, status 2).
 
 ### `src/components/BuiltinCommands/commands/awk/Awk.cpp` (new)
 
@@ -359,11 +389,13 @@ status 1. The file is read whole (stop promptly on `StopRequested()` or
 
 ### Registration and build
 
-- `BuiltinCommandList.h`: declare `CreateAwkCommand()`; add it first in
-  `CreateStandardBuiltinCommands()` (the list is alphabetical). That alone
+- `BuiltinCommandList.h`: declare `CreateAwkCommand()`; add it right after
+  `CreateBracketCommand()` in `CreateStandardBuiltinCommands()` (the list is
+  in byte order: `[` sorts before `awk`, `awk` before `basename`). That alone
   puts `# BUILTIN rootfs awk /bin/awk` in the `haisos --init` template
   (root `CLAUDE.md` rule 9; checked by `TheInitTemplatesBuiltinsAllApplyOnceUncommented`).
-- `src/components/BuiltinCommands/CMakeLists.txt`: add
+- `src/components/BuiltinCommands/CMakeLists.txt`: add, after the
+  `BuiltinText.cpp` line and before `commands/basename/Basename.cpp`,
   `commands/awk/AwkError.cpp`, `commands/awk/AwkLexer.cpp`,
   `commands/awk/AwkInvocation.cpp`, `commands/awk/Awk.cpp`.
 
@@ -385,7 +417,8 @@ AwkLexerTest.cpp AwkCommandTest.cpp)`, the same include directories
 (`src/components/Factory`, `tests/unit/components/BuiltinCommands.unittests`)
 and libraries (`gtest_main BuiltinCommands Environment Factory`),
 `cxx_std_17`; `tests/unit/CMakeLists.txt` gets
-`add_subdirectory(components/Awk.unittests)`. Every test suite name starts
+`add_subdirectory(components/Awk.unittests)` (next to the
+`components/Hsh.unittests` line). Every test suite name starts
 with `Awk`.
 
 `AwkLexerTest.cpp` -- plain `TEST`s, helpers as in `HshLexerTest.cpp`:
@@ -455,7 +488,7 @@ Sources are `AwkSource{"cmd. line", text}`.
 
 Existing tests to update: `ListsEveryBuiltinSortedWithAVersion` in
 `tests/unit/components/BuiltinCommands.unittests/BuiltinCommandsTest.cpp`
-gets `"awk"` (first). The generic tests (`EveryBuiltinsHelpHasTheSameShape`,
+gets `"awk"` right after `"["` (before `"basename"`). The generic tests (`EveryBuiltinsHelpHasTheSameShape`,
 `EveryUntreatedOptionIsAcceptedAndReported`, `EveryBuiltinHasAVersion`,
 `EveryBuiltinsManPageIsItsHelp`) then cover awk without change; check they
 pass (the untreated-option test runs `awk <option> [x] /docs`).
@@ -500,7 +533,7 @@ bash ./scripts/test_linux.sh L U
   exactly as specified.
 - [ ] Every lexer rule above is implemented and tested; `ScanRegex` is the
   only way a Regex token is made.
-- [ ] `awk` is registered in `CreateStandardBuiltinCommands()` (first) and
+- [ ] `awk` is registered in `CreateStandardBuiltinCommands()` (after `[`) and
   appears in the `haisos --init` template; `ListsEveryBuiltinSortedWithAVersion` updated.
 - [ ] New sources in `src/components/BuiltinCommands/CMakeLists.txt`; the
   `Awk.unittests` executable is built and green; all unit tests green.

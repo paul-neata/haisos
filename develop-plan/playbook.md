@@ -38,7 +38,7 @@ Pause: no
 | 30 | [diff--diff-recursive](tasks/diff--diff-recursive.md) | done | 0.5.31 | 29, 20 | #73 | 1 | 1C 2H fixed, 1M 2L open | Windows red, not checked; clean-room: 2 GNU-internal names from the plan renamed |
 | 31 | [diff--patch-core](tasks/diff--patch-core.md) | done | 0.5.32 | 1, 4, 29 | #74 | 1 | 0C 4H 1L fixed, 4M 2L open | Windows red, not checked; clean-room re-planned |
 | 32 | [diff--patch-fuzz-rej](tasks/diff--patch-fuzz-rej.md) | done | 0.5.33 | 31, 7 | #75 | 1 | 1C 2H 1M fixed, 1M 3L open | Windows red, not checked; clean-room re-planned |
-| 33 | [awk--lexer](tasks/awk--lexer.md) | todo | | 9, 4 | | | | |
+| 33 | [awk--lexer](tasks/awk--lexer.md) | in-progress | 0.5.34 | 9, 4 | | | | |
 | 34 | [awk--expressions](tasks/awk--expressions.md) | todo | | 33 | | | | |
 | 35 | [awk--parser](tasks/awk--parser.md) | todo | | 34 | | | | |
 | 36 | [awk--values](tasks/awk--values.md) | todo | | 33, 11 | | | | |
@@ -111,3 +111,4 @@ Pause: no
 - 2026-10-10 (implement) diff--diff-recursive refreshed against e8bb4a5: clean-room (GNU source references replaced by manual + host-verified behaviour), write-in-pieces rule in Context, diff-core's real names (OpenInputOperand, DiffTwoFiles missing0/1, QuoteHeaderName to DiffOutput.h); folded in #72's open findings (quadratic placement, per-step table copy, diff -e f f)
 - 2026-10-10 (implement) diff--patch-core re-planned clean-room against 57d3de1 (Opus): GNU patch internal names and code steps removed, behaviour verified on the host's GNU patch 2.7.6, several wrong statements corrected; documented exceptions: questions answered as with no terminal, exact matching until patch-fuzz-rej, git mode lines ignored, unparsable header times never the epoch, indented patches not recognised; folded in #73's medium and low (diff -e on distinct identical files, DiffFindLongOption exact match first); diff--patch-fuzz-rej needs the same pass
 - 2026-10-10 (implement) diff--patch-fuzz-rej re-planned clean-room against 1cbb5da (Opus), on patch-core's real names, behaviour verified on GNU patch 2.7.6 (fuzz order, positions in output-file numbers, context/normal diffs, -l, -r, --reject-format); folded in #74's open findings; ~1400 lines, kept as one task (patch-core's 3800 went in one run with the write-in-pieces rule); documented exceptions: no ed scripts, no 'misordered hunks!' line, -p not wrapped to 32 bits, .rej/write error wording, diff -C0 deletion applied, no ORIGFILE.orig for a git rename from a missing file
+- 2026-10-10 (implement) awk--lexer re-checked clean-room against 03f8369 (Opus): two gawk-internal references reworded as behaviour, clean-room and write-in-pieces paragraphs added, messages verified on gawk --posix 5.2.1; list/CMake/test slots (awk after [), ReadWholeInput for -f

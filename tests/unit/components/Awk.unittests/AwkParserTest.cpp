@@ -231,6 +231,11 @@ TEST(AwkProgramParserTest, PrintAndRedirections) {
     // `print (`: a grouping continues the first argument; a parenthesized
     // list ends it.
     ExpectProgram("{ print (1)(2) }", "{ print (concat 1 2) }");
+    // The grouping is the leftmost operand: what follows is never unary.
+    ExpectProgram("{ print (a) + b }", "{ print (+ a b) }");
+    ExpectProgram("{ print (1) - 1 }", "{ print (- 1 1) }");
+    ExpectProgram("{ print (x) ++y }", "{ print (concat x (pre++ y)) }");
+    ExpectProgram("{ print (x) !x }", "{ print (concat x (! x)) }");
     ExpectProgram("{ print (1, 2) > \"f\" }", "{ print 1, 2 > \"f\" }");
     ExpectProgram("{ print (1, 2) in a }", "{ print (in a 1 2) }");
     ExpectProgram("{ print (a > b) }", "{ print (> a b) }");

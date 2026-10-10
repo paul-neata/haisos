@@ -320,6 +320,12 @@ ExprPtr Parser::ParseMultiplicative() {
 }
 
 ExprPtr Parser::ParseUnary() {
+    if (m_pendingPrimary) {
+        // A print argument continuing from a grouping: the grouping is the
+        // leftmost operand, so a '-', '+' or '!' after it is not unary
+        // (print (a) - 1 subtracts).
+        return ParsePower();
+    }
     ExprOp op = ExprOp::None;
     switch (m_token.kind) {
         case TokenKind::Not:   op = ExprOp::Not;        break;
@@ -366,7 +372,9 @@ ExprPtr Parser::ParsePreIncDec() {
 }
 
 ExprPtr Parser::ParsePostfix() {
-    if (m_token.kind == TokenKind::Increment || m_token.kind == TokenKind::Decrement) {
+    // A pending grouping comes first: print (x) ++y concatenates a pre-increment.
+    if (!m_pendingPrimary &&
+        (m_token.kind == TokenKind::Increment || m_token.kind == TokenKind::Decrement)) {
         return ParsePreIncDec();
     }
     ExprPtr expr = ParsePrimary();

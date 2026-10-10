@@ -1,61 +1,6 @@
-#include <gtest/gtest.h>
-#include <cstdint>
-#include <memory>
-#include <string>
-#include <vector>
-#include "BuiltinCommandsFixture.h"
+#include "PatchTestHelpers.h"
 
 namespace Haisos {
-namespace {
-
-// The patch every expectation below was observed from GNU patch 2.7.6
-// against (LC_ALL=C, no terminal); P1 is the plan's recurring example.
-constexpr char kP1[] =
-    "--- f\n"
-    "+++ g\n"
-    "@@ -2,7 +2,7 @@\n"
-    " 2\n"
-    " 3\n"
-    " 4\n"
-    "-5\n"
-    "+five\n"
-    " 6\n"
-    " 7\n"
-    " 8\n";
-
-// The lines `1\n` .. `10\n`.
-std::string Seq(size_t count) {
-    std::string text;
-    for (size_t i = 1; i <= count; ++i) {
-        text += std::to_string(i) + "\n";
-    }
-    return text;
-}
-
-// The directory the patch tests work in, with a file written into it.
-void MakePatchDir(const std::shared_ptr<IFileSystem>& fs) {
-    ASSERT_EQ(fs->CreateDirectory("/p", kDirMode), 0);
-}
-
-void WritePatchFile(const std::shared_ptr<IFileSystem>& fs, const std::string& name,
-                    const std::string& content) {
-    auto file = fs->OpenFile("/p/" + name, kFileOpenWriteCreateTruncate, kFileCreateMode);
-    ASSERT_NE(file, nullptr) << name;
-    file->Write(content.data(), content.size());
-}
-
-std::string ReadPatchFile(const std::shared_ptr<IFileSystem>& fs, const std::string& name) {
-    std::string content;
-    ReadWholeFile(*fs, "/p/" + name, content);
-    return content;
-}
-
-bool PatchFileExists(const std::shared_ptr<IFileSystem>& fs, const std::string& name) {
-    FileStatus status;
-    return fs->Stat("/p/" + name, status) == 0;
-}
-
-} // namespace
 
 // A unified diff applies at its stated place; no .orig, no temporary file.
 TEST_F(BuiltinCommandsTest, PatchAppliesUnified) {
@@ -131,7 +76,7 @@ TEST_F(BuiltinCommandsTest, PatchSearchOrder) {
 
     // More leading than trailing context anchors the hunk at the file's end.
     WriteFile("/p/x", Seq(9) + "a\n");
-    result = patchX("@@ -7,3 +7,3 @@\n 7\n 8\n-9\n+NINE\n");
+    result = RunCaptured("patch", {"-F0"}, "--- x\n+++ x\n@@ -7,3 +7,3 @@\n 7\n 8\n-9\n+NINE\n", "/p");
     EXPECT_EQ(result.out,
         "patching file x\n"
         "Hunk #1 FAILED at 7.\n"
@@ -139,6 +84,13 @@ TEST_F(BuiltinCommandsTest, PatchSearchOrder) {
     EXPECT_EQ(result.status, 1);
     EXPECT_EQ(ReadPatchFile(root, "x.rej"),
         "--- x\n+++ x\n@@ -7,3 +7,3 @@\n 7\n 8\n-9\n+NINE\n");
+
+    // With the default fuzz the leading context is dropped instead: the
+    // hunk matches at the only line it needs.
+    result = patchX("@@ -7,3 +7,3 @@\n 7\n 8\n-9\n+NINE\n");
+    EXPECT_EQ(result.out, "patching file x\nHunk #1 succeeded at 7 with fuzz 2.\n");
+    EXPECT_EQ(result.status, 0);
+    EXPECT_EQ(ReadPatchFile(root, "x"), Seq(8) + "NINE\na\n");
 
     WriteFile("/p/x", "a\nb\n" + Seq(9));
     result = patchX("@@ -7,3 +7,3 @@\n 7\n 8\n-9\n+NINE\n");
@@ -1588,20 +1540,21 @@ TEST_F(BuiltinCommandsTest, PatchErrors) {
     EXPECT_EQ(empty.status, 0);
 
     const Captured version = RunCaptured("patch", {"-v"}, "");
-    EXPECT_EQ(version.out, "patch (HaisosOS builtin) 1.0.0\n");
+    EXPECT_EQ(version.out, "patch (HaisosOS builtin) 1.1.0\n");
     EXPECT_EQ(version.status, 0);
 
     const Captured untreated = RunCaptured("patch", {"-m", "-x", "1", "--verbose"}, "", "/p");
     EXPECT_EQ(untreated.err,
-        "Parameter -m is not treated by HaisosOS patch v. 1.0.0\n"
-        "Parameter -x is not treated by HaisosOS patch v. 1.0.0\n"
-        "Parameter --verbose is not treated by HaisosOS patch v. 1.0.0\n");
+        "Parameter -m is not treated by HaisosOS patch v. 1.1.0\n"
+        "Parameter -x is not treated by HaisosOS patch v. 1.1.0\n"
+        "Parameter --verbose is not treated by HaisosOS patch v. 1.1.0\n");
     EXPECT_EQ(untreated.out, "");
     EXPECT_EQ(untreated.status, 0);
 }
 
 // A hunk at the very start with no leading context is anchored to line 1:
-// GNU's -F0 behaviour, the fixed starting point this task implements.
+// GNU's -F0 behaviour, the fixed starting point. With the default fuzz the
+// trailing context gives instead: the hunk is found one line down.
 TEST_F(BuiltinCommandsTest, PatchHunkAtStartNeedsStart) {
     MakePatchDir(root);
     WriteFile("/p/x", "z\na\nb\n");
@@ -1614,9 +1567,24 @@ TEST_F(BuiltinCommandsTest, PatchHunkAtStartNeedsStart) {
         " b\n", "/p");
     EXPECT_EQ(result.out,
         "patching file x\n"
+        "Hunk #1 succeeded at 2 with fuzz 1 (offset 1 line).\n");
+    EXPECT_EQ(result.status, 0);
+    EXPECT_EQ(ReadPatchFile(root, "x"), "z\nA\nb\n");
+    EXPECT_EQ(ReadPatchFile(root, "x.orig"), "z\na\nb\n");
+
+    WriteFile("/p/x", "z\na\nb\n");
+    const Captured strict = RunCaptured("patch", {"-F0"},
+        "--- x\n"
+        "+++ x\n"
+        "@@ -1,2 +1,2 @@\n"
+        "-a\n"
+        "+A\n"
+        " b\n", "/p");
+    EXPECT_EQ(strict.out,
+        "patching file x\n"
         "Hunk #1 FAILED at 1.\n"
         "1 out of 1 hunk FAILED -- saving rejects to file x.rej\n");
-    EXPECT_EQ(result.status, 1);
+    EXPECT_EQ(strict.status, 1);
     EXPECT_EQ(ReadPatchFile(root, "x"), "z\na\nb\n");
     EXPECT_EQ(ReadPatchFile(root, "x.rej"),
         "--- x\n"
@@ -1625,7 +1593,6 @@ TEST_F(BuiltinCommandsTest, PatchHunkAtStartNeedsStart) {
         "-a\n"
         "+A\n"
         " b\n");
-    EXPECT_EQ(ReadPatchFile(root, "x.orig"), "z\na\nb\n");
 }
 
 // A diff the diff builtin makes, applied, leaves the two files equal.

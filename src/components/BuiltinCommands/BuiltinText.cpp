@@ -58,7 +58,8 @@ void WriteValidArguments(BuiltinContext& context, const std::vector<ArgChoice>& 
 } // namespace
 
 std::optional<int> ArgMatch(BuiltinContext& context, const std::string& longOption,
-                            const std::string& value, const std::vector<ArgChoice>& choices) {
+                            const std::string& value, const std::vector<ArgChoice>& choices,
+                            bool tryHelp) {
     for (const auto& choice : choices) {
         if (value == choice.name) {
             return choice.value;
@@ -83,7 +84,9 @@ std::optional<int> ArgMatch(BuiltinContext& context, const std::string& longOpti
     context.Error(std::string(ambiguous ? "ambiguous" : "invalid") + " argument "
         + GnuQuote(value) + " for " + GnuQuote(longOption));
     WriteValidArguments(context, choices);
-    context.TryHelp();
+    if (tryHelp) {
+        context.TryHelp();
+    }
     return std::nullopt;
 }
 

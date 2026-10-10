@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 #include "commands/jq/JqUtf8.h"
 
@@ -399,8 +400,9 @@ bool JsonReader::ClassifyToken(const std::string& token, Value& out) {
         out = Value::NumberLiteral(value, canonical);
         return true;
     }
-    // jq's nan and infinity, either sign, any case: nan reads as null, the
-    // infinities as the largest number jq prints.
+    // jq's nan and infinity, either sign, any case: both are numbers -- a
+    // NaN and a real infinity. Printing decides their text: NaN as null,
+    // the infinities as the largest double jq formats.
     size_t i = 0;
     if (token[i] == '+' || token[i] == '-')
         ++i;
@@ -419,12 +421,12 @@ bool JsonReader::ClassifyToken(const std::string& token, Value& out) {
         return true;
     };
     if (EqualsCaseInsensitive("nan")) {
-        out = Value::Null();
+        out = Value::Number(std::numeric_limits<double>::quiet_NaN());
         return true;
     }
     if (EqualsCaseInsensitive("inf") || EqualsCaseInsensitive("infinity")) {
-        out = Value::Number(negative ? -1.7976931348623157e308
-                                     : 1.7976931348623157e308);
+        out = Value::Number(negative ? -std::numeric_limits<double>::infinity()
+                                     : std::numeric_limits<double>::infinity());
         return true;
     }
     m_invalidTokenMessage = "Invalid numeric literal";

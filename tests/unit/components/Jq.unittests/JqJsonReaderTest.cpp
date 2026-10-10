@@ -1,14 +1,18 @@
 #include <gtest/gtest.h>
+#include <cmath>
 #include <string>
 #include <vector>
 #include "commands/jq/JqJsonReader.h"
 #include "commands/jq/JqJsonWriter.h"
+#include "commands/jq/JqUtf8.h"
 #include "commands/jq/JqValue.h"
 
 namespace {
 
 using Haisos::Jq::JsonReader;
+using Haisos::Jq::Kind;
 using Haisos::Jq::ParseSingleJson;
+using Haisos::Jq::RepairUtf8;
 using Haisos::Jq::Value;
 using Haisos::Jq::WriteJson;
 using Haisos::Jq::WriteOptions;
@@ -56,16 +60,37 @@ std::string ReadOne(const std::string& text) {
 }
 
 TEST(JqJsonReader, ReadsSeveralValues) {
-    // One value after another, the input fed in small pieces.
+    // One value after another, the input fed in small pieces of every size.
+    for (size_t pieceSize = 1; pieceSize <= 3; ++pieceSize) {
+        std::vector<Value> values;
+        std::string error;
+        ASSERT_TRUE(Read("1 2 {\"a\":1}{\"a\":2}\n[3]", values, error, pieceSize))
+            << error << " (piece size " << pieceSize << ")";
+        ASSERT_EQ(values.size(), 5u);
+        EXPECT_EQ(Dump(values[0]), "1");
+        EXPECT_EQ(Dump(values[1]), "2");
+        EXPECT_EQ(Dump(values[2]), "{\"a\":1}");
+        EXPECT_EQ(Dump(values[3]), "{\"a\":2}");
+        EXPECT_EQ(Dump(values[4]), "[3]");
+    }
+    // One byte at a time: a value lands in the output exactly when its
+    // last byte is fed -- a top-level scalar only at its delimiter.
+    const std::string text = "1 2 {\"a\":1}{\"a\":2}\n3";
+    const std::vector<size_t> countAfterByte = {
+        0, 1, 1, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4,
+    };
+    ASSERT_EQ(countAfterByte.size(), text.size());
     std::vector<Value> values;
-    std::string error;
-    ASSERT_TRUE(Read("1 2 {\"a\":1}{\"a\":2}\n[3]", values, error, 3)) << error;
+    JsonReader reader(values);
+    for (size_t i = 0; i < text.size(); ++i) {
+        ASSERT_TRUE(reader.Feed(std::string_view(text).substr(i, 1)));
+        ASSERT_EQ(values.size(), countAfterByte[i]) << "after byte " << i;
+    }
+    // The trailing scalar has no delimiter yet: only the end of the input
+    // makes it jq's.
+    ASSERT_TRUE(reader.Finish());
     ASSERT_EQ(values.size(), 5u);
-    EXPECT_EQ(Dump(values[0]), "1");
-    EXPECT_EQ(Dump(values[1]), "2");
-    EXPECT_EQ(Dump(values[2]), "{\"a\":1}");
-    EXPECT_EQ(Dump(values[3]), "{\"a\":2}");
-    EXPECT_EQ(Dump(values[4]), "[3]");
+    EXPECT_EQ(Dump(values[4]), "3");
 }
 
 TEST(JqJsonReader, KeepsLiterals) {
@@ -128,6 +153,32 @@ TEST(JqJsonReader, ErrorMessages) {
               "ERR|Unfinished JSON term at EOF at line 1, column 5\n");
     EXPECT_EQ(ReadOne("[1 x]"),
               "ERR|Invalid numeric literal at line 1, column 5\n");
+    // The rest of the plan's table, table-driven: the expected string is
+    // ReadOne's whole output -- the values read before the error, each on
+    // its own line, then the error line.
+    const std::vector<std::pair<std::string, std::string>> table = {
+        {"[1,2", "ERR|Unfinished JSON term at EOF at line 1, column 4\n"},
+        {"[1,2\n", "ERR|Unfinished JSON term at EOF at line 2, column 0\n"},
+        {"{\"a\" 1}", "ERR|Expected separator between values at line 1, column 7\n"},
+        {"[1] x", "[1]\nERR|Invalid numeric literal at EOF at line 1, column 5\n"},
+        {"{\"a\":1}}", "{\"a\":1}\nERR|Unmatched '}' at line 1, column 8\n"},
+        {"[1],", "[1]\nERR|Expected value before ',' at line 1, column 4\n"},
+        {"\"abc", "ERR|Unfinished string at EOF at line 1, column 4\n"},
+        {"\"a\nb\"",
+         "ERR|Invalid string: control characters from U+0000 through "
+         "U+001F must be escaped at line 2, column 2\n"},
+        {"\"\\ud800\"",
+         "ERR|Invalid \\uXXXX\\uXXXX surrogate pair escape at line 1, column 8\n"},
+        {"\"\\ud800x\"",
+         "ERR|Invalid \\uXXXX\\uXXXX surrogate pair escape at line 1, column 9\n"},
+        {"{\"a\",1}", "ERR|Objects must consist of key:value pairs at line 1, column 5\n"},
+        {"[1:2]", "ERR|':' not as part of an object at line 1, column 3\n"},
+        {"{\"a\":}", "ERR|Unmatched '}' at line 1, column 6\n"},
+        {"[true}", "ERR|Objects must consist of key:value pairs at line 1, column 6\n"},
+        {"[-]", "ERR|Invalid numeric literal at line 1, column 3\n"},
+    };
+    for (const auto& row : table)
+        EXPECT_EQ(ReadOne(row.first), row.second) << row.first;
 }
 
 TEST(JqJsonReader, StringErrors) {
@@ -160,11 +211,6 @@ TEST(JqJsonReader, StringErrors) {
 }
 
 TEST(JqJsonReader, LiteralTokens) {
-    EXPECT_EQ(ReadOne("nan"), "null\n");
-    EXPECT_EQ(ReadOne("NaN"), "null\n");
-    EXPECT_EQ(ReadOne("Infinity"), "1.7976931348623157e+308\n");
-    EXPECT_EQ(ReadOne("-Infinity"), "-1.7976931348623157e+308\n");
-    EXPECT_EQ(ReadOne("+inf"), "1.7976931348623157e+308\n");
     EXPECT_EQ(ReadOne("true"), "true\n");
     EXPECT_EQ(ReadOne("false"), "false\n");
     EXPECT_EQ(ReadOne("null"), "null\n");
@@ -172,6 +218,90 @@ TEST(JqJsonReader, LiteralTokens) {
     EXPECT_EQ(ReadOne(".5"), "0.5\n");
     EXPECT_EQ(ReadOne("1."), "1\n");
     EXPECT_EQ(ReadOne("+.5e-1"), "0.05\n");
+    // jq's nan and infinity, either sign, any case.
+    const std::vector<std::pair<const char*, const char*>> accepted = {
+        {"nan", "null"},
+        {"NaN", "null"},
+        {"nAn", "null"},
+        {"naN", "null"},
+        {"-nan", "null"},
+        {"-NaN", "null"},
+        {"+NaN", "null"},
+        {"Infinity", "1.7976931348623157e+308"},
+        {"+inf", "1.7976931348623157e+308"},
+        {"Inf", "1.7976931348623157e+308"},
+        {"INFINITY", "1.7976931348623157e+308"},
+        {"+infinity", "1.7976931348623157e+308"},
+        {"-Infinity", "-1.7976931348623157e+308"},
+        {"-inf", "-1.7976931348623157e+308"},
+    };
+    for (const auto& row : accepted)
+        EXPECT_EQ(ReadOne(row.first), std::string(row.second) + "\n") << row.first;
+    // Both are numbers: a NaN (printed null) and a real infinity.
+    for (const char* text : {"nan", "NaN", "-nan"}) {
+        std::vector<Value> values;
+        std::string error;
+        ASSERT_TRUE(Read(text, values, error)) << text;
+        ASSERT_EQ(values.size(), 1u) << text;
+        EXPECT_EQ(values[0].GetKind(), Kind::Number) << text;
+        EXPECT_TRUE(std::isnan(values[0].AsNumber())) << text;
+        EXPECT_EQ(Dump(values[0]), "null") << text;
+    }
+    const std::pair<const char*, bool> infinities[] = {
+        {"Infinity", true}, {"+inf", true}, {"-Infinity", false},
+    };
+    for (const auto& row : infinities) {
+        std::vector<Value> values;
+        std::string error;
+        ASSERT_TRUE(Read(row.first, values, error)) << row.first;
+        ASSERT_EQ(values.size(), 1u) << row.first;
+        EXPECT_EQ(values[0].GetKind(), Kind::Number) << row.first;
+        ASSERT_TRUE(std::isinf(values[0].AsNumber())) << row.first;
+        EXPECT_EQ(values[0].AsNumber() > 0, row.second) << row.first;
+        EXPECT_EQ(Dump(values[0]),
+                  row.second ? "1.7976931348623157e+308"
+                             : "-1.7976931348623157e+308")
+            << row.first;
+    }
+    // Every invalid bare word: a word starting t/f/nu is an invalid
+    // literal, anything else an invalid numeric literal.
+    const std::vector<std::pair<const char*, const char*>> invalid = {
+        {"t", "Invalid literal at EOF at line 1, column 1"},
+        {"tru", "Invalid literal at EOF at line 1, column 3"},
+        {"truex", "Invalid literal at EOF at line 1, column 5"},
+        {"fals", "Invalid literal at EOF at line 1, column 4"},
+        {"nu", "Invalid literal at EOF at line 1, column 2"},
+        {"nul", "Invalid literal at EOF at line 1, column 3"},
+        {"null2", "Invalid literal at EOF at line 1, column 5"},
+        {"nuLL", "Invalid literal at EOF at line 1, column 4"},
+        {"nul1", "Invalid literal at EOF at line 1, column 4"},
+        {"n", "Invalid numeric literal at EOF at line 1, column 1"},
+        {"na", "Invalid numeric literal at EOF at line 1, column 2"},
+        {"nax", "Invalid numeric literal at EOF at line 1, column 3"},
+        {"nil", "Invalid numeric literal at EOF at line 1, column 3"},
+        {"nUll", "Invalid numeric literal at EOF at line 1, column 4"},
+        {"Null", "Invalid numeric literal at EOF at line 1, column 4"},
+        {"True", "Invalid numeric literal at EOF at line 1, column 4"},
+        {"F", "Invalid numeric literal at EOF at line 1, column 1"},
+        {"nanx", "Invalid numeric literal at EOF at line 1, column 4"},
+        {"nan1", "Invalid numeric literal at EOF at line 1, column 4"},
+        {"Infinite", "Invalid numeric literal at EOF at line 1, column 8"},
+        {"infinityx", "Invalid numeric literal at EOF at line 1, column 9"},
+        {"1e5x", "Invalid numeric literal at EOF at line 1, column 4"},
+        {"1e", "Invalid numeric literal at EOF at line 1, column 2"},
+        {"1e+", "Invalid numeric literal at EOF at line 1, column 3"},
+        {"--1", "Invalid numeric literal at EOF at line 1, column 3"},
+        {"0x10", "Invalid numeric literal at EOF at line 1, column 4"},
+        {"1.2.3", "Invalid numeric literal at EOF at line 1, column 5"},
+        {".", "Invalid numeric literal at EOF at line 1, column 1"},
+        {"x", "Invalid numeric literal at EOF at line 1, column 1"},
+        {"-", "Invalid numeric literal at EOF at line 1, column 1"},
+        {"+", "Invalid numeric literal at EOF at line 1, column 1"},
+        {"1-2", "Invalid numeric literal at EOF at line 1, column 3"},
+    };
+    for (const auto& row : invalid)
+        EXPECT_EQ(ReadOne(row.first), "ERR|" + std::string(row.second) + "\n")
+            << row.first;
 }
 
 TEST(JqJsonReader, InvalidUtf8Repaired) {
@@ -192,6 +322,39 @@ TEST(JqJsonReader, LineCountsAcrossFeeds) {
               "ERR|Expected separator between values at line 2, column 3\n");
     EXPECT_EQ(ReadOne("{\n\"a\":1}\n{"),
               "{\"a\":1}\nERR|Unfinished JSON term at EOF at line 3, column 1\n");
+    // The line and column really carry from one Feed to the next.
+    std::vector<Value> values;
+    JsonReader reader(values);
+    ASSERT_TRUE(reader.Feed("{\"a\":1}\n"));
+    ASSERT_EQ(values.size(), 1u);
+    ASSERT_TRUE(reader.Feed("{"));
+    EXPECT_FALSE(reader.Finish());
+    EXPECT_EQ(reader.Error(), "Unfinished JSON term at EOF at line 2, column 1");
+}
+
+// Every ill-formed sequence one U+FFFD, the bytes around it kept.
+TEST(JqJsonReader, RepairUtf8Sequences) {
+    const std::string R = "\xef\xbf\xbd";  // U+FFFD
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        {"a\xc0\xaf" "b", "a" + R + R + "b"},
+        {"a\x80\x80" "b", "a" + R + R + "b"},
+        {"a\xf5\x80\x80\x80" "b", "a" + R + R + R + R + "b"},
+        {"a\xf8\x88\x80\x80\x80" "b", "a" + R + R + R + R + R + "b"},
+        {"a\xfe" "b", "a" + R + "b"},
+        {"a\xe0\x80\x80" "b", "a" + R + "b"},
+        {"a\xed\xa0\x80" "b", "a" + R + "b"},
+        {"a\xf4\x90\x80\x80" "b", "a" + R + "b"},
+        {"a\xe2\x82" "b", "a" + R + "b"},
+        {"a\xc3\xc3\xa9" "b", "a" + R + "\xc3\xa9" "b"},
+        {"a\xe2\x82\xe2\x82\xac" "b", "a" + R + "\xe2\x82\xac" "b"},
+        // A sequence cut short by the end of the input.
+        {"a\xf0\x9f\x98", "a" + R},
+        // Well-formed sequences are kept as they are.
+        {"a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80" "b",
+         "a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80" "b"},
+    };
+    for (const auto& row : cases)
+        EXPECT_EQ(RepairUtf8(row.first), row.second);
 }
 
 TEST(JqJsonReader, DepthLimit) {

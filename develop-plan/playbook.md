@@ -46,7 +46,7 @@ Pause: no
 | 38 | [awk--records](tasks/awk--records.md) | done | 0.5.39 | 37, 3 | #81 | 1 | 0C 1H 2M fixed, 1M 2L open | Windows red, not checked |
 | 39 | [awk--functions](tasks/awk--functions.md) | done | 0.5.40 | 38 | #82 | 1 | 0C 0H fixed, 2M 3L open | Windows red, not checked; call depth 200 vs the Windows stack: see final--windows-fix |
 | 40 | [awk--printf-math](tasks/awk--printf-math.md) | done | 0.5.41 | 39, 11 | #83 | 1 | 0C 1H 4M fixed, 0M 3L open | Windows red, not checked |
-| 41 | [awk--io](tasks/awk--io.md) | todo | | 40, 9 | | | | |
+| 41 | [awk--io](tasks/awk--io.md) | in-progress | 0.5.42 | 40, 9 | | | | |
 | 42 | [tools--jq-parse](tasks/tools--jq-parse.md) | todo | | - | | | | |
 | 43 | [tools--jq-json](tasks/tools--jq-json.md) | todo | | - | | | | |
 | 44 | [tools--jq-eval](tasks/tools--jq-eval.md) | todo | | 42, 43 | | | | |
@@ -119,3 +119,4 @@ Pause: no
 - 2026-10-10 (implement) awk--records re-checked clean-room against c45c82e (Opus): real names from #76-#80, no old internal names; four rules corrected on gawk --posix (first bad literal regex only, escape warnings once per run, paragraph-mode newline split only for single-byte/space FS, parenthesized regex dynamic); folded in #80's three lows; awk 1.2.0
 - 2026-10-10 (implement) awk--functions re-checked clean-room against 8ca0cbc (Opus): new interpreter names, Frame->ActiveCall (one true awk's struct name); real APIs from #76-#81; m_globals a deque; split(s, a[i]) a documented exception; folded in #81's findings (regex FS fatal at assignment, $0 = v re-splits with current FS/RS, test leftover); awk 1.3.0
 - 2026-10-10 (implement) awk--printf-math re-checked clean-room against b334335 (Opus; the agent hit a Claude session limit at its end, its edits complete): current awk names, clean-room and write-in-pieces paragraphs, real APIs from #76-#82; folded in #82's findings (array-bound parameter fatals, ScalarRefOf, CLAUDE.md backtick, FlowUnwind)
+- 2026-10-10 (implement) awk--io re-checked clean-room against 902c91d (Opus): gawk-internals wording replaced by observed behaviour; real names from #76-#83; three rules corrected on gawk 5.2.1 (close() of a pipe returns the exit status, one stream per close most-recent first, flush order); documented exception: a command killed inside hsh maps to 269/271 (gawk with dash 141/143); folded in #83's lows; awk 1.5.0

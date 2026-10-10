@@ -3,7 +3,7 @@
 - Rock: awk
 - Depends on: awk--printf-math, coreutils--names-env (`BuiltinRunProgram.h`)
 - Size: ~950 changed lines in ~11 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ 902c91d
 - PR title: Add awk getline, redirections, pipes, close, fflush and system
 
 ## Goal
@@ -19,11 +19,14 @@ gawk 5.2 `--posix` runs them.
 - `print`/`printf` with `> file`, `>> file` and `| cmd`; a stream is opened
   once and reused by its name (`print > "out"` twice writes two lines);
   `close()` and its return values (0 for a file, the command's exit status
-  for a pipe, -1 when nothing of that name is open); `fflush()`;
-  `system(cmd)` returning the command's exit status as plain gawk 5 does
-  (`system("exit 3")` is 3; a command killed by a signal gives 256 + the
-  signal number) -- the user chose plain gawk's values over `--posix`'s
-  wait status (256 x status), which is what awk one-liners expect.
+  for a pipe, -1 when nothing of that name is open; one stream per call, the
+  most recently opened of that name first); `fflush()`;
+  `system(cmd)` and `close()` of a pipe returning the command's exit status
+  as plain gawk 5 does (`system("exit 3")` is 3; a command killed by a
+  signal gives 256 + the signal number) -- the user chose plain gawk's
+  values (goal.md's clarification) over `--posix`'s (a wait status, 256 x
+  status, for `system`; 0 for `close` of a pipe), which is what awk
+  one-liners expect.
 - Commands -- `system`, output pipes, `cmd | getline` -- run in Haisos's
   shell, `hsh -c <cmd>` (found in `PATH`), started through
   `ICurrentProcess::OS()` by `BuiltinRunProgram`; awk's buffered output is
@@ -37,70 +40,122 @@ gawk 5.2 `--posix` runs them.
 - Exit codes: `exit` values modulo 256, 2 after a fatal error (streams still
   closed), 141 on a broken standard output, 143 when stopped -- the children
   stopped too.
+- Three small fixes from #83's review, each with its test: `sprintf` reads
+  CONVFMT after its arguments are evaluated; `ScalarRef`'s array fatal can
+  no longer fall through a `case`; the "a, from x" text of a by-name
+  argument is built only when it is used.
 
 ## Context
 
+**Clean room** (root `CLAUDE.md`, "Clean-room rule", above every other
+rule): all code is written from scratch. Never read, copy, port, translate
+or paraphrase another program's source (gawk, mawk, the one true awk,
+busybox, dash, ...), whatever its licence, and never name another program's
+internal functions, variables, types or fields -- not in code, not in
+comments. Behaviour is matched from documentation (POSIX awk, the gawk
+manual, man pages) and from the observed output of real awks. Everything
+below describes behaviour; every name in it is this project's own.
+
+**Write in pieces**: never more than ~250 lines in one Write/Edit call;
+build a file up with several Edits; commit after each file or step.
+
 Read first: `src/components/BuiltinCommands/commands/awk/CLAUDE.md` and the
-files it lists (`AwkInterpreter.h/.cpp`, `AwkBuiltins.cpp`, `AwkInput.h`,
-`AwkAst.h`); `src/components/BuiltinCommands/BuiltinRunProgram.h/.cpp`;
-`commands/hsh/HshShell.cpp` (`CreateStagePipe`: how a pipe is made with
-`IO().CreatePipe` and its slots closed; `StartChild`, `WaitForChild`);
-`interfaces/IFileIO.h` (`OpenFile`, `CreatePipe`, `GetDescriptor`,
+files it lists, above all `AwkInterpreter.h/.cpp`, `AwkBuiltins.cpp`,
+`AwkInput.h`, `AwkAst.h`; `src/components/BuiltinCommands/BuiltinRunProgram.h/.cpp`
+(`OpenEmptyInput` shows how a pipe is made with `IO().CreatePipe` and its
+slots closed again); `commands/hsh/HshShell.cpp` (`CreateStagePipe`,
+`Shell::StartChild`, `Shell::WaitForChild`: Haisos's own pipes and
+children); `interfaces/IFileIO.h` (`OpenFile`, `CreatePipe`, `GetDescriptor`,
 `CloseDescriptor`, `Stat`), `interfaces/IPipeService.h` (a pipe's rules:
 `kIOBrokenPipe`, `kIOInterrupted`), `src/components/Filesystem/FilesystemUtils.h`
 (`kFileOpenWriteCreateTruncate`, `kFileOpenWriteCreateAppend`,
-`kFileCreateMode`); root `CLAUDE.md` ("Security", "Exit codes");
+`kFileCreateMode`), `src/components/BuiltinCommands/BuiltinText.h`
+(`OpenInputOperand`, `InputOpenFailure`, `OpenFailureText`);
+`tests/unit/components/Awk.unittests/AwkRunFixture.h` and
+`AwkInterpreterTest.cpp` (`NotYetAvailable`); root `CLAUDE.md`
+("Clean-room rule", "Security", "Exit codes");
 `src/components/BuiltinCommands/CLAUDE.md` ("Output": buffering, broken
 pipes).
 
-What earlier tasks provide (on develop; their plans are the authority):
-- coreutils--names-env: `BuiltinRunProgram.h` -- `FindProgramInPath(context,
-  name, const IEnvironment* = nullptr)` (PATH, or `kBuiltinDefaultSearchPath`
-  when there is none -- it holds `/bin`), `struct RunProgramOptions { stdIn,
-  stdOut, stdErr; workingDirectory; environment }` (null descriptor: the
-  caller's own slot 0/1/2, an empty slot as a closed descriptor; null
-  environment: a clone of the caller's), `RunProgramAndWait(context, path,
-  args, options, bool* started)` (flushes the caller's stdout, starts through
-  `context.Process().OS()->StartProcess` only, waits in 50 ms slices, stops
-  the child when the caller is stopped; 127 when not started).
-- coreutils--sort: `OpenInputOperand(context, name, failure)` /
-  `InputOpenFailure` (`-` is descriptor 0).
-- awk--values: `RecordReader(BuiltinContext&, std::shared_ptr<IFileDescriptor>)`,
+What is on develop already (#76-#83, all in
+`src/components/BuiltinCommands/commands/awk/`, namespace `Haisos::Awk`;
+the code is the authority):
+- `BuiltinRunProgram.h` (namespace `Haisos`): `SearchPathEntries`,
+  `FindProgramInPath(context, name, const IEnvironment* = nullptr)` (PATH,
+  or `kBuiltinDefaultSearchPath` when there is none -- it holds `/bin`),
+  `OpenEmptyInput(context)`, `struct RunProgramOptions { stdIn, stdOut,
+  stdErr; workingDirectory; environment }` (null descriptor: the caller's
+  own slot 0/1/2, an empty slot as `Hsh::ClosedDescriptor`; null
+  environment: the caller's), `RunProgramAndWait(context, path, args,
+  options, bool* started)` (flushes the caller's stdout, starts through
+  `context.Process().OS()->StartProcess` only, the OS released at once,
+  waits in `kWaitSliceMs` 50 ms slices, stops the child once when the
+  caller is stopped and waits `kStopGraceMs` 5000 ms more;
+  `kExitCodeNotStarted` 127 when not started, `kExitCodeStopped` 143 when
+  it did not finish).
+- `BuiltinText.h`: `OpenInputOperand(context, name, failure)` /
+  `InputOpenFailure { None, Missing, Directory, Denied, BadDescriptor }`
+  (`-` is descriptor 0), `OpenFailureText(failure)`.
+- `BuiltinCommand.h`: `BuiltinContext` -- `Out` (block-buffered to
+  anything but a terminal, `kBuiltinOutBufferSize` 4096), `ErrorText`
+  (unbuffered; flushes stdout first), `Flush()`, `StopRequested()`,
+  `Process()`, `IO()`; a `kIOBrokenPipe` on stdout or stderr stops the
+  process quietly with 141.
+- `AwkInput.h`: `RecordReader(BuiltinContext&, std::shared_ptr<IFileDescriptor>)`,
   `Next(rs, record)` -> `RecordReadResult { Record, End, Error, Stopped }`
-  (RS's first byte; `""` paragraph mode since awk--records); `Value`;
-  `AwkFatal`.
-- awk--interpreter: `Interpreter` -- `Output(const Stmt& print, const
-  std::string& text)` (today: refuses a redirection with
+  (RS's first byte; `""` paragraph mode).
+- `AwkAst.h`: `Stmt::redirect` (`RedirectKind { None, File, Append, Pipe }`)
+  and `Stmt::redirectTarget` on `StmtKind::Print`/`Printf`; an `Expr` of
+  kind `ExprKind::Getline` with `getlineForm` (`GetlineForm { Simple, File,
+  Command }`), `target` (null: `$0`) and `operands[0]` (the file or
+  command).
+- `AwkValue.h`: `Value` (`FromNumber`, `FromString`, `FromInput` -- a
+  strnum when it looks numeric -- `ToString(convfmt)`, `ToNumber`),
+  `AwkArray`; `AwkError.h`: `AwkFatal(message, withLocation = true)`.
+- `AwkInterpreter.h/.cpp`, the `Interpreter`: `Variable` (a global's or a
+  parameter's storage), `GlobalVariable(slot)`, `ValueOf(expr)`,
+  `RunStatement(stmt)`, `ActiveCall` frames on `m_calls`; `Assign(lvalue,
+  value)`; `SpecialString(kSlotRS / kSlotFS / kSlotCONVFMT)` (refreshes the
+  slot's string each call); `m_fields.SetRecord(record, fs,
+  paragraphMode)`; `Output(const Stmt& print, const std::string& text)` --
+  print's and printf's one door, which today refuses a redirection with
   `AwkFatal("output redirection is not implemented yet")`, else
-  `m_context.Out`), `EvaluateGetline(const Expr&)` (today
-  `AwkFatal("getline is not implemented yet")`), `NextMainRecord()` (the
-  operands as ARGV is now, `-` is standard input, FILENAME/NR/FNR, the
-  "cannot open file" fatals), `Assign`, `SpecialString(kSlotRS / kSlotFS /
-  kSlotCONVFMT)`, `m_fields.SetRecord(record, fs, paragraphMode)`,
-  `ThrowIfStopped()`, `Run` (fatal errors written, status 2; 143 when
-  stopped), `kSlotENVIRON` (an empty array until now).
-- awk--parser: `Stmt::redirect` (`RedirectKind { None, File, Append, Pipe }`)
-  and `Stmt::redirectTarget`; `Expr` of kind `Getline` with `getlineForm`
-  (`Simple`, `File`, `Command`), `target` (null: `$0`) and `operands[0]`
-  (the file or command).
-- awk--functions: `CallBuiltin` in `AwkBuiltins.cpp` (`close`, `fflush`,
-  `system` still the placeholder ``function `<name>' is not implemented
-  yet``), `RuntimeWarning(message)`, the `AwkRunTest` fixture in
-  `tests/unit/components/Awk.unittests/AwkRunFixture.h` (`/abc.txt` =
-  `a b c\nd e f\n`, `/data.csv` = `x,1,2.5\ny,2,3.25\nz,3,4\n`).
-- awk--printf-math: `printf` statements go through `Output` like `print`.
+  `m_context.Out`; `EvaluateGetline(const Expr&)` -- today
+  `AwkFatal("getline is not implemented yet")`; `NextMainRecord()` (the
+  current `m_reader`, else `OpenNextInput()`: ARGV as it is now, `-` the
+  standard input, FILENAME, FNR reset, the "cannot open file" fatals; NR and
+  FNR + 1 and `SetRecord` per record); `Prepare()` (sets `kSlotENVIRON` to
+  an empty array: "awk--io fills it"); `ThrowIfStopped()`;
+  `RuntimeWarning(message)`; `Run()` (`AwkFatal` -> `ReportFatal`, 2;
+  `Stopped` -> 143; else `m_exitCode & 0xFF`).
+- `AwkBuiltins.cpp`, `Interpreter::CallBuiltin`: every built-in but
+  `close`, `fflush` and `system`, which reach its last line, ``function
+  `<name>' is not implemented yet``.
+- `Awk.cpp`: `Version()` 1.4.0; `Help().notes` ends its exceptions with
+  "getline and output redirections are not available yet."
+- Tests: the `AwkRunTest` fixture (`AwkRunFixture.h`, over
+  `BuiltinCommandsTest`): `RunCaptured(command, args, input, workingDirectory,
+  environment)` -> `Captured { out, err, status }`, `StartAwk(args, stdIn)`
+  (stdout `/out` and stderr `/err` on the `streams` filesystem),
+  `WriteFile`, `ReadWholeFile(*root, path, text)`; files `/abc.txt` =
+  `a b c\nd e f\n`, `/data.csv` = `x,1,2.5\ny,2,3.25\nz,3,4\n`, `/para.txt`,
+  the directory `/docs`; every builtin in `/bin`; the OS environment has no
+  PATH (the default search path finds `/bin`).
 
 Every expected text below was produced by gawk 5.2.1 `--posix` with
-`LC_ALL=C` (`gawk:` replaced by `awk:`, `sh` by Haisos's `hsh`), except the
-documented exceptions named. The task container has only mawk: never change
-an expectation to mawk's, and never look for or copy gawk's (or any other
-awk's) source code -- the behaviour described here is the specification.
+`LC_ALL=C` (`gawk:` replaced by `awk:`, `sh` by Haisos's `hsh`, the
+fixture's absolute paths for the scratch directory's), re-run against this
+plan on 2026-10-10 -- except `system()` and `close()` of a pipe, whose
+values are plain gawk 5.2.1's (the user's choice), and the documented
+exceptions named. The task container has only mawk: never change an
+expectation to mawk's -- the behaviour described here is the specification.
 
 ## Changes
 
 ### `src/components/BuiltinCommands/BuiltinRunProgram.h` / `.cpp` -- start without waiting
 
-Contract 5 grows by two functions (the existing ones keep their behaviour):
+`BuiltinRunProgram.h` grows by two functions (the existing ones keep their
+behaviour, `OpenEmptyInput` included):
 
 ```cpp
 // Starts |programPath| as RunProgramAndWait does -- the descriptors,
@@ -125,9 +180,10 @@ false`) then `WaitForProgram`. env, find and xargs keep working unchanged
 
 ### `commands/awk/AwkStreams.h` / `AwkStreams.cpp` (new)
 
-Namespace `Haisos::Awk`. The table of awk's open streams -- what gawk calls
-redirections -- and the commands it runs. A plain class owned by the
-`Interpreter` (`AwkStreams m_streams;`, built with its context).
+Namespace `Haisos::Awk`. The table of awk's open streams -- the files and
+commands its redirections and getlines opened -- and the commands it runs.
+A plain class owned by the `Interpreter` (`AwkStreams m_streams;`, built
+with its context).
 
 ```cpp
 enum class AwkStreamKind { OutputFile, OutputPipe, InputFile, InputPipe };
@@ -152,8 +208,9 @@ public:
     int ReadRecord(AwkStreamKind kind, const std::string& name, const std::string& rs,
                    std::string& record);
 
-    // close(name): -1 when nothing of that name is open (or its output could
-    // not be written out); for a file 0; for a pipe (output or input) the
+    // close(name): the most recently opened stream of that name, one per
+    // call. -1 when nothing of that name is open (or its output could not
+    // be written out); for a file 0; for a pipe (output or input) the
     // command's status mapped as RunSystem maps it (`close("cat; exit 3")`
     // is 3).
     int Close(const std::string& name);
@@ -164,8 +221,9 @@ public:
     void FlushAll();
     // system(command): the status as plain gawk 5 returns it (below).
     int RunSystem(const std::string& command);
-    // Every stream closed, in the order opened (pipes waited for): at the
-    // end of every run -- normal, exit, fatal error, stop. Never throws.
+    // Every stream closed, the most recently opened first (pipes waited
+    // for): at the end of every run -- normal, exit, fatal error, stop.
+    // Never throws.
     void CloseAll();
 };
 ```
@@ -202,8 +260,8 @@ end, whether a write failed. Streams are kept in opening order and found by
 2. Standard streams are written at once; a file or pipe stream appends to its
    buffer, written out when it reaches `kBuiltinOutBufferSize` (and on
    flush/close). Writing loops until every byte is out: `kIOBrokenPipe` ->
-   `AwkFatal("<statement> to \"<name>\" failed: Broken pipe")` (gawk
-   `--posix` ignores SIGPIPE for redirections: status 2, not 141); any other
+   `AwkFatal("<statement> to \"<name>\" failed: Broken pipe")` (gawk,
+   `--posix` or not, reports this fatal, status 2 -- not a quiet 141); any other
    negative result but `kIOInterrupted` -> the same with `Input/output
    error`; `kIOInterrupted` (stopped) -> return quietly. A stream whose write
    failed is marked and never written again.
@@ -213,8 +271,8 @@ end, whether a write failed. Streams are kept in opening order and found by
    - InputFile `-` or `/dev/stdin`: descriptor 0 (`context.IO().GetDescriptor(0)`;
      empty -> -1). Each name is a stream of its own with its own reader (a
      reader reads ahead, so mixing them with the main input from standard
-     input is unspecified -- as in gawk, which reads `-` and `/dev/stdin`
-     through separate buffers).
+     input is unspecified; observed in gawk: after `getline v < "-"` has
+     read the only line, `getline w < "/dev/stdin"` finds nothing).
    - Other InputFile: `OpenInputOperand(context, name, failure)`; any failure
      (missing, directory, ...) -> -1, nothing registered.
    - InputPipe: `FlushAll()`; a pipe as above; `StartProgram` with
@@ -226,13 +284,20 @@ end, whether a write failed. Streams are kept in opening order and found by
    `Next(rs, record)`: Record -> 1; End -> 0 (marked); Error -> -1; Stopped
    -> 0 (the interpreter's `ThrowIfStopped` unwinds right after).
 
-**Close(name)**: every stream of that name, any kind, in opening order:
-output streams first written out (`/dev/stdout`: `context.Flush()`); a file
-released; an output pipe's write end released, then `WaitForProgram`; an
-input pipe's reader and read end released, then `WaitForProgram`; removed
-from the table. Returns 0 -- for a pipe too, whatever the command's exit
-status (gawk `--posix`) -- or -1 when none was open or an output could not be
-written out.
+**Close(name)**: the most recently opened stream of that name, whatever its
+kind -- one per call, so a second `close` of the name closes the one opened
+before it (gawk: after `print "y" > "c"; print "x" | "c"` the first
+`close("c")` closes the pipe, the second the file). An output stream is
+first written out (`/dev/stdout`: `context.Flush()`); a file released; an
+output pipe: awk's own stdout written out first (`context.Flush()` --
+gawk's `print "x" | "cat"; print "y"; close("cat")` prints `y` before
+`x`), then the stream's buffer, its write end released, then
+`WaitForProgram`; an input pipe's reader and read end released, then
+`WaitForProgram`; removed from the table. Returns 0 for a file (and a
+standard stream), the command's code mapped as `RunSystem` maps it for a
+pipe of either direction (plain gawk 5, the user's choice: `close("cat;
+exit 3")` is 3, where `--posix` gives 0), or -1 when none was open or an
+output could not be written out.
 
 **Flush(name)**: null or (from the interpreter) `""` -> `FlushAll()`, 0.
 `/dev/stdout` -> `context.Flush()`, 0; `/dev/stderr` -> 0 -- both even when
@@ -248,16 +313,26 @@ not opened (gawk). Otherwise the output streams of that name written out, 0
 own standard streams and environment, and awk's working directory), its code
 c mapped as plain gawk 5 reports it (not `--posix`): 143 (stopped: Haisos's
 SIGTERM) -> 271 (256 + 15), 141 (broken pipe: SIGPIPE) -> 269 (256 + 13),
-any other c -> c (`exit 3` -> 3, not found -> 127). No shell -> 127. `system("")` runs `hsh -c ''` (0) and
-flushes everything, as gawk.
+any other c -> c (`exit 3` -> 3, not found -> 127). No shell -> 127.
+`system("")` runs `hsh -c ''` (0) and flushes everything, as gawk. Haisos
+sees only the shell's exit code, so a command stopped or broken-piped
+inside the shell maps the same as the shell itself would (269, 271), where
+gawk with dash, whose shell outlives the command, gets the shell's own
+code (141, 143): a documented exception.
 
-**CloseAll()**: `Close` of every stream, in opening order. When the process
-is being stopped, `WaitForProgram` stops each child and waits at most its
-grace time.
+**CloseAll()**: every stream closed as `Close` closes it, the most
+recently opened first (gawk: `print "1" | "sort -r"; print "2" | "sort";
+print "3" | "cat"` prints `3 2 1` at the end) -- except that awk's own
+stdout is **not** written out first: at the end gawk finishes its pipes
+before its buffered stdout (`print "x" | "cat"; print "y"` prints `x`
+then `y`), so the stdout buffer is left to `~BuiltinContext`. When the
+process is being stopped, `WaitForProgram` stops each child and waits at
+most its grace time.
 
 ### `commands/awk/AwkInterpreter.h` / `.cpp`
 
-- `AwkStreams m_streams;` (constructed with `m_context`).
+- `AwkStreams m_streams;` (constructed with `m_context`, declared after
+  it).
 - **Output(stmt, text)**: no redirection -> `m_context.Out(text)` as before.
   Otherwise the target's value `ToString(CONVFMT)`; an empty name ->
   ``AwkFatal("expression for `>' redirection has null string value")`` (`>>`,
@@ -295,14 +370,39 @@ grace time.
   returning, so the children's output reaches the shared descriptors before
   awk's own buffered stdout is written by `~BuiltinContext`.
 
+### Three small fixes from #83's review
+
+- `AwkBuiltins.cpp` (`CallBuiltin`, the `sprintf` branch; the
+  `const std::string& convfmt = SpecialString(kSlotCONVFMT)` taken at the
+  top of `CallBuiltin`, ~line 123): `sprintf` formats with the CONVFMT of
+  the moment its arguments have all been evaluated -- an argument that
+  assigns CONVFMT counts, for the format's own conversion and for its `%s`
+  conversions alike. Take `SpecialString(kSlotCONVFMT)` again after the
+  argument loop, as the `printf` statement in `RunStatement` already does
+  (gawk: `x = 3.14159; s = sprintf("%s %s", x, CONVFMT = "%.2f")` is
+  `3.14 %.2f`).
+- `AwkInterpreter.cpp`, `ScalarRef(Variable&, const std::string&)` (~line
+  456): the `fatal` lambda returns as far as the compiler knows, so
+  `case Variable::Kind::Array: fatal();` falls through into the Untyped
+  case syntactically (`-Wimplicit-fallthrough`). Make it a file-local
+  `[[noreturn]]` function (taking the name and `passedFrom`) in the
+  anonymous namespace, called from both places, so no `case` ends in a
+  call that can return. Behaviour unchanged.
+- `AwkInterpreter.cpp`, `CallFunction` (~line 1390): the `passedFrom` text
+  (`"a"`, or `"a, from x"`) is built for every by-name argument, a Scalar
+  one included, which never uses it. Build it only in the Array and
+  Untyped cases (a small helper or lambda returning the text). Behaviour
+  unchanged.
+
 ### `commands/awk/Awk.cpp`
 
-`Help().notes`: drop the last "not available yet" line; add `commands run in
-hsh (-c), found in PATH`; the documented exceptions `/dev/stdout,
-/dev/stderr, /dev/stdin and - are awk's own streams (gawk --posix opens the
-devices)`, `system() and close() of a pipe return the exit status as plain
-gawk does (256 + the signal for a stopped command or a broken pipe), not
-gawk --posix's wait status`.
+`Version()` 1.4.0 -> 1.5.0. `Help().notes`: drop the line "getline and
+output redirections are not available yet."; add `Commands run in hsh
+(-c), found in PATH.`; the documented exceptions `/dev/stdout, /dev/stderr,
+/dev/stdin and - are awk's own streams (gawk --posix opens the devices).`,
+`system() and close() of a pipe return the command's exit status as plain
+gawk does (256 + the signal for a command stopped or broken-piped, also
+inside the shell), not gawk --posix's values.`
 
 ### Build
 
@@ -330,12 +430,13 @@ gawk --posix's wait status`.
 
 New `tests/unit/components/Awk.unittests/AwkIoTest.cpp` (in that
 directory's `CMakeLists.txt`): `class AwkIoTest : public AwkRunTest {};`,
-`TEST_F`s on `RunCaptured("awk", ...)` with exact `out`, `err`, `status`
+`TEST_F`s on `RunCaptured("awk", args, input, "/", environment)` with exact `out`, `err`, `status`
 (0 and empty err unless given); files the program writes are read back with
 `ReadWholeFile(*root, path, text)`. Programs are the awk text (C++ raw
 strings); expected texts use C escapes. Commands (`echo`, `cat`, `sort`,
-`true`, `false`, `sleep`, `hsh`) are the fixture's `/bin` builtins, found
-through the default search path (the fixture's environment has no PATH).
+`seq`, `true`, `false`, `sleep`, `hsh`) are the fixture's `/bin` builtins,
+found through the default search path (the fixture's environment has no
+PATH).
 
 - `GetlineMainInput`:
   input `l1\nl2 x\nl3\nl4\n`, `{ print "rec", NR, FNR, NF, $0; r = getline; print "got", r, NR, FNR, NF, $0 }`
@@ -360,7 +461,9 @@ through the default search path (the fixture's environment has no PATH).
   `BEGIN { while (("echo 1; echo 2" | getline) > 0) n++; print n, NR; print ("echo 1; echo 2" | getline), close("echo 1; echo 2"), ("echo 1; echo 2" | getline), $0 }` -> `2 0\n0 0 1 1\n`;
   `BEGIN { "echo a" | getline; "echo b" | getline; print $0; print close("echo a"), close("echo b"), close("echo a") }` -> `b\n0 0 -1\n`;
   input `in1\n`, `BEGIN { "cat" | getline x; print "[" x "]" }` -> `[in1]\n` (the command reads awk's stdin);
-  `BEGIN { r = ("nocmdx" | getline); print r }` -> out `0\n`, err hsh's not-found line for `nocmdx` (assert it contains `nocmdx: not found`).
+  `BEGIN { r = ("nocmdx" | getline); print r }` -> out `0\n`, err hsh's not-found line for `nocmdx` (assert it contains `nocmdx: not found`);
+  `BEGIN { "echo q; exit 4" | getline; print close("echo q; exit 4") }` -> `4\n` (plain gawk; `--posix` gives 0);
+  `BEGIN { "seq 100000" | getline; print $0, close("seq 100000") }` -> `1 269\n` (the documented exception: gawk with dash prints `1 141`).
 - `OutputRedirections`:
   `BEGIN { print "a" > "/out1.txt"; print "b" > "/out1.txt"; close("/out1.txt"); print "c" >> "/out1.txt"; print close("/out1.txt"), close("/out1.txt"), close("never"); while ((getline l < "/out1.txt") > 0) print "read", l }`
   -> `0 -1 -1\nread a\nread b\nread c\n`, and `/out1.txt` is `a\nb\nc\n`;
@@ -369,6 +472,15 @@ through the default search path (the fixture's environment has no PATH).
   `BEGIN { print "x" > "/out4.txt"; getline l < "/out4.txt"; print "[" l "]" }` -> `[]\n` (not written out before close);
   `BEGIN { print "x" > "/out10.txt"; print "y" > "/out10.txt"; print close("/out10.txt"); getline l < "/out10.txt"; print l }` -> `0\nx\n`;
   `BEGIN { print "x" | "cat"; print "y" > "cat"; close("cat") }` -> out `x\n`, and `/cat` is `y\n`.
+- `CloseOrder` (one stream per `close`, the most recently opened first; plain gawk's pipe status):
+  `BEGIN { print "x" | "cat; exit 3"; print "y" > "cat; exit 3"; print "c1", close("cat; exit 3"); print "c2", close("cat; exit 3"); print "c3", close("cat; exit 3") }`
+  -> `c1 0\nx\nc2 3\nc3 -1\n`, and `/cat; exit 3` is `y\n`;
+  `BEGIN { print "y" > "cat; exit 3"; print "x" | "cat; exit 3"; print "c1", close("cat; exit 3"); print "c2", close("cat; exit 3"); print "c3", close("cat; exit 3") }`
+  -> `x\nc1 3\nc2 0\nc3 -1\n`;
+  `BEGIN { print "x" | "cat"; print "y"; close("cat"); print "z" }` -> `y\nx\nz\n` (closing a pipe writes awk's stdout out first);
+  `BEGIN { print "x" | "cat"; print "y"; print "z" }` -> `x\ny\nz\n` (at the end the pipes finish first);
+  `BEGIN { print "1" | "sort -r"; print "2" | "sort"; print "3" | "cat" }` -> `3\n2\n1\n` (closed at the end, the most recent first);
+  `BEGIN { print "x" | "nocmdx"; print close("nocmdx") }` -> out `127\n`, err contains `nocmdx: not found`.
 - `RedirectionErrors` (status 2, out empty, err exactly):
   `BEGIN { print "x" > "/nonexistent/dir/f"; print "after" }` -> ``awk: cmd. line:1: fatal: cannot redirect to `/nonexistent/dir/f': No such file or directory\n``;
   `BEGIN { print "x" > "/docs" }` -> ``awk: cmd. line:1: fatal: cannot redirect to `/docs': Is a directory\n``;
@@ -411,23 +523,35 @@ through the default search path (the fixture's environment has no PATH).
   `BEGIN { print "x" | "cat"; exit 3 }` -> out `x\n`, status 3;
   `BEGIN { print "x" | "cat"; print "f" > "/o7.txt"; z = 0; y = 1 / z }` -> out `x\n`,
   err `awk: cmd. line:1: fatal: division by zero attempted\n`, status 2, `/o7.txt` is `f\n`.
-- `StopsPromptly`: start `/bin/awk` with `os->StartProcess` (stdout and
-  stderr in-memory files as `RunCaptured` makes them), ~100 ms, `TriggerStop()`,
+- `StopsPromptly`: start awk with the fixture's `StartAwk(args, nullptr)`
+  (stdout `/out` and stderr `/err`), ~100 ms, `TriggerStop()`,
   then `WaitToFinish(3000)` true and exit code 143, for each of
   `BEGIN { system("sleep 100") }`, `BEGIN { while (("sleep 100" | getline) > 0) ; }`
   and `BEGIN { print "x" | "sleep 100" }` (the last stops while waiting for
   the pipe's command at the end); afterwards `os->GetRunningProcesses()`
   holds no `sleep` (the children were stopped).
 
-Update earlier tests: awk--interpreter's and awk--printf-math's
-`NotYetAvailable` placeholders for getline, redirections and `close` (they
-now run) -- remove them.
+The three fixes from #83's review:
+- `AwkPrintfTest.cpp`, new `TEST_F(AwkPrintfTest, SprintfReadsConvfmtAfterItsArguments)`:
+  `BEGIN { x = 3.14159; s = sprintf("%s %s", x, CONVFMT = "%.2f"); print s }` -> `3.14 %.2f\n`;
+  `BEGIN { x = 3.14159; print sprintf(x, CONVFMT = "%.2f") }` -> `3.14\n`;
+  `BEGIN { x = 3.14159; printf "%s %s\n", x, CONVFMT = "%.3f" }` -> `3.142 %.3f\n` (the statement, already right).
+- `AwkFunctionsTest.cpp`, `FunctionErrors` gains: `function f(a) { return a } function g(b) { return f(b) } BEGIN { y[1]; g(y) }`
+  -> status 2, err ``awk: cmd. line:1: fatal: attempt to use array `a (from b, from y)' in a scalar context\n``
+  (the Array case of `ScalarRef`, no fall-through); `UserFunctions` gains
+  `function f(a) { a = a + 1; return a } function g(b) { return f(b) } BEGIN { x = 1; print g(x), x }` -> `2 1\n`
+  (a Scalar passed by name: no `passedFrom` text needed). The existing
+  `(from ...)` expectations in `FunctionErrors` and `LateArrayBinding` stay green.
+
+Update earlier tests: `AwkInterpreterTest.cpp`'s `TEST_F(AwkRunTest,
+NotYetAvailable)` (close, an output redirection and getline, each
+``... is not implemented yet``; they now run) -- remove it.
 
 Commands:
 ```
 bash ./scripts/build_linux_on_linux.sh
 bash ./scripts/test_linux.sh L U Awk
-./output/linux/Awk.unittests --gtest_filter='AwkIoTest.*'
+./output/linux/Awk.unittests --gtest_filter='AwkIoTest.*:AwkPrintfTest.*:AwkFunctionsTest.*'
 bash ./scripts/test_linux.sh L U BuiltinCommands
 ./output/linux/BuiltinCommands.unittests --gtest_filter='BuiltinCommandsTest.Env*'
 bash ./scripts/test_linux.sh L U
@@ -437,18 +561,29 @@ bash ./scripts/test_linux.sh L U
 
 - `commands/awk/CLAUDE.md`: an "Input and output" section -- `AwkStreams`
   (streams by name and kind, buffering, the special names, open/close/flush
-  rules and return values, error texts), getline's forms and their effects
-  on `$0 NF NR FNR`, the shell and how commands are started (pipes made with
+  rules and return values, `close` one stream per call, the most recent
+  first, error texts), getline's forms and their effects on `$0 NF NR FNR`,
+  the shell and how commands are started (pipes made with
   `IO().CreatePipe`, the unused end released, `StartProgram` /
-  `WaitForProgram`, flush before a command, `CloseAll` before the final
-  stdout), `system()`'s status mapping, `ENVIRON`; `AwkStreams.h/.cpp` in the
-  file list; the exceptions under "Documented exceptions".
+  `WaitForProgram`, flush before a command and before closing a pipe,
+  `CloseAll` before the final stdout), the status mapping of `system()` and
+  `close()`, `ENVIRON`; `AwkStreams.h/.cpp` in the file list; `Awk.cpp`'s
+  version 1.5.0; under "Running", "Built-in functions" and "Documented
+  exceptions" drop what says getline, redirections, close, fflush and
+  system are not implemented yet (the hooks bullet, the last line of
+  "Built-in functions", the "parts that do not run yet" exception) and add
+  this task's exceptions (the special names, the 269/271 mapping inside the
+  shell); `sprintf` reads CONVFMT after its arguments (under "printf and
+  sprintf").
 - `src/components/BuiltinCommands/CLAUDE.md`: under "Key Classes",
-  `BuiltinRunProgram` gains `StartProgram` and `WaitForProgram`; the awk row:
-  the whole of POSIX awk now, with its exceptions.
+  `BuiltinRunProgram` gains `StartProgram` and `WaitForProgram` ("for awk's
+  `system()` later" becomes awk's `system()`, pipes and `getline` from a
+  command); the awk row: version 1.5.0, the whole of POSIX awk now, with its
+  exceptions (its "... is not implemented yet" clause replaced).
 - Root `CLAUDE.md`: the awk row (POSIX awk as gawk `--posix`: patterns,
   fields, arrays, functions, printf, getline, redirections, pipes and
-  `system` through hsh).
+  `system` through hsh), its "... is not implemented yet" clause replaced by
+  this task's exceptions.
 
 ## Acceptance
 
@@ -465,8 +600,16 @@ bash ./scripts/test_linux.sh L U
   stops too.
 - [ ] Stops within a second or so of `TriggerStop()` while blocked on a pipe
   or waiting for a command; its children are stopped.
-- [ ] Every test above passes byte for byte; no expectation changed to
-  mawk's; all unit tests green; the three CLAUDE.md files updated.
+- [ ] `close` closes one stream per call, the most recently opened of the
+  name first; closing a pipe writes awk's stdout out first; at the end the
+  streams close most recent first, before awk's stdout is written.
+- [ ] The three #83 fixes: `sprintf` takes CONVFMT after its arguments;
+  no `case` in `ScalarRef` ends in a call that can return (a `[[noreturn]]`
+  helper); the `passedFrom` text built only for Array and Untyped
+  arguments.
+- [ ] Version 1.5.0; every test above passes byte for byte; no expectation
+  changed to mawk's; all unit tests green; the three CLAUDE.md files
+  updated; no code, name or comment taken from another awk's source.
 
 ## Out of scope
 

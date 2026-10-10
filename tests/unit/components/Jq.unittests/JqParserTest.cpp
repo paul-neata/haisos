@@ -119,7 +119,7 @@ TEST(JqParserTest, ObjectsDesugared) {
               "(object (\"a\" (index . \"a\")) (\"x\" $x) "
               "(\"b c\" (index . \"b c\")) ((index . \"k\") 1) "
               "(\"if\" 2) (\"__loc__\" (loc 1)))");
-    // An object value is an ObjPipe: '|' stays inside, ',' does not.
+    // An object value is a pipe of terms: '|' stays inside, ',' does not.
     EXPECT_EQ(Dump("{a: .b | length}"),
               R"((object ("a" (| (index . "b") (call length)))))");
     EXPECT_EQ(Dump("{a,}"), R"((object ("a" (index . "a"))))");
@@ -331,8 +331,8 @@ TEST(JqParserTest, SyntaxErrors) {
 }
 
 TEST(JqParserTest, DeepNestingIsRefused) {
-    // Past 256 levels of brackets the 257th is refused, as jq refuses
-    // its own limit with the same message shape.
+    // Past 256 levels of brackets the 257th is refused (a documented
+    // exception: jq has no limit), worded as any other syntax error.
     std::string deep(300, '[');
     deep += "1";
     deep.append(300, ']');
@@ -342,6 +342,33 @@ TEST(JqParserTest, DeepNestingIsRefused) {
     EXPECT_EQ(result.errors[0].message,
               "syntax error, unexpected '[' (Unix shell quoting issues?)");
     EXPECT_FALSE(result.root);
+
+    // Call arguments, string interpolations and negations in an object
+    // value nest too, and are refused the same way.
+    std::string calls;
+    for (int i = 0; i < 300; ++i) calls += "f(";
+    calls += "1";
+    calls.append(300, ')');
+    result = ParseProgram(calls);
+    ASSERT_EQ(result.errors.size(), 1u);
+    EXPECT_EQ(result.errors[0].message,
+              "syntax error, unexpected '(' (Unix shell quoting issues?)");
+    std::string strings;
+    for (int i = 0; i < 300; ++i) strings += "\"\\(";
+    strings += "1";
+    for (int i = 0; i < 300; ++i) strings += ")\"";
+    result = ParseProgram(strings);
+    ASSERT_EQ(result.errors.size(), 1u);
+    EXPECT_EQ(result.errors[0].message,
+              "syntax error, unexpected QQSTRING_INTERP_START (Unix shell "
+              "quoting issues?)");
+    std::string negations = "{a: ";
+    for (int i = 0; i < 300; ++i) negations += "- ";
+    negations += "1}";
+    result = ParseProgram(negations);
+    ASSERT_EQ(result.errors.size(), 1u);
+    EXPECT_EQ(result.errors[0].message,
+              "syntax error, unexpected '-' (Unix shell quoting issues?)");
 
     // Below the limit everything parses.
     std::string ok(200, '(');

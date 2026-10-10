@@ -620,6 +620,8 @@ std::unique_ptr<Node> Parser::ParseStringNode(const Token& format,
             part += m_token.text;
             Advance();
         } else if (m_token.type == TokenType::InterpolationStart) {
+            // An interpolation nests a whole program: one level deeper.
+            Depth depth(*this, m_token);
             node->stringParts.push_back(part);
             part.clear();
             Advance();
@@ -906,6 +908,7 @@ std::unique_ptr<Node> Parser::ParseCallRest(const Token& name) {
         }
         return node;
     }
+    Depth depth(*this, m_token);
     const size_t open = m_token.begin;
     Advance();
     PushBracket(open);
@@ -1053,6 +1056,7 @@ std::unique_ptr<Node> Parser::ParseObjectValue() {
 std::unique_ptr<Node> Parser::ParseObjectValueTerm() {
     if (IsChar('-')) {
         const Token at = m_token;
+        Depth depth(*this, at);
         Advance();
         auto node = MakeNode(NodeType::Negate, at.begin);
         node->children.push_back(ParseObjectValueTerm());

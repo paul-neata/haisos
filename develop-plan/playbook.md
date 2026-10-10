@@ -38,7 +38,7 @@ Pause: no
 | 30 | [diff--diff-recursive](tasks/diff--diff-recursive.md) | done | 0.5.31 | 29, 20 | #73 | 1 | 1C 2H fixed, 1M 2L open | Windows red, not checked; clean-room: 2 GNU-internal names from the plan renamed |
 | 31 | [diff--patch-core](tasks/diff--patch-core.md) | done | 0.5.32 | 1, 4, 29 | #74 | 1 | 0C 4H 1L fixed, 4M 2L open | Windows red, not checked; clean-room re-planned |
 | 32 | [diff--patch-fuzz-rej](tasks/diff--patch-fuzz-rej.md) | done | 0.5.33 | 31, 7 | #75 | 1 | 1C 2H 1M fixed, 1M 3L open | Windows red, not checked; clean-room re-planned |
-| 33 | [awk--lexer](tasks/awk--lexer.md) | in-review | 0.5.34 | 9, 4 | #76 | 1 | | |
+| 33 | [awk--lexer](tasks/awk--lexer.md) | done | 0.5.34 | 9, 4 | #76 | 1 | 0C 1H fixed, 3M 4L open | Windows red, not checked |
 | 34 | [awk--expressions](tasks/awk--expressions.md) | todo | | 33 | | | | |
 | 35 | [awk--parser](tasks/awk--parser.md) | todo | | 34 | | | | |
 | 36 | [awk--values](tasks/awk--values.md) | todo | | 33, 11 | | | | |

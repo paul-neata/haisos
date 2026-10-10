@@ -190,7 +190,9 @@ awk rock and adds its files here:
   "Values, fields and records" below).
 - `AwkInterpreter.h/.cpp` - the `Interpreter` that runs a parsed program
   (see "Running" below).
-- `Awk.cpp` - the `awk` builtin itself: `Name`, `Version` 1.2.0, the option
+- `AwkBuiltins.cpp` - `Interpreter::CallBuiltin`: the string built-in
+  functions (see "Built-in functions" below).
+- `Awk.cpp` - the `awk` builtin itself: `Name`, `Version` 1.3.0, the option
   table, the gawk-based `--help` (`BuiltinHelp::basedOn`), and `Run`:
   parse the invocation, load the sources, parse the program
   (`ParseAwkProgram`) -- its diagnostics go to stderr and any failure is
@@ -275,7 +277,9 @@ itself. StrNum comes only from `FromInput`: the fields and `$0`, the
   assignment rebuilds $0 with the OFS (and CONVFMT for Number fields) of
   that assignment, and the rebuilt $0 is a plain String, not a strnum, while
   the fields themselves still read as strnum; `$0 = v` sets a new record,
-  re-split with the FS saved with the current record. `NF = n` truncates to
+  re-split with the FS and paragraph flag of the moment of the assignment
+  -- the interpreter passes them through `SetRecord`, the store itself
+  keeping the ones a record was read with. `NF = n` truncates to
   the first n fields or extends with empty ones. An assignment may make at
   most `kAwkMaxFields` (1000000) fields; a larger `$n = v` or `NF = n` is
   refused (``NF set to N: more than 1000000 fields`` / ``attempt to assign
@@ -356,6 +360,15 @@ FS on its own and the fields appended (FS `" "` the lines' words, `""`
 each line whole) -- so it is the one-byte FS that makes the newline a
 separator, a regex FS leaving the cutting to the regex.
 
+A regex FS (two or more bytes) is compiled and checked when FS is assigned
+(`CheckFieldSeparator`), as gawk does -- not when a record first comes to be
+split -- so a bad one is fatal before any input is read, also in a
+BEGIN-only program. A program assignment reports with its location (the
+statement's, `RegexWarnings` giving the escape warnings there too); `-F`,
+`-v FS=...` and an `FS=...` operand are checked location-less, gawk's
+``awk: fatal: ...``. The check is only for two or more bytes: a one-byte
+FS is a literal and never compiled at all.
+
 ## Running
 
 `AwkInterpreter.h/.cpp` -- the `Interpreter`, one instance per run of the
@@ -372,12 +385,6 @@ fill its hooks without changing it.
   (a read goes to `NF()`, an assignment to `SetNF`). `Flow` is what a
   statement tells the ones around it (Normal, Break, Continue, Next,
   NextFile, Exit, Return).
-- `Prepare` resolves every name in the program to a global slot
-  (`ResolveExpr`/`ResolveStmt`), sets the specials (ARGV[0] "awk" and then
-  the operands, ARGC one more than they, ENVIRON an empty array) and
-  applies the pre-assignments in order: `-F` to FS, `-v name=value` (and
-  the operands' `var=value`) through `AssignName`; a `-v` name that is not
-  an identifier is gawk's fatal `` `' is not a legal variable name ``.
 - The run order is gawk's: `RunBeginItems`, then the main loop (skipped
   when BEGIN ran `exit`, and when the program has no main item and no END
   item, the input never read), then `RunEndItems`. Each record comes from
@@ -393,6 +400,14 @@ fill its hooks without changing it.
   opened for reading (`-` too, the standard input, named `-`; a failure
   is gawk's fatal ``cannot open file `X' for reading: <reason>``); when
   nothing was opened, the standard input is read once.
+- `Prepare` resolves every name in the program to a global slot
+  (`ResolveExpr`/`ResolveStmt`), or to the parameter it is inside a
+  function body (see "Functions" below), sets the specials (ARGV[0] "awk"
+  and then the operands, ARGC one more than they, ENVIRON an empty array)
+  and applies the pre-assignments in order: `-F` to FS, `-v name=value`
+  (and the operands' `var=value`) through `AssignName`; a `-v` name that
+  is not an identifier is gawk's fatal `` `' is not a legal variable
+  name ``.
 - `ValueOf` evaluates expressions on the `AwkValue` conversions (CONVFMT
   for the implicit one, OFMT for print), POSIX's comparison rule with
   `kAwkUnordered` mapped per relational operator, concatenation joining
@@ -404,9 +419,11 @@ fill its hooks without changing it.
   `SplitRecord` is the FieldStore's splitter (the FS rules and paragraph
   mode in "Regexes" above); `MatchRegex` is the one place a literal and a
   dynamic regex both go through (see "Regexes" above).
-- The hooks later tasks fill: `CallBuiltin` and `CallFunction`
-  (awk--functions) and `EvaluateGetline` (awk--io) report
-  ``... is not implemented yet`` for now.
+- The hooks later tasks fill: `EvaluateGetline` (awk--io) and the
+  built-ins not yet made -- printf and sprintf, the math functions,
+  close, fflush, system -- report ``... is not implemented yet`` for now
+  (`CallFunction` and the string built-ins in "Functions" and
+  "Built-in functions" below).
 - An `AwkFatal` unwinds to `Run`, which reports gawk's ``fatal:`` line --
   with a location ``awk: <source>:<line>: (FILENAME=<f> FNR=<n>) fatal:
   <message>``, the FILENAME/FNR part only past the first record, without
@@ -416,6 +433,108 @@ fill its hooks without changing it.
   as `Stopped` and exits 143; loops and the main loop check
   `ThrowIfStopped` per iteration, the record reader per read, so a
   stopped awk ends promptly.
+
+## Functions
+
+User-defined functions, resolved and run by the `Interpreter`
+(awk--functions; `CallFunction` in `AwkInterpreter.cpp`):
+
+- Resolution: `ResolveExpr`/`ResolveStmt` walk a function's body with its
+  parameter names; a name that is one of them takes the parameter's index
+  in `Expr::localSlot` (an Index/In expression) or `Stmt::localSlot`
+  (`localArraySlot` for the array of a for-in or a delete) instead of a
+  global slot. A `Call` expression takes its definition's index in
+  `Program::functions` (`Expr::functionIndex`), so a call before the
+  definition works; an undefined function is a run-time fatal
+  ``function `foo' not defined``.
+- A call builds an `ActiveCall` -- the definition, a frame of `Variable`s
+  (one per parameter, the parameters beyond the arguments among them:
+  they are the function's locals) -- pushes it on `m_calls` and runs the
+  body. Arguments go left to right: a bare (unparenthesized) variable
+  that is not a special one is passed by name -- an array shares the
+  caller's array with the parameter, an untyped variable is recorded as
+  the parameter's `binding` (the callee may make it a scalar or an array
+  in the caller), a scalar copies its value; the special variables, NF
+  included, and every other argument are values. More arguments than
+  parameters evaluate and are dropped, with a warning per call
+  (``function `f' called with more arguments than declared``); the
+  201st active call is fatal, gawk has no fixed limit
+  (`kAwkMaxCallDepth`).
+- The binding chain: a `binding` points at the variable of the caller's
+  frame the argument was passed from (raw, not owned: the caller's frame
+  outlives every call made from it). Reading the parameter's scalar
+  (`ScalarRef`) types every still-Untyped variable on the chain Scalar,
+  and an Array met on it is the fatal ``attempt to use array `a (from x)'
+  in a scalar context`` -- the parameter's name and the variable it was
+  passed from; taking its array (`ArrayRef`) walks the chain to its end
+  and creates the array there, sharing it into every link, and a Scalar
+  met is the fatal ``attempt to use scalar parameter `a' as an array``,
+  the plain name. A global used the other way round fails as before
+  (``attempt to use scalar `x' as an array`` / ``attempt to use array
+  `x' in a scalar context``). `m_globals` is a deque because a binding
+  points into the caller's own frame: a vector's reallocation on a new
+  slot would leave them dangling.
+- Flow: `return` leaves the value its expression gave, uninitialized
+  without one, in the frame's `returnValue`. `next`/`nextfile` unwind the
+  calls (each frame popped as the flow passes through it, a `FlowUnwind`
+  thrown to the item loops) and act on the calling rule; out of a BEGIN
+  or END item they are fatal, `` `next' cannot be called from a `BEGIN'
+  rule `` (nextfile the same with its own word, END in place of BEGIN).
+  `exit` unwinds the same way and exits. `break`/`continue` never reach
+  here: the parser allows them only inside a loop, and a function body's
+  loops catch their own.
+
+## Built-in functions
+
+The string built-ins, `Interpreter::CallBuiltin`
+(`AwkBuiltins.cpp`; awk--functions):
+
+- The argument counts are the parser's, checked at the call's `)`
+  (`Parser::CheckBuiltinArguments`, gawk's messages: ``N is invalid as
+  number of arguments for <name>``, the caret on the closing
+  parenthesis). gawk's extensions are named for what they are:
+  `match` a third argument and `close` a second report ``<name>: <...>
+  is a gawk extension``. split's fourth argument is different: gawk
+  --posix takes four in the count check but refuses the fourth at the
+  call's run (``split: fourth argument is a gawk extension``, a fatal).
+- A regex argument (sub, gsub, match, split's separator) goes through
+  `RegexOperand`: a non-parenthesized `/re/` literal is the compiled
+  regex itself, anything else is the value's text as a dynamic regex
+  (a parenthesized `(/re/` `)` among them: its value is `$0 ~ /re/`).
+- `length`: without an argument $0; a bare variable argument is its
+  variable -- an array is ``length: received array argument``, an
+  untyped one taken as (and made) a scalar -- anything else its value's
+  string. `substr`: the start and length truncate toward zero; a start
+  below 1 is 1 without shortening the length, NaN is 1, +inf past the
+  end; a length of none at all (NaN, 0, negative) is none; without a
+  third argument, to the end. `index`: the first occurrence, an empty t
+  found at 1. `tolower`/`toupper`: ASCII letters only, bytes kept.
+- `split(s, a[, fs])`: the second argument must be a plain variable
+  (used as an array -- a scalar or anything else is ``split: second
+  argument is not an array``; gawk makes an element `a[i]` a sub-array,
+  an extension). The array is cleared first; the pieces are strnum
+  (`Value::FromInput`), keyed "1", "2", ... and the count returned. The
+  separator: none is the current FS with the record rules
+  (`SplitRecord`); a `/re/` literal, or a value of two or more bytes,
+  is a regex (`SplitByRegex`); `" "` runs of blanks; one other byte a
+  literal -- and `""`, unlike FS `""`, is one piece per byte.
+- `sub`/`gsub(re, repl[, target])`: the replacement's `&` is the
+  matched text, `\&` a literal `&`, `\\` one `\`; a `\` before anything
+  else (and a final lone one) kept. sub replaces the first match; gsub
+  every match that is a substitution -- an empty match exactly where
+  the previous one ended is not one: the byte there is copied and the
+  search moves past it, so `/x*/` on "abc" gives four. Without a match
+  nothing is assigned: the target keeps its value and its type. The
+  target: $0 by default (the new record re-split, through `SetRecord`,
+  with the FS and RS of the moment); an lvalue assigned the result as a
+  string; anything else a temporary worked on and dropped. The count is
+  returned.
+- `match(s, re)`: the leftmost-longest match's position in RSTART, its
+  length in RLENGTH (0 and -1 without a match), and the position
+  returned.
+
+printf, sprintf, the math functions, close, fflush and system are later
+tasks of the rock; each reports ``... is not implemented yet``.
 
 ## Documented exceptions (checked against gawk --posix 5.2.1)
 
@@ -443,9 +562,13 @@ fill its hooks without changing it.
 - At most 1000000 fields may be made by an assignment (`$n = v`, `NF = n`,
   the message ``NF set to N: more than 1000000 fields``); gawk's own limit
   depends on its build.
-- The parts that do not run yet (functions, `printf`, `getline`,
-  output redirections) report ``... is not implemented yet``; later tasks
-  of the rock append their exceptions here.
+- User-defined functions may nest at most 200 calls deep
+  (`kAwkMaxCallDepth`); gawk has no fixed limit.
+- `split(s, a[i])' is refused (second argument is not an array); gawk
+  makes a[i] a sub-array, an extension.`
+- The parts that do not run yet (`printf`, `sprintf`, the math functions,
+  `getline`, output redirections) report ``... is not implemented yet``;
+  later tasks of the rock append their exceptions here.
 - A literal regex's escape warnings come after the program's string-escape
   warnings, all of them, wherever in the source either is; gawk
   interleaves the two in source order.

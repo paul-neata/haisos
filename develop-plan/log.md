@@ -125,3 +125,4 @@
 - 2026-10-10 05:42 UTC -- awk--parser merged #78 as 0.5.36: 0C 1H fixed, 1M 3L open, 1 try
 - 2026-10-10 05:48 UTC -- start awk--values (0.5.37)
 - 2026-10-10 06:13 UTC -- awk--values: PR #79, windows-failed (ignored per Direction)
+- 2026-10-10 06:18 UTC -- awk--values merged #79 as 0.5.37: 0C 0H, 3M 2L open, 1 try

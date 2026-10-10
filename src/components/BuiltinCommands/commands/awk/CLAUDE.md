@@ -184,11 +184,13 @@ awk rock and adds its files here:
   records" below).
 - `AwkFields.h/.cpp` - the fields of the current record: `SplitAwkFields`
   and `FieldStore` (see "Values, fields and records" below).
+- `AwkRegex.h/.cpp` - awk's regexes onto Haisos's `Regex` engine (see
+  "Regexes" below).
 - `AwkInput.h/.cpp` - `RecordReader`, the record reader of one input (see
   "Values, fields and records" below).
 - `AwkInterpreter.h/.cpp` - the `Interpreter` that runs a parsed program
   (see "Running" below).
-- `Awk.cpp` - the `awk` builtin itself: `Name`, `Version` 1.1.0, the option
+- `Awk.cpp` - the `awk` builtin itself: `Name`, `Version` 1.2.0, the option
   table, the gawk-based `--help` (`BuiltinHelp::basedOn`), and `Run`:
   parse the invocation, load the sources, parse the program
   (`ParseAwkProgram`) -- its diagnostics go to stderr and any failure is
@@ -232,9 +234,8 @@ sub-nodes in parentheses -- the format the tests compare against, exact:
 
 The data layer of the interpreter (`AwkValue`, `AwkFields`, `AwkInput`),
 behaviour matched to POSIX awk and the observed output of gawk `--posix`
-5.2.1. The interpreter (see "Running" below) is built on these; awk--records
-adds regex field separators and `RS = ""`, awk--functions and awk--io reuse
-them.
+5.2.1. The interpreter (see "Running" below) is built on these; awk--functions
+and awk--io reuse them.
 
 A `Value` is one of four kinds: Uninitialized (what every variable starts
 as, "" and 0 at once), Number, String, and *strnum* -- text that came from
@@ -268,8 +269,8 @@ itself. StrNum comes only from `FromInput`: the fields and `$0`, the
   with the FS in force when it was set (`SetRecord` saves it; a later change
   of FS does not affect that record), by a splitter the interpreter
   supplies (`Splitter`; `SplitAwkFields` -- FS `" "` runs of blanks, `""` no
-  splitting, one other byte literal -- until awk--records' regexes and
-  paragraph mode). Fields read as strnum; an assigned field keeps its type.
+  splitting, one other byte literal -- the interpreter's `SplitRecord` adding
+  the regex FS and paragraph mode, see "Regexes" below). Fields read as strnum; an assigned field keeps its type.
   Assigning to a field beyond NF extends with empty fields; a field or NF
   assignment rebuilds $0 with the OFS (and CONVFMT for Number fields) of
   that assignment, and the rebuilt $0 is a plain String, not a strnum, while
@@ -282,12 +283,78 @@ itself. StrNum comes only from `FromInput`: the fields and `$0`, the
   stays quiet, returning an empty string.
 - The record reader (`RecordReader`): one input, read in 64 KiB blocks,
   each record separated by the first byte of RS as it is at that call (a
-  change applies from the next record on; `RS = ""` paragraph mode is
-  awk--records'). The bytes past the record stay in the reader's own buffer
+  change applies from the next record on). `RS = ""` is paragraph mode:
+  a record is what a run of two or more newlines separates, the whole run
+  consumed as one separator -- a single newline is content, so a line of
+  blanks stays in its record; a leading run is skipped, the trailing
+  newlines of the input's last record are stripped (no empty record after
+  it), and a run straddling a block read is consumed whole. The bytes past
+  the record stay in the reader's own buffer
   for the next call, the buffer's consumed front erased before a block is
   appended so many small records cannot grow it without bound; it stops
   promptly on a stop (checked before each read) or a `kIOInterrupted`
   read, and reports an error on any other negative read.
+
+## Regexes
+
+`AwkRegex.h/.cpp` brings awk's regexes onto Haisos's `Regex` engine, always
+`RegexSyntax::Extended` (POSIX ERE), through one door, `TranslateAwkRegex`
+(regex text in, engine text out, the escape warnings out) -- nothing else
+prepares awk regexes for `Regex::Compile`:
+
+- Outside a bracket expression, a backslash and the byte after it:
+  `\/` -> `/`; `\"` -> `"` with the warning; `\a \b \f \n \r \t \v` -> that
+  control byte (`\b` a backspace, not the regex word boundary); `\` and
+  1-3 octal digits -> that byte emitted raw, so a decoded metacharacter is
+  a metacharacter (`/a\052b/` matches `aab`); `\` and one of
+  `. [ ] ( ) * + ? { } | ^ $ \` kept as the escape pair; any other byte `c`
+  -> `c` alone, with the warning ``regexp escape sequence `\c' is not a
+  known regexp operator``; a final lone `\` kept (the engine then reports
+  `Trailing backslash`). Intervals `{n,m}` are already ERE, copied.
+- Inside a bracket expression (from an unescaped `[`; a `]` first, after
+  `[` or `[^`, is a member; `[:class:]`, `[.x.]`, `[=x=]` copied whole) an
+  escape is decoded to its byte as above and the bracket re-emitted so
+  POSIX reads it: a `]` member goes first (one byte of it is enough --
+  the members are a set, and a second would be read as the bracket's
+  close), a decoded `-` last, a decoded `^` not first; every other member
+  in place (`[a\]b]` becomes `[]ab]`). A range whose end is below its
+  start is re-emitted where it is, so the engine refuses it (`Invalid
+  range end`) as it refused the original; an unterminated bracket passes
+  through raw, the engine's `Unmatched [` error.
+- `AwkRegexAsWritten` writes a regex back the way the program wrote it
+  (every `/` outside a bracket `\/`) for the error messages;
+  `AwkRegexCache` holds one compiled regex per text (cleared at 256
+  entries), its warnings given to the caller each compile only;
+  `SplitByRegex` cuts a record at every match (the fields the text
+  between matches; a match at the very start an empty first field, one at
+  the end an empty last field; an empty match never separates; an empty
+  text no fields) -- awk--functions' `split` reuses it.
+
+Literal and dynamic regexes, both through `Interpreter::MatchRegex`:
+
+- A `/re/` in the program is translated and compiled once, before BEGIN,
+  in source order (`CompileLiteralRegexes`: a function's body in its
+  place, a `for`'s init, condition, update then body, a `do`'s body
+  before its condition). The first that does not compile is
+  `FormatAwkError`'s ``<Regex error>: /<text as written>/``, the walk
+  stops there and nothing runs (status 1); regexes past it are not
+  reported, gawk's way.
+- A dynamic regex -- the `~`/`!~` operand or a pattern that is not a
+  regex literal, taken as `ToString` text -- is translated and compiled at
+  its first use and cached. One that does not compile is a run-time
+  fatal, status 2.
+- The escape warnings come once per message per run (`RegexWarnings`, a
+  literal's and a dynamic's alike): a literal's before anything runs, at
+  its own source and line; a dynamic's at the place it is met, through
+  `RuntimeWarning`.
+
+The FS rules (`SplitRecord`): FS of two or more bytes is an ERE, split
+purely by the regex (`SplitByRegex`); FS `" "` runs of blanks, `""` no
+splitting, one other byte a literal (`SplitAwkFields`). In paragraph mode
+a one-byte FS cuts the record at every newline first, each piece split by
+FS on its own and the fields appended (FS `" "` the lines' words, `""`
+each line whole) -- so it is the one-byte FS that makes the newline a
+separator, a regex FS leaving the cutting to the regex.
 
 ## Running
 
@@ -334,16 +401,18 @@ fill its hooks without changing it.
   and out-of-intmax values INTMAX_MIN. `Output` is print's one door: its
   text (the arguments joined by OFS, then ORS; an empty list prints $0)
   written to stdout here, awk--io adding the redirections through it.
-  `SplitRecord` is the FieldStore's splitter (a regex FS or paragraph
-  mode refused for now).
+  `SplitRecord` is the FieldStore's splitter (the FS rules and paragraph
+  mode in "Regexes" above); `MatchRegex` is the one place a literal and a
+  dynamic regex both go through (see "Regexes" above).
 - The hooks later tasks fill: `CallBuiltin` and `CallFunction`
-  (awk--functions), `EvaluateGetline` (awk--io), and the regexes
-  (`~`, `!~`, a `/re/` pattern, a regex FS) and `RS = ""`, report
+  (awk--functions) and `EvaluateGetline` (awk--io) report
   ``... is not implemented yet`` for now.
 - An `AwkFatal` unwinds to `Run`, which reports gawk's ``fatal:`` line --
   with a location ``awk: <source>:<line>: (FILENAME=<f> FNR=<n>) fatal:
   <message>``, the FILENAME/FNR part only past the first record, without
-  one ``awk: fatal: <message>`` -- and exits 2. A stop asked for unwinds
+  one ``awk: fatal: <message>`` -- and exits 2. A run-time warning (an
+  unknown regex escape met at use) goes through `RuntimeWarning`, the same
+  prefix with `warning:` in place of `fatal:`, and runs on. A stop asked for unwinds
   as `Stopped` and exits 143; loops and the main loop check
   `ThrowIfStopped` per iteration, the record reader per read, so a
   stopped awk ends promptly.
@@ -374,6 +443,13 @@ fill its hooks without changing it.
 - At most 1000000 fields may be made by an assignment (`$n = v`, `NF = n`,
   the message ``NF set to N: more than 1000000 fields``); gawk's own limit
   depends on its build.
-- The parts that do not run yet (regexes, functions, `printf`, `getline`,
+- The parts that do not run yet (functions, `printf`, `getline`,
   output redirections) report ``... is not implemented yet``; later tasks
   of the rock append their exceptions here.
+- A literal regex's escape warnings come after the program's string-escape
+  warnings, all of them, wherever in the source either is; gawk
+  interleaves the two in source order.
+- A regex's text as written in an error message shows a `\/` inside a
+  bracket expression as `/` (nothing else there escapes the slash).
+- gawk cuts the regex text of its error message at the first decoded
+  escape (`/a\t(/` reported as `/a\t/`); Haisos shows the whole text.

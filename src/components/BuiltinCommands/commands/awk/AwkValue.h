@@ -80,6 +80,12 @@ int CompareValues(const Value& a, const Value& b, const std::string& convfmt);
 // [A-Za-z_][A-Za-z0-9_]*: a legal awk variable name (for -v and var=value).
 bool IsAwkIdentifier(std::string_view name);
 
+// A whole number out of a value's number, as gawk shows it (a field index,
+// an NF, an exit code): truncated toward zero. A NaN, or anything outside
+// intmax_t's range, is INTMAX_MIN -- gawk's `attempt to access field
+// -9223372036854775808' (never a plain cast: out of range it is undefined).
+intmax_t AwkIntegerOf(double number);
+
 // An awk array: string keys, insertion-ordered (what `for (k in a)` visits;
 // gawk's order is unspecified -- a documented difference).
 class AwkArray {

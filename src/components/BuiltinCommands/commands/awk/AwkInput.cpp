@@ -17,25 +17,37 @@ RecordReadResult RecordReader::Next(const std::string& rs, std::string& record) 
     // of it. An empty |rs| (paragraph mode) is awk--records' -- until then
     // the caller never passes one, and a newline stands in its place.
     const char separator = rs.empty() ? '\n' : rs.front();
+    size_t scan = m_start;   // where the search resumes within this call
     while (true) {
-        const size_t separatorPos = m_buffer.find(separator);
+        const size_t separatorPos = m_buffer.find(separator, scan);
         if (separatorPos != std::string::npos) {
-            record.assign(m_buffer, 0, separatorPos);
-            m_buffer.erase(0, separatorPos + 1);
+            record.assign(m_buffer, m_start, separatorPos - m_start);
+            m_start = separatorPos + 1;
             return RecordReadResult::Record;
         }
+        scan = m_buffer.size();
         if (m_eof) {
             // The end of the input: the bytes still buffered are the last
             // record (it had no separator), or there is none at all.
-            if (m_buffer.empty()) {
+            if (m_start >= m_buffer.size()) {
+                m_buffer.clear();
+                m_start = 0;
                 return RecordReadResult::End;
             }
-            record = std::move(m_buffer);
+            record.assign(m_buffer, m_start, std::string::npos);
             m_buffer.clear();
+            m_start = 0;
             return RecordReadResult::Record;
         }
         if (m_context.StopRequested()) {
             return RecordReadResult::Stopped;
+        }
+        // Drop the consumed front before the buffer grows again, so what is
+        // read appends to the bytes still to come and nothing else.
+        if (m_start > 0) {
+            m_buffer.erase(0, m_start);
+            scan -= m_start;
+            m_start = 0;
         }
         char block[kReadBlockSize];
         const ssize_t read = m_input->Read(block, sizeof(block));

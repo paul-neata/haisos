@@ -6,28 +6,21 @@
 
 using namespace Haisos;
 
-namespace {
-
-// The not-implemented message every run of a program prints for now.
-const char* kNotImplemented = "awk: running programs is not implemented yet\n";
-
-} // namespace
-
 class AwkCommandTest : public BuiltinCommandsTest {};
 
 TEST_F(AwkCommandTest, VersionAndHelp) {
     const auto version = RunCaptured("awk", {"--version"});
     EXPECT_EQ(version.status, 0);
-    EXPECT_EQ(version.out, "awk (HaisosOS builtin) 1.0.2\n");
+    EXPECT_EQ(version.out, "awk (HaisosOS builtin) 1.1.0\n");
     const auto shortVersion = RunCaptured("awk", {"-V"});
     EXPECT_EQ(shortVersion.status, 0);
-    EXPECT_EQ(shortVersion.out, "awk (HaisosOS builtin) 1.0.2\n");
+    EXPECT_EQ(shortVersion.out, "awk (HaisosOS builtin) 1.1.0\n");
 
     const auto help = RunCaptured("awk", {"--help"});
     EXPECT_EQ(help.status, 0);
     const Lines lines = SplitLines(help.out);
     ASSERT_GT(lines.size(), 1u);
-    EXPECT_EQ(lines[0], "HaisosOS awk version 1.0.2 - pattern scanning and processing language");
+    EXPECT_EQ(lines[0], "HaisosOS awk version 1.1.0 - pattern scanning and processing language");
     EXPECT_EQ(lines[1], "Based on Linux gawk: https://man7.org/linux/man-pages/man1/gawk.1.html");
 
     // -h prints the same help, as gawk's.
@@ -61,30 +54,30 @@ TEST_F(AwkCommandTest, UsageErrors) {
 
 TEST_F(AwkCommandTest, OptionsStopAtTheProgram) {
     // Everything after the program operand is an operand: no invalid option,
-    // no not-treated report.
+    // no not-treated report. BEGIN{} has no main or END item, so the input
+    // (the operand files) is never read either.
     const auto after = RunCaptured("awk", {"BEGIN{}", "-x", "--lint"});
-    EXPECT_EQ(after.status, 2);
+    EXPECT_EQ(after.status, 0);
     EXPECT_EQ(after.out, "");
-    EXPECT_EQ(after.err, kNotImplemented);
+    EXPECT_EQ(after.err, "");
 
-    const auto dashDash = RunCaptured("awk", {"--", "BEGIN{}", "-x"});
-    EXPECT_EQ(dashDash.status, 2);
-    EXPECT_EQ(dashDash.out, "");
-    EXPECT_EQ(dashDash.err, kNotImplemented);
+    const auto dashDash = RunCaptured("awk", {"--", "BEGIN { print 42 }", "-x"});
+    EXPECT_EQ(dashDash.status, 0);
+    EXPECT_EQ(dashDash.out, "42\n");
+    EXPECT_EQ(dashDash.err, "");
 }
 
 TEST_F(AwkCommandTest, NotTreatedOptionsAreReported) {
     const auto lint = RunCaptured("awk", {"--lint", "BEGIN{}"});
-    EXPECT_EQ(lint.status, 2);
-    EXPECT_NE(lint.err.find("Parameter --lint is not treated by HaisosOS awk v. 1.0.2"),
+    EXPECT_EQ(lint.status, 0);
+    EXPECT_NE(lint.err.find("Parameter --lint is not treated by HaisosOS awk v. 1.1.0"),
         std::string::npos) << lint.err;
-    EXPECT_NE(lint.err.find(kNotImplemented), std::string::npos);
 
     // -P and --re-interval are treated: always on, so never reported.
     for (const std::string& option : {"-P", "--re-interval"}) {
         const auto treated = RunCaptured("awk", {option, "BEGIN{}"});
-        EXPECT_EQ(treated.status, 2) << option;
-        EXPECT_EQ(treated.err, kNotImplemented) << option;
+        EXPECT_EQ(treated.status, 0) << option;
+        EXPECT_EQ(treated.err, "") << option;
     }
 }
 
@@ -100,14 +93,17 @@ TEST_F(AwkCommandTest, ProgramSources) {
     EXPECT_EQ(directory.out, "");
     EXPECT_EQ(directory.err, "awk: /docs:1: error: cannot read source file `/docs': Is a directory\n");
 
+    // /notes.txt parses as three false patterns: it runs, nothing prints.
     const auto file = RunCaptured("awk", {"-f", "/notes.txt"});
-    EXPECT_EQ(file.status, 2);
-    EXPECT_EQ(file.err, kNotImplemented);
+    EXPECT_EQ(file.status, 0);
+    EXPECT_EQ(file.out, "");
+    EXPECT_EQ(file.err, "");
 
     // -f - reads the program from standard input.
-    const auto standardInput = RunCaptured("awk", {"-f", "-"}, "BEGIN{}");
-    EXPECT_EQ(standardInput.status, 2);
-    EXPECT_EQ(standardInput.err, kNotImplemented);
+    const auto standardInput = RunCaptured("awk", {"-f", "-"}, "BEGIN { print 7 }");
+    EXPECT_EQ(standardInput.status, 0);
+    EXPECT_EQ(standardInput.out, "7\n");
+    EXPECT_EQ(standardInput.err, "");
 }
 
 TEST_F(AwkCommandTest, SyntaxErrorsAreReported) {
@@ -130,11 +126,17 @@ TEST_F(AwkCommandTest, SyntaxErrorsAreReported) {
         "complete functions or rules\n");
 }
 
-TEST_F(AwkCommandTest, ParsedProgramsDoNotRunYet) {
-    // A program that parses still does not run (awk--interpreter removes
-    // this).
-    const auto parsed = RunCaptured("awk", {"BEGIN { print 1 }"});
-    EXPECT_EQ(parsed.status, 2);
-    EXPECT_EQ(parsed.out, "");
-    EXPECT_EQ(parsed.err, kNotImplemented);
+TEST_F(AwkCommandTest, RunsBeginAndEnd) {
+    // A program that parses runs: BEGIN and END both run, and with no
+    // main item the input is never read.
+    const auto parsed = RunCaptured("awk", {"BEGIN { print 1 }"}, "");
+    EXPECT_EQ(parsed.status, 0);
+    EXPECT_EQ(parsed.out, "1\n");
+    EXPECT_EQ(parsed.err, "");
+
+    // An action with no pattern runs on every record of the standard input.
+    const auto whole = RunCaptured("awk", {"{ print }"}, "a\nb\n");
+    EXPECT_EQ(whole.status, 0);
+    EXPECT_EQ(whole.out, "a\nb\n");
+    EXPECT_EQ(whole.err, "");
 }

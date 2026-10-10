@@ -242,23 +242,53 @@ void Interpreter::AssignSlot(int slot, const std::string& name, const Value& val
 }
 
 void Interpreter::Assign(const Expr& lvalue, const Value& value) {
+    WritePlace(PlaceOf(lvalue), value);
+}
+
+Interpreter::Place Interpreter::PlaceOf(const Expr& lvalue) {
+    Place place;
+    place.lvalue = &lvalue;
     switch (lvalue.kind) {
         case ExprKind::Variable:
-            AssignSlot(lvalue.slot, lvalue.text, value);
-            return;
-        case ExprKind::Index: {
-            AwkArray& array = ArrayRef(lvalue.slot, lvalue.text);
-            array.GetOrCreate(Subscript(lvalue.operands)) = value;
-            return;
-        }
+            return place;
+        case ExprKind::Index:
+            place.key = Subscript(lvalue.operands);
+            return place;
         case ExprKind::Field:
-            m_fields.SetField(AwkIntegerOf(ValueOf(*lvalue.operands[0]).ToNumber()), value,
-                              SpecialString(kSlotOFS), SpecialString(kSlotCONVFMT));
-            return;
+            place.field = AwkIntegerOf(ValueOf(*lvalue.operands[0]).ToNumber());
+            return place;
         default:
             break;
     }
     throw AwkFatal("cannot assign to this expression");
+}
+
+Value Interpreter::ReadPlace(const Place& place) {
+    const Expr& lvalue = *place.lvalue;
+    switch (lvalue.kind) {
+        case ExprKind::Index:
+            return ArrayRef(lvalue.slot, lvalue.text).GetOrCreate(place.key);
+        case ExprKind::Field:
+            return m_fields.Field(place.field, SpecialString(kSlotCONVFMT));
+        default:
+            return ValueOf(lvalue);   // a Variable: no subscript to evaluate
+    }
+}
+
+void Interpreter::WritePlace(const Place& place, const Value& value) {
+    const Expr& lvalue = *place.lvalue;
+    switch (lvalue.kind) {
+        case ExprKind::Index:
+            ArrayRef(lvalue.slot, lvalue.text).GetOrCreate(place.key) = value;
+            return;
+        case ExprKind::Field:
+            m_fields.SetField(place.field, value, SpecialString(kSlotOFS),
+                              SpecialString(kSlotCONVFMT));
+            return;
+        default:
+            AssignSlot(lvalue.slot, lvalue.text, value);
+            return;
+    }
 }
 
 std::string Interpreter::Subscript(const std::vector<ExprPtr>& subscripts) {
@@ -428,29 +458,31 @@ Value Interpreter::ValueOf(const Expr& expr) {
                 return right;
             }
             // A compound assignment: the value of the target, the arithmetic
-            // on numbers, stored back (the target is read once, as awk's).
-            const Value left = ValueOf(*expr.operands[0]);
+            // on numbers, stored back -- the target's subscript or field
+            // index evaluated once (gawk: a[i++] += 1 adds 1 to i once).
+            const Place place = PlaceOf(*expr.operands[0]);
+            const Value left = ReadPlace(place);
             const Value result = Value::FromNumber(CompoundArithmetic(expr.op, left.ToNumber(),
                                                                         right.ToNumber()));
-            Assign(*expr.operands[0], result);
+            WritePlace(place, result);
             return result;
         }
         case ExprKind::IncDec: {
-            const Value old = ValueOf(*expr.operands[0]);
-            const double number = old.ToNumber();
+            const Place place = PlaceOf(*expr.operands[0]);
+            const double number = ReadPlace(place).ToNumber();
             switch (expr.op) {
                 case ExprOp::PreIncrement:
                 case ExprOp::PreDecrement: {
                     const Value result = Value::FromNumber(
                         expr.op == ExprOp::PreIncrement ? number + 1 : number - 1);
-                    Assign(*expr.operands[0], result);
+                    WritePlace(place, result);
                     return result;
                 }
                 case ExprOp::PostIncrement:
                 case ExprOp::PostDecrement: {
-                    Assign(*expr.operands[0], Value::FromNumber(
+                    WritePlace(place, Value::FromNumber(
                         expr.op == ExprOp::PostIncrement ? number + 1 : number - 1));
-                    return old;
+                    return Value::FromNumber(number);   // the old number, never its text
                 }
                 default: break;
             }

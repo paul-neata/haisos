@@ -299,6 +299,22 @@ TEST_F(AwkRunTest, ArithmeticAndTruth) {
     EXPECT_EQ(captured.out, "1 f\n");
     EXPECT_EQ(captured.err, "");
     EXPECT_EQ(captured.status, 0);
+
+    // A post ++/-- gives the old number, not the old text.
+    captured = RunCaptured("awk",
+        {"BEGIN { x = \"abc\"; y = x++; print y; s = \"3x\"; t = s--; print t }"});
+    EXPECT_EQ(captured.out, "0\n3\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    // A compound assignment or ++ evaluates its target's subscript or field
+    // index once.
+    captured = RunCaptured("awk",
+        {"BEGIN { i = 1; a[i++] += 5; print i; j = 1; b[j++]++; print j; "
+         "k = 1; $0 = \"1 2 3\"; $(k++) += 10; print k, $0 }"});
+    EXPECT_EQ(captured.out, "2\n2\n2 11 2 3\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
 }
 
 TEST_F(AwkRunTest, NumberOutput) {

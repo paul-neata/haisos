@@ -74,6 +74,16 @@ private:
     Value& ScalarRef(int slot, const std::string& name);
     AwkArray& ArrayRef(int slot, const std::string& name);  // makes an Untyped one Array
     void Assign(const Expr& lvalue, const Value& value);    // Variable, Index, Field (and NF)
+    // An lvalue with its subscript or field index evaluated once, so a
+    // compound assignment or ++/-- reads and writes the same place.
+    struct Place {
+        const Expr* lvalue = nullptr;
+        std::string key;      // Index: the subscript
+        intmax_t field = 0;   // Field: the index
+    };
+    Place PlaceOf(const Expr& lvalue);
+    Value ReadPlace(const Place& place);
+    void WritePlace(const Place& place, const Value& value);
     void AssignSlot(int slot, const std::string& name, const Value& value);  // a Variable assignment: NF lives in the FieldStore
     std::string Subscript(const std::vector<ExprPtr>& subscripts);  // ToString(CONVFMT) joined by SUBSEP
     const std::string& SpecialString(int slot);  // FS, OFS, ORS, RS, SUBSEP, CONVFMT, OFMT as strings

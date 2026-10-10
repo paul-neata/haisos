@@ -46,7 +46,7 @@ Pause: no
 | 38 | [awk--records](tasks/awk--records.md) | done | 0.5.39 | 37, 3 | #81 | 1 | 0C 1H 2M fixed, 1M 2L open | Windows red, not checked |
 | 39 | [awk--functions](tasks/awk--functions.md) | done | 0.5.40 | 38 | #82 | 1 | 0C 0H fixed, 2M 3L open | Windows red, not checked; call depth 200 vs the Windows stack: see final--windows-fix |
 | 40 | [awk--printf-math](tasks/awk--printf-math.md) | done | 0.5.41 | 39, 11 | #83 | 1 | 0C 1H 4M fixed, 0M 3L open | Windows red, not checked |
-| 41 | [awk--io](tasks/awk--io.md) | in-progress | 0.5.42 | 40, 9 | | | | |
+| 41 | [awk--io](tasks/awk--io.md) | in-review | 0.5.42 | 40, 9 | #84 | 1 | | |
 | 42 | [tools--jq-parse](tasks/tools--jq-parse.md) | todo | | - | | | | |
 | 43 | [tools--jq-json](tasks/tools--jq-json.md) | todo | | - | | | | |
 | 44 | [tools--jq-eval](tasks/tools--jq-eval.md) | todo | | 42, 43 | | | | |

@@ -141,3 +141,4 @@
 - 2026-10-10 12:05 UTC -- start awk--io (0.5.42)
 - 2026-10-10 12:46 UTC -- awk--io: PR #84, windows-failed (ignored per Direction)
 - 2026-10-10 13:05 UTC -- awk--io merged #84 as 0.5.42: 0C 1H fixed, 2M 2L open, 1 try
+- 2026-10-10 13:14 UTC -- start tools--jq-parse (0.5.43)

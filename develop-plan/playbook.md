@@ -47,7 +47,7 @@ Pause: no
 | 39 | [awk--functions](tasks/awk--functions.md) | done | 0.5.40 | 38 | #82 | 1 | 0C 0H fixed, 2M 3L open | Windows red, not checked; call depth 200 vs the Windows stack: see final--windows-fix |
 | 40 | [awk--printf-math](tasks/awk--printf-math.md) | done | 0.5.41 | 39, 11 | #83 | 1 | 0C 1H 4M fixed, 0M 3L open | Windows red, not checked |
 | 41 | [awk--io](tasks/awk--io.md) | done | 0.5.42 | 40, 9 | #84 | 1 | 0C 1H fixed, 2M 2L open | Windows red, not checked |
-| 42 | [tools--jq-parse](tasks/tools--jq-parse.md) | todo | | - | | | | |
+| 42 | [tools--jq-parse](tasks/tools--jq-parse.md) | in-progress | 0.5.43 | - | | | | |
 | 43 | [tools--jq-json](tasks/tools--jq-json.md) | todo | | - | | | | |
 | 44 | [tools--jq-eval](tasks/tools--jq-eval.md) | todo | | 42, 43 | | | | |
 | 45 | [tools--jq-paths](tasks/tools--jq-paths.md) | todo | | 44 | | | | |
@@ -120,3 +120,4 @@ Pause: no
 - 2026-10-10 (implement) awk--functions re-checked clean-room against 8ca0cbc (Opus): new interpreter names, Frame->ActiveCall (one true awk's struct name); real APIs from #76-#81; m_globals a deque; split(s, a[i]) a documented exception; folded in #81's findings (regex FS fatal at assignment, $0 = v re-splits with current FS/RS, test leftover); awk 1.3.0
 - 2026-10-10 (implement) awk--printf-math re-checked clean-room against b334335 (Opus; the agent hit a Claude session limit at its end, its edits complete): current awk names, clean-room and write-in-pieces paragraphs, real APIs from #76-#82; folded in #82's findings (array-bound parameter fatals, ScalarRefOf, CLAUDE.md backtick, FlowUnwind)
 - 2026-10-10 (implement) awk--io re-checked clean-room against 902c91d (Opus): gawk-internals wording replaced by observed behaviour; real names from #76-#83; three rules corrected on gawk 5.2.1 (close() of a pipe returns the exit status, one stream per close most-recent first, flush order); documented exception: a command killed inside hsh maps to 269/271 (gawk with dash 141/143); folded in #83's lows; awk 1.5.0
+- 2026-10-10 (implement) tools--jq-parse re-checked clean-room against 579a736 (Opus): jq source references (lexer.l, parser.y, token/rule names) removed, Haisos's own names; verified on the host's jq 1.7.1; seven wrong claims corrected; documented difference: import gives 'module not found'

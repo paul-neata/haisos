@@ -188,13 +188,15 @@ awk rock and adds its files here:
   "Regexes" below).
 - `AwkInput.h/.cpp` - `RecordReader`, the record reader of one input (see
   "Values, fields and records" below).
+- `AwkStreams.h/.cpp` - `AwkStreams`, the streams of getline and the output
+  redirections (see "Input and output" below).
 - `AwkInterpreter.h/.cpp` - the `Interpreter` that runs a parsed program
   (see "Running" below).
 - `AwkBuiltins.cpp` - `Interpreter::CallBuiltin`: the string built-in
   functions, sprintf and the math functions (see "Built-in functions" below).
 - `AwkFormat.h/.cpp` - `FormatAwkPrintf`, the printf/sprintf format engine
   (see "printf and sprintf" below).
-- `Awk.cpp` - the `awk` builtin itself: `Name`, `Version` 1.4.0, the option
+- `Awk.cpp` - the `awk` builtin itself: `Name`, `Version` 1.5.0, the option
   table, the gawk-based `--help` (`BuiltinHelp::basedOn`), and `Run`:
   parse the invocation, load the sources, parse the program
   (`ParseAwkProgram`) -- its diagnostics go to stderr and any failure is
@@ -417,14 +419,15 @@ fill its hooks without changing it.
   ARGV's walk -- go through `AwkIntegerOf`: truncated toward zero, NaN
   and out-of-intmax values INTMAX_MIN. `Output` is print's one door: its
   text (the arguments joined by OFS, then ORS; an empty list prints $0)
-  written to stdout here, awk--io adding the redirections through it.
+  written to stdout here, the redirections ("Input and output" below)
+  going through it too.
   `SplitRecord` is the FieldStore's splitter (the FS rules and paragraph
   mode in "Regexes" above); `MatchRegex` is the one place a literal and a
   dynamic regex both go through (see "Regexes" above).
-- The hooks later tasks fill: `EvaluateGetline` (awk--io) and the
-  built-ins not yet made -- close, fflush, system -- report ``... is not
-  implemented yet`` for now (`CallFunction` and the string built-ins in
-  "Functions" and "Built-in functions" below).
+- `EvaluateGetline` runs getline's forms, and the built-ins close, fflush
+  and system run too, over the interpreter's one `AwkStreams`
+  (`m_streams`, built on the `BuiltinContext`; see "Input and output"
+  below) -- `Run` closes every stream on every way out.
 - An `AwkFatal` unwinds to `Run`, which reports gawk's ``fatal:`` line --
   with a location ``awk: <source>:<line>: (FILENAME=<f> FNR=<n>) fatal:
   <message>``, the FILENAME/FNR part only past the first record, without
@@ -542,8 +545,8 @@ The string built-ins, `Interpreter::CallBuiltin`
   returned.
 
 printf, sprintf and the math functions run (the sections below); close,
-fflush and system are later tasks of the rock and report ``... is not
-implemented yet``.
+fflush and system too, over the interpreter's streams ("Input and output"
+below).
 
 ## printf and sprintf
 
@@ -553,8 +556,12 @@ one engine behind the `printf` statement and the `sprintf` built-in
 evaluated, in order) gawk's way, through `BuiltinPrintf.h`'s
 `ParsePrintfSpec`/`FormatPrintf*` for each conversion, and throws
 `AwkFatal` on the two refusals; the statement's output goes through
-`Output`, so awk--io's redirections will pass through it too, and the
-whole text is built before any of it is written.
+`Output`, so awk--io's redirections pass through it too, and the
+whole text is built before any of it is written. CONVFMT is read once
+every argument is evaluated -- an argument that assigns it counts, for
+the format's own conversion and for its `%s` conversions alike (the
+`printf` statement already read it after its arguments; `sprintf` does
+the same).
 
 - A specification, from the `%` on, is one of four things: a length
   modifier (`h l L j z t` -- `q` is not one of gawk's, so `%qd` is an
@@ -614,6 +621,82 @@ keeping the value a double), `rand` and `srand`.
   argument seeds with the current time. A seed of 0 is a seed like any
   other.
 
+## Input and output
+
+`AwkStreams.h/.cpp` -- `AwkStreams`, one instance in the `Interpreter`
+(`m_streams`, built on the `BuiltinContext`): every file, pipe and command
+an awk program opens lives there -- getline from a file or a command, the
+`print`/`printf` redirections, `close`, `fflush` and `system` all go
+through it -- and `Run` closes every stream on every way out (exit, a
+fatal error, a stop).
+
+- Streams are found by name *and kind* together: `getline < "f"` and
+  `print > "f"` are two streams, `print | "f"` a third. An open stream is
+  reused where it was left; a closed one is opened afresh. `close(name)`
+  looks by name alone, one stream per call, the most recently opened
+  first. A stream holds its descriptor (an opened file or the kept end of
+  a pipe), its output buffer and, for an input, its own `RecordReader`;
+  the special output names hold no descriptor of their own.
+- The output redirections go through `Output` (unredirected print to
+  stdout as before): `>` truncating, `>>` appending, `|` a command. An
+  empty name is the fatal ``expression for `>' redirection has null
+  string value`` (the operator as written). Output is buffered per stream
+  and written at `kBuiltinOutBufferSize`, at a close and at a flush. A
+  file that cannot be opened is the fatal ``cannot redirect to `<name>':
+  <reason>`` (the reason found through Stat: `No such file or directory`,
+  `Is a directory`, `Permission denied`); a pipe that cannot be made or
+  whose command never starts, ``cannot open pipe `<name>': Too many open
+  files`` / ``No such file or directory``. A write that fails (a broken
+  pipe) is the fatal ``<statement> to "<name>" failed: Broken pipe`` from
+  a print, and quietly -1 from a flush or a close.
+- getline (`EvaluateGetline`): the simple form reads the main input -- $0
+  and NF set, NR and FNR counted, the main loop going on from the next
+  record (in BEGIN it opens the first operand; in END the input is used
+  up); with a target, only the variable is set. `getline [x] < "f"` and
+  `"cmd" | getline [x]` read their own streams, NR and FNR untouched:
+  1 a record, 0 the end, -1 a stream that could not be opened (quietly,
+  gawk's way). The record is split by the RS in force at the call; an
+  empty name is the null-string fatal (with `<` or `|` as written).
+- Commands run in hsh: `system("...")` and every pipe start
+  `hsh -c <command>`, the shell found in PATH (`FindAwkShell`), so a
+  command's own exit status is hsh's; 127 when no shell was found. A
+  pipe is made with `context.IO().CreatePipe()` and the end the command
+  does not use is released at once, so it sees the end of its input and
+  gives its own; the command starts through `StartProgram` and is waited
+  for through `WaitForProgram` (`BuiltinRunProgram.h`), which passes a
+  stop of awk's on to the child once and gives it up to 5 s more. The
+  command gets awk's own standard streams, environment and working
+  directory.
+- Ordering: awk's own stdout is flushed before any command starts and
+  before an output pipe's command is waited for at its close, so a
+  command's output cannot overtake awk's. At the end of the run
+  `CloseAll` closes the streams most recently opened first, *without*
+  flushing awk's stdout -- gawk finishes its pipes before its buffered
+  stdout, which is left to `~BuiltinContext`.
+- The status mapping, of `system()` and of `close()` of a pipe: the
+  command's exit status; a command stopped 271 (256 + SIGTERM) and one
+  broken-piped 269 (256 + SIGPIPE) -- inside the shell too, hsh mapping
+  its own children the same way -- plain gawk's values, not gawk
+  `--posix`'s (the documented choice).
+- The special names are awk's own streams, not opened devices (the
+  documented exception): output to `/dev/stdout` and `-` goes to stdout,
+  to `/dev/stderr` to stderr, each registered as an output stream when
+  first written (so `close()` of one flushes awk's stdout); input from
+  `-` and `/dev/stdin` is the standard input, each name a stream with
+  its own reader. `/dev/stdin` as an operand is the standard input too,
+  FILENAME keeping the name as written.
+- `fflush()` flushes every output stream and awk's own stdout (0);
+  `fflush(name)` only that name's output streams, -1 when none is open,
+  with gawk's warning ``fflush: `<name>' is not an open file, pipe or
+  co-process``; `/dev/stdout` flushes awk's stdout without being open,
+  `/dev/stderr` is 0 without being open (stderr is never buffered).
+- `system` flushes awk's stdout first (as before any command), runs the
+  command to its end and returns its mapped status.
+- ENVIRON is a copy of the process's environment (`GetVariableNames` /
+  `GetVariable`, the values `Value::FromInput`), filled in `Prepare`:
+  editing it changes nothing for the commands, which get awk's own
+  environment.
+
 ## Documented exceptions (checked against gawk --posix 5.2.1)
 
 - A usage error prints `awk: <error>`, then gawk's two `Usage:` lines, and
@@ -648,9 +731,13 @@ keeping the value a double), `rand` and `srand`.
   above); gawk's seeds and return values are matched, its draws not.
 - `%a` and `%A` print the platform's long double (1 as `0x8p-3` on
   x86-64); gawk prints its own (`0x1p+0` for 1).
-- The parts that do not run yet (`getline`, output redirections, `close`,
-  `fflush`, `system`) report ``... is not implemented yet``; later tasks
-  of the rock append their exceptions here.
+- The special names (`/dev/stdout`, `-`, `/dev/stderr`, `/dev/stdin`) are
+  awk's own streams, not opened devices: gawk `--posix` opens the devices
+  and loses lines written before them.
+- `system()` and `close()` of a pipe return the command's exit status as
+  plain gawk does -- a command stopped 271 (256 + SIGTERM), one
+  broken-piped 269 (256 + SIGPIPE), inside the shell too -- where gawk
+  `--posix` divides by 256.
 - A literal regex's escape warnings come after the program's string-escape
   warnings, all of them, wherever in the source either is; gawk
   interleaves the two in source order.

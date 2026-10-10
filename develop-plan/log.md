@@ -149,3 +149,4 @@
 - 2026-10-10 16:34 UTC -- tools--jq-json merged #86 as 0.5.44: 0C 2H 1M fixed, 4M 4L open, 1 try
 - 2026-10-10 16:51 UTC -- start tools--jq-eval (0.5.45)
 - 2026-10-10 17:56 UTC -- tools--jq-eval: PR #87, windows-failed (ignored per Direction)
+- 2026-10-10 18:18 UTC -- tools--jq-eval merged #87 as 0.5.45: 0C 2H fixed, 4M 3L open, 1 try

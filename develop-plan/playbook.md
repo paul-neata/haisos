@@ -49,7 +49,7 @@ Pause: no
 | 41 | [awk--io](tasks/awk--io.md) | done | 0.5.42 | 40, 9 | #84 | 1 | 0C 1H fixed, 2M 2L open | Windows red, not checked |
 | 42 | [tools--jq-parse](tasks/tools--jq-parse.md) | done | 0.5.43 | - | #85 | 1 | 0C 1H 1M fixed, 3M 2L open | Windows red, not checked |
 | 43 | [tools--jq-json](tasks/tools--jq-json.md) | done | 0.5.44 | - | #86 | 1 | 0C 2H 1M fixed, 4M 4L open | Windows red, not checked (MSVC NaN constant in a test) |
-| 44 | [tools--jq-eval](tasks/tools--jq-eval.md) | in-review | 0.5.45 | 42, 43 | #87 | 1 | | |
+| 44 | [tools--jq-eval](tasks/tools--jq-eval.md) | done | 0.5.45 | 42, 43 | #87 | 1 | 0C 2H fixed, 4M 3L open | Windows red, not checked (Jq.unittests stack depth: see final--windows-fix) |
 | 45 | [tools--jq-paths](tasks/tools--jq-paths.md) | todo | | 44 | | | | |
 | 46 | [tools--jq-command](tasks/tools--jq-command.md) | todo | | 45, 4, 26 | | | | |
 | 47 | [tools--jq-builtins](tasks/tools--jq-builtins.md) | todo | | 46 | | | | |

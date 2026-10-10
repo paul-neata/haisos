@@ -1,20 +1,23 @@
 # jq
 
-`jq` here is the jq 1.7.1 language, so far its front half: a lexer, a parser
-and the syntax tree they build, matching jq 1.7.1's compile errors byte for
-byte. Nothing runs yet -- the evaluator (and with it the `jq` builtin
-itself, its option table, `--help` and its tests in
-`tests/unit/components/BuiltinCommands.unittests/`) is a later task of the
-jq rock. The reference is the jq 1.7 manual and the observed behaviour of
-the real `jq` (its error messages included, token names and all); no jq,
-gojq or jaq source was read or copied -- everything here is written from
-scratch, as everywhere in Haisos. All of it lives in namespace
-`Haisos::Jq`, as plain portable C++17 (built for Linux, Windows/MSVC and
-WASM: no POSIX headers, no `<regex>`, and nothing recursive per input
-byte -- nesting is iterative, recursion per construct, refused past 256
-levels).
+`jq` here is the jq 1.7.1 language, so far its front half: a lexer, a
+parser, the syntax tree they build, jq's JSON values, and the JSON reader
+and writer -- matching jq 1.7.1 byte for byte, its compile errors, its
+parse errors and its output layout included. Nothing runs yet -- the
+evaluator (and with it the `jq` builtin itself, its option table,
+`--help` and its tests in
+`tests/unit/components/BuiltinCommands.unittests/`) is a later task of
+the jq rock. The reference is the jq 1.7 manual and the observed
+behaviour of the real `jq` (its error messages included, token names and
+all); no jq, gojq or jaq source was read or copied -- everything here is
+written from scratch, as everywhere in Haisos. All of it lives in
+namespace `Haisos::Jq`, as plain portable C++17 (built for Linux,
+Windows/MSVC and WASM: no POSIX headers, no `<regex>`, and nothing
+recursive per input byte -- nesting is iterative, recursion per
+construct, refused past 256 levels).
 
-The pipeline is lexer -> parser -> syntax tree (an evaluator joins later,
+The pipeline is lexer -> parser -> syntax tree, over values the JSON
+reader produces and the JSON writer prints (an evaluator joins later,
 each stage a task of its own):
 
 - `JqLexer.h/.cpp` - the `Lexer` of the jq language subset. It tracks
@@ -63,6 +66,50 @@ each stage a task of its own):
   and `FormatCompileError`/`FormatCompileErrorCount` print it with jq's
   location block (the offending line, jq's space padding, no caret) and
   the `jq: N compile error(s)` count line.
+- `JqUtf8.h/.cpp` - `AppendUtf8` (a code point as its UTF-8 bytes) and
+  `RepairUtf8`, jq's string-byte repair: a well-formed sequence is kept
+  as it is, every ill-formed one becomes U+FFFD, one per sequence, the
+  bytes around it untouched.
+- `JqValue.h/.cpp` - `Value`, a JSON value as jq holds one: null, false,
+  true, number, string, array, object, immutable and shared -- a copy
+  shares its payload (`std::shared_ptr<const ...>`), a changed copy
+  (`WithElement`, `WithMember`, `WithoutMember`) keeps the untouched
+  rest shared. Numbers carry their literal: one read from the input
+  keeps a canonical spelling (`CanonicalNumberLiteral`: leading zeros
+  stripped, the exponent shifted in, plain while the exponent stays in
+  range, `d[.ddd]E±n` otherwise), so the output
+  echoes `1.0` as `1.0`; a computed number prints its shortest
+  round-trip form instead. Objects keep insertion order (a repeated key
+  its first place, the last value); `Compare` is jq's total order --
+  null, false, NaN, numbers, strings (by UTF-8 bytes), arrays
+  (lexicographic), objects (sorted key lists first, then the values in
+  sorted key order) -- with NaN a number before every other, unequal to
+  itself. The JSON handling is written from scratch rather than through
+  the project's `nlohmann/json` dependency: jq's values carry a
+  canonical literal and jq's total order, which that library's values do
+  not model, and jq's numbers, error messages and positions are
+  byte-specific in a way its parser does not expose.
+- `JqJsonWriter.h/.cpp` - `WriteJson` with `WriteOptions` (indent 2,
+  tab, sort keys, ASCII escapes, colour): jq's layouts byte for byte --
+  pretty (empty containers inline, one per line), compact (`indent 0`),
+  `--tab`'s tabs; `FormatNumber` (a literal kept, a computed number its
+  shortest round-trip, plain while the exponent stays in range, the
+  infinities clamped, NaN null); `QuoteJsonString` (jq's escapes, ASCII
+  mode's `\uXXXX` and surrogate pairs); `DumpTruncated` (a value cut to
+  a width, never inside a UTF-8 sequence); and jq's ANSI colours for
+  `--color-output` (field names blue, strings green, null grey, the
+  rest uncoloured, the punctuation bold white).
+- `JqJsonReader.h/.cpp` - `JsonReader`, a push parser (`Feed` a piece,
+  `Finish` the end) into a caller's `std::vector<Value>`: several values
+  one after another, no recursion per input byte (nesting iterative,
+  refused past 256 levels), jq's extensions (comments, `nan`/`NaN`,
+  `Infinity`, a leading `+`, `.5`), a repeated object key keeping its
+  first place, its literal numbers kept, and ill-formed UTF-8 in strings
+  repaired. Every failure is jq's message with its line and column --
+  `"<message>[ at EOF] at line L, column C"` -- byte for byte, a
+  container's strings and containers committed at their own closing byte
+  and a top-level value only once its delimiter is seen (jq prints
+  nothing for `1,`). `ParseSingleJson` wraps it for one value exactly.
 
 ## Documented differences from jq 1.7.1
 
@@ -82,3 +129,8 @@ each stage a task of its own):
   jq's `{a: 1 b: 2}`-style cases.
 - Nesting is refused past 256 levels (jq's own limit is higher); the
   token that goes too deep is reported as unexpected, jq's wording.
+- A number literal with an exponent below -999999999 keeps its exact
+  decimal (`1e-9999999999` reads back as `1E-9999999999`), where jq
+  1.7.1 wraps the exponent into its 32-bit range and echoes the same
+  input as `0E-1147483646`. An adjusted exponent above 999999999 keeps
+  no literal, as jq's.

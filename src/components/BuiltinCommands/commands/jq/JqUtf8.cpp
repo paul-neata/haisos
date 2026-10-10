@@ -91,4 +91,50 @@ std::string RepairUtf8(std::string_view bytes) {
     return out;
 }
 
+size_t Utf8Length(const std::string& utf8) {
+    size_t count = 0;
+    for (size_t i = 0; i < utf8.size(); ++i) {
+        const unsigned char lead = static_cast<unsigned char>(utf8[i]);
+        size_t need = 0;
+        if (lead < 0x80) {
+            need = 0;
+        } else if (lead >= 0xC2 && lead <= 0xDF) {
+            need = 1;
+        } else if (lead >= 0xE0 && lead <= 0xEF) {
+            need = 2;
+        } else if (lead >= 0xF0 && lead <= 0xF4) {
+            need = 3;
+        } else {
+            need = 0;  // starts no sequence: one code point on its own
+        }
+        while (need > 0 && i + 1 < utf8.size() &&
+               IsContinuation(utf8[i + 1])) {
+            --need;
+            ++i;
+        }
+        ++count;
+    }
+    return count;
+}
+
+size_t Utf8ByteOffset(const std::string& utf8, size_t codePoints) {
+    size_t seen = 0;
+    size_t i = 0;
+    while (i < utf8.size() && seen < codePoints) {
+        const unsigned char lead = static_cast<unsigned char>(utf8[i]);
+        size_t step = 1;
+        if (lead >= 0xC2 && lead <= 0xDF) {
+            step = 2;
+        } else if (lead >= 0xE0 && lead <= 0xEF) {
+            step = 3;
+        } else if (lead >= 0xF0 && lead <= 0xF4) {
+            step = 4;
+        }
+        while (step > 1 && i + step - 1 >= utf8.size()) --step;  // cut short
+        i += step;
+        ++seen;
+    }
+    return i;
+}
+
 } // namespace Haisos::Jq

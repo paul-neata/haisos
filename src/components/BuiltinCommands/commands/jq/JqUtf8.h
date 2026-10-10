@@ -20,4 +20,14 @@ void AppendUtf8(std::string& out, unsigned int codePoint);
 // read afresh.
 std::string RepairUtf8(std::string_view bytes);
 
+// The number of code points in |utf8|: a byte that starts no sequence
+// (or one cut short by the end) counts as one, as RepairUtf8 makes each
+// such piece one U+FFFD.
+size_t Utf8Length(const std::string& utf8);
+
+// The byte offset where the |codePoints|'th code point of |utf8| starts,
+// clamped to utf8.size(). Slices of strings count code points, so a
+// from/to pair is translated here once before the bytes are taken.
+size_t Utf8ByteOffset(const std::string& utf8, size_t codePoints);
+
 } // namespace Haisos::Jq

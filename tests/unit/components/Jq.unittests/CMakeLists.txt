@@ -1,4 +1,5 @@
 add_executable(Jq.unittests
+    JqInterpreterTest.cpp
     JqJsonReaderTest.cpp
     JqJsonWriterTest.cpp
     JqLexerTest.cpp

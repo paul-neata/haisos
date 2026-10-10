@@ -292,4 +292,111 @@ std::string DumpNode(const Node& node) {
     return out;
 }
 
+namespace {
+
+// Moves every key node of |pattern|'s entries out, at any nesting depth of
+// the patterns (their own structure holds no nodes, and the parser's
+// nesting limit bounds that walk).
+void CollectPatternKeys(Pattern& pattern,
+                        std::vector<std::unique_ptr<Node>>& out) {
+    for (auto& entry : pattern.entries) {
+        if (entry.key)
+            out.push_back(std::move(entry.key));
+        if (entry.value)
+            CollectPatternKeys(*entry.value, out);
+    }
+    for (auto& element : pattern.elements)
+        CollectPatternKeys(element, out);
+}
+
+// Pushes every key node of |pattern|'s entries onto |stack|, at |level|, at
+// any nesting depth of the patterns.
+void PushPatternKeys(const Pattern& pattern, size_t level,
+                     std::vector<std::pair<const Node*, size_t>>& stack) {
+    for (const auto& entry : pattern.entries) {
+        if (entry.key)
+            stack.push_back({entry.key.get(), level});
+        if (entry.value)
+            PushPatternKeys(*entry.value, level, stack);
+    }
+    for (const auto& element : pattern.elements)
+        PushPatternKeys(element, level, stack);
+}
+
+} // namespace
+
+Node::~Node() {
+    // Iterative: a tree the parser refuses, or a syntax error leaves
+    // half-built, can be as deep as the program is long. Each node moves
+    // every subtree it owns into |pending| and is then set aside in |owned|
+    // to be destroyed once its own subtrees were moved -- destroying it
+    // right away would run ~Node one frame per level, the very recursion
+    // this exists to avoid.
+    std::vector<std::unique_ptr<Node>> pending;
+    std::vector<std::unique_ptr<Node>> owned;
+    Node* current = this;
+    for (;;) {
+        for (auto& child : current->children)
+            if (child)
+                pending.push_back(std::move(child));
+        current->children.clear();
+        for (auto& entry : current->entries) {
+            if (entry.first)
+                pending.push_back(std::move(entry.first));
+            if (entry.second)
+                pending.push_back(std::move(entry.second));
+        }
+        current->entries.clear();
+        for (auto& alternative : current->patterns)
+            CollectPatternKeys(alternative, pending);
+        current->patterns.clear();
+        for (auto& definition : current->definitions)
+            if (definition.body)
+                pending.push_back(std::move(definition.body));
+        current->definitions.clear();
+        if (pending.empty())
+            break;
+        owned.push_back(std::move(pending.back()));
+        pending.pop_back();
+        current = owned.back().get();
+    }
+    // Every node in |owned| was emptied above, so each destructor here is
+    // one shallow walk of nothing.
+}
+
+size_t TreeHeight(const Node& root, size_t* deepestBegin) {
+    size_t height = 0;
+    std::vector<std::pair<const Node*, size_t>> stack;
+    stack.push_back({&root, 1});
+    while (!stack.empty()) {
+        const Node* node = stack.back().first;
+        const size_t level = stack.back().second;
+        stack.pop_back();
+        if (level > height) {
+            height = level;
+            if (deepestBegin)
+                *deepestBegin = node->begin;
+        } else if (level == height && deepestBegin &&
+                   node->begin < *deepestBegin) {
+            // Several nodes sit at the greatest level: the leftmost is named.
+            *deepestBegin = node->begin;
+        }
+        for (const auto& child : node->children)
+            if (child)
+                stack.push_back({child.get(), level + 1});
+        for (const auto& entry : node->entries) {
+            if (entry.first)
+                stack.push_back({entry.first.get(), level + 1});
+            if (entry.second)
+                stack.push_back({entry.second.get(), level + 1});
+        }
+        for (const auto& alternative : node->patterns)
+            PushPatternKeys(alternative, level + 1, stack);
+        for (const auto& definition : node->definitions)
+            if (definition.body)
+                stack.push_back({definition.body.get(), level + 1});
+    }
+    return height;
+}
+
 } // namespace Haisos::Jq

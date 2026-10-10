@@ -635,8 +635,11 @@ int ApplyFilePatch(PatchRun& run, FilePatch patch) {
             run.Fatal("Can't open file " + ShellEscapeQuoted(input) + " : Input/output error");
             return 2;
         }
-    } else if (patch.oldAbsence == SideAbsence::Present && !run.force) {
-        // No creation, and nothing forced: the file a normal patch needs.
+    } else if (patch.oldAbsence == SideAbsence::Present && !run.force
+               && !isRenameOrCopy) {
+        // No creation, and nothing forced: the file a normal patch needs. A
+        // rename reads its source wherever it went: missing, it reads empty
+        // and the hunks fail against nothing.
         run.Fatal("Can't open file " + ShellEscapeQuoted(input) + " : No such file or directory");
         return 2;
     }
@@ -895,11 +898,15 @@ int ApplyFilePatch(PatchRun& run, FilePatch patch) {
             // patch that did not apply cleanly otherwise (unless told not
             // to). The original is moved there just before the new content
             // takes its place; a file that did not exist gets an empty one.
+            // The file written is the one backed up (a rename's source
+            // included, moved under the written file's name) and the key,
+            // not the backup's name: a numbered backup of a file patched
+            // twice in one run still counts once.
             const bool mismatch = anyOffset || anyFuzz || !rejHunks.empty();
             if (run.backup || (run.mismatchBackup && mismatch)) {
-                const std::string backupPath = BackupPathFor(run.context, input,
+                const std::string backupPath = BackupPathFor(run.context, output,
                     run.backupMode, run.backupSuffix);
-                const std::string key = run.context.IO().ResolvePath(backupPath);
+                const std::string key = run.context.IO().ResolvePath(output);
                 if (run.backupMade.insert(key).second) {
                     bool backupOk = true;
                     std::string backupFailure;
@@ -1106,8 +1113,9 @@ int PatchCommand::Run(BuiltinContext& context) {
                 } else if (option.argument == "unified") {
                     run.rejectFormat = RejFormat::Unified;
                 } else {
-                    // This one carries the Try line on its own, nothing else.
-                    context.TryHelp();
+                    // This one carries the Try line on its own, prefixed
+                    // as every message, and nothing else.
+                    context.Error("Try 'patch --help' for more information.");
                     return 2;
                 }
                 break;
@@ -1145,19 +1153,21 @@ int PatchCommand::Run(BuiltinContext& context) {
     }
 
     // The backup method, decided once the options are parsed: the last -V
-    // word, else PATCH_VERSION_CONTROL, else VERSION_CONTROL (a set but
-    // empty one counts as unset), else existing -- checked even when no
-    // backup will be made. GNU 2.7.6 takes none and off as numbered.
+    // word, else PATCH_VERSION_CONTROL, else VERSION_CONTROL -- each read
+    // only when set at all, an empty value meaning existing -- else
+    // existing -- checked even when no backup will be made. GNU 2.7.6
+    // takes none and off as numbered.
     {
         std::optional<std::string> word;
         const char* reportedName = "--version-control or -V option";
         if (versionControl) {
             word = versionControl;
         } else if (auto env = context.Process().GetEnvironment()
-                                 ->GetVariable("PATCH_VERSION_CONTROL");
-                   env && !env->empty()) {
-            word = env;
-            reportedName = "$PATCH_VERSION_CONTROL";
+                                 ->GetVariable("PATCH_VERSION_CONTROL"); env) {
+            if (!env->empty()) {
+                word = env;
+                reportedName = "$PATCH_VERSION_CONTROL";
+            }
         } else if (auto env = context.Process().GetEnvironment()
                                  ->GetVariable("VERSION_CONTROL");
                    env && !env->empty()) {

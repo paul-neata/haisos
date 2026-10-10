@@ -826,17 +826,16 @@ size_t PatchReader::ReadContextHunk(size_t index, FilePatch& patch) {
                 + (delimited ? "\n" : ""), lineNumber, false});
     }
     if (separatorIndex == n) {
-        return malformed("unexpected end of file in patch at line " + std::to_string(n)
-            + "\n");
+        return malformed("unexpected end of file in patch at line " + std::to_string(n));
     }
     if (!oldPart.empty()) {
         if (static_cast<int64_t>(oldPart.size()) < oldCount) {
             return malformed("Premature '---' at line " + std::to_string(separatorIndex + 1)
-                + "; check line numbers at line " + std::to_string(index + 2) + "\n");
+                + "; check line numbers at line " + std::to_string(index + 2));
         }
         if (static_cast<int64_t>(oldPart.size()) > oldCount) {
             return malformed("Overdue '---' at line " + std::to_string(separatorIndex + 1)
-                + "; check line numbers at line " + std::to_string(index + 2) + "\n");
+                + "; check line numbers at line " + std::to_string(index + 2));
         }
     }
     // The new part, read until a line that is not one of its marks ("  ",
@@ -879,7 +878,7 @@ size_t PatchReader::ReadContextHunk(size_t index, FilePatch& patch) {
             const std::string terminator = LineText(end, patch.stripTrailingCr);
             if (IsStarHunkLine(terminator)) {
                 return newPartMalformed("unexpected end of hunk at line "
-                    + std::to_string(end + 1) + "\n");
+                    + std::to_string(end + 1));
             }
             return newPartMalformed("malformed patch at line " + std::to_string(end + 1)
                 + ": " + terminator + "\n");
@@ -966,7 +965,7 @@ size_t PatchReader::ReadContextHunk(size_t index, FilePatch& patch) {
         const size_t newLine = j2 < newPart.size() ? newPart[j2].inputLine
             : (newPart.empty() ? separatorIndex + 1 : newPart.back().inputLine);
         patch.malformed = "Out-of-sync patch, lines " + std::to_string(oldLine) + ","
-            + std::to_string(newLine) + " -- mangled text or line numbers, maybe?\n";
+            + std::to_string(newLine) + " -- mangled text or line numbers, maybe?";
         return n;
     }
     if (hunk.oldCount == 0 && hunk.oldStart == 1
@@ -1012,8 +1011,7 @@ size_t PatchReader::ReadNormalHunk(size_t index, FilePatch& patch) {
     const auto readSide = [&](int64_t want, char mark, std::vector<PatchLine>& out) -> bool {
         while (static_cast<int64_t>(out.size()) < want) {
             if (k >= n) {
-                malformed("unexpected end of file in patch at line " + std::to_string(n)
-                    + "\n");
+                malformed("unexpected end of file in patch at line " + std::to_string(n));
                 return false;
             }
             const bool delimited = m_lines[k].delimited;
@@ -1032,7 +1030,7 @@ size_t PatchReader::ReadNormalHunk(size_t index, FilePatch& patch) {
                 || (text[1] != ' ' && text[1] != '\t')) {
                 malformed("'" + std::string(1, mark)
                     + "' followed by space or tab expected at line "
-                    + std::to_string(k) + " of patch\n");
+                    + std::to_string(k) + " of patch");
                 return false;
             }
             out.push_back(PatchLine{
@@ -1046,14 +1044,13 @@ size_t PatchReader::ReadNormalHunk(size_t index, FilePatch& patch) {
     }
     if (command.kind == 'c') {
         if (k >= n) {
-            return malformed("unexpected end of file in patch at line " + std::to_string(n)
-                + "\n");
+            return malformed("unexpected end of file in patch at line " + std::to_string(n));
         }
         const std::string separator = LineText(k, patch.stripTrailingCr);
         ++k;
         if (separator != "---") {
             return malformed("'---' expected at line " + std::to_string(k)
-                + " of patch\n");
+                + " of patch");
         }
     }
     if (!readSide(newList, '>', newLines)) {
@@ -1227,7 +1224,7 @@ std::optional<FilePatch> PatchReader::Next(int64_t strip, bool& garbage) {
                 if (cr || crNext) {
                     patch->stripTrailingCr = true;
                 }
-                const int effStrip = (strip < 0 && patch->gitDiff) ? 1 : strip;
+                const int64_t effStrip = (strip < 0 && patch->gitDiff) ? 1 : strip;
                 const HeaderName oldSide = ParseHeaderName(HeaderText(text).substr(3));
                 const HeaderName newSide = ParseHeaderName(HeaderText(next).substr(3));
                 patch->oldName = oldSide.name ? StripFileName(*oldSide.name, effStrip)
@@ -1258,10 +1255,13 @@ std::optional<FilePatch> PatchReader::Next(int64_t strip, bool& garbage) {
         }
 
         // A unified hunk. With no headers before it, the patch begins here.
+        // A number too large for int64 still starts a hunk: the hunk reader
+        // reports it when it takes the hunk in.
         int64_t dummyStart = 0, dummyCount = 0;
         std::string dummyFunction;
+        std::string dummyTooLarge;
         if (unifiedAllowed && ParseHunkHeader(text, dummyStart, dummyCount, dummyStart,
-                dummyCount, dummyFunction, nullptr, nullptr)) {
+                dummyCount, dummyFunction, &dummyTooLarge, nullptr)) {
             if (!patch) {
                 patch = FilePatch{};
                 lastHeader = static_cast<int64_t>(i) - 1;
@@ -1316,8 +1316,11 @@ std::optional<FilePatch> PatchReader::Next(int64_t strip, bool& garbage) {
         ++i;  // leading text, or a line between the headers and the first hunk
     }
 
-    if (!patch) {
-        // No patch in the rest of the input: garbage when none was ever read.
+    if (!patch || (patch->hunks.empty() && !patch->gitDiff
+            && patch->malformed.empty())) {
+        // No patch in the rest of the input -- file headers alone are none
+        // of it (a git diff's mode or rename lines aside): garbage when none
+        // was ever read.
         garbage = (m_pos == 0 && !m_lines.empty());
         m_pos = n;
         return std::nullopt;

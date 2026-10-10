@@ -290,8 +290,10 @@ std::string RejText(const FilePatch& patch, const std::vector<RejectedHunk>& rej
         const auto writePart = [&](bool oldSide) {
             for (size_t i = 0; i < hunk.lines.size(); ++i) {
                 const PatchLine& line = hunk.lines[i];
-                const bool isOld = line.kind != PatchLineKind::Insert;
-                if (isOld != oldSide) {
+                // A context line belongs to both parts; a Delete to the old
+                // one, an Insert to the new.
+                if (oldSide ? line.kind == PatchLineKind::Insert
+                            : line.kind == PatchLineKind::Delete) {
                     continue;
                 }
                 out += markFor(hunk.lines, i);

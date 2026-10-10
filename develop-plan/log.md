@@ -146,3 +146,4 @@
 - 2026-10-10 14:59 UTC -- tools--jq-parse merged #85 as 0.5.43: 0C 1H 1M fixed, 3M 2L open, 1 try
 - 2026-10-10 15:07 UTC -- start tools--jq-json (0.5.44)
 - 2026-10-10 16:12 UTC -- tools--jq-json: PR #86, windows-failed (ignored per Direction)
+- 2026-10-10 16:34 UTC -- tools--jq-json merged #86 as 0.5.44: 0C 2H 1M fixed, 4M 4L open, 1 try

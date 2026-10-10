@@ -317,6 +317,115 @@ TEST_F(AwkFunctionsTest, FunctionErrors) {
     EXPECT_EQ(captured.status, 2);
 }
 
+// The #82 follow-ups: a binding chain whose end turns out to be an array,
+// read as a scalar after the call began -- gawk's fatal, the name listing
+// the whole chain.
+TEST_F(AwkFunctionsTest, LateArrayBinding) {
+    // The caller's variable became an array after the call began.
+    Captured captured = RunCaptured("awk",
+        {R"(function f(a) { x[1] = 1; print "[" a "]" } BEGIN { f(x) })"});
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: attempt to use array "
+                           "`a (from x)' in a scalar context\n");
+    EXPECT_EQ(captured.status, 2);
+
+    // The same for an assignment, an increment and a condition.
+    captured = RunCaptured("awk",
+        {R"(function f(a) { x[1] = 1; a = 3 } BEGIN { f(x) })"});
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: attempt to use array "
+                           "`a (from x)' in a scalar context\n");
+    EXPECT_EQ(captured.status, 2);
+
+    captured = RunCaptured("awk",
+        {R"(function f(a) { x[1] = 1; a++ } BEGIN { f(x) })"});
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: attempt to use array "
+                           "`a (from x)' in a scalar context\n");
+    EXPECT_EQ(captured.status, 2);
+
+    captured = RunCaptured("awk",
+        {R"(function f(a) { x[1] = 1; if (a) print "t" } BEGIN { f(x) })"});
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: attempt to use array "
+                           "`a (from x)' in a scalar context\n");
+    EXPECT_EQ(captured.status, 2);
+
+    // The chain names every parameter it went through.
+    captured = RunCaptured("awk",
+        {R"(function g(b) { print b } function f(a) { g(a) } )"
+         R"(BEGIN { x[1] = 1; f(x) })"});
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: attempt to use array "
+                           "`b (from a, from x)' in a scalar context\n");
+    EXPECT_EQ(captured.status, 2);
+
+    captured = RunCaptured("awk",
+        {R"(function h(c) { x[1] = 1; print c } function g(b) { h(b) } )"
+         R"(function f(a) { g(a) } BEGIN { f(x) })"});
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: attempt to use array "
+                           "`c (from b, from a, from x)' in a scalar context\n");
+    EXPECT_EQ(captured.status, 2);
+
+    // A local (an extra parameter) is named as the one it was passed from.
+    captured = RunCaptured("awk",
+        {R"(function g(b) { print b } function f(a, l) { l[1] = 1; g(l) } )"
+         R"(BEGIN { f(1) })"});
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: attempt to use array "
+                           "`b (from l)' in a scalar context\n");
+    EXPECT_EQ(captured.status, 2);
+
+    // The scalar side keeps the plain name.
+    captured = RunCaptured("awk",
+        {R"(function g(b) { b[1] = 1 } function f(a) { x = 1; g(a) } )"
+         R"(BEGIN { f(x) })"});
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: attempt to use scalar "
+                           "parameter `b' as an array\n");
+    EXPECT_EQ(captured.status, 2);
+
+    // length of a parameter whose chain turns out to be an array.
+    captured = RunCaptured("awk",
+        {R"(function f(a) { x[1] = 1; print length(a) } BEGIN { f(x) })"});
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: length: received array "
+                            "argument\n");
+    EXPECT_EQ(captured.status, 2);
+
+    captured = RunCaptured("awk",
+        {R"(function g(b) { x[1] = 1; print length(b) } function f(a) { g(a) } )"
+         R"(BEGIN { f(x) })"});
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: length: received array "
+                            "argument\n");
+    EXPECT_EQ(captured.status, 2);
+
+    // A chain that ends in a scalar: length of it is 0, and no error.
+    captured = RunCaptured("awk",
+        {R"(function f(a) { x = 5; print length(a) } BEGIN { f(x) })"});
+    EXPECT_EQ(captured.out, "0\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    // split into a parameter whose chain turns out to be a scalar.
+    captured = RunCaptured("awk",
+        {R"(function f(a) { x = 1; split("a b", a) } BEGIN { f(x) })"});
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: split: second argument is "
+                            "not an array\n");
+    EXPECT_EQ(captured.status, 2);
+
+    captured = RunCaptured("awk",
+        {R"(function g(b) { x = 1; split("a", b) } function f(a) { g(a) } )"
+         R"(BEGIN { f(x) })"});
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: split: second argument is "
+                            "not an array\n");
+    EXPECT_EQ(captured.status, 2);
+}
+
 // --- length, substr, index, tolower, toupper ---
 
 TEST_F(AwkFunctionsTest, LengthSubstrIndexCase) {

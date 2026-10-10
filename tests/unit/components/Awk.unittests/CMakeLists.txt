@@ -1,4 +1,4 @@
-add_executable(Awk.unittests AwkLexerTest.cpp AwkParserTest.cpp AwkCommandTest.cpp AwkValueTest.cpp AwkRegexTest.cpp AwkInterpreterTest.cpp AwkFunctionsTest.cpp)
+add_executable(Awk.unittests AwkLexerTest.cpp AwkParserTest.cpp AwkCommandTest.cpp AwkValueTest.cpp AwkRegexTest.cpp AwkInterpreterTest.cpp AwkFunctionsTest.cpp AwkPrintfTest.cpp)
 target_include_directories(Awk.unittests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/components/Factory
     ${CMAKE_SOURCE_DIR}/tests/unit/components/BuiltinCommands.unittests

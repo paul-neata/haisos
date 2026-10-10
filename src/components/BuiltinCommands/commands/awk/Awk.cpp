@@ -13,7 +13,7 @@ namespace {
 class AwkCommand : public IBuiltinCommand {
 public:
     std::string Name() const override { return "awk"; }
-    std::string Version() const override { return "1.3.0"; }
+    std::string Version() const override { return "1.4.0"; }
 
     const std::vector<BuiltinOption>& Options() const override {
         return Awk::AwkOptionTable();
@@ -43,8 +43,11 @@ public:
             "gawk has no such limit.\n"
             "Regular expressions are POSIX EREs, as gawk --posix takes them\n"
             "(no \\y \\w \\s, no \\< \\>); intervals are supported.\n"
-            "printf, sprintf, the math functions, getline and output\n"
-            "redirections are not available yet.\n"
+            "rand() has its own sequence; srand's seeds and return values are\n"
+            "gawk's.\n"
+            "%a and %A print the platform's long double (0x8p-3 for 1 on\n"
+            "x86-64; gawk prints 0x1p+0).\n"
+            "getline and output redirections are not available yet.\n"
             "User-defined functions may nest at most 200 calls deep; gawk has\n"
             "no fixed limit.\n"
             "`split(s, a[i])' is refused (second argument is not an array);\n"

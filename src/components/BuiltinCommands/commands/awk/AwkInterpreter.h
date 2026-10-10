@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <deque>
 #include <memory>
+#include <random>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -111,9 +112,10 @@ private:
     Value& ScalarRef(const Expr& variable);  // a Variable expression's scalar (makes an Untyped one Scalar)
     Value& ScalarRef(int slot, const std::string& name);
     AwkArray& ArrayRef(int slot, const std::string& name);  // makes an Untyped one Array
-    // A parameter's name in gawk's error texts: "a" alone, or "a (from x)"
-    // when the argument was passed by name from x.
-    std::string VariableName(int localSlot, const std::string& name);
+    // The kind of the first link of a variable's binding chain that is not
+    // Untyped, Untyped when every link is (a global, having no binding, is
+    // its own kind).
+    static Variable::Kind BoundKind(const Variable& variable);
     // A local parameter's scalar or array, through its binding chain to the
     // variable the argument came from (see Variable::binding). ScalarRef
     // types every still-Untyped variable on the chain; ArrayRef creates the
@@ -206,6 +208,8 @@ private:
     bool m_regexCompileFailed = false;       // a literal regex did not compile: the walk stopped
     intmax_t m_exitCode = 0;
     bool m_exitFromBegin = false;            // exit in BEGIN: the input is skipped
+    std::mt19937 m_random{1};               // rand()'s generator, seeded 1 (srand's default)
+    int64_t m_seed = 1;                     // srand's seed, what srand returns
 };
 
 } // namespace Haisos::Awk

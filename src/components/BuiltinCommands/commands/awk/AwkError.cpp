@@ -6,6 +6,11 @@ std::string AwkLocationPrefix(const std::string& sourceName, int line) {
     return std::string(kAwkName) + ": " + sourceName + ":" + std::to_string(line) + ": ";
 }
 
+AwkFatal::AwkFatal(const std::string& message, bool withLocation)
+    : std::runtime_error(message)
+    , m_withLocation(withLocation) {
+}
+
 AwkSyntaxError::AwkSyntaxError(const std::string& message, std::string sourceName, int line,
                                std::string lineText, size_t column)
     : std::runtime_error(message)

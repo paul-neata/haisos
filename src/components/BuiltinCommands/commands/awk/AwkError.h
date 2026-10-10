@@ -44,6 +44,19 @@ private:
     size_t m_column;
 };
 
+// A gawk "fatal:" error at run time: the program stops, status 2. The
+// interpreter formats it (awk--interpreter): with a location,
+// "awk: <src>:<line>: [(FILENAME=<f> FNR=<n>) ]fatal: <message>\n";
+// without, "awk: fatal: <message>\n".
+class AwkFatal : public std::runtime_error {
+public:
+    explicit AwkFatal(const std::string& message, bool withLocation = true);
+    bool WithLocation() const { return m_withLocation; }
+
+private:
+    bool m_withLocation;
+};
+
 // gawk's syntax-error report, byte for byte:
 //   <prefix><lineText>\n
 //   <prefix><caret padding>^ <message>\n

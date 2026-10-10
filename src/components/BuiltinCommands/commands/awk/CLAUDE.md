@@ -17,7 +17,9 @@ awk rock and adds its files here:
   one byte per source byte before the column -- a tab stays a tab, anything
   else a space -- and the `^ <message>`), `FormatAwkWarning` and
   `FormatAwkError` the `warning:`/`error:` lines, all behind
-  `AwkLocationPrefix`: `awk: <source>:<line>: `.
+  `AwkLocationPrefix`: `awk: <source>:<line>: `. `AwkFatal` is a run-time
+  "fatal:" error (the program stops, status 2; the interpreter formats it,
+  with or without its location -- awk--interpreter).
 - `AwkLexer.h/.cpp` - the `Lexer` of POSIX awk as gawk `--posix` reads a
   program, and `DecodeAwkStringEscapes`, awk's string escapes (also the
   escapes of a `-v` value, `-F`'s value and `var=value` operands when the
@@ -177,6 +179,13 @@ awk rock and adds its files here:
   and `LoadAwkSources` (each `-f` file read whole through `OpenInputOperand`
   and `ReadWholeInput` -- `-` is standard input; an unreadable file is
   gawk's fatal, status 2, a directory its own error, status 1).
+- `AwkValue.h/.cpp` - awk's values and arrays: `Value` and its four kinds,
+  the conversions, the comparison and `AwkArray` (see "Values, fields and
+  records" below).
+- `AwkFields.h/.cpp` - the fields of the current record: `SplitAwkFields`
+  and `FieldStore` (see "Values, fields and records" below).
+- `AwkInput.h/.cpp` - `RecordReader`, the record reader of one input (see
+  "Values, fields and records" below).
 - `Awk.cpp` - the `awk` builtin itself: `Name`, `Version` 1.0.2, the option
   table, the gawk-based `--help` (`BuiltinHelp::basedOn`), and `Run`:
   parse the invocation, load the sources, parse the program
@@ -217,6 +226,60 @@ sub-nodes in parentheses -- the format the tests compare against, exact:
   pattern), `function f(a, b) S`. `DumpProgram` joins them with '\n', no
   final newline.
 
+## Values, fields and records
+
+The data layer of the interpreter (`AwkValue`, `AwkFields`, `AwkInput`),
+behaviour matched to POSIX awk and the observed output of gawk `--posix`
+5.2.1. Nothing user-visible yet: awk--interpreter builds the interpreter on
+these, awk--records adds regex field separators and `RS = ""`, awk--functions
+and awk--io reuse them.
+
+A `Value` is one of four kinds: Uninitialized (what every variable starts
+as, "" and 0 at once), Number, String, and *strnum* -- text that came from
+input and looks numeric, so that it compares numerically while printing as
+itself. StrNum comes only from `FromInput`: the fields and `$0`, the
+`var=value` operands, `-v` values, for-in keys, ARGV and (later) getline.
+
+- Conversions. A string to a number (`StringToNumber`): leading blanks
+  (space `\t \n \v \f \r`) skipped, then the longest prefix `std::strtod`
+  accepts -- decimal, hex `0x1A`, `inf`, `infinity`, `nan`, any case -- none
+  at all is 0 (`"3x"` 3, `"info"` +inf). `LooksNumeric` says when that
+  conversion took at least one byte and only blanks follow it: what makes
+  input a strnum. A number to a string (`AwkNumberToString`): NaN and
+  infinities as `+nan`, `-nan`, `+inf`, `-inf` (the sign bit decides); an
+  integral value as its decimal integer, every digit, whatever its size and
+  whatever the format (1e30 is `1000000000000000019884624838656`, `-0` is
+  `0`); anything else through `FormatAwkNumber`, which applies CONVFMT or
+  OFMT to the one number -- bytes copied, `%%` a `%`, the conversions parsed
+  by `ParsePrintfSpec` (d i o u x X c e E f F g G a A, a negative value
+  through intmax_t as glibc's printf converts it), anything else, or a format
+  ending inside a specification, copied as written.
+- Comparison (`CompareValues`): POSIX's rule -- numeric (by `ToNumber`)
+  when both sides are numeric (Number, StrNum or Uninitialized), else the
+  two `ToString(convfmt)` compared byte by byte as unsigned chars. A numeric
+  comparison with a NaN on either side returns `kAwkUnordered`: the two are
+  unordered, so `< <= == > >=` are all false and `!=` true. The interpreter
+  maps the result to each relational operator, `kAwkUnordered` first.
+- Arrays (`AwkArray`): string keys, insertion-ordered (what `for (k in a)`
+  visits), a Value reference valid until its element is removed.
+- The field store (`FieldStore`): $0, $1..., NF. A record is split lazily,
+  with the FS in force when it was set (`SetRecord` saves it; a later change
+  of FS does not affect that record), by a splitter the interpreter
+  supplies (`Splitter`; `SplitAwkFields` -- FS `" "` runs of blanks, `""` no
+  splitting, one other byte literal -- until awk--records' regexes and
+  paragraph mode). Fields read as strnum; an assigned field keeps its type.
+  Assigning to a field beyond NF extends with empty fields; a field or NF
+  assignment rebuilds $0 with the OFS (and CONVFMT for Number fields) of
+  that assignment; `$0 = v` sets a new record, re-split with the FS saved
+  with the current record.
+- The record reader (`RecordReader`): one input, read in 64 KiB blocks,
+  each record separated by the first byte of RS as it is at that call (a
+  change applies from the next record on; `RS = ""` paragraph mode is
+  awk--records'). The bytes past the record stay in the reader's own buffer
+  for the next call; it stops promptly on a stop (checked before each read)
+  or a `kIOInterrupted` read, and reports an error on any other negative
+  read.
+
 ## Documented exceptions (checked against gawk --posix 5.2.1)
 
 - A usage error prints `awk: <error>`, then gawk's two `Usage:` lines, and
@@ -234,5 +297,11 @@ sub-nodes in parentheses -- the format the tests compare against, exact:
   gawk's second, location-less line.
 - The `(END OF FILE)` report's caret is always at column 0; gawk's column
   varies with how the `-f` file ends.
+- `for (k in a)` visits the keys in insertion order; gawk's order is
+  unspecified.
+- A `*` width or precision in CONVFMT or OFMT counts as absent; gawk stops
+  with a fatal error.
+- A strnum NaN compares unordered (`kAwkUnordered`): `$1 == $2` is false for
+  the fields `nan` and `+nan`; gawk 5.2.1 `--posix` gives it true.
 - Running programs is not implemented yet; later tasks of the rock append
   their exceptions here.

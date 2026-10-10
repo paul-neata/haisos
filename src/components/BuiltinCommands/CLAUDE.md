@@ -225,6 +225,9 @@ through `IFactory` (`CreateBuiltinCommands`, `CreateBuiltinConfigurator`).
   CLAUDE.md.
 - `commands/awk/` - `awk`, POSIX awk as gawk `--posix` runs it; has its own
   CLAUDE.md.
+- `commands/jq/` - `jq`, the jq 1.7.1 language: a lexer, a parser and the
+  syntax tree they build, with jq's compile errors byte for byte (the
+  evaluator and the `jq` builtin are a later task); has its own CLAUDE.md.
 
 ## Output
 

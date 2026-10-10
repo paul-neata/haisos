@@ -110,3 +110,4 @@
 - 2026-10-09 22:20 UTC -- diff--diff-recursive merged #73 as 0.5.31: 1C 2H fixed, 1M 2L open, 1 try
 - 2026-10-09 22:34 UTC -- start diff--patch-core (0.5.32), re-planned clean-room
 - 2026-10-10 00:05 UTC -- diff--patch-core: PR #74, windows-failed (ignored per Direction)
+- 2026-10-10 00:30 UTC -- diff--patch-core merged #74 as 0.5.32: 0C 4H 1L fixed, 4M 2L open, 1 try

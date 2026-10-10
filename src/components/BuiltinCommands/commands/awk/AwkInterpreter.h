@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -15,6 +16,11 @@
 
 namespace Haisos::Awk {
 
+// How deep user function calls may nest. gawk has no fixed limit; a number
+// this side of exhausting the machine keeps a runaway recursion fatal
+// instead of crashing.
+inline constexpr size_t kAwkMaxCallDepth = 200;
+
 // A variable's storage. Untyped until first used: as a scalar (reading it
 // too) it becomes Scalar, as an array Array; the other use is then an
 // AwkFatal. The array is shared so awk--functions can pass it by reference.
@@ -23,6 +29,14 @@ struct Variable {
     Kind kind = Kind::Untyped;
     Value scalar;
     std::shared_ptr<AwkArray> array;
+    // The caller's variable an untyped parameter was passed by name: using
+    // the parameter types and (for arrays) reaches the binding's own chain
+    // end. Raw: a binding lives in the caller's frame, which outlives every
+    // call made from it.
+    Variable* binding = nullptr;
+    // The name the argument was passed from, for gawk's "(from x)" error
+    // texts.
+    std::string passedFrom;
 };
 
 // The special variables, at these fixed global slots (registered first, in
@@ -35,6 +49,21 @@ enum SpecialSlot : int {
 
 // What a statement tells the statements around it.
 enum class Flow { Normal, Break, Continue, Next, NextFile, Exit, Return };
+
+// One active user function call: the definition being run, its frame of
+// parameters and extra locals, and the value `return` left (Uninitialized
+// without one).
+struct ActiveCall {
+    const FunctionDefinition* function = nullptr;
+    std::vector<Variable> locals;
+    Value returnValue;
+};
+
+// next/nextfile/exit out of a function body: caught by the item loops the
+// flow belongs to (the call is already unwound when it is thrown).
+struct FlowUnwind {
+    Flow flow;
+};
 
 // Runs a parsed program: the BEGIN items, the main items over the input's
 // records, the END items (see "Running" in the awk CLAUDE.md). A plain class
@@ -57,8 +86,12 @@ private:
     // --- before anything runs ---
     void Prepare();                          // resolve names to slots; set the special variables; -F/-v
     int SlotOf(const std::string& name);     // the global slot of a name, created if new
-    void ResolveExpr(const Expr& expr);     // gives every name its slot
-    void ResolveStmt(const Stmt& stmt);
+    // Gives every name its slot: a global's, or the parameter it is inside
+    // a function body (parameters null: a global, whatever it is). A Call's
+    // definition index is resolved too, calls before their definitions
+    // included.
+    void ResolveExpr(const Expr& expr, const std::vector<std::string>* parameters);
+    void ResolveStmt(const Stmt& stmt, const std::vector<std::string>* parameters);
     void ApplyPreAssignment(const AwkPreAssignment& assignment);
     void AssignName(const std::string& name, const Value& value);  // -v and var=value
     bool CompileLiteralRegexes();            // every /re/ in the program, before anything runs
@@ -78,6 +111,24 @@ private:
     Value& ScalarRef(const Expr& variable);  // a Variable expression's scalar (makes an Untyped one Scalar)
     Value& ScalarRef(int slot, const std::string& name);
     AwkArray& ArrayRef(int slot, const std::string& name);  // makes an Untyped one Array
+    // A parameter's name in gawk's error texts: "a" alone, or "a (from x)"
+    // when the argument was passed by name from x.
+    std::string VariableName(int localSlot, const std::string& name);
+    // A local parameter's scalar or array, through its binding chain to the
+    // variable the argument came from (see Variable::binding). ScalarRef
+    // types every still-Untyped variable on the chain; ArrayRef creates the
+    // array at the chain's end.
+    Value& ScalarRef(Variable& variable, const std::string& name);
+    AwkArray& ArrayRef(Variable& variable, const std::string& name);
+    // The scalar or array a resolved Variable/Index/In expression names:
+    // global (localSlot -1) or the current call's parameter.
+    Value& ScalarRefOf(int slot, int localSlot, const std::string& name);
+    AwkArray& ArrayRefOf(int slot, int localSlot, const std::string& name);
+    // The current call's frame; null in the items themselves.
+    ActiveCall* CurrentCall();
+    // A Variable expression's own Variable, global (localSlot -1) or the
+    // current call's parameter.
+    Variable& VariableOf(const Expr& variable);
     void Assign(const Expr& lvalue, const Value& value);    // Variable, Index, Field (and NF)
     // An lvalue with its subscript or field index evaluated once, so a
     // compound assignment or ++/-- reads and writes the same place.
@@ -89,9 +140,16 @@ private:
     Place PlaceOf(const Expr& lvalue);
     Value ReadPlace(const Place& place);
     void WritePlace(const Place& place, const Value& value);
-    void AssignSlot(int slot, const std::string& name, const Value& value);  // a Variable assignment: NF lives in the FieldStore
+    // A Variable assignment: NF lives in the FieldStore; FS is checked
+    // against the regex engine (located: with the statement's position, as
+    // a program assignment reports it; false for -v, -F and var=value).
+    void AssignSlot(int slot, const std::string& name, const Value& value, bool located = true);
     std::string Subscript(const std::vector<ExprPtr>& subscripts);  // ToString(CONVFMT) joined by SUBSEP
     const std::string& SpecialString(int slot);  // FS, OFS, ORS, RS, SUBSEP, CONVFMT, OFMT as strings
+    // FS with two or more bytes must compile as an ERE: gawk checks it when
+    // it is assigned, not when a record is first split. The fatal and the
+    // escape warnings are located as AssignSlot's.
+    void CheckFieldSeparator(bool withLocation);
 
     // --- items and input ---
     bool MatchesPattern(const Item& item, size_t itemIndex);  // ranges kept per item
@@ -104,6 +162,9 @@ private:
     // --- regexes ---
     bool MatchRegex(const Expr& regex, const std::string& text);  // a literal or dynamic regex against text
     bool MatchRegexLiteral(const Expr& regex, const std::string& text);  // /re/ itself, compiled already
+    // The regex of a built-in's argument (sub/gsub/match/split): a
+    // non-parenthesized /re/ itself, a dynamic value through the cache.
+    std::shared_ptr<const Regex> RegexOperand(const Expr& operand);
     // The escape warnings of a regex, once per message per run: reported
     // through FormatAwkWarning before the run, at the run's location in it.
     void RegexWarnings(const std::vector<std::string>& messages, bool atRuntime);
@@ -125,8 +186,14 @@ private:
     BuiltinContext& m_context;
     std::shared_ptr<const Program> m_program;
     const AwkInvocation& m_invocation;
-    std::vector<Variable> m_globals;
+    // A deque: a parameter's binding points into the caller's own globals,
+    // and a vector's reallocation on a new slot would leave them dangling.
+    std::deque<Variable> m_globals;
     std::unordered_map<std::string, int> m_globalSlots;
+    std::unordered_map<std::string, int> m_functionSlots;  // a function's name -> its index in Program::functions
+    // The active calls, outermost first; empty in the items themselves.
+    std::vector<std::unique_ptr<ActiveCall>> m_calls;
+    ItemKind m_currentItemKind = ItemKind::Main;  // next/nextfile out of a function: BEGIN and END refuse them
     FieldStore m_fields;
     SourcePosition m_position;               // of the statement (or pattern) being run: fatal errors report it
     std::string m_specialStrings[kSpecialSlotCount];  // SpecialString's per-slot storage

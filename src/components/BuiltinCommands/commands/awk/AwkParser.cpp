@@ -32,7 +32,7 @@ const BuiltinArity kBuiltinArities[] = {
     {"match", 2, 2, "match: third argument is a gawk extension"},
     {"rand", 0, 0, nullptr},
     {"sin", 1, 1, nullptr},
-    {"split", 2, 3, "split: fourth argument is a gawk extension"},
+    {"split", 2, 4, nullptr},  // a 4th is refused when the call runs (CallBuiltin)
     {"sprintf", 0, -1, nullptr},
     {"sqrt", 1, 1, nullptr},
     {"srand", 0, 1, nullptr},
@@ -464,7 +464,7 @@ void Parser::CheckBuiltinArguments(const Token& nameToken, size_t count) {
     const int given = static_cast<int>(count);
     if (given >= arity->minimum && (arity->maximum < 0 || given <= arity->maximum))
         return;
-    if (given > arity->maximum && arity->maximum >= 0 && arity->extensionMessage)
+    if (arity->extensionMessage && given == arity->maximum + 1)
         Fail(m_token, arity->extensionMessage);
     Fail(m_token, std::to_string(given) + " is invalid as number of arguments for "
                      + nameToken.text);

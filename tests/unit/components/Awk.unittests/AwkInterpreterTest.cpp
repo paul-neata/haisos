@@ -4,6 +4,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "AwkRunFixture.h"
 #include "BuiltinCommandsFixture.h"
 #include "BuiltinCommand.h"
 #include "interfaces/IFileDescriptor.h"
@@ -14,29 +15,6 @@
 
 namespace Haisos {
 namespace {
-
-// The awk builtin run end to end: a program over the fixture's files and
-// the standard input. Every expectation is gawk --posix 5.2.1's own output.
-class AwkRunTest : public BuiltinCommandsTest {
-protected:
-    void SetUp() override {
-        BuiltinCommandsTest::SetUp();
-        WriteFile("/abc.txt", "a b c\nd e f\n");
-        WriteFile("/data.csv", "x,1,2.5\ny,2,3.25\nz,3,4\n");
-        WriteFile("/para.txt", "p1 l1\np1 l2\n\n\n\np2 l1\n\n");
-    }
-
-    // Runs /bin/awk with |stdIn| as its standard input and files as its
-    // other two streams (RunCaptured's, without its input handling).
-    std::shared_ptr<IProcess> StartAwk(const std::vector<std::string>& args,
-                                       const std::shared_ptr<IFileDescriptor>& stdIn) {
-        StartProcessOptions options;
-        options.stdIn = stdIn;
-        options.stdOut = streams->OpenFile("/out", kFileOpenWriteCreateTruncate, kFileCreateMode);
-        options.stdErr = streams->OpenFile("/err", kFileOpenWriteCreateTruncate, kFileCreateMode);
-        return os->StartProcess(os->GetOsEnvironment()->Clone(), "/bin/awk", args, "/", options);
-    }
-};
 
 TEST_F(AwkRunTest, BeginOnlyAndEmptyProgram) {
     // A BEGIN-only program never touches its input.
@@ -607,10 +585,8 @@ TEST_F(AwkRunTest, RuntimeErrors) {
 
 TEST_F(AwkRunTest, NotYetAvailable) {
     // Each unimplemented part fails with its own fatal error.
-    Captured captured = RunCaptured("awk", {"BEGIN { print length(\"ab\") }"});
-
-    captured = RunCaptured("awk", {"BEGIN { print length(\"ab\") }"});
-    EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: function `length' is not implemented yet\n");
+    Captured captured = RunCaptured("awk", {"BEGIN { print sprintf(\"%d\", 1) }"});
+    EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: function `sprintf' is not implemented yet\n");
     EXPECT_EQ(captured.status, 2);
 
     captured = RunCaptured("awk", {"BEGIN { printf \"%d\", 1 }"});
@@ -883,6 +859,104 @@ TEST_F(AwkRunTest, ParagraphMode) {
     captured = RunCaptured("awk", {"BEGIN { RS = \"\" } { print NR \": \" $0 }"},
                            "a\n \nb\n\nc\n");
     EXPECT_EQ(captured.out, "1: a\n \nb\n2: c\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+}
+
+TEST_F(AwkRunTest, FieldSeparatorCheckedWhenAssigned) {
+    // A regex FS is checked when it is assigned, before any input is read
+    // -- also in a BEGIN-only program -- not when the first record would
+    // be split.
+    Captured captured = RunCaptured("awk", {"BEGIN { FS = \"a(\" } { print \"hi\" }"},
+                                   "x\n");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err,
+              "awk: cmd. line:1: fatal: invalid regexp: Unmatched ( or \\(: /a(/\n");
+    EXPECT_EQ(captured.status, 2);
+
+    captured = RunCaptured("awk", {"BEGIN { FS = \"a(\" }"});
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err,
+              "awk: cmd. line:1: fatal: invalid regexp: Unmatched ( or \\(: /a(/\n");
+    EXPECT_EQ(captured.status, 2);
+
+    // In a main rule, with the record's location.
+    captured = RunCaptured("awk", {"{ FS = \"a(\" }"}, "q\n");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "awk: cmd. line:1: (FILENAME=- FNR=1) fatal: "
+                            "invalid regexp: Unmatched ( or \\(: /a(/\n");
+    EXPECT_EQ(captured.status, 2);
+
+    // -F, -v and a var=value operand are checked too, without a location
+    // (nothing of the program is running yet).
+    const char* locationless =
+        "awk: fatal: invalid regexp: Unmatched ( or \\(: /a(/\n";
+    captured = RunCaptured("awk", {"-F", "a(", "{ print \"hi\" }"}, "x\n");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, locationless);
+    EXPECT_EQ(captured.status, 2);
+
+    captured = RunCaptured("awk", {"-v", "FS=a(", "BEGIN { print \"no\" }"});
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, locationless);
+    EXPECT_EQ(captured.status, 2);
+
+    captured = RunCaptured("awk", {"{ print }", "FS=a("}, "x\n");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, locationless);
+    EXPECT_EQ(captured.status, 2);
+
+    // The escape warning of a dynamic FS is given at the assignment, and
+    // runs on.
+    captured = RunCaptured("awk",
+        {"BEGIN { print \"1\"; FS = \"a\\\\q\"; print \"2\" }"});
+    EXPECT_EQ(captured.out, "1\n2\n");
+    EXPECT_EQ(captured.err, "awk: cmd. line:1: warning: regexp escape sequence "
+                            "`\\q' is not a known regexp operator\n");
+    EXPECT_EQ(captured.status, 0);
+
+    captured = RunCaptured("awk", {"-v", "FS=a\\\\q", "BEGIN { print 1 }"});
+    EXPECT_EQ(captured.out, "1\n");
+    EXPECT_EQ(captured.err, "awk: warning: regexp escape sequence `\\q' is not a "
+                            "known regexp operator\n");
+    EXPECT_EQ(captured.status, 0);
+
+    // A one-byte FS is a literal, never compiled.
+    captured = RunCaptured("awk",
+        {"BEGIN { FS = \"(\"; print split(\"a(b\", x), x[2] }"});
+    EXPECT_EQ(captured.out, "2 b\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+}
+
+TEST_F(AwkRunTest, RecordAssignmentTakesFsAndRs) {
+    // $0 = v re-splits with the FS and RS of the assignment, not the ones
+    // the record was read with (the classic re-split idiom).
+    Captured captured = RunCaptured("awk",
+        {"{ FS = \":\"; $0 = $0; print $1; print NF }"}, "a:b c\n");
+    EXPECT_EQ(captured.out, "a\n2\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    // The paragraph flag of the moment: a mid-record RS = "" turns $0 = v
+    // into paragraph splitting.
+    captured = RunCaptured("awk",
+        {"{ RS = \"\"; FS = \"x\"; $0 = \"p\\nq r\"; print NF; print $2 }"}, "p q r\n");
+    EXPECT_EQ(captured.out, "2\nq r\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    captured = RunCaptured("awk",
+        {"BEGIN { RS = \"\" } { RS = \"\\n\"; FS = \"x\"; $0 = \"p\\nq r\"; print NF }"},
+        "a\n");
+    EXPECT_EQ(captured.out, "1\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    // sub on $0 goes through the same door.
+    captured = RunCaptured("awk",
+        {"{ FS = \"x\"; sub(/ /, \"x\"); print NF, $1 }"}, "a b\n");
+    EXPECT_EQ(captured.out, "2 a\n");
     EXPECT_EQ(captured.err, "");
     EXPECT_EQ(captured.status, 0);
 }

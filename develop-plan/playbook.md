@@ -40,7 +40,7 @@ Pause: no
 | 32 | [diff--patch-fuzz-rej](tasks/diff--patch-fuzz-rej.md) | done | 0.5.33 | 31, 7 | #75 | 1 | 1C 2H 1M fixed, 1M 3L open | Windows red, not checked; clean-room re-planned |
 | 33 | [awk--lexer](tasks/awk--lexer.md) | done | 0.5.34 | 9, 4 | #76 | 1 | 0C 1H fixed, 3M 4L open | Windows red, not checked |
 | 34 | [awk--expressions](tasks/awk--expressions.md) | done | 0.5.35 | 33 | #77 | 1 | 0C 2H fixed, 2M 1L open | Windows red, not checked |
-| 35 | [awk--parser](tasks/awk--parser.md) | todo | | 34 | | | | |
+| 35 | [awk--parser](tasks/awk--parser.md) | in-progress | 0.5.36 | 34 | | | | |
 | 36 | [awk--values](tasks/awk--values.md) | todo | | 33, 11 | | | | |
 | 37 | [awk--interpreter](tasks/awk--interpreter.md) | todo | | 35, 36, 4 | | | | |
 | 38 | [awk--records](tasks/awk--records.md) | todo | | 37, 3 | | | | |
@@ -113,3 +113,4 @@ Pause: no
 - 2026-10-10 (implement) diff--patch-fuzz-rej re-planned clean-room against 1cbb5da (Opus), on patch-core's real names, behaviour verified on GNU patch 2.7.6 (fuzz order, positions in output-file numbers, context/normal diffs, -l, -r, --reject-format); folded in #74's open findings; ~1400 lines, kept as one task (patch-core's 3800 went in one run with the write-in-pieces rule); documented exceptions: no ed scripts, no 'misordered hunks!' line, -p not wrapped to 32 bits, .rej/write error wording, diff -C0 deletion applied, no ORIGFILE.orig for a git rename from a missing file
 - 2026-10-10 (implement) awk--lexer re-checked clean-room against 03f8369 (Opus): two gawk-internal references reworded as behaviour, clean-room and write-in-pieces paragraphs added, messages verified on gawk --posix 5.2.1; list/CMake/test slots (awk after [), ReadWholeInput for -f
 - 2026-10-10 (implement) awk--expressions re-checked clean-room against 308a07c (Opus): awkgram.y / gawk-internals references replaced by POSIX's precedence table and gawk --posix output; grammar corrected (~ !~ left-assoc, getline in concatenation, getline < operand at + - level, $e++ assignment error); lexer's real API; folded in #76's findings (& syntax error, comment-backslash NL, FindKeyword comment, --help notes, CMakeLists newline)
+- 2026-10-10 (implement) awk--parser re-checked clean-room against eb11783 (Opus): one gawk-internal passage (EOF caret) restated as behaviour, a documented exception (always column 0); real names from #76/#77; folded in #77's findings (parenthesized lvalues refused, shared ParseVariableOrElement/ParseField, alignment); awk 1.0.2

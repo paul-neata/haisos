@@ -3,7 +3,7 @@
 - Rock: awk
 - Depends on: awk--expressions
 - Size: ~900 changed lines in ~6 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ eb11783
 - PR title: Parse whole awk programs, with gawk's syntax errors
 
 ## Goal
@@ -17,31 +17,126 @@ with the source line and caret (`awk: cmd. line:1: ...`), the end of a
 BEGIN action ``, a function defined twice, bad parameters, a function used
 as a variable), all with exit status 1. A program that parses still does
 not run (`awk: running programs is not implemented yet`, status 2) until
-awk--interpreter.
+awk--interpreter. Also the open findings of awk--expressions' review (#77):
+a parenthesized lvalue is no longer an lvalue (`(x) = 3` is a syntax error,
+as gawk's), the `name[...]` and `$` operand parsing is written once, and
+three misaligned switch/comment columns are fixed.
 
 ## Context
 
-Read first: `src/components/BuiltinCommands/commands/awk/CLAUDE.md`,
-`AwkAst.h`, `AwkParser.h/.cpp`, `AwkLexer.h`, `AwkError.h`,
-`AwkInvocation.h`, `Awk.cpp`; `tests/unit/components/Awk.unittests/`.
+**Clean room** (root `CLAUDE.md`, "Clean-room rule", above every other
+rule): all code is written from scratch. Never read, copy, port, translate
+or paraphrase another program's source (gawk, mawk, the one true awk,
+busybox, ...), whatever its licence, and never name another program's
+internal functions, variables, types, grammar rules or token names.
+Behaviour is matched from documentation (POSIX awk, the gawk manual, man
+pages) and from the observed output of real awks; every expected text
+below was checked against gawk 5.2.1 `--posix` on the host. The item,
+statement and print-context structure below is this plan's own design,
+derived from POSIX's grammar description and gawk's observed output.
 
-What earlier tasks provide (on develop): the whole AST (`Program`, `Item`,
-`ItemKind`, `FunctionDefinition`, `Stmt`, `StmtKind`, `RedirectKind`,
-`Expr`, `IsLvalue`) and its dump (`DumpProgram`, `DumpStmt`, `DumpExpr`,
-the format in `commands/awk/CLAUDE.md`), `Parser(source, sourceIndex)`
-with `ParseExpression()` and the precedence levels, the error rules
-(Newline: line + 1, `unexpected newline or end of string`), `Lexer`
-(`TakeWarnings`, `LineText`), `AwkSyntaxError`, `FormatAwkSyntaxError`,
-`FormatAwkWarning`, `FormatAwkError`, `LoadAwkSources`.
+**Write in pieces**: never more than ~250 lines in one Write/Edit call;
+build a file up with several Edits; commit after each file or step.
 
-Every expected text below was checked with gawk 5.2.1 `--posix`; the task
-container has only mawk -- never change an expectation to mawk's.
+Read first: `src/components/BuiltinCommands/commands/awk/CLAUDE.md` (its
+"AST dump" section is the dump format the tests compare against),
+`AwkAst.h/.cpp`, `AwkParser.h/.cpp`, `AwkLexer.h`, `AwkError.h`,
+`AwkInvocation.h`, `Awk.cpp`; `tests/unit/components/Awk.unittests/`
+(`AwkParserTest.cpp` with its `ExpectExpr`/`ExpectExprError` helpers,
+`AwkCommandTest.cpp` on `BuiltinCommandsTest`'s `RunCaptured`; the test
+target is `Awk.unittests`).
+
+What earlier tasks provide (on develop, in `commands/awk/`; awk--lexer
+merged as 4cae914, #76; awk--expressions as a676fb5, #77):
+- `AwkAst.h`: `SourcePosition {source, line}`; `Expr` (`ExprKind`
+  Number ... Getline, `ExprOp`, `GetlineForm`, `position`, `number`, `text`,
+  `operands`, `hasParentheses`, `getlineForm`, `target`) and `IsLvalue`
+  (Variable, Field or Index); `Stmt` (`StmtKind` Expression, Print, Printf,
+  If, While, Do, For, ForIn, Block, Next, Nextfile, Exit, Return, Break,
+  Continue, Delete; fields `expr`, `args`, `redirect` (`RedirectKind` None,
+  File, Append, Pipe), `redirectTarget`, `init`, `update`, `body`,
+  `elseBody`, `statements`, `name`, `arrayName` -- each field's use is
+  commented there); `ItemKind` Begin, End, Main, Function; `Item`
+  (`pattern`, `rangeEnd`, `action`, `functionIndex`, `position`);
+  `FunctionDefinition` (`name`, `parameters`, `body`, `position`);
+  `Program` (`sources`, `items`, `functions`); `DumpExpr`, `DumpStmt`,
+  `DumpProgram`. Nothing new is needed in the tree but the `parenthesized`
+  flag below; the dump already writes every statement and item.
+- `AwkParser.h`: `Parser(const AwkSource& source, int sourceIndex)`,
+  `ParseExpression()`, the private levels `ParseAssignment(ExprPtr left)`,
+  `ParseTernary` ... `ParsePrimary`, `ParseDollarOperand`,
+  `ParsePreIncDec`, `ParseGetlineTarget`, `ParseCallArguments`, the helpers
+  `Advance`, `IsAssignOp`, `StartsConcatOperand`, `MakeExpr`,
+  `MakeBinary`, `MakeAssign`, and `Fail(token, message)` with gawk's rules
+  (a Newline: `unexpected newline or end of string` on line + 1, or
+  `syntax error` at the `#` of the comment it ends; EndOfInput: `unexpected
+  newline or end of string` at its own place); members `m_lexer`,
+  `m_token`, `m_sourceIndex`. The comment `// awk--parser adds the
+  statement, item and program methods here.` marks where the new methods
+  go. `ParseAwkExpression(text)` (a friend) stays, for the expression tests.
+- `AwkLexer.h`: `TokenKind` (keywords `Begin End Function Getline If Else
+  While For Do Break Continue Next Nextfile Exit Return Delete In Print
+  Printf`, punctuation `LeftBrace RightBrace ... Semicolon Comma ... Greater
+  Pipe Append ...`, `Newline`, `EndOfInput`, `Name`, `FuncName`,
+  `Builtin`), `Token` (`kind`, `text`, `number`, `line`, `column`),
+  `Lexer::Next`, `ScanRegex`, `TakeWarnings()` (a `vector<AwkWarning>`,
+  cleared), `Source()`, `LineText(line)`.
+- `AwkError.h`: `kCommandLineSourceName` (`cmd. line`), `AwkSource {name,
+  text}`, `AwkWarning {sourceName, line, message}`, `AwkSyntaxError`,
+  `FormatAwkSyntaxError(error)`, `FormatAwkWarning(warning)`,
+  `FormatAwkError(sourceName, line, message)`.
+- `AwkInvocation.h`: `ParseAwkInvocation`, `LoadAwkSources(context,
+  invocation, status)` returning `std::optional<std::vector<AwkSource>>`.
+
+Every expected text below was checked with gawk 5.2.1 `--posix` (gawk
+prints `gawk:` where Haisos prints `awk:`); the task container has only
+mawk -- never change an expectation to mawk's.
 
 ## Changes
 
+### Open findings of awk--expressions (#77), first
+
+Small, each with its tests (see "Tests"):
+
+1. **A parenthesized expression is never an lvalue.** gawk `--posix`
+   refuses `(x) = 3`, `(x) += 3`, `(a[1]) = 3`, `($1) = 3`, `x = (y) = 2`,
+   `1 && (y) = 2`, `c ? (x) = 1 : 2` (syntax error at the assignment
+   operator), `++(x)` and `--(x)` (at the `(`), and `(x)++` / `(x)--`,
+   where the `++` is taken as the start of a concatenated pre-increment, so
+   the error is at the token after it (`(x) ++y` is `(x)` concatenated with
+   `++y`). `$(x) = 3` stays valid: the Field is the lvalue, not its
+   parenthesized operand. Today the one-expression grouping in
+   `ParsePrimary` (`AwkParser.cpp` ~482: "a grouping keeps no node")
+   returns the inner expression unmarked, so all of these are accepted.
+   Fix: add `bool parenthesized = false;` to `Expr` (comment: "the result
+   of a one-expression grouping `( e )`: never an lvalue; the dump ignores
+   it"), set it on that returned expression, and make `IsLvalue` return
+   false when it is set. Nothing else changes: `ParseAssignment`,
+   `ParsePostfix` and `ParsePreIncDec` already ask `IsLvalue`, and the
+   errors then fall out where gawk reports them. The dump is unchanged
+   (`(x) ++y` dumps `(concat x (pre++ y))`). Later tasks rely on it too:
+   gawk refuses `sub(/a/, "b", (x))` and `split("a b", (arr))` -- that is
+   awk--functions' business, through the same `IsLvalue`.
+2. **`name[subscripts]` and `$` operands are parsed in one place.**
+   `ParseGetlineTarget` (~410-443) and `ParsePrimary`'s `Name` and `Dollar`
+   cases (~502-525, ~561-567) hold the same code twice. Add two private
+   methods -- `ParseVariableOrElement()` (the current token is a Name: a
+   Variable, or with `[` an Index of one or more subscripts, `]` required)
+   and `ParseField()` (the current token is `$`: a Field of
+   `ParseDollarOperand()`) -- declared next to `ParseGetlineTarget` with a
+   one-line comment each, and call them from both places. Behaviour and
+   dumps unchanged; the existing tests must stay green as they are.
+3. **Alignment, off by one**: `AwkAst.h` ~24 (`Number,       //` -- its
+   comment one column left of the others), `AwkParser.cpp` ~11 and ~18 (the
+   `Star:` and `NotEqual:` returns one column left in `BinaryOpOf`),
+   `AwkAst.cpp` ~66 and ~68 (`NotEqual:` and `Greater:` in
+   `DumpBinaryOp`'s comparison block). Align each with its neighbours;
+   whitespace only.
+
 ### `AwkParser.h` / `AwkParser.cpp`
 
-Add the program entry point:
+Replace the comment `// awk--parser adds the statement, item and program
+methods here.` with the new methods. Add the program entry point:
 
 ```cpp
 struct ParseResult {
@@ -81,9 +176,11 @@ New `Parser` methods (names are the implementer's; the structure is fixed):
 - EndOfInput inside an item of a `-f` source (name not `cmd. line`): the
   syntax error `source files / command-line arguments must contain complete
   functions or rules`, line = the EndOfInput token's line, line text
-  `(END OF FILE)`, column 0. (gawk's caret column there depends on
-  internals: with a final newline it is 0, as here.) In the `cmd. line`
-  source the general rule applies (`unexpected newline or end of string`).
+  `(END OF FILE)`, column 0. (gawk's caret there is at column 0 for a file
+  ending in a newline, as observed; for `BEGIN {` with no final newline it
+  prints column 6 -- Haisos always uses 0, a documented exception.) In the
+  `cmd. line` source the general rule applies (`unexpected newline or end
+  of string`).
 
 **Statements** (inside a block `{ ... }`):
 - Newline and `;` alone are skipped; `}` ends the block.
@@ -94,9 +191,10 @@ New `Parser` methods (names are the implementer's; the structure is fixed):
   statement; `for (` Name `in` Name `)` {Newline} statement.
 - A body that is a lone `;` (`if (x) ;`, `while (x);`) is an empty Block.
 - for-in detection: after `for (`, parse an expression; if it is an In with
-  one subscript that is a Variable and the current token is `)`, it is a
-  ForIn (`name` = the variable, `arrayName` = the array); otherwise it is
-  the init of a classic `for` (then `;` must follow).
+  one subscript that is a Variable (not `parenthesized`) and the current
+  token is `)`, it is a ForIn (`name` = the variable, `arrayName` = the
+  array); otherwise it is the init of a classic `for` (then `;` must
+  follow: `for ((k) in a)` is a syntax error at its `)`, as gawk's).
 - Simple statements, each ended by a terminator -- `;`, Newline, or nothing
   before `}` (and EndOfInput, which then fails at the item level):
   `print` [args] [redirection]; `printf` [args] [redirection] (gawk accepts
@@ -122,7 +220,9 @@ New `Parser` methods (names are the implementer's; the structure is fixed):
   `(concat 1 2)`, `print (a) + b`), then further arguments; with several,
   `in` must follow (`print (1, 2) in a`), else a syntax error. Add a
   `Parser` hook for "continue an expression from this primary" (e.g. a
-  pending primary that the primary level returns first).
+  pending primary that the primary level returns first). The pending
+  primary is a grouping's result, so it is `parenthesized`: `print (x) = 3`
+  is a syntax error at the `=`, as gawk's.
 
 **Parse-time checks** -- errors (`FormatAwkError`, at the line of the
 token named; parsing goes on, the program does not run, status 1), texts
@@ -157,7 +257,8 @@ Syntax errors (stop parsing, `AwkSyntaxError`):
 `Run`: after `LoadAwkSources`, `ParseAwkProgram`; write `diagnostics` to
 stderr (`ErrorText`); `failed` -> status 1; otherwise still the
 not-implemented message and status 2 (awk--interpreter replaces it). Add
-the documented exceptions above to `Help().notes`.
+the documented exceptions above to `Help().notes`. `Version` 1.0.1 ->
+1.0.2 (behaviour changes: programs are now checked).
 
 ## Tests
 
@@ -222,8 +323,27 @@ In `tests/unit/components/Awk.unittests/AwkParserTest.cpp`, a new suite
   `BEGIN { (= x 1) }\nEND { print x }`, and the END item's position has
   source 1, line 1; `[{"/p.awk", "BEGIN {\n"}]` ->
   `awk: /p.awk:1: (END OF FILE)\nawk: /p.awk:1: ^ source files / command-line arguments must contain complete functions or rules\n`.
+- `ParenthesizedLvalues` (finding 1; diagnostics exactly
+  `awk: cmd. line:1: <text>\nawk: cmd. line:1: <column spaces>^ syntax error\n`,
+  `failed`), the caret column of each:
+  `BEGIN { (x) = 3 }` 12; `BEGIN { (x)++ }` 14 (the `}`);
+  `BEGIN { ++(x) }` 10 (the `(`); `BEGIN { x = 1; (x)--; print x }` 20
+  (the `;`); `BEGIN { ($1) = 3 }` 13; `BEGIN { 1 && (y) = 2 }` 17;
+  `BEGIN { c ? (x) = 1 : 2 }` 16; `BEGIN { print (x) = 3 }` 18;
+  `BEGIN { a[1]; for ((k) in a) print k }` 27 (the `)`). Still valid:
+  `BEGIN { $(x) = 3 }` -> `BEGIN { (= ($ x) 3) }`.
+
+In the existing `AwkParserTest` suite (finding 1, expression level):
+`ExpressionErrors` gains `ExpectExprError("(x) = 3", "syntax error", 1, 4)`,
+`("(x) += 3", ..., 1, 4)`, `("x = (y) = 2", ..., 1, 8)`,
+`("++(x)", ..., 1, 2)`, `("--(a[1])", ..., 1, 2)`; `Concatenation` gains
+`ExpectExpr("(x) ++y", "(concat x (pre++ y))")`; `Fields` gains
+`ExpectExpr("$(x) = 3", "(= ($ x) 3)")`. Finding 2 adds no test: every
+existing `GetlineForms`, `Fields` and `Calls` expectation stays as it is.
 
 In `AwkCommandTest.cpp`:
+- `AwkCommandTest.VersionAndHelp`: the version 1.0.2 in its three
+  expectations.
 - `AwkCommandTest.SyntaxErrorsAreReported`: `RunCaptured("awk", {"BEGIN { x = = 1 }"})`
   -> stdout empty, stderr the first `SyntaxErrors` text, status 1; with
   `/p.awk` written (`BEGIN {\n`) and `-f /p.awk` -> the `(END OF FILE)` text, 1.
@@ -243,16 +363,26 @@ bash ./scripts/test_linux.sh L U
 separation, statements and terminators, the print context and the
 `print (` rule, redirection targets at the concatenation level, sources
 parsed one by one, the parse-time checks and their texts, the
-diagnostics order; the new documented exceptions (break/continue reported
-once, the parameter-name line). `src/components/BuiltinCommands/CLAUDE.md`
-and root `CLAUDE.md`: the awk rows say programs are parsed (with gawk's
-errors) but not run yet.
+diagnostics order; in the `AwkParser.h/.cpp` entry, "the statement, item
+and program methods come with awk--parser" becomes a pointer to that
+section, and add "a parenthesized expression is never an lvalue
+(`Expr::parenthesized`)"; in the `AwkAst.h/.cpp` entry, the
+`parenthesized` flag; in the `Awk.cpp` entry, `Version` 1.0.2 and `Run`
+now parsing. The new documented exceptions (break/continue reported once,
+the parameter-name line, the `(END OF FILE)` caret always at column 0),
+and the last bullet's "(this task is the lexer)" dropped: running programs
+is still not implemented. `src/components/BuiltinCommands/CLAUDE.md`
+(version 1.0.2) and root `CLAUDE.md`: the awk rows say programs are parsed
+(with gawk's errors) but not run yet.
 
 ## Acceptance
 
 - [ ] `ParseAwkProgram` builds the AST for every construct listed, with
   positions (source index, line) on every item, statement and expression.
 - [ ] The print context and `print (` disambiguation behave as specified.
+- [ ] #77's findings: `(x) = 3` and the other parenthesized lvalues are
+  syntax errors where gawk reports them; `name[...]`/`$` parsed by one pair
+  of methods; the three alignments fixed.
 - [ ] Every syntax error and parse-time error text, line and column as specified.
 - [ ] `awk` reports diagnostics on stderr with status 1, and nothing on stdout.
 - [ ] All `Awk` and other unit tests green.

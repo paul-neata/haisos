@@ -113,3 +113,4 @@
 - 2026-10-10 00:30 UTC -- diff--patch-core merged #74 as 0.5.32: 0C 4H 1L fixed, 4M 2L open, 1 try
 - 2026-10-10 00:59 UTC -- start diff--patch-fuzz-rej (0.5.33), re-planned clean-room
 - 2026-10-10 02:28 UTC -- diff--patch-fuzz-rej: PR #75, windows-failed (ignored per Direction)
+- 2026-10-10 02:48 UTC -- diff--patch-fuzz-rej merged #75 as 0.5.33: 1C 2H 1M fixed, 1M 3L open, 1 try

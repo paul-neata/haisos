@@ -37,7 +37,7 @@ Pause: no
 | 29 | [diff--diff-core](tasks/diff--diff-core.md) | done | 0.5.30 | 4, 12 | #72 | 4 | 1C 2H 2M 1L fixed, 1M 2L open | Windows red, not checked; clean-room re-planned; runs 1-2 died on the 32000 output-token cap, 3 on Ollama 429 (account changed); finished in fix round 4 |
 | 30 | [diff--diff-recursive](tasks/diff--diff-recursive.md) | done | 0.5.31 | 29, 20 | #73 | 1 | 1C 2H fixed, 1M 2L open | Windows red, not checked; clean-room: 2 GNU-internal names from the plan renamed |
 | 31 | [diff--patch-core](tasks/diff--patch-core.md) | done | 0.5.32 | 1, 4, 29 | #74 | 1 | 0C 4H 1L fixed, 4M 2L open | Windows red, not checked; clean-room re-planned |
-| 32 | [diff--patch-fuzz-rej](tasks/diff--patch-fuzz-rej.md) | in-review | 0.5.33 | 31, 7 | #75 | 1 | | |
+| 32 | [diff--patch-fuzz-rej](tasks/diff--patch-fuzz-rej.md) | done | 0.5.33 | 31, 7 | #75 | 1 | 1C 2H 1M fixed, 1M 3L open | Windows red, not checked; clean-room re-planned |
 | 33 | [awk--lexer](tasks/awk--lexer.md) | todo | | 9, 4 | | | | |
 | 34 | [awk--expressions](tasks/awk--expressions.md) | todo | | 33 | | | | |
 | 35 | [awk--parser](tasks/awk--parser.md) | todo | | 34 | | | | |

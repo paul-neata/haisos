@@ -191,7 +191,9 @@ bool ParseLiteralParts(const std::string& s, LiteralParts& out) {
     }
     const size_t last = digits.find_last_not_of('0');
     out.digits = digits.substr(first, last - first + 1);
-    out.adjusted = exponent + static_cast<long long>(out.digits.size()) - 1 -
+    // The power of ten of the first digit: the whole digit string counts,
+    // trailing zeros included (they were stripped from out.digits alone).
+    out.adjusted = exponent + static_cast<long long>(digits.size()) - 1 -
                    static_cast<long long>(first);
     return true;
 }

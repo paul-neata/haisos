@@ -1,3 +1,9 @@
-add_executable(Jq.unittests JqLexerTest.cpp JqParserTest.cpp)
+add_executable(Jq.unittests
+    JqJsonReaderTest.cpp
+    JqJsonWriterTest.cpp
+    JqLexerTest.cpp
+    JqParserTest.cpp
+    JqValueTest.cpp
+)
 target_link_libraries(Jq.unittests PRIVATE gtest_main BuiltinCommands)
 target_compile_features(Jq.unittests PRIVATE cxx_std_17)

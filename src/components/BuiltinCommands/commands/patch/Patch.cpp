@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include "BuiltinCommand.h"
+#include "BuiltinCopy.h"
 #include "BuiltinText.h"
 #include "commands/patch/PatchApply.h"
 #include "commands/patch/PatchParse.h"
@@ -37,6 +38,17 @@ enum PatchOptionId {
     kPatchVersionOption,        // -v
     kPatchDryRun,               // --dry-run
     kPatchBinary,               // --binary
+    kPatchFuzz,                 // -F
+    kPatchLooseWhitespace,      // -l
+    kPatchBackup,               // -b
+    kPatchSuffix,               // -z
+    kPatchVersionControl,       // -V
+    kPatchBackupIfMismatch,     // --backup-if-mismatch
+    kPatchNoBackupIfMismatch,   // --no-backup-if-mismatch
+    kPatchRejectFile,           // -r
+    kPatchRejectFormat,         // --reject-format
+    kPatchContext,              // -c
+    kPatchNormal,               // -n
 };
 
 // One run of the patch command: its options, and what the file patches so far
@@ -52,12 +64,21 @@ struct PatchRun {
     bool removeEmpty = false;  // -E
     bool binary = false;       // --binary
     bool stripGiven = false;   // -p was on the command line
+    bool looseWhitespace = false;  // -l
+    int64_t fuzz = 2;             // -F NUM (GNU's own default 2)
+    bool backup = false;           // -b
+    bool mismatchBackup = true;    // --backup-if-mismatch, on by default
     std::optional<std::string> outputFile;   // -o FILE
     std::optional<std::string> origOperand;  // the ORIGFILE operand
+    std::optional<std::string> rejectFile;   // -r FILE ("-" discards them)
+    std::optional<RejFormat> rejectFormat;   // --reject-format
+    BackupMode backupMode = BackupMode::Existing;  // -V / the environment,
+    // decided after the options are parsed
+    std::string backupSuffix;  // -z / SIMPLE_BACKUP_SUFFIX, likewise
     int status = 0;  // 1 when a hunk failed or was ignored, a file patch was
     // skipped, or a deletion was refused
-    std::set<std::string> origMade;    // targets whose .orig was written
-    std::set<std::string> rejWritten;  // .rej files written this run
+    std::set<std::string> backupMade;   // targets whose backup was written
+    std::set<std::string> rejWritten;   // reject files written this run
     std::shared_ptr<IFileDescriptor> outFile;  // -o FILE, opened once
 
     explicit PatchRun(BuiltinContext& context) : context(context) {}
@@ -80,6 +101,31 @@ struct PatchRun {
         return Stat(path, size);
     }
 };
+
+// Whether |path| names a directory.
+bool IsDirectory(PatchRun& run, const std::string& path) {
+    FileStatus status;
+    return run.context.IO().Stat(path, status) == 0
+        && status.type == DirectoryEntryType::Dir;
+}
+
+// Why a file patch could not create |path|: it is a directory, its parent is
+// missing, or nothing else is known (Haisos has no permissions to check).
+std::string CreateFailedReason(PatchRun& run, const std::string& path) {
+    if (IsDirectory(run, path)) {
+        return "Is a directory";
+    }
+    const size_t slash = path.rfind('/');
+    if (slash != std::string::npos && !run.Exists(path.substr(0, slash))) {
+        return "No such file or directory";
+    }
+    return "Permission denied";
+}
+
+// Why the original could not be renamed onto |path| for a backup.
+std::string BackupRenameFailedReason(PatchRun& run, const std::string& path) {
+    return IsDirectory(run, path) ? "Is a directory" : "Permission denied";
+}
 
 // The lines of a whole file: each with its '\n', the last possibly without.
 std::vector<std::string> SplitFileLines(const std::string& bytes) {
@@ -108,6 +154,43 @@ std::string JoinFileLines(const std::vector<std::string>& lines) {
 
 bool EndsCrLf(const std::string& line) {
     return line.size() >= 2 && line[line.size() - 2] == '\r' && line[line.size() - 1] == '\n';
+}
+
+// -p NUM and -F NUM: an optional '-', then digits; a value an int64 cannot
+// hold saturates at its maximum (GNU's strtol does the same). |what| names
+// the option in the message. Returns false after reporting.
+bool ParseCountOption(BuiltinContext& context, const std::string& what,
+                      const std::string& argument, int64_t& out) {
+    bool ok = !argument.empty();
+    bool negative = false;
+    size_t i = 0;
+    if (!argument.empty() && argument[0] == '-') {
+        negative = true;
+        i = 1;
+    }
+    int64_t value = 0;
+    for (; ok && i < argument.size(); ++i) {
+        const char c = argument[i];
+        if (c < '0' || c > '9') {
+            ok = false;
+            break;
+        }
+        if (value > (INT64_MAX - (c - '0')) / 10) {
+            value = INT64_MAX;
+            continue;
+        }
+        value = value * 10 + (c - '0');
+    }
+    if (!ok) {
+        context.Error("**** " + what + " " + ShellEscapeQuoted(argument) + " is not a number");
+        return false;
+    }
+    if (negative) {
+        context.Error("**** " + what + " " + ShellEscapeQuoted(argument) + " is negative");
+        return false;
+    }
+    out = value;
+    return true;
 }
 
 // The '/'-separated components of a file name, empty ones left out.
@@ -321,20 +404,27 @@ void PrintSummary(PatchRun& run, size_t count, size_t total, bool ignored,
     run.Out(text);
 }
 
-// Writes the .rej text: replaced by the first rejects of a run, appended to by
-// later ones.
-void WriteRejFile(PatchRun& run, const std::string& rejName, const std::string& rejText) {
+// Writes the reject text: replaced by the first rejects of a run, appended to
+// by later ones. Returns false with |failure| filled ("open" plus the reason,
+// or "write") when the file could not be written.
+bool WriteRejFile(PatchRun& run, const std::string& rejName, const std::string& rejText,
+                  std::string& failure) {
     if (rejText.empty()) {
-        return;
+        return true;
     }
     const int flags = run.rejWritten.count(rejName) ? kFileOpenWriteCreateAppend
                                                     : kFileOpenWriteCreateTruncate;
     run.rejWritten.insert(rejName);
     auto file = run.context.IO().OpenFile(rejName, flags, kFileCreateMode);
     if (!file) {
-        return;
+        failure = CreateFailedReason(run, rejName);
+        return false;
     }
-    WriteFully(*file, rejText);
+    if (WriteFully(*file, rejText) < 0) {
+        failure = "write";
+        return false;
+    }
+    return true;
 }
 
 // The whole block of a patch that names no file to patch: the text leading up
@@ -343,22 +433,29 @@ void NoFileBlock(PatchRun& run, const FilePatch& patch) {
     if (!run.silent) {
         run.Out("can't find file to patch at input line "
             + std::to_string(patch.reportLine) + "\n");
-        run.Out(run.stripGiven ? "Perhaps you used the wrong -p or --strip option?\n"
-                               : "Perhaps you should have used the -p or --strip option?\n");
-    }
-    run.Out("The text leading up to this was:\n--------------------------\n");
-    std::string line;
-    for (char c : patch.leadingText) {
-        line += c;
-        if (c == '\n') {
-            run.Out("|" + line);
-            line.clear();
+        // A normal diff names no file at all, so no -p could have helped it;
+        // a diff whose headers had names keeps the line even when -p ate
+        // every component of them.
+        if (patch.format != PatchFormat::Normal) {
+            run.Out(run.stripGiven ? "Perhaps you used the wrong -p or --strip option?\n"
+                                   : "Perhaps you should have used the -p or --strip option?\n");
         }
     }
-    if (!line.empty()) {
-        run.Out("|" + line + "\n");
+    if (!patch.leadingText.empty()) {
+        run.Out("The text leading up to this was:\n--------------------------\n");
+        std::string line;
+        for (char c : patch.leadingText) {
+            line += c;
+            if (c == '\n') {
+                run.Out("|" + line);
+                line.clear();
+            }
+        }
+        if (!line.empty()) {
+            run.Out("|" + line + "\n");
+        }
+        run.Out("--------------------------\n");
     }
-    run.Out("--------------------------\n");
     if (run.force || run.batch) {
         run.Out("No file to patch.  Skipping patch.\n");
     } else {
@@ -397,35 +494,63 @@ int ApplyFilePatch(PatchRun& run, FilePatch patch) {
     }
     const size_t total = patch.hunks.size();
 
+    // A context diff whose first hunk is malformed is refused before
+    // anything else of its file patch is said.
+    if (!patch.malformedBeforeFile.empty()) {
+        run.context.Error("**** " + patch.malformedBeforeFile);
+        return 2;
+    }
+
     // A git rename or copy reads one file and writes another. Its OLD is
-    // oldName and its NEW newName, whichever way round -R left them.
+    // oldName (an ORIGFILE operand in its place), its NEW newName, whichever
+    // way round -R left them.
     bool isRenameOrCopy = patch.gitRename || patch.gitCopy;
     bool removeOldAfter = false;
     std::string input;   // the file read
     std::string output;  // the file written
     std::string patchingSuffix;
-    if (isRenameOrCopy && patch.oldName && patch.newName) {
-        input = *patch.oldName;
+    if (isRenameOrCopy && patch.newName) {
         output = *patch.newName;
-        const bool oldExists = run.Exists(input);
-        if (oldExists) {
+        if (run.origOperand) {
+            // The operand replaces the OLD side, there or not.
+            input = *run.origOperand;
             patchingSuffix = patch.gitRename ? " (renamed from " : " (copied from ";
             patchingSuffix += ShellEscapeQuoted(input) + ")";
-            removeOldAfter = patch.gitRename;
-        } else if (patch.gitCopy) {
-            // A copy needs both files: with the source gone there is nothing
-            // to read and nothing to write.
-            run.Out("Cannot copy file without two valid file names\n");
-            run.status = 1;
-            if (total > 0) {
-                PrintSummary(run, total, total, true, "");
+            if (patch.gitRename || run.Exists(input)) {
+                removeOldAfter = patch.gitRename;
+            } else {
+                // A copy needs both files: with the source gone there is
+                // nothing to read and nothing to write.
+                run.Out("Cannot copy file without two valid file names\n");
+                run.status = 1;
+                if (total > 0) {
+                    PrintSummary(run, total, total, true, "");
+                }
+                return 0;
             }
-            return 0;
-        } else if (run.Exists(output)) {
-            patchingSuffix = " (already renamed from " + ShellEscapeQuoted(input) + ")";
-            input = output;
+        } else if (patch.oldName) {
+            input = *patch.oldName;
+            if (run.Exists(input)) {
+                patchingSuffix = patch.gitRename ? " (renamed from " : " (copied from ";
+                patchingSuffix += ShellEscapeQuoted(input) + ")";
+                removeOldAfter = patch.gitRename;
+            } else if (patch.gitCopy) {
+                // A copy needs both files: with the source gone there is
+                // nothing to read and nothing to write.
+                run.Out("Cannot copy file without two valid file names\n");
+                run.status = 1;
+                if (total > 0) {
+                    PrintSummary(run, total, total, true, "");
+                }
+                return 0;
+            } else if (run.Exists(output)) {
+                patchingSuffix = " (already renamed from " + ShellEscapeQuoted(input) + ")";
+                input = output;
+            } else {
+                isRenameOrCopy = false;  // neither side is there: the usual choice
+            }
         } else {
-            isRenameOrCopy = false;  // neither side is there: the usual choice
+            isRenameOrCopy = false;
         }
     } else {
         isRenameOrCopy = false;
@@ -523,49 +648,71 @@ int ApplyFilePatch(PatchRun& run, FilePatch patch) {
         && patch.newAbsence != SideAbsence::Surely && !target.lines.empty();
     int64_t runningOffset = 0;
     int64_t consumedLines = 0;
+    int64_t lineShift = 0;  // what the applied hunks before this one changed
+    // the file's length by (the line numbers said and saved are the output's)
     size_t written = 0;  // input lines already copied into the result
     std::vector<std::string> result;
-    std::vector<size_t> rejHunks;  // 1-based numbers of the failed/ignored
+    std::vector<RejectedHunk> rejHunks;  // the failed/ignored hunks
     bool skipped = false;          // the whole file patch was skipped
-    bool anyOffset = false;
+    bool anyOffset = false;         // a hunk applied away from its stated place
+    bool anyFuzz = false;           // a hunk applied with context dropped
     for (size_t h = 0; h < total; ++h) {
         if (run.context.StopRequested()) {
             return 2;  // a quiet stop
         }
         PatchHunk& hunk = patch.hunks[h];
         if (skipped) {
-            rejHunks.push_back(h + 1);
+            rejHunks.push_back({h + 1, 0});  // a skipped patch's shifts are 0
             continue;
         }
-        const int64_t expected = hunk.oldStart + runningOffset;
-        int64_t at = creationRefused ? 0 : LocateHunk(target, hunk, 0, consumedLines,
-                                                      runningOffset);
-        // Hunk #1 alone, when it fits nowhere: perhaps the patch was already
-        // applied and its sides want swapping.
-        if (h == 0 && at == 0 && !run.force && !decided && !creationRefused) {
-            SwapFilePatch(patch);
-            int64_t probeOffset = 0;
-            const int64_t probe = LocateHunk(target, patch.hunks[0], 0, 0, probeOffset);
-            if (probe != 0) {
-                const char* detected = run.reverse ? "Unreversed patch detected!"
-                                                  : "Reversed (or previously applied) patch detected!";
-                const PatchAnswer answer = AskReversal(run, detected, run.reverse);
-                if (answer == PatchAnswer::Skip) {
-                    SwapFilePatch(patch);  // back as given, for the .rej
-                    skipped = true;
-                    rejHunks.push_back(1);
-                    continue;
-                }
-                decided = true;  // kept swapped, as the answer asked
-                at = probe;
-                runningOffset = probeOffset;
-            } else {
+        // The hunk is tried at every fuzz level from none up to the option's
+        // (never more than its context can lose): a match at a lower level
+        // wins, and a forward match beats a reversed one at the same level.
+        const int64_t maxFuzz = std::min(run.fuzz,
+            std::max(hunk.leadingContext, hunk.trailingContext));
+        int64_t at = 0;
+        int64_t fuzz = 0;
+        for (int64_t f = 0; f <= maxFuzz && at == 0; ++f) {
+            at = creationRefused ? 0
+                : LocateHunk(target, hunk, {f, run.looseWhitespace}, consumedLines,
+                             runningOffset);
+            if (at != 0) {
+                fuzz = f;
+            }
+            // Hunk #1 alone, when it fits nowhere at any level: perhaps the
+            // patch was already applied and its sides want swapping.
+            if (h == 0 && at == 0 && !run.force && !decided && !creationRefused) {
                 SwapFilePatch(patch);
+                int64_t probeOffset = 0;
+                const int64_t probe = LocateHunk(target, patch.hunks[0],
+                    {f, run.looseWhitespace}, 0, probeOffset);
+                if (probe != 0) {
+                    const char* detected = run.reverse
+                        ? "Unreversed patch detected!"
+                        : "Reversed (or previously applied) patch detected!";
+                    const PatchAnswer answer = AskReversal(run, detected, run.reverse);
+                    if (answer == PatchAnswer::Skip) {
+                        SwapFilePatch(patch);  // back as given, for the .rej
+                        skipped = true;
+                        rejHunks.push_back({1, 0});
+                        break;
+                    }
+                    decided = true;  // kept swapped, as the answer asked
+                    at = probe;
+                    fuzz = f;
+                    runningOffset = probeOffset;
+                } else {
+                    SwapFilePatch(patch);
+                }
             }
         }
+        if (skipped) {
+            continue;
+        }
         if (at == 0) {
-            rejHunks.push_back(h + 1);
+            rejHunks.push_back({h + 1, lineShift});
             if (!run.silent) {
+                const int64_t expected = hunk.oldStart + lineShift;
                 std::string text = "Hunk #" + std::to_string(h + 1) + " FAILED at "
                     + std::to_string(expected);
                 const std::string* oldFirst = FirstOldLine(hunk);
@@ -586,17 +733,30 @@ int ApplyFilePatch(PatchRun& run, FilePatch patch) {
         }
         // An insertion with no old lines is placed, not searched for, so it
         // is never found "at an offset", however far its place was moved.
-        if (at != hunk.oldStart && FirstOldLine(hunk) != nullptr) {
+        const bool hasOldLines = FirstOldLine(hunk) != nullptr;
+        const int64_t offset = at - hunk.oldStart;
+        if (offset != 0 && hasOldLines) {
             anyOffset = true;
-            if (!run.silent) {
-                const int64_t offset = at - hunk.oldStart;
-                run.Out("Hunk #" + std::to_string(h + 1) + " succeeded at "
-                    + std::to_string(at) + " (offset " + std::to_string(offset)
-                    + (offset == 1 ? " line" : " lines") + ").\n");
+        }
+        if (fuzz > 0) {
+            anyFuzz = true;
+        }
+        if (!run.silent && ((offset != 0 && hasOldLines) || fuzz > 0)) {
+            std::string text = "Hunk #" + std::to_string(h + 1) + " succeeded at "
+                + std::to_string(at + lineShift);
+            if (fuzz > 0) {
+                text += " with fuzz " + std::to_string(fuzz);
             }
+            if (offset != 0 && hasOldLines) {
+                text += " (offset " + std::to_string(offset)
+                    + (offset == 1 ? " line" : " lines") + ")";
+            }
+            run.Out(text + ".\n");
         }
         // The input lines before the hunk, then the hunk up to its last
-        // change; its trailing context waits for what copies the rest.
+        // change; its trailing context waits for what copies the rest. A
+        // line an earlier hunk already wrote is left alone, a Delete on one
+        // a no-op: the two hunks share their ground.
         while (written < static_cast<size_t>(at - 1)) {
             result.push_back(target.lines[written]);
             ++written;
@@ -614,10 +774,16 @@ int ApplyFilePatch(PatchRun& run, FilePatch patch) {
             }
             switch (hunk.lines[i].kind) {
                 case PatchLineKind::Context:
-                    result.push_back(target.lines[index]);
+                    if (index >= written) {
+                        result.push_back(target.lines[index]);
+                        written = index + 1;
+                    }
                     ++index;
                     break;
                 case PatchLineKind::Delete:
+                    if (index >= written) {
+                        written = index + 1;  // consumed, not copied
+                    }
                     ++index;
                     break;
                 case PatchLineKind::Insert:
@@ -625,8 +791,8 @@ int ApplyFilePatch(PatchRun& run, FilePatch patch) {
                     break;
             }
         }
-        written = index;
         consumedLines = at + hunk.oldCount - hunk.trailingContext - 1;
+        lineShift += hunk.newCount - hunk.oldCount;
     }
 
     // The rest of the input, after the last hunk.
@@ -646,39 +812,63 @@ int ApplyFilePatch(PatchRun& run, FilePatch patch) {
         run.status = 1;
     }
 
-    // The rejects, and the line that says where they went.
+    // A patch whose new side is surely absent says the file should be gone;
+    // with content left it is not, said before the summary.
+    const bool removeResult = ResultRemoved(patch, content, run);
+    if (!removeResult && patch.newAbsence == SideAbsence::Surely && !content.empty()
+        && !run.outputFile && !run.dryRun) {
+        if (!run.silent) {
+            run.Out("Not deleting file " + ShellEscapeQuoted(output)
+                + " as content differs from patch\n");
+        }
+        run.status = 1;
+    }
+
+    // The rejects, and the line that says where they went: -r's own file
+    // (replaced by this run's first rejects, appended to after), the usual
+    // NAME.rej, or nowhere when -r was "-".
     if (!rejHunks.empty()) {
-        const std::string rejName = run.outputFile ? *run.outputFile + ".rej" : output + ".rej";
+        std::string rejName;
+        if (run.rejectFile) {
+            if (*run.rejectFile != "-") {
+                rejName = *run.rejectFile;
+            }
+        } else {
+            rejName = run.outputFile ? *run.outputFile + ".rej" : output + ".rej";
+        }
         PrintSummary(run, rejHunks.size(), total, skipped, rejName);
-        if (!run.dryRun) {
-            WriteRejFile(run, rejName, RejText(patch, rejHunks));
+        if (!rejName.empty() && !run.dryRun) {
+            const RejFormat format = run.rejectFormat
+                ? *run.rejectFormat
+                : (patch.format == PatchFormat::Unified ? RejFormat::Unified
+                                                        : RejFormat::Context);
+            std::string failure;
+            if (!WriteRejFile(run, rejName, RejText(patch, rejHunks, format), failure)) {
+                if (failure == "write") {
+                    run.Fatal("write error : Input/output error");
+                } else {
+                    run.Fatal("Can't create file " + ShellEscapeQuoted(rejName) + " : "
+                        + failure);
+                }
+                return 2;
+            }
         }
     }
 
     // A patch skipped at its question writes nothing: the file stands as it
-    // was, and no .orig of it is kept.
+    // was, and no backup of it is kept.
     if (skipped) {
         return 0;
     }
 
     // The output. Nothing is written under --dry-run; -o collects every
     // result in one file; otherwise a temporary next to the target is renamed
-    // into place.
+    // into place, the original moved to its backup just before.
     if (!run.dryRun) {
-        if (!run.outputFile && (anyOffset || !rejHunks.empty())) {
-            const std::string origPath = input + ".orig";
-            const std::string key = run.context.IO().ResolvePath(origPath);
-            if (run.origMade.insert(key).second) {
-                auto orig = run.context.IO().OpenFile(origPath, kFileOpenWriteCreateTruncate,
-                    kFileCreateMode);
-                if (orig) {
-                    WriteFully(*orig, inputBytes);
-                }
-            }
-        }
         if (run.outputFile) {
-            if (run.outFile) {
-                WriteFully(*run.outFile, content);
+            if (run.outFile && WriteFully(*run.outFile, content) < 0) {
+                run.Fatal("write error : Input/output error");
+                return 2;
             }
         } else {
             CreateMissingDirectories(run, output);
@@ -701,6 +891,45 @@ int ApplyFilePatch(PatchRun& run, FilePatch patch) {
                 run.Fatal("Can't write file " + ShellEscapeQuoted(tmp) + " : Input/output error");
                 return 2;
             }
+            // The backup, once per file per run: -b asks for one always, a
+            // patch that did not apply cleanly otherwise (unless told not
+            // to). The original is moved there just before the new content
+            // takes its place; a file that did not exist gets an empty one.
+            const bool mismatch = anyOffset || anyFuzz || !rejHunks.empty();
+            if (run.backup || (run.mismatchBackup && mismatch)) {
+                const std::string backupPath = BackupPathFor(run.context, input,
+                    run.backupMode, run.backupSuffix);
+                const std::string key = run.context.IO().ResolvePath(backupPath);
+                if (run.backupMade.insert(key).second) {
+                    bool backupOk = true;
+                    std::string backupFailure;
+                    if (run.Exists(input)) {
+                        if (run.context.IO().Rename(input, backupPath) != 0) {
+                            backupFailure = BackupRenameFailedReason(run, backupPath);
+                            backupOk = false;
+                        }
+                    } else {
+                        auto backup = run.context.IO().OpenFile(backupPath,
+                            kFileOpenWriteCreateTruncate, kFileCreateMode);
+                        if (!backup) {
+                            backupFailure = CreateFailedReason(run, backupPath);
+                            backupOk = false;
+                        }
+                    }
+                    if (!backupOk) {
+                        // The file is left exactly as it was.
+                        run.context.IO().RemoveFile(tmp);
+                        if (run.Exists(input)) {
+                            run.Fatal("Can't rename file " + ShellEscapeQuoted(input) + " to "
+                                + ShellEscapeQuoted(backupPath) + " : " + backupFailure);
+                        } else {
+                            run.Fatal("Can't create file " + ShellEscapeQuoted(backupPath)
+                                + " : " + backupFailure);
+                        }
+                        return 2;
+                    }
+                }
+            }
             if (run.context.IO().Rename(tmp, output) != 0) {
                 run.context.IO().RemoveFile(tmp);
                 run.Fatal("Can't create file " + ShellEscapeQuoted(output)
@@ -712,16 +941,8 @@ int ApplyFilePatch(PatchRun& run, FilePatch patch) {
         if (removeOldAfter && !run.outputFile) {
             run.context.IO().RemoveFile(input);
         }
-        if (!run.outputFile) {
-            if (ResultRemoved(patch, content, run)) {
-                run.context.IO().RemoveFile(output);
-            } else if (patch.newAbsence == SideAbsence::Surely && !content.empty()) {
-                if (!run.silent) {
-                    run.Out("Not deleting file " + ShellEscapeQuoted(output)
-                        + " as content differs from patch\n");
-                }
-                run.status = 1;
-            }
+        if (!run.outputFile && removeResult) {
+            run.context.IO().RemoveFile(output);
         }
     }
     return 0;
@@ -732,13 +953,15 @@ int ApplyFilePatch(PatchRun& run, FilePatch patch) {
 class PatchCommand : public IBuiltinCommand {
 public:
     std::string Name() const override { return "patch"; }
-    std::string Version() const override { return "1.0.0"; }
+    std::string Version() const override { return "1.1.0"; }
 
     const std::vector<BuiltinOption>& Options() const override {
         static const std::vector<BuiltinOption> options = {
-            {'b', "backup", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
+            {'b', "backup", kPatchBackup, BuiltinArgument::None, "",
+                "back the original up, however cleanly the patch applies"},
             {'B', "prefix", kBuiltinNotTreated, BuiltinArgument::Required, "PREFIX", ""},
-            {'c', "context", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
+            {'c', "context", kPatchContext, BuiltinArgument::None, "",
+                "take the patch as a context diff (both of its styles)"},
             {'d', "directory", kPatchDirectory, BuiltinArgument::Required, "DIR",
                 "read and write files in directory DIR"},
             {'D', "ifdef", kBuiltinNotTreated, BuiltinArgument::Required, "NAME", ""},
@@ -747,20 +970,24 @@ public:
                 "remove files left empty by patching"},
             {'f', "force", kPatchForce, BuiltinArgument::None, "",
                 "do not ask questions; take every patch as it comes"},
-            {'F', "fuzz", kBuiltinNotTreated, BuiltinArgument::Required, "NUM", ""},
+            {'F', "fuzz", kPatchFuzz, BuiltinArgument::Required, "NUM",
+                "let hunks match with up to NUM context lines dropped (default 2)"},
             {'g', "get", kBuiltinNotTreated, BuiltinArgument::Required, "NUM", ""},
             {'i', "input", kPatchInput, BuiltinArgument::Required, "FILE",
                 "read the patch from FILE ('-' the standard input)"},
-            {'l', "ignore-whitespace", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
+            {'l', "ignore-whitespace", kPatchLooseWhitespace, BuiltinArgument::None, "",
+                "match context lines ignoring changes in blank runs"},
             {'m', "merge", kBuiltinNotTreated, BuiltinArgument::Optional, "STYLE", ""},
-            {'n', "normal", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
+            {'n', "normal", kPatchNormal, BuiltinArgument::None, "",
+                "take the patch as a normal diff (it names no file)"},
             {'N', "forward", kPatchForward, BuiltinArgument::None, "",
                 "ignore patches that seem to be applied already"},
             {'o', "output", kPatchOutput, BuiltinArgument::Required, "FILE",
                 "put every file's result into FILE, in the order of the patch"},
             {'p', "strip", kPatchStrip, BuiltinArgument::Required, "NUM",
                 "strip NUM leading components from the patch's file names"},
-            {'r', "reject-file", kBuiltinNotTreated, BuiltinArgument::Required, "FILE", ""},
+            {'r', "reject-file", kPatchRejectFile, BuiltinArgument::Required, "FILE",
+                "put every reject into FILE ('-' throws them away)"},
             {'R', "reverse", kPatchReverse, BuiltinArgument::None, "",
                 "take the patch as made with its old and new sides swapped"},
             {'s', "silent", kPatchSilent, BuiltinArgument::None, "",
@@ -770,23 +997,28 @@ public:
             {'t', "batch", kPatchBatch, BuiltinArgument::None, "",
                 "do not ask questions; take the answers patch would assume"},
             {'u', "unified", kPatchUnified, BuiltinArgument::None, "",
-                "unified diffs, the only format read"},
+                "take the patch as a unified diff"},
             {'v', "", kBuiltinOptionVersion, BuiltinArgument::None, "",
                 "output version information"},
-            {'V', "version-control", kBuiltinNotTreated, BuiltinArgument::Required, "METHOD",
-                ""},
+            {'V', "version-control", kPatchVersionControl, BuiltinArgument::Required, "METHOD",
+                "keep backups as METHOD says: simple, numbered or existing"},
             {'x', "debug", kBuiltinNotTreated, BuiltinArgument::Required, "NUM", ""},
             {'Y', "basename-prefix", kBuiltinNotTreated, BuiltinArgument::Required, "PREFIX",
                 ""},
-            {'z', "suffix", kBuiltinNotTreated, BuiltinArgument::Required, "SUFFIX", ""},
+            {'z', "suffix", kPatchSuffix, BuiltinArgument::Required, "SUFFIX",
+                "back the original up as NAME.SUFFIX instead of NAME.orig"},
             {'Z', "set-utc", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
             {'T', "set-time", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
-            {0, "backup-if-mismatch", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
-            {0, "no-backup-if-mismatch", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
+            {0, "backup-if-mismatch", kPatchBackupIfMismatch, BuiltinArgument::None, "",
+                "back the original up when a patch applies with fuzz or fails"},
+            {0, "no-backup-if-mismatch", kPatchNoBackupIfMismatch, BuiltinArgument::None, "",
+                "leave the original alone when a patch applies with fuzz or fails"},
             {0, "binary", kPatchBinary, BuiltinArgument::None, "",
                 "keep the patch's carriage returns"},
             {0, "dry-run", kPatchDryRun, BuiltinArgument::None, "",
                 "report what would be done, without changing any file"},
+            {0, "reject-format", kPatchRejectFormat, BuiltinArgument::Required, "FORMAT",
+                "write rejects in FORMAT: context or unified"},
             {0, "verbose", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
             {0, "posix", kBuiltinNotTreated, BuiltinArgument::None, "", ""},
             {0, "quoting-style", kBuiltinNotTreated, BuiltinArgument::Required, "WORD", ""},
@@ -801,10 +1033,11 @@ public:
             "apply a diff file to an original",
             {"patch [OPTION]... [ORIGFILE [PATCHFILE]]"},
             "Every question is printed with its answer taken, as patch does when its\n"
-            "input and output are not terminals: nothing is read back. Only unified\n"
-            "diffs are read, and a hunk applies only where its lines match the file\n"
-            "exactly; the fuzz factor, backup files and the other diff formats are\n"
-            "not treated yet.",
+            "input and output are not terminals: nothing is read back. Unified,\n"
+            "context and normal diffs are read; a hunk is matched with up to -F\n"
+            "context lines dropped (the side holding more of them loses first)\n"
+            "and, with -l, its blank runs taken loosely. Ed scripts are not read;\n"
+            "the answers questions assume are patch's no-terminal ones.",
         };
     }
 
@@ -842,6 +1075,10 @@ int PatchCommand::Run(BuiltinContext& context) {
     PatchRun run(context);
     std::optional<std::string> input;
     int64_t strip = -1;
+    std::optional<PatchFormat> forcedFormat;  // -u, -c or -n
+    bool normalGiven = false;                 // -n (a normal diff names no file)
+    std::optional<std::string> versionControl;  // the last -V word
+    std::optional<std::string> suffixOption;     // the last -z SUFFIX
     for (const auto& option : parsed.options) {
         switch (option.id) {
             case kPatchDirectory: break;  // changed to below, before everything else
@@ -853,42 +1090,48 @@ int PatchCommand::Run(BuiltinContext& context) {
             case kPatchReverse: run.reverse = true; break;
             case kPatchSilent: run.silent = true; break;
             case kPatchBatch: run.batch = true; break;
-            case kPatchUnified: break;  // the only format read
+            case kPatchUnified: forcedFormat = PatchFormat::Unified; break;
+            case kPatchContext: forcedFormat = PatchFormat::Context; break;
+            case kPatchNormal: forcedFormat = PatchFormat::Normal; normalGiven = true; break;
             case kPatchDryRun: run.dryRun = true; break;
             case kPatchBinary: run.binary = true; break;
+            case kPatchLooseWhitespace: run.looseWhitespace = true; break;
+            case kPatchBackup: run.backup = true; break;
+            case kPatchBackupIfMismatch: run.mismatchBackup = true; break;
+            case kPatchNoBackupIfMismatch: run.mismatchBackup = false; break;
+            case kPatchRejectFile: run.rejectFile = option.argument; break;
+            case kPatchRejectFormat:
+                if (option.argument == "context") {
+                    run.rejectFormat = RejFormat::Context;
+                } else if (option.argument == "unified") {
+                    run.rejectFormat = RejFormat::Unified;
+                } else {
+                    // This one carries the Try line on its own, nothing else.
+                    context.TryHelp();
+                    return 2;
+                }
+                break;
+            case kPatchVersionControl: versionControl = option.argument; break;
+            case kPatchSuffix:
+                if (option.argument.empty()) {
+                    context.Error("**** backup suffix is empty");
+                    return 2;
+                }
+                suffixOption = option.argument;
+                break;
             case kPatchStrip: {
-                bool ok = !option.argument.empty();
-                bool negative = false;
-                size_t i = 0;
-                if (!option.argument.empty() && option.argument[0] == '-') {
-                    negative = true;
-                    i = 1;
-                }
-                int64_t value = 0;
-                for (; ok && i < option.argument.size(); ++i) {
-                    const char c = option.argument[i];
-                    if (c < '0' || c > '9') {
-                        ok = false;
-                        break;
-                    }
-                    if (value > (INT64_MAX - (c - '0')) / 10) {
-                        ok = false;
-                        break;
-                    }
-                    value = value * 10 + (c - '0');
-                }
-                if (!ok) {
-                    context.Error("**** strip count " + ShellEscapeQuoted(option.argument)
-                        + " is not a number");
+                if (!ParseCountOption(context, "strip count", option.argument, strip)) {
                     return 2;
                 }
-                if (negative) {
-                    context.Error("**** strip count " + ShellEscapeQuoted(option.argument)
-                        + " is negative");
-                    return 2;
-                }
-                strip = value;
                 run.stripGiven = true;
+                break;
+            }
+            case kPatchFuzz: {
+                int64_t fuzz = 0;
+                if (!ParseCountOption(context, "fuzz factor", option.argument, fuzz)) {
+                    return 2;
+                }
+                run.fuzz = fuzz;
                 break;
             }
         }
@@ -899,6 +1142,44 @@ int PatchCommand::Run(BuiltinContext& context) {
     }
     if (!parsed.operands.empty()) {
         run.origOperand = parsed.operands[0];
+    }
+
+    // The backup method, decided once the options are parsed: the last -V
+    // word, else PATCH_VERSION_CONTROL, else VERSION_CONTROL (a set but
+    // empty one counts as unset), else existing -- checked even when no
+    // backup will be made. GNU 2.7.6 takes none and off as numbered.
+    {
+        std::optional<std::string> word;
+        const char* reportedName = "--version-control or -V option";
+        if (versionControl) {
+            word = versionControl;
+        } else if (auto env = context.Process().GetEnvironment()
+                                 ->GetVariable("PATCH_VERSION_CONTROL");
+                   env && !env->empty()) {
+            word = env;
+            reportedName = "$PATCH_VERSION_CONTROL";
+        } else if (auto env = context.Process().GetEnvironment()
+                                 ->GetVariable("VERSION_CONTROL");
+                   env && !env->empty()) {
+            word = env;
+            reportedName = "$VERSION_CONTROL";
+        }
+        BackupMode mode = BackupMode::Existing;
+        if (word && !ParseBackupControlNamed(context, reportedName, *word, mode, false)) {
+            return 2;
+        }
+        run.backupMode = mode == BackupMode::None ? BackupMode::Numbered : mode;
+    }
+    // The backup suffix: the last -z, else SIMPLE_BACKUP_SUFFIX (empty gives
+    // the default), else .orig.
+    if (suffixOption) {
+        run.backupSuffix = *suffixOption;
+    } else if (auto env = context.Process().GetEnvironment()
+                             ->GetVariable("SIMPLE_BACKUP_SUFFIX");
+               env && !env->empty()) {
+        run.backupSuffix = *env;
+    } else {
+        run.backupSuffix = ".orig";
     }
 
     // -d first, as patch does: everything after happens in that directory.
@@ -916,7 +1197,7 @@ int PatchCommand::Run(BuiltinContext& context) {
             kFileCreateMode);
         if (!run.outFile) {
             context.Error("**** Can't create file " + ShellEscapeQuoted(*run.outputFile)
-                + " : No such file or directory");
+                + " : " + CreateFailedReason(run, *run.outputFile));
             return 2;
         }
     }
@@ -949,7 +1230,8 @@ int PatchCommand::Run(BuiltinContext& context) {
         }
     }
 
-    PatchReader reader(std::move(patchText), run.binary);
+    PatchReader reader(std::move(patchText), run.binary, forcedFormat,
+        run.origOperand.has_value() || normalGiven);
     bool garbage = false;
     while (const std::optional<FilePatch> filePatch = reader.Next(strip, garbage)) {
         const int code = ApplyFilePatch(run, std::move(*filePatch));

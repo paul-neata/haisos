@@ -61,7 +61,7 @@ bool ParseBackupControl(BuiltinContext& context, const std::string& word, Backup
 // The same, reported under |reportedName|: "$VERSION_CONTROL" for the
 // environment's word ("backup type" is ParseBackupControl's).
 bool ParseBackupControlNamed(BuiltinContext& context, const std::string& reportedName,
-                             const std::string& word, BackupMode& out);
+                             const std::string& word, BackupMode& out, bool tryHelp = true);
 
 // Parses a --update UPDATE word: all, none, older. On a bad word prints
 // GNU's block and returns false (the exit status is then 1).

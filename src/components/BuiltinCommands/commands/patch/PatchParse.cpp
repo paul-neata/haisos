@@ -24,20 +24,21 @@ std::vector<PatchReader::InputLine> SplitInputLines(const std::string& text) {
     return lines;
 }
 
-size_t strlen(const char* s) {
-    size_t n = 0;
-    while (s[n] != '\0') {
-        ++n;
-    }
-    return n;
-}
-
 bool StartsWith(const std::string& text, const char* prefix) {
-    return text.compare(0, strlen(prefix), prefix) == 0;
+    for (size_t i = 0; prefix[i] != '\0'; ++i) {
+        if (i >= text.size() || text[i] != prefix[i]) {
+            return false;
+        }
+    }
+    return true;
 }
 
-// A decimal number: digits only, empty or anything else rejected.
-bool ParseNumber(const std::string& text, size_t begin, size_t end, int64_t& out) {
+// A decimal number: digits only, empty or anything else rejected. A value
+// with more digits than an int64 holds is refused -- unless |tooLarge| is
+// given, when it saturates to INT64_MAX and |tooLarge| is set (the hunk
+// header reader reports it).
+bool ParseNumber(const std::string& text, size_t begin, size_t end, int64_t& out,
+                 bool* tooLarge = nullptr) {
     if (begin >= end) {
         return false;
     }
@@ -47,7 +48,12 @@ bool ParseNumber(const std::string& text, size_t begin, size_t end, int64_t& out
             return false;
         }
         if (value > (INT64_MAX - (text[i] - '0')) / 10) {
-            return false;
+            if (!tooLarge) {
+                return false;
+            }
+            *tooLarge = true;
+            out = INT64_MAX;
+            return true;
         }
         value = value * 10 + (text[i] - '0');
     }
@@ -104,7 +110,7 @@ std::optional<size_t> EndOfQuotedName(const std::string& text, size_t at) {
 // -p NUM: remove NUM leading components of |name|, a run of '/' counting as
 // one separator and a leading '/' as one component; too few components
 // leaves no name. A negative strip (no -p) keeps only the last component.
-std::optional<std::string> StripFileName(const std::string& name, int strip) {
+std::optional<std::string> StripFileName(const std::string& name, int64_t strip) {
     if (strip < 0) {
         const size_t slash = name.find_last_of('/');
         return slash == std::string::npos ? name : name.substr(slash + 1);
@@ -130,11 +136,11 @@ std::optional<std::string> StripFileName(const std::string& name, int strip) {
             ++i;
         }
     }
-    if (static_cast<int>(components.size()) <= strip) {
+    if (static_cast<int64_t>(components.size()) <= strip) {
         return std::nullopt;
     }
     std::string out;
-    for (size_t j = strip; j < components.size(); ++j) {
+    for (size_t j = static_cast<size_t>(strip); j < components.size(); ++j) {
         if (j > static_cast<size_t>(strip)) {
             out += '/';
         }
@@ -257,27 +263,9 @@ std::string HeaderText(const std::string& text) {
     return text;
 }
 
-} // namespace
-// ---- PatchReader ----
-
-PatchReader::PatchReader(std::string text, bool binary)
-    : m_lines(SplitInputLines(text))
-    , m_binary(binary)
-{
-}
-
-std::string PatchReader::LineText(size_t index, bool& stripCr) const {
-    const InputLine& line = m_lines[index];
-    if (!m_binary && !line.text.empty() && line.text.back() == '\r') {
-        stripCr = true;
-        return line.text.substr(0, line.text.size() - 1);
-    }
-    return line.text;
-}
-
-// One name side of a "---"/"+++" line: the name (nullopt for /dev/null or
-// none), the time text after it, and whether the name said the file is not
-// there.
+// One name side of a "---"/"+++"/"***"/"---" line: the name (nullopt for
+// /dev/null or none), the time text after it, and whether the name said the
+// file is not there.
 struct HeaderName {
     std::optional<std::string> name;
     std::string timeText;
@@ -331,8 +319,226 @@ HeaderName ParseHeaderName(const std::string& raw) {
     return out;
 }
 
+// One name out of a "diff --git A B" line: "..."-quoted or a plain word.
+std::optional<std::string> ParseGitName(const std::string& text, size_t& at) {
+    while (at < text.size() && (text[at] == ' ' || text[at] == '\t')) {
+        ++at;
+    }
+    if (at >= text.size()) {
+        return std::nullopt;
+    }
+    if (text[at] == '"') {
+        const std::optional<size_t> end = EndOfQuotedName(text, at);
+        if (!end) {
+            return std::nullopt;
+        }
+        const std::string name = UnquoteCName(text, at + 1, *end - 1);
+        at = *end;
+        return name;
+    }
+    const size_t start = at;
+    while (at < text.size() && text[at] != ' ' && text[at] != '\t') {
+        ++at;
+    }
+    return text.substr(start, at - start);
+}
+
+// Whether |text| names an option-like git header line of a "diff --git"
+// block, and which.
+enum class GitHeader { None, Index, NewFile, DeletedFile, Mode, Rename, Copy };
+
+GitHeader ClassifyGitHeader(const std::string& text) {
+    if (StartsWith(text, "index ")) {
+        return GitHeader::Index;
+    }
+    if (StartsWith(text, "new file mode")) {
+        return GitHeader::NewFile;
+    }
+    if (StartsWith(text, "deleted file mode")) {
+        return GitHeader::DeletedFile;
+    }
+    if (StartsWith(text, "old mode") || StartsWith(text, "new mode")
+        || StartsWith(text, "similarity index") || StartsWith(text, "dissimilarity index")) {
+        return GitHeader::Mode;
+    }
+    if (StartsWith(text, "rename from ") || StartsWith(text, "rename to ")) {
+        return GitHeader::Rename;
+    }
+    if (StartsWith(text, "copy from ") || StartsWith(text, "copy to ")) {
+        return GitHeader::Copy;
+    }
+    return GitHeader::None;
+}
+
+// A context hunk's opening line: a run of 8 or more '*' (fewer is not one),
+// whatever follows the run being the hunk's function name.
+bool IsStarHunkLine(const std::string& text) {
+    size_t stars = 0;
+    while (stars < text.size() && text[stars] == '*') {
+        ++stars;
+    }
+    return stars >= 8;
+}
+
+// The function name that follows a star hunk line's run of stars.
+std::string StarHunkFunction(const std::string& text) {
+    size_t at = 0;
+    while (at < text.size() && text[at] == '*') {
+        ++at;
+    }
+    std::string function = text.substr(at);
+    while (!function.empty() && (function.front() == ' ' || function.front() == '\t')) {
+        function.erase(function.begin());
+    }
+    return function;
+}
+
+// The range line of a context hunk's part, |text| what follows the mark
+// ("4,6 ****" / "4,6 ----", the suffix left out in the old style): the
+// part's first line and how many of its lines follow, |oldStyle| when the
+// suffix is missing. The new style's tail is a run of four or more of
+// |suffixChar| ('*' for the old part, '-' for the new one; a reject file's
+// five dashes read back too). A bare 0 (or 0,0) is the empty range after
+// line 0: start 1, no lines.
+bool ParseContextRangeLine(const std::string& text, char suffixChar, int64_t& start,
+                           int64_t& count, bool& oldStyle) {
+    size_t at = 0;
+    while (at < text.size() && (text[at] == ' ' || text[at] == '\t')) {
+        ++at;
+    }
+    const auto digitsEnd = [&text](size_t from) {
+        size_t j = from;
+        while (j < text.size() && text[j] >= '0' && text[j] <= '9') {
+            ++j;
+        }
+        return j;
+    };
+    int64_t first = 0;
+    if (!ParseNumber(text, at, digitsEnd(at), first)) {
+        return false;
+    }
+    at = digitsEnd(at);
+    int64_t last = first;
+    if (at < text.size() && text[at] == ',') {
+        ++at;
+        if (!ParseNumber(text, at, digitsEnd(at), last)) {
+            return false;
+        }
+        at = digitsEnd(at);
+    }
+    size_t rest = at;
+    while (rest < text.size() && (text[rest] == ' ' || text[rest] == '\t')) {
+        ++rest;
+    }
+    size_t suffix = rest;
+    while (suffix < text.size() && text[suffix] == suffixChar) {
+        ++suffix;
+    }
+    while (suffix < text.size() && (text[suffix] == ' ' || text[suffix] == '\t')) {
+        ++suffix;
+    }
+    if (suffix != text.size()) {
+        return false;  // something besides the run of stars/dashes
+    }
+    oldStyle = rest == suffix;
+    if (!oldStyle && suffix - rest < 4) {
+        return false;
+    }
+    if (last < first) {
+        return false;
+    }
+    if (first == 0 && last == 0) {
+        start = 1;  // the empty range after line 0
+        count = 0;
+    } else {
+        start = first;
+        count = last - first + 1;
+    }
+    return true;
+}
+
+// A normal diff's command: "A[,B]{a|c|d}C[,D]".
+struct NormalCommand {
+    char kind = 'c';
+    int64_t first = 0, last = 0, third = 0, fourth = 0;
+};
+
+bool ParseNormalCommand(const std::string& text, NormalCommand& command) {
+    size_t at = 0;
+    const auto digitsEnd = [&text](size_t from) {
+        size_t j = from;
+        while (j < text.size() && text[j] >= '0' && text[j] <= '9') {
+            ++j;
+        }
+        return j;
+    };
+    const auto readNumber = [&](int64_t& out) {
+        const size_t end = digitsEnd(at);
+        if (!ParseNumber(text, at, end, out)) {
+            return false;
+        }
+        at = end;
+        return true;
+    };
+    if (!readNumber(command.first)) {
+        return false;
+    }
+    command.last = command.first;
+    if (at < text.size() && text[at] == ',') {
+        ++at;
+        if (!readNumber(command.last)) {
+            return false;
+        }
+    }
+    if (at >= text.size() || command.last < command.first) {
+        return false;
+    }
+    command.kind = text[at];
+    if (command.kind != 'a' && command.kind != 'c' && command.kind != 'd') {
+        return false;
+    }
+    ++at;
+    if (!readNumber(command.third)) {
+        return false;
+    }
+    command.fourth = command.third;
+    if (at < text.size() && text[at] == ',') {
+        ++at;
+        if (!readNumber(command.fourth)) {
+            return false;
+        }
+    }
+    if (command.fourth < command.third || at != text.size()) {
+        return false;
+    }
+    return true;
+}
+
+} // namespace
+
+// ---- PatchReader ----
+
+PatchReader::PatchReader(std::string text, bool binary, std::optional<PatchFormat> format,
+                         bool normalAllowed)
+    : m_lines(SplitInputLines(text))
+    , m_binary(binary)
+    , m_format(format)
+    , m_normalAllowed(normalAllowed)
+{
+}
+
+std::string PatchReader::LineText(size_t index, bool& stripCr) const {
+    const InputLine& line = m_lines[index];
+    if (!m_binary && !line.text.empty() && line.text.back() == '\r') {
+        stripCr = true;
+        return line.text.substr(0, line.text.size() - 1);
+    }
+    return line.text;
+}
+
 bool PatchReader::ParseHunkHeader(const std::string& text, int64_t& oldStart, int64_t& oldCount,
-                                  int64_t& newStart, int64_t& newCount, std::string& function) const {
+                                  int64_t& newStart, int64_t& newCount, std::string& function,
+                                  std::string* tooLarge, bool* overflow) const {
     if (!StartsWith(text, "@@ -")) {
         return false;
     }
@@ -343,17 +549,30 @@ bool PatchReader::ParseHunkHeader(const std::string& text, int64_t& oldStart, in
         }
         return j;
     };
+    const auto readNumber = [&](size_t at, int64_t& out) {
+        bool large = false;
+        if (!ParseNumber(text, at, digitsEnd(at), out, tooLarge ? &large : nullptr)) {
+            return false;
+        }
+        if (large && tooLarge) {
+            // The first number that saturates is the one reported.
+            if (tooLarge->empty()) {
+                tooLarge->assign(text, at, digitsEnd(at) - at);
+            }
+        }
+        return true;
+    };
     size_t i = 4;
     int64_t rawOldStart = 0, rawNewStart = 0;
     oldCount = 1;
     newCount = 1;
-    if (!ParseNumber(text, i, digitsEnd(i), rawOldStart)) {
+    if (!readNumber(i, rawOldStart)) {
         return false;
     }
     i = digitsEnd(i);
     if (i < text.size() && text[i] == ',') {
         ++i;
-        if (!ParseNumber(text, i, digitsEnd(i), oldCount)) {
+        if (!readNumber(i, oldCount)) {
             return false;
         }
         i = digitsEnd(i);
@@ -362,13 +581,13 @@ bool PatchReader::ParseHunkHeader(const std::string& text, int64_t& oldStart, in
         return false;
     }
     i += 2;
-    if (!ParseNumber(text, i, digitsEnd(i), rawNewStart)) {
+    if (!readNumber(i, rawNewStart)) {
         return false;
     }
     i = digitsEnd(i);
     if (i < text.size() && text[i] == ',') {
         ++i;
-        if (!ParseNumber(text, i, digitsEnd(i), newCount)) {
+        if (!readNumber(i, newCount)) {
             return false;
         }
         i = digitsEnd(i);
@@ -381,7 +600,14 @@ bool PatchReader::ParseHunkHeader(const std::string& text, int64_t& oldStart, in
     while (!function.empty() && (function.front() == ' ' || function.front() == '\t')) {
         function.erase(function.begin());
     }
-    // An empty range "-A,0" means "after line A": the hunk starts at A + 1.
+    // An empty range "-A,0" means "after line A": the hunk starts at A + 1 --
+    // a start the increment would overflow is malformed, not a hunk.
+    if (overflow && oldCount == 0 && rawOldStart == INT64_MAX) {
+        *overflow = true;
+    }
+    if (overflow && newCount == 0 && rawNewStart == INT64_MAX) {
+        *overflow = true;
+    }
     oldStart = oldCount == 0 ? rawOldStart + 1 : rawOldStart;
     newStart = newCount == 0 ? rawNewStart + 1 : rawNewStart;
     return true;
@@ -390,9 +616,22 @@ bool PatchReader::ParseHunkHeader(const std::string& text, int64_t& oldStart, in
 size_t PatchReader::ReadHunk(size_t index, FilePatch& patch) {
     PatchHunk hunk;
     hunk.headerLine = static_cast<int64_t>(index) + 1;
-    if (!ParseHunkHeader(LineText(index, patch.stripTrailingCr), hunk.oldStart, hunk.oldCount,
-            hunk.newStart, hunk.newCount, hunk.function)) {
+    const std::string headerText = LineText(index, patch.stripTrailingCr);
+    std::string tooLarge;
+    bool overflow = false;
+    if (!ParseHunkHeader(headerText, hunk.oldStart, hunk.oldCount, hunk.newStart, hunk.newCount,
+            hunk.function, &tooLarge, &overflow)) {
         return index + 1;  // the caller checked: not reached
+    }
+    if (!tooLarge.empty()) {
+        patch.malformed = "line number " + tooLarge + " is too large at line "
+            + std::to_string(index + 1) + ": " + headerText + "\n";
+        return m_lines.size();
+    }
+    if (overflow) {
+        patch.malformed = "malformed patch at line " + std::to_string(index + 1) + ": "
+            + headerText + "\n";
+        return m_lines.size();
     }
     // The "-0,0" range: the side's file did not exist, surely when its time
     // stamp was the epoch or it was /dev/null (already Surely), else maybe.
@@ -494,60 +733,366 @@ size_t PatchReader::ReadHunk(size_t index, FilePatch& patch) {
     return k;
 }
 
-// One name out of a "diff --git A B" line: "..."-quoted or a plain word.
-std::optional<std::string> ParseGitName(const std::string& text, size_t& at) {
-    while (at < text.size() && (text[at] == ' ' || text[at] == '\t')) {
-        ++at;
+// One line of a context hunk's part: its mark (' ': context, '-': old file
+// only, '+': new file only, '!': changed) and its text, '\n' included unless
+// the "\ No newline" marker followed it.
+struct ContextPartLine {
+    char mark = ' ';
+    std::string text;
+    size_t inputLine = 0;  // the input line it came from, 1-based
+    bool noNewline = false;
+};
+
+// Whether |text| holds a context part's two-character mark (a blank second
+// byte included), |mark| the first byte; an empty line is empty context.
+bool IsContextPartMark(const std::string& text, char& mark) {
+    if (text.empty()) {
+        mark = ' ';
+        return true;
     }
-    if (at >= text.size()) {
-        return std::nullopt;
+    if (text.size() < 2 || (text[1] != ' ' && text[1] != '\t')) {
+        return false;
     }
-    if (text[at] == '"') {
-        const std::optional<size_t> end = EndOfQuotedName(text, at);
-        if (!end) {
-            return std::nullopt;
+    mark = text[0];
+    return true;
+}
+
+void MarkContextPartNoNewline(std::vector<ContextPartLine>& part) {
+    if (!part.empty()) {
+        part.back().noNewline = true;
+        if (!part.back().text.empty() && part.back().text.back() == '\n') {
+            part.back().text.pop_back();
         }
-        const std::string name = UnquoteCName(text, at + 1, *end - 1);
-        at = *end;
-        return name;
     }
-    const size_t start = at;
-    while (at < text.size() && text[at] != ' ' && text[at] != '\t') {
-        ++at;
-    }
-    return text.substr(start, at - start);
 }
 
-// Whether |text| names an option-like git header line of a "diff --git"
-// block, and which.
-enum class GitHeader { None, Index, NewFile, DeletedFile, Mode, Rename, Copy };
+size_t PatchReader::ReadContextHunk(size_t index, FilePatch& patch) {
+    const size_t n = m_lines.size();
+    const bool firstHunk = patch.hunks.empty();
+    // A malformed first hunk is reported before anything else of this file
+    // patch; an out-of-sync patch alone is not -- the hunk's parts were each
+    // well formed, it is the two of them that do not meet.
+    const auto malformed = [&](const std::string& message) {
+        patch.malformed = message;
+        if (firstHunk) {
+            patch.malformedBeforeFile = message;
+        }
+        return n;
+    };
 
-GitHeader ClassifyGitHeader(const std::string& text) {
-    if (StartsWith(text, "index ")) {
-        return GitHeader::Index;
+    std::string function = StarHunkFunction(LineText(index, patch.stripTrailingCr));
+    if (index + 1 >= n) {
+        return malformed("malformed patch at line " + std::to_string(index + 2) + ":  \n");
     }
-    if (StartsWith(text, "new file mode")) {
-        return GitHeader::NewFile;
+    const std::string oldRangeText = LineText(index + 1, patch.stripTrailingCr);
+    int64_t oldStart = 0, oldCount = 0;
+    bool oldStyle = false;
+    if (!StartsWith(oldRangeText, "***")
+        || !ParseContextRangeLine(oldRangeText.substr(3), '*', oldStart, oldCount, oldStyle)) {
+        return malformed("malformed patch at line " + std::to_string(index + 2) + ": "
+            + oldRangeText + "\n");
     }
-    if (StartsWith(text, "deleted file mode")) {
-        return GitHeader::DeletedFile;
+    patch.format = oldStyle ? PatchFormat::OldContext : PatchFormat::Context;
+
+    std::vector<ContextPartLine> oldPart, newPart;
+    int64_t newStart = 0, newCount = 0;
+    size_t separatorIndex = n;  // the "--- C[,D] ----" line
+    // The old part, up to the "---" line that heads the new one.
+    size_t k = index + 2;
+    while (k < n) {
+        const bool delimited = m_lines[k].delimited;
+        const std::string text = LineText(k, patch.stripTrailingCr);
+        const size_t lineNumber = k + 1;
+        ++k;
+        if (StartsWith(text, "---")) {
+            bool style = false;
+            if (ParseContextRangeLine(text.substr(3), '-', newStart, newCount, style)) {
+                separatorIndex = k - 1;
+                break;
+            }
+        }
+        if (!text.empty() && text[0] == '\\') {
+            MarkContextPartNoNewline(oldPart);  // "\ No newline at end of file"
+            continue;
+        }
+        char mark = ' ';
+        if (!IsContextPartMark(text, mark)
+            || (mark != ' ' && mark != '-' && mark != '!')) {
+            return malformed("malformed patch at line " + std::to_string(lineNumber)
+                + ": " + text + "\n");
+        }
+        oldPart.push_back(ContextPartLine{mark,
+            text.empty() ? std::string(delimited ? "\n" : "") : text.substr(2)
+                + (delimited ? "\n" : ""), lineNumber, false});
     }
-    if (StartsWith(text, "old mode") || StartsWith(text, "new mode")
-        || StartsWith(text, "similarity index") || StartsWith(text, "dissimilarity index")) {
-        return GitHeader::Mode;
+    if (separatorIndex == n) {
+        return malformed("unexpected end of file in patch at line " + std::to_string(n)
+            + "\n");
     }
-    if (StartsWith(text, "rename from ") || StartsWith(text, "rename to ")) {
-        return GitHeader::Rename;
+    if (!oldPart.empty()) {
+        if (static_cast<int64_t>(oldPart.size()) < oldCount) {
+            return malformed("Premature '---' at line " + std::to_string(separatorIndex + 1)
+                + "; check line numbers at line " + std::to_string(index + 2) + "\n");
+        }
+        if (static_cast<int64_t>(oldPart.size()) > oldCount) {
+            return malformed("Overdue '---' at line " + std::to_string(separatorIndex + 1)
+                + "; check line numbers at line " + std::to_string(index + 2) + "\n");
+        }
     }
-    if (StartsWith(text, "copy from ") || StartsWith(text, "copy to ")) {
-        return GitHeader::Copy;
+    // The new part, read until a line that is not one of its marks ("  ",
+    // "+ ", "! ") -- a part cut short by the input's end is made good from
+    // the old part's remaining lines.
+    bool shortAtEnd = false;
+    size_t end = n;  // the first line after the hunk
+    while (k < n) {
+        const bool delimited = m_lines[k].delimited;
+        const std::string text = LineText(k, patch.stripTrailingCr);
+        char mark = ' ';
+        if (!text.empty() && text[0] == '\\') {
+            MarkContextPartNoNewline(newPart);
+            ++k;
+            continue;
+        }
+        if (!IsContextPartMark(text, mark)
+            || (mark != ' ' && mark != '+' && mark != '!')) {
+            end = k;  // the terminator is the next thing's, not the hunk's
+            break;
+        }
+        newPart.push_back(ContextPartLine{mark,
+            text.empty() ? std::string(delimited ? "\n" : "") : text.substr(2)
+                + (delimited ? "\n" : ""), k + 1, false});
+        ++k;
     }
-    return GitHeader::None;
+    const auto newPartMalformed = [&](const std::string& message) {
+        patch.malformed = message;
+        if (firstHunk) {
+            patch.malformedBeforeFile = message;
+        }
+        return n;
+    };
+    if (!newPart.empty() && static_cast<int64_t>(newPart.size()) < newCount) {
+        if (end == n) {
+            // the input ended the hunk: the old part's remaining lines
+            // complete the new part, as GNU completes it
+            shortAtEnd = true;
+        } else {
+            const std::string terminator = LineText(end, patch.stripTrailingCr);
+            if (IsStarHunkLine(terminator)) {
+                return newPartMalformed("unexpected end of hunk at line "
+                    + std::to_string(end + 1) + "\n");
+            }
+            return newPartMalformed("malformed patch at line " + std::to_string(end + 1)
+                + ": " + terminator + "\n");
+        }
+    }
+    if (oldPart.empty()) {
+        // A part listing no lines is the other part's context lines.
+        for (const ContextPartLine& line : newPart) {
+            if (line.mark == ' ') {
+                oldPart.push_back(line);
+            }
+        }
+    }
+    if (newPart.empty() && !shortAtEnd) {
+        for (const ContextPartLine& line : oldPart) {
+            if (line.mark == ' ') {
+                newPart.push_back(line);
+            }
+        }
+    } else if (shortAtEnd) {
+        for (size_t x = newPart.size(); x < oldPart.size(); ++x) {
+            newPart.push_back(oldPart[x]);
+            newPart.back().mark = ' ';  // what mirrors an old line is context
+        }
+    }
+
+    // Walking both parts together gives the unified order.
+    PatchHunk hunk;
+    hunk.headerLine = static_cast<int64_t>(index) + 1;
+    hunk.function = std::move(function);
+    hunk.oldStart = oldStart;
+    hunk.oldCount = oldCount;
+    hunk.newStart = newStart;
+    hunk.newCount = newCount;
+    size_t i2 = 0, j2 = 0;
+    while (i2 < oldPart.size() || j2 < newPart.size()) {
+        if (i2 < oldPart.size() && oldPart[i2].mark == '-') {
+            hunk.lines.push_back(PatchLine{PatchLineKind::Delete, oldPart[i2].text,
+                oldPart[i2].noNewline});
+            ++i2;
+            continue;
+        }
+        if (j2 < newPart.size() && newPart[j2].mark == '+') {
+            hunk.lines.push_back(PatchLine{PatchLineKind::Insert, newPart[j2].text,
+                newPart[j2].noNewline});
+            ++j2;
+            continue;
+        }
+        if (i2 < oldPart.size() && j2 < newPart.size()
+            && oldPart[i2].mark == '!' && newPart[j2].mark == '!') {
+            size_t iEnd = i2;
+            while (iEnd < oldPart.size() && oldPart[iEnd].mark == '!') {
+                ++iEnd;
+            }
+            size_t jEnd = j2;
+            while (jEnd < newPart.size() && newPart[jEnd].mark == '!') {
+                ++jEnd;
+            }
+            for (size_t x = i2; x < iEnd; ++x) {
+                hunk.lines.push_back(PatchLine{PatchLineKind::Delete, oldPart[x].text,
+                    oldPart[x].noNewline});
+            }
+            for (size_t x = j2; x < jEnd; ++x) {
+                hunk.lines.push_back(PatchLine{PatchLineKind::Insert, newPart[x].text,
+                    newPart[x].noNewline});
+            }
+            i2 = iEnd;
+            j2 = jEnd;
+            continue;
+        }
+        if (i2 < oldPart.size() && j2 < newPart.size()
+            && oldPart[i2].mark == ' ' && newPart[j2].mark == ' ') {
+            hunk.lines.push_back(PatchLine{PatchLineKind::Context, oldPart[i2].text,
+                oldPart[i2].noNewline});
+            ++i2;
+            ++j2;
+            continue;
+        }
+        // A "!" line meets a context line, or one part holds lines the other
+        // has none left to meet: out of sync. The two lines named are the
+        // ones that failed to meet.
+        const size_t oldLine = i2 < oldPart.size() ? oldPart[i2].inputLine
+            : (oldPart.empty() ? index + 2 : oldPart.back().inputLine);
+        const size_t newLine = j2 < newPart.size() ? newPart[j2].inputLine
+            : (newPart.empty() ? separatorIndex + 1 : newPart.back().inputLine);
+        patch.malformed = "Out-of-sync patch, lines " + std::to_string(oldLine) + ","
+            + std::to_string(newLine) + " -- mangled text or line numbers, maybe?\n";
+        return n;
+    }
+    if (hunk.oldCount == 0 && hunk.oldStart == 1
+        && patch.oldAbsence == SideAbsence::Present) {
+        patch.oldAbsence = SideAbsence::Maybe;  // "*** 0 ****", like "-0,0"
+    }
+    if (hunk.newCount == 0 && hunk.newStart == 1
+        && patch.newAbsence == SideAbsence::Present) {
+        patch.newAbsence = SideAbsence::Maybe;  // "--- 0 ----"
+    }
+    // The context runs before the first and after the last change.
+    size_t first = 0;
+    while (first < hunk.lines.size() && hunk.lines[first].kind == PatchLineKind::Context) {
+        ++first;
+    }
+    size_t after = hunk.lines.size();
+    while (after > first && hunk.lines[after - 1].kind == PatchLineKind::Context) {
+        --after;
+    }
+    const bool hasChanges = first < after;
+    hunk.leadingContext = hasChanges ? static_cast<int64_t>(first) : 0;
+    hunk.trailingContext = hasChanges ? static_cast<int64_t>(hunk.lines.size() - after) : 0;
+    patch.hunks.push_back(std::move(hunk));
+    return end;
 }
 
-std::optional<FilePatch> PatchReader::Next(int strip, bool& garbage) {
+size_t PatchReader::ReadNormalHunk(size_t index, FilePatch& patch) {
+    const size_t n = m_lines.size();
+    patch.format = PatchFormat::Normal;
+    NormalCommand command;
+    ParseNormalCommand(LineText(index, patch.stripTrailingCr), command);  // checked
+    // The sides' ranges: "a" names no old lines, "d" no new ones, an empty
+    // range being the line after the one named.
+    const int64_t oldList = command.kind == 'a' ? 0 : command.last - command.first + 1;
+    const int64_t newList = command.kind == 'd' ? 0 : command.fourth - command.third + 1;
+    const auto malformed = [&](const std::string& message) {
+        patch.malformed = message;
+        return n;
+    };
+    // One side's "TEXT" lines, each "< " / "> " followed by its text.
+    std::vector<PatchLine> oldLines, newLines;
+    size_t k = index + 1;
+    const auto readSide = [&](int64_t want, char mark, std::vector<PatchLine>& out) -> bool {
+        while (static_cast<int64_t>(out.size()) < want) {
+            if (k >= n) {
+                malformed("unexpected end of file in patch at line " + std::to_string(n)
+                    + "\n");
+                return false;
+            }
+            const bool delimited = m_lines[k].delimited;
+            const std::string text = LineText(k, patch.stripTrailingCr);
+            ++k;
+            if (!text.empty() && text[0] == '\\') {
+                if (!out.empty()) {  // "\ No newline at end of file"
+                    out.back().noNewline = true;
+                    if (!out.back().text.empty() && out.back().text.back() == '\n') {
+                        out.back().text.pop_back();
+                    }
+                }
+                continue;
+            }
+            if (text.size() < 2 || text[0] != mark
+                || (text[1] != ' ' && text[1] != '\t')) {
+                malformed("'" + std::string(1, mark)
+                    + "' followed by space or tab expected at line "
+                    + std::to_string(k) + " of patch\n");
+                return false;
+            }
+            out.push_back(PatchLine{
+                mark == '<' ? PatchLineKind::Delete : PatchLineKind::Insert,
+                text.substr(2) + (delimited ? "\n" : ""), false});
+        }
+        return true;
+    };
+    if (!readSide(oldList, '<', oldLines)) {
+        return n;
+    }
+    if (command.kind == 'c') {
+        if (k >= n) {
+            return malformed("unexpected end of file in patch at line " + std::to_string(n)
+                + "\n");
+        }
+        const std::string separator = LineText(k, patch.stripTrailingCr);
+        ++k;
+        if (separator != "---") {
+            return malformed("'---' expected at line " + std::to_string(k)
+                + " of patch\n");
+        }
+    }
+    if (!readSide(newList, '>', newLines)) {
+        return n;
+    }
+
+    PatchHunk hunk;
+    hunk.headerLine = static_cast<int64_t>(index) + 1;
+    if (command.kind == 'a') {
+        hunk.oldStart = command.first + 1;  // the empty range after A
+        hunk.newStart = command.third;
+    } else if (command.kind == 'd') {
+        hunk.oldStart = command.first;
+        hunk.newStart = command.third + 1;
+    } else {
+        hunk.oldStart = command.first;
+        hunk.newStart = command.third;
+    }
+    hunk.oldCount = oldList;
+    hunk.newCount = newList;
+    hunk.lines = std::move(oldLines);
+    for (PatchLine& line : newLines) {
+        hunk.lines.push_back(std::move(line));
+    }
+    patch.hunks.push_back(std::move(hunk));
+    return k;
+}
+
+std::optional<FilePatch> PatchReader::Next(int64_t strip, bool& garbage) {
     garbage = false;
     const size_t n = m_lines.size();
+    // What the options let this run recognise: -u, -c or -n one format
+    // alone, none of them any of them -- but a normal diff only when it
+    // names a file (an ORIGFILE operand or -n), for it holds no name itself.
+    const bool unifiedAllowed = !m_format || *m_format == PatchFormat::Unified;
+    const bool contextAllowed = !m_format || *m_format == PatchFormat::Context
+        || *m_format == PatchFormat::OldContext;
+    const bool normalAllowed = (!m_format && m_normalAllowed)
+        || (m_format && *m_format == PatchFormat::Normal);
     std::optional<FilePatch> patch;
     int64_t lastHeader = -1;  // index of this patch's last header line
     size_t lastLine = m_pos;   // the last line consumed as part of the patch
@@ -579,8 +1124,9 @@ std::optional<FilePatch> PatchReader::Next(int strip, bool& garbage) {
             continue;
         }
 
-        // "diff --git A B": the first line of a git patch.
-        if (StartsWith(text, "diff --git")) {
+        // "diff --git A B": the first line of a git patch, its hunks being
+        // unified ones.
+        if (unifiedAllowed && StartsWith(text, "diff --git")) {
             if (patch) {
                 break;  // the previous patch is over, git hunks or not
             }
@@ -622,8 +1168,53 @@ std::optional<FilePatch> PatchReader::Next(int strip, bool& garbage) {
             }
         }
 
+        // A "*** NAME [TIME]" line followed by a "--- NAME [TIME]" one: a
+        // context diff's file headers, read as the unified ones are.
+        if (contextAllowed && StartsWith(text, "***") && !IsStarHunkLine(text)
+            && i + 1 < n) {
+            bool crNext = false;
+            const std::string next = LineText(i + 1, crNext);
+            if (StartsWith(next, "---")) {
+                const HeaderName oldSide = ParseHeaderName(HeaderText(text).substr(3));
+                const HeaderName newSide = ParseHeaderName(HeaderText(next).substr(3));
+                if ((oldSide.name || oldSide.absent) && (newSide.name || newSide.absent)) {
+                    if (patch && !patch->hunks.empty()) {
+                        break;  // a new patch begins here
+                    }
+                    if (!patch) {
+                        patch = FilePatch{};
+                    }
+                    if (cr || crNext) {
+                        patch->stripTrailingCr = true;
+                    }
+                    patch->oldName = oldSide.name ? StripFileName(*oldSide.name, strip)
+                        : std::nullopt;
+                    patch->newName = newSide.name ? StripFileName(*newSide.name, strip)
+                        : std::nullopt;
+                    patch->oldTimeText = oldSide.timeText;
+                    patch->newTimeText = newSide.timeText;
+                    if (oldSide.absent) {
+                        patch->oldAbsence = SideAbsence::Surely;
+                    }
+                    if (newSide.absent) {
+                        patch->newAbsence = SideAbsence::Surely;
+                    }
+                    if (IsEpochStamp(oldSide.timeText)) {
+                        patch->oldAbsence = SideAbsence::Surely;
+                    }
+                    if (IsEpochStamp(newSide.timeText)) {
+                        patch->newAbsence = SideAbsence::Surely;
+                    }
+                    lastHeader = static_cast<int64_t>(i) + 1;
+                    lastLine = i + 1;
+                    i += 2;
+                    continue;
+                }
+            }
+        }
+
         // A "--- NAME [TIME]" line followed by a "+++ ..." one.
-        if (StartsWith(text, "---") && i + 1 < n) {
+        if (unifiedAllowed && StartsWith(text, "---") && i + 1 < n) {
             bool crNext = false;
             const std::string next = LineText(i + 1, crNext);
             if (StartsWith(next, "+++")) {
@@ -666,11 +1257,11 @@ std::optional<FilePatch> PatchReader::Next(int strip, bool& garbage) {
             }
         }
 
-        // A hunk. With no headers before it, the patch begins here.
+        // A unified hunk. With no headers before it, the patch begins here.
         int64_t dummyStart = 0, dummyCount = 0;
         std::string dummyFunction;
-        if (ParseHunkHeader(text, dummyStart, dummyCount, dummyStart, dummyCount,
-                dummyFunction)) {
+        if (unifiedAllowed && ParseHunkHeader(text, dummyStart, dummyCount, dummyStart,
+                dummyCount, dummyFunction, nullptr, nullptr)) {
             if (!patch) {
                 patch = FilePatch{};
                 lastHeader = static_cast<int64_t>(i) - 1;
@@ -682,6 +1273,41 @@ std::optional<FilePatch> PatchReader::Next(int strip, bool& garbage) {
             lastLine = after - 1;
             i = after;
             continue;
+        }
+
+        // A context hunk: its "***************" line.
+        if (contextAllowed && IsStarHunkLine(text)) {
+            if (!patch) {
+                patch = FilePatch{};
+                lastHeader = static_cast<int64_t>(i) - 1;
+            }
+            if (cr) {
+                patch->stripTrailingCr = true;
+            }
+            const size_t after = ReadContextHunk(i, *patch);
+            lastLine = after - 1;
+            i = after;
+            continue;
+        }
+
+        // A normal hunk: "A[,B]{a|c|d}C[,D]". An "a" line with nothing after
+        // it at the input's end is not one (it names no file to read from).
+        if (normalAllowed) {
+            NormalCommand command;
+            if (ParseNormalCommand(text, command)
+                && !(command.kind == 'a' && i + 1 >= n)) {
+                if (!patch) {
+                    patch = FilePatch{};
+                    lastHeader = static_cast<int64_t>(i) - 1;
+                }
+                if (cr) {
+                    patch->stripTrailingCr = true;
+                }
+                const size_t after = ReadNormalHunk(i, *patch);
+                lastLine = after - 1;
+                i = after;
+                continue;
+            }
         }
 
         if (patch && !patch->hunks.empty()) {

@@ -33,8 +33,10 @@ struct ArgChoice {
 //   Try '<cmd> --help' for more information.
 // (all quoting with GnuQuote). The caller then returns 1 -- GNU's exit status
 // for an argmatch failure, whatever the command's usual error status.
+// |tryHelp| false leaves that last line out (patch's -V block has none).
 std::optional<int> ArgMatch(BuiltinContext& context, const std::string& longOption /* "--sort" */,
-                            const std::string& value, const std::vector<ArgChoice>& choices);
+                            const std::string& value, const std::vector<ArgChoice>& choices,
+                            bool tryHelp = true);
 
 // How opening an input operand went: each command words the failure itself.
 enum class InputOpenFailure { None, Missing, Directory, Denied, BadDescriptor };

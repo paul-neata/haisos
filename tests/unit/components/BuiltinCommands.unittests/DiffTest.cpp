@@ -581,6 +581,7 @@ TEST_F(BuiltinCommandsTest, DiffFindLongOptionExactFirst) {
     // A table shaped so an exact match comes after two entries it prefixes:
     // the exact match wins; a prefix of both is ambiguous.
     const std::vector<BuiltinOption> table = {
+        {'q', "", 4, BuiltinArgument::None},
         {' ', "ab-x", 1, BuiltinArgument::None},
         {' ', "ab-y", 2, BuiltinArgument::None},
         {' ', "ab", 3, BuiltinArgument::None},
@@ -590,6 +591,8 @@ TEST_F(BuiltinCommandsTest, DiffFindLongOptionExactFirst) {
     EXPECT_EQ(DiffFindLongOption("ab-y", table)->id, 2);
     EXPECT_EQ(DiffFindLongOption("ab-", table), nullptr);
     EXPECT_EQ(DiffFindLongOption("a", table), nullptr);
+    // A short-only option's empty long name matches no long option.
+    EXPECT_EQ(DiffFindLongOption("", table), nullptr);
 }
 
 TEST_F(BuiltinCommandsTest, DiffWhiteSpaceOptions) {

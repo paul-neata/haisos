@@ -265,7 +265,7 @@ const BuiltinOption* DiffFindLongOption(const std::string& name,
                                         const std::vector<BuiltinOption>& options) {
     const BuiltinOption* prefix = nullptr;
     for (const BuiltinOption& option : options) {
-        if (option.longName == name) {
+        if (!option.longName.empty() && option.longName == name) {
             return &option;
         }
     }

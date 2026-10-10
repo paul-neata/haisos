@@ -152,7 +152,7 @@ std::string BackupPathFor(BuiltinContext& context, const std::string& dest,
 }
 
 bool ParseBackupControlNamed(BuiltinContext& context, const std::string& reportedName,
-                             const std::string& word, BackupMode& out) {
+                             const std::string& word, BackupMode& out, bool tryHelp) {
     static const std::vector<ArgChoice> kControls = {
         {"none", static_cast<int>(BackupMode::None)},
         {"off", static_cast<int>(BackupMode::None)},
@@ -163,7 +163,7 @@ bool ParseBackupControlNamed(BuiltinContext& context, const std::string& reporte
         {"numbered", static_cast<int>(BackupMode::Numbered)},
         {"t", static_cast<int>(BackupMode::Numbered)},
     };
-    const auto matched = ArgMatch(context, reportedName, word, kControls);
+    const auto matched = ArgMatch(context, reportedName, word, kControls, tryHelp);
     if (!matched) {
         return false;
     }

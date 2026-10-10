@@ -50,7 +50,7 @@ Pause: no
 | 42 | [tools--jq-parse](tasks/tools--jq-parse.md) | done | 0.5.43 | - | #85 | 1 | 0C 1H 1M fixed, 3M 2L open | Windows red, not checked |
 | 43 | [tools--jq-json](tasks/tools--jq-json.md) | done | 0.5.44 | - | #86 | 1 | 0C 2H 1M fixed, 4M 4L open | Windows red, not checked (MSVC NaN constant in a test) |
 | 44 | [tools--jq-eval](tasks/tools--jq-eval.md) | done | 0.5.45 | 42, 43 | #87 | 1 | 0C 2H fixed, 4M 3L open | Windows red, not checked (Jq.unittests stack depth: see final--windows-fix) |
-| 45 | [tools--jq-paths](tasks/tools--jq-paths.md) | todo | | 44 | | | | |
+| 45 | [tools--jq-paths](tasks/tools--jq-paths.md) | in-progress | 0.5.46 | 44 | | | | |
 | 46 | [tools--jq-command](tasks/tools--jq-command.md) | todo | | 45, 4, 26 | | | | |
 | 47 | [tools--jq-builtins](tasks/tools--jq-builtins.md) | todo | | 46 | | | | |
 | 48 | [tools--jq-text](tasks/tools--jq-text.md) | todo | | 47, 3, 12 | | | | |
@@ -123,3 +123,4 @@ Pause: no
 - 2026-10-10 (implement) tools--jq-parse re-checked clean-room against 579a736 (Opus): jq source references (lexer.l, parser.y, token/rule names) removed, Haisos's own names; verified on the host's jq 1.7.1; seven wrong claims corrected; documented difference: import gives 'module not found'
 - 2026-10-10 (implement) tools--jq-json re-checked clean-room against 79ff345 (Opus): jq internal names (jv_*, jvp_dtoa, decNumber) removed, behaviour verified on jq 1.7.1; wrong claims fixed (-a escapes, n... tokens, UTF-8 repair one U+FFFD per bad sequence); AppendUtf8 moves to JqUtf8.h/.cpp
 - 2026-10-10 (implement) tools--jq-eval re-checked clean-room against 58c42cc (Opus): jq-internals wording rewritten as behaviour; real APIs from #85/#86; corrections from jq 1.7.1 (% sign, slice bounds, null indexing); folded in #85 (tree height bounded at 512, ~Node non-recursive, evaluation depth 1024, as-bodies without recursion, pattern keys String, expecting lists) and #86 (MSVC quiet_NaN, object key index from 16 members, lows); 756-line plan
+- 2026-10-10 (implement) tools--jq-paths re-checked clean-room against 96ecdd0 (Opus): jq library definitions (|=, paths, del) replaced by behaviour-only natives; path mode re-specified from jq 1.7.1 (bound/loose outputs, reduce/foreach paths, delpaths order); folded in #87's findings plus a new '?' scope fix; documented differences: 256 MiB string repetition limit, array index growth limit, destructuring adds no path; 644-line plan

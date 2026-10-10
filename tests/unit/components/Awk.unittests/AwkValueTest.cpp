@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -288,61 +289,61 @@ TEST(AwkValueTest, FieldStoreAssignmentsRebuildRecord) {
     // record ` a b `, $3 = "c" -> $0 `a b c`, NF 3.
     store.SetRecord(" a b ", " ");
     store.SetField(3, Awk::Value::FromString("c"), " ", kConvFmt);
-    EXPECT_EQ(store.Record(), "a b c");
+    EXPECT_EQ(store.Record(kConvFmt), "a b c");
     EXPECT_EQ(store.NF(), 3u);
     // NF = 2 -> `a b`.
     store.SetNF(2, " ");
-    EXPECT_EQ(store.Record(), "a b");
+    EXPECT_EQ(store.Record(kConvFmt), "a b");
     EXPECT_EQ(store.NF(), 2u);
     // $5 = "e" -> `a b   e`, NF 5.
     store.SetField(5, Awk::Value::FromString("e"), " ", kConvFmt);
-    EXPECT_EQ(store.Record(), "a b   e");
+    EXPECT_EQ(store.Record(kConvFmt), "a b   e");
     EXPECT_EQ(store.NF(), 5u);
 
     // record `a b c`, OFS `:`, $7 = "z" -> `a:b:c::::z`, NF 7.
     store.SetRecord("a b c", " ");
     store.SetField(7, Awk::Value::FromString("z"), ":", kConvFmt);
-    EXPECT_EQ(store.Record(), "a:b:c::::z");
+    EXPECT_EQ(store.Record(kConvFmt), "a:b:c::::z");
     EXPECT_EQ(store.NF(), 7u);
 
     // record `a b c`, NF = 5 -> `a b c  `; then $2 = "" -> `a  c  `.
     store.SetRecord("a b c", " ");
     store.SetNF(5, " ");
-    EXPECT_EQ(store.Record(), "a b c  ");
+    EXPECT_EQ(store.Record(kConvFmt), "a b c  ");
     EXPECT_EQ(store.NF(), 5u);
     store.SetField(2, Awk::Value::FromString(""), " ", kConvFmt);
-    EXPECT_EQ(store.Record(), "a  c  ");
+    EXPECT_EQ(store.Record(kConvFmt), "a  c  ");
 
     // empty record, NF = 2 -> $0 is one space; then $2 = "b" -> ` b`.
     store.SetRecord("", " ");
     store.SetNF(2, " ");
-    EXPECT_EQ(store.Record(), " ");
+    EXPECT_EQ(store.Record(kConvFmt), " ");
     store.SetField(2, Awk::Value::FromString("b"), " ", kConvFmt);
-    EXPECT_EQ(store.Record(), " b");
+    EXPECT_EQ(store.Record(kConvFmt), " b");
 
     // $0 = "  x  " -> NF 1, $1 `x`.
     store.SetRecord("  x  ", " ");
     EXPECT_EQ(store.NF(), 1u);
-    EXPECT_EQ(store.Field(1).ToString(kConvFmt), "x");
-    EXPECT_EQ(store.Field(0).ToString(kConvFmt), "  x  ");
+    EXPECT_EQ(store.Field(1, kConvFmt).ToString(kConvFmt), "x");
+    EXPECT_EQ(store.Field(0, kConvFmt).ToString(kConvFmt), "  x  ");
 }
 
 TEST(AwkValueTest, FieldStoreSplitsWithTheFsSavedWithTheRecord) {
     Awk::FieldStore store = MakeStore();
     store.SetRecord("a:b", " ");
-    // The fields are split with the FS saved at SetRecord, however many
-    // records have come and gone.
+    // The store splits with the FS given to SetRecord; it never sees the
+    // caller's FS, so a record that came while FS was " " stays one field.
     EXPECT_EQ(store.NF(), 1u);
-    EXPECT_EQ(store.Field(1).ToString(kConvFmt), "a:b");
+    EXPECT_EQ(store.Field(1, kConvFmt).ToString(kConvFmt), "a:b");
     // $0 = value re-splits with that same FS.
     store.SetField(0, Awk::Value::FromString("x:y"), " ", kConvFmt);
     EXPECT_EQ(store.NF(), 1u);
-    EXPECT_EQ(store.Field(1).ToString(kConvFmt), "x:y");
-    EXPECT_EQ(store.Record(), "x:y");
+    EXPECT_EQ(store.Field(1, kConvFmt).ToString(kConvFmt), "x:y");
+    EXPECT_EQ(store.Record(kConvFmt), "x:y");
     // Fields come from the record as input: strnum when they look numeric.
     store.SetRecord(" 12 x", " ");
-    EXPECT_EQ(store.Field(1).GetType(), Awk::Value::Type::StrNum);
-    EXPECT_EQ(store.Field(2).GetType(), Awk::Value::Type::String);
+    EXPECT_EQ(store.Field(1, kConvFmt).GetType(), Awk::Value::Type::StrNum);
+    EXPECT_EQ(store.Field(2, kConvFmt).GetType(), Awk::Value::Type::String);
 }
 
 TEST(AwkValueTest, FieldStoreKeepsAssignedTypesAndConvertsNumbers) {
@@ -350,25 +351,25 @@ TEST(AwkValueTest, FieldStoreKeepsAssignedTypesAndConvertsNumbers) {
     store.SetRecord("a b", " ");
     store.SetField(2, Awk::Value::FromNumber(3.5), " ", kConvFmt);
     // The field reads back as the number it was assigned.
-    EXPECT_EQ(store.Field(2).GetType(), Awk::Value::Type::Number);
-    EXPECT_EQ(store.Field(2).ToNumber(), 3.5);
+    EXPECT_EQ(store.Field(2, kConvFmt).GetType(), Awk::Value::Type::Number);
+    EXPECT_EQ(store.Field(2, kConvFmt).ToNumber(), 3.5);
     // $0 is rebuilt with the conversion format.
-    EXPECT_EQ(store.Record(), "a 3.5");
+    EXPECT_EQ(store.Record(kConvFmt), "a 3.5");
     // Beyond NF the field is Uninitialized; the rebuilt $0 is a plain
-    // string (only a record that came from input is strnum, and "a 3.5"
-    // looks like no number anyway).
-    EXPECT_EQ(store.Field(4).GetType(), Awk::Value::Type::Uninitialized);
-    EXPECT_EQ(store.Field(0).GetType(), Awk::Value::Type::String);
+    // string: only a record set by SetRecord is strnum, and a field
+    // assignment made this one.
+    EXPECT_EQ(store.Field(4, kConvFmt).GetType(), Awk::Value::Type::Uninitialized);
+    EXPECT_EQ(store.Field(0, kConvFmt).GetType(), Awk::Value::Type::String);
     // A record that came from input and looks numeric: $0 is a strnum.
     store.SetRecord(" 12 ", " ");
-    EXPECT_EQ(store.Field(0).GetType(), Awk::Value::Type::StrNum);
+    EXPECT_EQ(store.Field(0, kConvFmt).GetType(), Awk::Value::Type::StrNum);
 }
 
 TEST(AwkValueTest, FieldStoreRefusesNegativeIndexAndNF) {
     Awk::FieldStore store = MakeStore();
     store.SetRecord("a b", " ");
     try {
-        (void)store.Field(-1);
+        (void)store.Field(-1, kConvFmt);
         FAIL() << "expected AwkFatal";
     } catch (const Awk::AwkFatal& error) {
         EXPECT_STREQ(error.what(), "attempt to access field -1");
@@ -386,6 +387,60 @@ TEST(AwkValueTest, FieldStoreRefusesNegativeIndexAndNF) {
     } catch (const Awk::AwkFatal& error) {
         EXPECT_STREQ(error.what(), "NF set to negative value");
     }
+}
+
+TEST(AwkValueTest, FieldStoreRebuildsWithTheConvfmtOfTheRebuild) {
+    Awk::FieldStore store = MakeStore();
+    store.SetRecord("a b", " ");
+    store.SetField(2, Awk::Value::FromNumber(3.5), " ", kConvFmt);
+    // The CONVFMT of the first read after the assignment is what the rebuild
+    // uses, and the rebuild happens once: a later change changes nothing.
+    EXPECT_EQ(store.Record("%.2f"), "a 3.50");
+    EXPECT_EQ(store.Record(kConvFmt), "a 3.50");
+    // The rebuilt $0 is a plain string; a record set again is input once more.
+    EXPECT_EQ(store.Field(0, kConvFmt).GetType(), Awk::Value::Type::String);
+    store.SetRecord(" 12 ", " ");
+    EXPECT_EQ(store.Field(0, kConvFmt).GetType(), Awk::Value::Type::StrNum);
+    // $0 = <number> goes through SetRecord: the new record is input.
+    store.SetField(0, Awk::Value::FromNumber(12), " ", kConvFmt);
+    EXPECT_EQ(store.Field(0, kConvFmt).GetType(), Awk::Value::Type::StrNum);
+}
+
+TEST(AwkValueTest, FieldStoreRefusesTooManyFields) {
+    Awk::FieldStore store = MakeStore();
+    store.SetRecord("a b", " ");
+    try {
+        store.SetNF(1000001, " ");
+        FAIL() << "expected AwkFatal";
+    } catch (const Awk::AwkFatal& error) {
+        EXPECT_STREQ(error.what(), "NF set to 1000001: more than 1000000 fields");
+    }
+    try {
+        store.SetField(1000001, Awk::Value::FromString("x"), " ", kConvFmt);
+        FAIL() << "expected AwkFatal";
+    } catch (const Awk::AwkFatal& error) {
+        EXPECT_STREQ(error.what(), "attempt to assign field 1000001: more than 1000000 fields");
+    }
+    // The limit itself is allowed; reading far beyond NF stays quiet.
+    store.SetNF(1000000, " ");
+    EXPECT_EQ(store.NF(), 1000000u);
+    EXPECT_EQ(store.Field(1000002, kConvFmt).GetType(), Awk::Value::Type::Uninitialized);
+}
+
+// --- AwkIntegerOf ---
+
+TEST(AwkValueTest, AwkIntegerOf) {
+    const intmax_t kMin = std::numeric_limits<intmax_t>::min();
+    EXPECT_EQ(Awk::AwkIntegerOf(3.9), 3);
+    EXPECT_EQ(Awk::AwkIntegerOf(-3.9), -3);
+    EXPECT_EQ(Awk::AwkIntegerOf(0.5), 0);
+    EXPECT_EQ(Awk::AwkIntegerOf(1e30), kMin);
+    EXPECT_EQ(Awk::AwkIntegerOf(-1e30), kMin);
+    EXPECT_EQ(Awk::AwkIntegerOf(std::nan("")), kMin);
+    // 2^63 itself is out of range; -2^63 is intmax_t's own minimum.
+    EXPECT_EQ(Awk::AwkIntegerOf(9223372036854775808.0), kMin);
+    EXPECT_EQ(Awk::AwkIntegerOf(-9223372036854775808.0), kMin);
+    EXPECT_EQ(Awk::AwkIntegerOf(4611686018427387904.0), 4611686018427387904);
 }
 
 // --- RecordReader ---
@@ -462,6 +517,42 @@ TEST(AwkValueTest, RecordReaderReadsALongLineWhole) {
     EXPECT_EQ(harness.Next("\n", record), Awk::RecordReadResult::Record);
     EXPECT_EQ(record, std::string(200 * 1024, 'x'));
     EXPECT_EQ(harness.Next("\n", record), Awk::RecordReadResult::End);
+}
+
+TEST(AwkValueTest, RecordReaderReadsManyShortRecords) {
+    // 300000 records `x<n>\n', each 7 bytes or fewer: the buffer's front is
+    // consumed per record, so this stays linear where erasing every returned
+    // record would not. Spot-check the records, not all of them.
+    const auto makeRecords = [] {
+        std::string bytes;
+        for (int i = 0; i < 300000; ++i) {
+            bytes += "x" + std::to_string(i) + "\n";
+        }
+        return bytes;
+    };
+    const std::string bytes = makeRecords();
+    const auto checkAll = [&](ReaderHarness& harness) {
+        std::string record;
+        for (int i = 0; i < 300000; ++i) {
+            ASSERT_EQ(harness.Next("\n", record), Awk::RecordReadResult::Record);
+            if (i == 0 || i == 65535 || i == 65536 || i == 299999) {
+                EXPECT_EQ(record, "x" + std::to_string(i));
+            }
+        }
+        EXPECT_EQ(harness.Next("\n", record), Awk::RecordReadResult::End);
+    };
+    ReaderHarness whole;
+    whole.Feed(bytes);
+    whole.EndInput();
+    checkAll(whole);
+    // The same records again, fed 7 bytes at a time: every Read then takes
+    // what has accumulated, across many block boundaries.
+    ReaderHarness inSevens;
+    for (size_t pos = 0; pos < bytes.size(); pos += 7) {
+        inSevens.Feed(bytes.substr(pos, 7));
+    }
+    inSevens.EndInput();
+    checkAll(inSevens);
 }
 
 TEST(AwkValueTest, RecordReaderStopsPromptly) {

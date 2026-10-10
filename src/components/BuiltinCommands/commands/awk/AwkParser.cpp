@@ -729,6 +729,19 @@ StmtPtr Parser::ParseBody() {
     return ParseStatement();
 }
 
+// After the body of an if (before 'else') or of a do (before 'while'): gawk
+// takes one ';' -- the one that ended a simple then-body, which is also what
+// separates it from an 'else' -- only when the body did not end in '}', and
+// then only newlines. A second ';' (or one after a block) leaves it for the
+// statements around, so what follows is the syntax error, at its own token,
+// as gawk reports it.
+void Parser::SkipBodySeparator() {
+    if (m_previousKind != TokenKind::RightBrace && m_token.kind == TokenKind::Semicolon) {
+        Advance();
+    }
+    SkipNewlines();
+}
+
 StmtPtr Parser::ParseStatement() {
     switch (m_token.kind) {
         case TokenKind::LeftBrace:
@@ -742,8 +755,8 @@ StmtPtr Parser::ParseStatement() {
             SkipNewlines();
             stmt->body = ParseBody();
             // The ';' that ended a simple then-body is also what separates it
-            // from an 'else'.
-            SkipStatementSeparators();
+            // from an 'else' -- but only that one, as gawk's.
+            SkipBodySeparator();
             if (m_token.kind == TokenKind::Else) {
                 Advance();  // the lexer skips the newlines after 'else'
                 stmt->elseBody = ParseBody();
@@ -768,7 +781,7 @@ StmtPtr Parser::ParseStatement() {
             ++m_loopDepth;
             stmt->body = ParseBody();
             --m_loopDepth;
-            SkipStatementSeparators();
+            SkipBodySeparator();
             Expect(TokenKind::While);
             Expect(TokenKind::LeftParen);
             stmt->expr = ParseExpression();

@@ -19,6 +19,7 @@ add_library(BuiltinCommands STATIC
     commands/awk/AwkError.cpp
     commands/awk/AwkFields.cpp
     commands/awk/AwkInput.cpp
+    commands/awk/AwkInterpreter.cpp
     commands/awk/AwkInvocation.cpp
     commands/awk/AwkLexer.cpp
     commands/awk/AwkParser.cpp

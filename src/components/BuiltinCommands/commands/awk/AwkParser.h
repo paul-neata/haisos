@@ -7,21 +7,6 @@
 
 namespace Haisos::Awk {
 
-// The recursive-descent parser of awk expressions, statements and whole
-// programs (see "Parsing programs" in the awk CLAUDE.md), POSIX precedence
-// and associativity, lowest first (one method per level): assignment, ternary,
-// '||', '&&', 'in', '~' and '!~', the comparison operators, '| getline',
-// concatenation, '+' and '-', '*' '/' '%', unary '! - +', '^' (the exponent
-// at the unary level, so right-associative), '++'/'--' (pre and post) and
-// the primaries -- among them '$' (a field of a dollar operand: no postfix
-// under it, so $i++ is ($i)++) and every 'getline' form.
-//
-// It keeps exactly one token of lookahead: m_token is the current token;
-// Advance() fetches the next, and the lexer never reads past m_token -- so
-// a '/' (or '/=') standing where an operand is expected can be handed back
-// to Lexer::ScanRegex and become a regex literal; anywhere else it is
-// division. A plain class (no interface), owned by value; its lexer is a
-// member.
 // A name used as a variable or an array: where, for the check after the whole
 // program that a defined function's name is not (gawk's "called with space
 // between name and `(' ...").
@@ -45,6 +30,21 @@ struct ParseResult {
 // span two sources: each is parsed by its own Parser.
 ParseResult ParseAwkProgram(std::vector<AwkSource> sources);
 
+// The recursive-descent parser of awk expressions, statements and whole
+// programs (see "Parsing programs" in the awk CLAUDE.md), POSIX precedence
+// and associativity, lowest first (one method per level): assignment, ternary,
+// '||', '&&', 'in', '~' and '!~', the comparison operators, '| getline',
+// concatenation, '+' and '-', '*' '/' '%', unary '! - +', '^' (the exponent
+// at the unary level, so right-associative), '++'/'--' (pre and post) and
+// the primaries -- among them '$' (a field of a dollar operand: no postfix
+// under it, so $i++ is ($i)++) and every 'getline' form.
+//
+// It keeps exactly one token of lookahead: m_token is the current token;
+// Advance() fetches the next, and the lexer never reads past m_token -- so
+// a '/' (or '/=') standing where an operand is expected can be handed back
+// to Lexer::ScanRegex and become a regex literal; anywhere else it is
+// division. A plain class (no interface), owned by value; its lexer is a
+// member.
 class Parser {
 public:
     // Parses tokens of |source|, which is Program::sources[sourceIndex].
@@ -123,6 +123,10 @@ private:
     void ExpectSimpleStatementEnd();
     void SkipNewlines();
     void SkipStatementSeparators();
+    // One ';' (when the body did not end in '}') and then the newlines: what
+    // may separate an if's then-body from its 'else', or a do's body from its
+    // 'while' -- as gawk, no more than one ';'.
+    void SkipBodySeparator();
     StmtPtr MakeStmt(StmtKind kind, const Token& token);
     // A parse-time error, gawk's: recorded, parsing goes on.
     void AddError(const Token& token, const std::string& message);
@@ -131,7 +135,10 @@ private:
     void AddNameUse(const std::string& name, const SourcePosition& position);
     void Expect(TokenKind kind);
 
-    void Advance() { m_token = m_lexer.Next(); }
+    void Advance() {
+        m_previousKind = m_token.kind;
+        m_token = m_lexer.Next();
+    }
     bool IsAssignOp(TokenKind kind) const;
     bool StartsConcatOperand(TokenKind kind) const;
     ExprPtr MakeExpr(ExprKind kind, const Token& token);
@@ -146,6 +153,7 @@ private:
 
     Lexer m_lexer;
     Token m_token;
+    TokenKind m_previousKind = TokenKind::EndOfInput;  // the last token Advance() consumed
     int m_sourceIndex = 0;
     // --- program parsing state ---
     bool m_programMode = false;     // ParseSourceItems is running

@@ -1,4 +1,5 @@
 #include "BuiltinCommand.h"
+#include "commands/awk/AwkInterpreter.h"
 #include "commands/awk/AwkInvocation.h"
 #include "commands/awk/AwkParser.h"
 #include <memory>
@@ -12,7 +13,7 @@ namespace {
 class AwkCommand : public IBuiltinCommand {
 public:
     std::string Name() const override { return "awk"; }
-    std::string Version() const override { return "1.0.2"; }
+    std::string Version() const override { return "1.1.0"; }
 
     const std::vector<BuiltinOption>& Options() const override {
         return Awk::AwkOptionTable();
@@ -36,7 +37,12 @@ public:
             "gawk's second, location-less line.\n"
             "The end of a -f file inside a rule reports `(END OF FILE)' with the\n"
             "caret at column 0; gawk's column varies with the file's ending.\n"
-            "Running programs is not implemented yet.",
+            "`for (k in a)' visits the keys in insertion order; gawk's order is\n"
+            "unspecified.\n"
+            "At most 1000000 fields may be made by an assignment ($n = v, NF = n);\n"
+            "gawk has no such limit.\n"
+            "Regular expressions, functions, printf, getline and output\n"
+            "redirections are not available yet.",
             "gawk",
         };
     }
@@ -60,8 +66,8 @@ public:
         if (parsed.failed) {
             return 1;
         }
-        context.ErrorText("awk: running programs is not implemented yet\n");
-        return 2;
+        Awk::Interpreter interpreter(context, std::move(parsed.program), *invocation);
+        return interpreter.Run();
     }
 };
 

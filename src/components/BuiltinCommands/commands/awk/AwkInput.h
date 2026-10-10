@@ -27,8 +27,14 @@ private:
     BuiltinContext& m_context;
     std::shared_ptr<IFileDescriptor> m_input;
     // What was read past the record last returned: the bytes of the records
-    // still to come (this reader is the only reader of its descriptor).
+    // still to come (this reader is the only reader of its descriptor), with
+    // m_start where the next record begins in it. The consumed front is
+    // erased only just before a block is read (a record returned never costs
+    // an erase of its own, so a block of short lines is not quadratic); the
+    // search for the separator starts at m_start and resumes, within one
+    // call, after the bytes already searched.
     std::string m_buffer;
+    size_t m_start = 0;
     bool m_eof = false;
 };
 

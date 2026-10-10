@@ -19,7 +19,7 @@ awk rock and adds its files here:
   `FormatAwkError` the `warning:`/`error:` lines, all behind
   `AwkLocationPrefix`: `awk: <source>:<line>: `. `AwkFatal` is a run-time
   "fatal:" error (the program stops, status 2; the interpreter formats it,
-  with or without its location -- awk--interpreter).
+  with or without its location -- see "Running").
 - `AwkLexer.h/.cpp` - the `Lexer` of POSIX awk as gawk `--posix` reads a
   program, and `DecodeAwkStringEscapes`, awk's string escapes (also the
   escapes of a `-v` value, `-F`'s value and `var=value` operands when the
@@ -186,12 +186,14 @@ awk rock and adds its files here:
   and `FieldStore` (see "Values, fields and records" below).
 - `AwkInput.h/.cpp` - `RecordReader`, the record reader of one input (see
   "Values, fields and records" below).
-- `Awk.cpp` - the `awk` builtin itself: `Name`, `Version` 1.0.2, the option
+- `AwkInterpreter.h/.cpp` - the `Interpreter` that runs a parsed program
+  (see "Running" below).
+- `Awk.cpp` - the `awk` builtin itself: `Name`, `Version` 1.1.0, the option
   table, the gawk-based `--help` (`BuiltinHelp::basedOn`), and `Run`:
   parse the invocation, load the sources, parse the program
   (`ParseAwkProgram`) -- its diagnostics go to stderr and any failure is
-  status 1 -- then -- for now -- report `awk: running programs is not
-  implemented yet` with status 2 (awk--interpreter replaces this).
+  status 1 -- then hand the program and the invocation to `Awk::Interpreter`
+  and return its status.
 
 The man page is the `--help` text, like most builtins (`ManPage` is not
 overridden).
@@ -230,9 +232,9 @@ sub-nodes in parentheses -- the format the tests compare against, exact:
 
 The data layer of the interpreter (`AwkValue`, `AwkFields`, `AwkInput`),
 behaviour matched to POSIX awk and the observed output of gawk `--posix`
-5.2.1. Nothing user-visible yet: awk--interpreter builds the interpreter on
-these, awk--records adds regex field separators and `RS = ""`, awk--functions
-and awk--io reuse them.
+5.2.1. The interpreter (see "Running" below) is built on these; awk--records
+adds regex field separators and `RS = ""`, awk--functions and awk--io reuse
+them.
 
 A `Value` is one of four kinds: Uninitialized (what every variable starts
 as, "" and 0 at once), Number, String, and *strnum* -- text that came from
@@ -270,15 +272,81 @@ itself. StrNum comes only from `FromInput`: the fields and `$0`, the
   paragraph mode). Fields read as strnum; an assigned field keeps its type.
   Assigning to a field beyond NF extends with empty fields; a field or NF
   assignment rebuilds $0 with the OFS (and CONVFMT for Number fields) of
-  that assignment; `$0 = v` sets a new record, re-split with the FS saved
-  with the current record.
+  that assignment, and the rebuilt $0 is a plain String, not a strnum, while
+  the fields themselves still read as strnum; `$0 = v` sets a new record,
+  re-split with the FS saved with the current record. `NF = n` truncates to
+  the first n fields or extends with empty ones. An assignment may make at
+  most `kAwkMaxFields` (1000000) fields; a larger `$n = v` or `NF = n` is
+  refused (``NF set to N: more than 1000000 fields`` / ``attempt to assign
+  field N: more than 1000000 fields``), while reading `$n` past the limit
+  stays quiet, returning an empty string.
 - The record reader (`RecordReader`): one input, read in 64 KiB blocks,
   each record separated by the first byte of RS as it is at that call (a
   change applies from the next record on; `RS = ""` paragraph mode is
   awk--records'). The bytes past the record stay in the reader's own buffer
-  for the next call; it stops promptly on a stop (checked before each read)
-  or a `kIOInterrupted` read, and reports an error on any other negative
-  read.
+  for the next call, the buffer's consumed front erased before a block is
+  appended so many small records cannot grow it without bound; it stops
+  promptly on a stop (checked before each read) or a `kIOInterrupted`
+  read, and reports an error on any other negative read.
+
+## Running
+
+`AwkInterpreter.h/.cpp` -- the `Interpreter`, one instance per run of the
+command (`Awk.cpp` builds it with the parsed program and the invocation).
+Its shape is fixed: the later tasks of the rock (records, functions, io)
+fill its hooks without changing it.
+
+- `Variable` is a global's storage: Untyped until first used, then Scalar
+  or Array (the other use is a fatal error; the array is shared, for
+  awk--functions' by-reference parameters). The special variables live at
+  fixed `SpecialSlot`s, registered first, by name: FS, OFS, ORS, RS,
+  SUBSEP, CONVFMT, OFMT, NR, FNR, FILENAME, RSTART, RLENGTH, ARGC, ARGV,
+  ENVIRON, NF -- NF's variable is unused, NF living in the `FieldStore`
+  (a read goes to `NF()`, an assignment to `SetNF`). `Flow` is what a
+  statement tells the ones around it (Normal, Break, Continue, Next,
+  NextFile, Exit, Return).
+- `Prepare` resolves every name in the program to a global slot
+  (`ResolveExpr`/`ResolveStmt`), sets the specials (ARGV[0] "awk" and then
+  the operands, ARGC one more than they, ENVIRON an empty array) and
+  applies the pre-assignments in order: `-F` to FS, `-v name=value` (and
+  the operands' `var=value`) through `AssignName`; a `-v` name that is not
+  an identifier is gawk's fatal `` `' is not a legal variable name ``.
+- The run order is gawk's: `RunBeginItems`, then the main loop (skipped
+  when BEGIN ran `exit`, and when the program has no main item and no END
+  item, the input never read), then `RunEndItems`. Each record comes from
+  `NextMainRecord` into $0 (NR and FNR up), then `RunMainItems` runs the
+  main items in order. `exit` skips the rest of the records and the items
+  but not the END items; `next` the rest of this record's items; `nextfile`
+  also the rest of this file.
+- Ranges and operands: a range pattern's in-range state is kept per item
+  (`MatchesPattern`); a pattern-only item is a `print $0`. After BEGIN,
+  `OpenNextInput` walks ARGV from element 1 on (a BEGIN edit of
+  ARGC/ARGV changes what is read): a missing or empty element is skipped,
+  `name=value` with a legal identifier is assigned, anything else is
+  opened for reading (`-` too, the standard input, named `-`; a failure
+  is gawk's fatal ``cannot open file `X' for reading: <reason>``); when
+  nothing was opened, the standard input is read once.
+- `ValueOf` evaluates expressions on the `AwkValue` conversions (CONVFMT
+  for the implicit one, OFMT for print), POSIX's comparison rule with
+  `kAwkUnordered` mapped per relational operator, concatenation joining
+  through CONVFMT. Integer values -- a field index, NF, an exit code,
+  ARGV's walk -- go through `AwkIntegerOf`: truncated toward zero, NaN
+  and out-of-intmax values INTMAX_MIN. `Output` is print's one door: its
+  text (the arguments joined by OFS, then ORS; an empty list prints $0)
+  written to stdout here, awk--io adding the redirections through it.
+  `SplitRecord` is the FieldStore's splitter (a regex FS or paragraph
+  mode refused for now).
+- The hooks later tasks fill: `CallBuiltin` and `CallFunction`
+  (awk--functions), `EvaluateGetline` (awk--io), and the regexes
+  (`~`, `!~`, a `/re/` pattern, a regex FS) and `RS = ""`, report
+  ``... is not implemented yet`` for now.
+- An `AwkFatal` unwinds to `Run`, which reports gawk's ``fatal:`` line --
+  with a location ``awk: <source>:<line>: (FILENAME=<f> FNR=<n>) fatal:
+  <message>``, the FILENAME/FNR part only past the first record, without
+  one ``awk: fatal: <message>`` -- and exits 2. A stop asked for unwinds
+  as `Stopped` and exits 143; loops and the main loop check
+  `ThrowIfStopped` per iteration, the record reader per read, so a
+  stopped awk ends promptly.
 
 ## Documented exceptions (checked against gawk --posix 5.2.1)
 
@@ -303,5 +371,9 @@ itself. StrNum comes only from `FromInput`: the fields and `$0`, the
   with a fatal error.
 - A strnum NaN compares unordered (`kAwkUnordered`): `$1 == $2` is false for
   the fields `nan` and `+nan`; gawk 5.2.1 `--posix` gives it true.
-- Running programs is not implemented yet; later tasks of the rock append
-  their exceptions here.
+- At most 1000000 fields may be made by an assignment (`$n = v`, `NF = n`,
+  the message ``NF set to N: more than 1000000 fields``); gawk's own limit
+  depends on its build.
+- The parts that do not run yet (regexes, functions, `printf`, `getline`,
+  output redirections) report ``... is not implemented yet``; later tasks
+  of the rock append their exceptions here.

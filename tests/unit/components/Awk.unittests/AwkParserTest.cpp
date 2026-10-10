@@ -218,6 +218,15 @@ TEST(AwkProgramParserTest, Statements) {
     ExpectProgram("{ ; ; x }", "{ x }");
     // A lone `;` body is an empty Block.
     ExpectProgram("{ if (x) ; }", "{ if (x) { } }");
+    // The one `;` gawk allows after an if's body separates it from its else.
+    ExpectProgram("{ if (1) ; else print 2 }", "{ if (1) { } else print 2 }");
+    ExpectProgram("{ if (1) print 1;\n else print 2 }",
+                  "{ if (1) print 1 else print 2 }");
+    ExpectProgram("{ if (1) {print 1}\n else print 2 }",
+                  "{ if (1) { print 1 } else print 2 }");
+    ExpectProgram("{ do {x++}\n while (x < 3) }",
+                  "{ do { (post++ x) } while ((< x 3)) }");
+    ExpectProgram("{ do ; while (0) }", "{ do { } while (0) }");
     ExpectProgram("{\n  a = 1\n  b = 2\n}", "{ (= a 1); (= b 2) }");
 }
 
@@ -291,6 +300,23 @@ TEST(AwkProgramParserTest, SyntaxErrors) {
                       "awk: cmd. line:1: warning: escape sequence `\\q' treated as plain `q'\n"
                       "awk: cmd. line:1: BEGIN { x = \"\\q\" ; = }\n"
                       "awk: cmd. line:1:                    ^ syntax error\n");
+    // One `;` may separate an if's or do's body from what follows; two are
+    // gawk's syntax error, the caret on what comes after them.
+    ExpectDiagnostics("BEGIN { if (1) print 1;; else print 2 }",
+                      "awk: cmd. line:1: BEGIN { if (1) print 1;; else print 2 }\n"
+                      "awk: cmd. line:1:                          ^ syntax error\n");
+    ExpectDiagnostics("BEGIN { if (1) {} ; else print 2 }",
+                      "awk: cmd. line:1: BEGIN { if (1) {} ; else print 2 }\n"
+                      "awk: cmd. line:1:                     ^ syntax error\n");
+    ExpectDiagnostics("BEGIN { if (0) print 1\n;else print 2 }",
+                      "awk: cmd. line:2: ;else print 2 }\n"
+                      "awk: cmd. line:2:  ^ syntax error\n");
+    ExpectDiagnostics("BEGIN { do x++;; while (x < 3) }",
+                      "awk: cmd. line:1: BEGIN { do x++;; while (x < 3) }\n"
+                      "awk: cmd. line:1:                ^ syntax error\n");
+    ExpectDiagnostics("BEGIN { do {} ; while (0) }",
+                      "awk: cmd. line:1: BEGIN { do {} ; while (0) }\n"
+                      "awk: cmd. line:1:               ^ syntax error\n");
 }
 
 TEST(AwkProgramParserTest, ParseTimeErrors) {

@@ -310,4 +310,20 @@ std::vector<std::string> AwkArray::Keys() const {
     return keys;
 }
 
+// --- AwkIntegerOf ---
+
+intmax_t AwkIntegerOf(double number) {
+    if (std::isnan(number)) {
+        return std::numeric_limits<intmax_t>::min();
+    }
+    const double truncated = std::trunc(number);
+    // 2^63 is exactly representable as a double; intmax_t's own top is not,
+    // so anything at or above it, and anything below -2^63, is out of range.
+    constexpr double kRange = 9223372036854775808.0;
+    if (truncated < -kRange || truncated >= kRange) {
+        return std::numeric_limits<intmax_t>::min();
+    }
+    return static_cast<intmax_t>(truncated);
+}
+
 } // namespace Haisos::Awk

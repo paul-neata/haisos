@@ -62,6 +62,10 @@ struct Expr {
     bool parenthesized = false;
     GetlineForm getlineForm = GetlineForm::Simple;
     ExprPtr target;                        // Getline's variable, field or element; null when none
+    // The interpreter's resolution of a name (Variable, Index, In): the
+    // global slot it stored the name under. Mutable: the program is held
+    // const; the dump ignores this.
+    mutable int slot = -1;
 };
 
 // An lvalue: Variable, Field or Index -- never a parenthesized one, as
@@ -89,6 +93,10 @@ struct Stmt {
     std::vector<StmtPtr> statements;  // Block
     std::string name;                 // ForIn: the loop variable; Delete: the array
     std::string arrayName;            // ForIn: the array
+    // The interpreter's resolution of the names (mutable as Expr::slot):
+    // ForIn's variable in slot, ForIn's array and Delete's array in arraySlot.
+    mutable int slot = -1;
+    mutable int arraySlot = -1;
 };
 
 enum class ItemKind { Begin, End, Main, Function };

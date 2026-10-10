@@ -10,6 +10,12 @@ bool IsFieldBlank(char c) {
     return c == ' ' || c == '\t' || c == '\n';
 }
 
+// AwkFatal for an assignment making more fields than kAwkMaxFields.
+[[noreturn]] void FailTooManyFields(const char* what, intmax_t number) {
+    throw AwkFatal(std::string(what) + " " + std::to_string(number) + ": more than " +
+                   std::to_string(kAwkMaxFields) + " fields");
+}
+
 } // namespace
 
 bool SplitAwkFields(std::string_view text, const std::string& fs,
@@ -76,14 +82,14 @@ void FieldStore::EnsureSplit() {
     m_split = true;
 }
 
-void FieldStore::Rebuild() {
+void FieldStore::Rebuild(const std::string& convfmt) {
     EnsureSplit();
     std::string record;
     for (size_t i = 0; i < m_fields.size(); ++i) {
         if (i > 0) {
             record += m_ofs;
         }
-        record += m_fields[i].ToString(m_convfmt);
+        record += m_fields[i].ToString(convfmt);
     }
     m_record = std::move(record);
     m_recordDirty = false;
@@ -96,22 +102,24 @@ void FieldStore::SetRecord(std::string record, const std::string& fs, bool parag
     m_fields.clear();
     m_split = false;
     m_recordDirty = false;
+    m_recordFromInput = true;
 }
 
-const std::string& FieldStore::Record() {
+const std::string& FieldStore::Record(const std::string& convfmt) {
     if (m_recordDirty) {
-        Rebuild();
+        Rebuild(convfmt);
     }
     return m_record;
 }
 
-Value FieldStore::Field(intmax_t index) {
+Value FieldStore::Field(intmax_t index, const std::string& convfmt) {
     if (index < 0) {
         throw AwkFatal("attempt to access field " + std::to_string(index));
     }
     if (index == 0) {
-        // $0 is input: a record that looks numeric is a strnum.
-        return Value::FromInput(Record());
+        // $0 is input (a strnum) only for a record no assignment rebuilt.
+        const std::string& record = Record(convfmt);
+        return m_recordFromInput ? Value::FromInput(record) : Value::FromString(record);
     }
     EnsureSplit();
     const size_t field = static_cast<size_t>(index);
@@ -128,9 +136,12 @@ void FieldStore::SetField(intmax_t index, const Value& value, const std::string&
     }
     if (index == 0) {
         // $0 = value: a new record, re-split with the FS saved with the
-        // current record.
+        // current record. |convfmt| converts a Number value.
         SetRecord(value.ToString(convfmt), m_fs, m_paragraph);
         return;
+    }
+    if (index > kAwkMaxFields) {
+        FailTooManyFields("attempt to assign field", index);
     }
     EnsureSplit();
     const size_t field = static_cast<size_t>(index);
@@ -140,8 +151,8 @@ void FieldStore::SetField(intmax_t index, const Value& value, const std::string&
     }
     m_fields[field - 1] = value;
     m_ofs = ofs;
-    m_convfmt = convfmt;
     m_recordDirty = true;
+    m_recordFromInput = false;
 }
 
 size_t FieldStore::NF() {
@@ -153,6 +164,9 @@ void FieldStore::SetNF(intmax_t nf, const std::string& ofs) {
     if (nf < 0) {
         throw AwkFatal("NF set to negative value");
     }
+    if (nf > kAwkMaxFields) {
+        FailTooManyFields("NF set to", nf);
+    }
     EnsureSplit();
     const size_t count = static_cast<size_t>(nf);
     if (count < m_fields.size()) {
@@ -162,6 +176,7 @@ void FieldStore::SetNF(intmax_t nf, const std::string& ofs) {
     }
     m_ofs = ofs;
     m_recordDirty = true;
+    m_recordFromInput = false;
 }
 
 } // namespace Haisos::Awk

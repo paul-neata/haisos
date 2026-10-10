@@ -13,7 +13,7 @@ namespace {
 class AwkCommand : public IBuiltinCommand {
 public:
     std::string Name() const override { return "awk"; }
-    std::string Version() const override { return "1.1.0"; }
+    std::string Version() const override { return "1.2.0"; }
 
     const std::vector<BuiltinOption>& Options() const override {
         return Awk::AwkOptionTable();
@@ -41,8 +41,10 @@ public:
             "unspecified.\n"
             "At most 1000000 fields may be made by an assignment ($n = v, NF = n);\n"
             "gawk has no such limit.\n"
-            "Regular expressions, functions, printf, getline and output\n"
-            "redirections are not available yet.",
+            "Regular expressions are POSIX EREs, as gawk --posix takes them\n"
+            "(no \\y \\w \\s, no \\< \\>); intervals are supported.\n"
+            "Functions, printf, getline and output redirections are not\n"
+            "available yet.",
             "gawk",
         };
     }

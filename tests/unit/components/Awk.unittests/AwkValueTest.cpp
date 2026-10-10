@@ -573,3 +573,70 @@ TEST(AwkValueTest, RecordReaderStopsPromptly) {
     mid.RequestStop();
     EXPECT_EQ(mid.Next("\n", record), Awk::RecordReadResult::Stopped);
 }
+
+TEST(AwkValueTest, RecordReaderParagraphMode) {
+    // RS = "": a record is a paragraph, its separator a run of two or more
+    // newlines; leading newlines are skipped, the trailing ones stripped, with
+    // no empty record after them.
+    ReaderHarness harness;
+    harness.Feed("\n\na\nb\n\n\nc\n\n");
+    harness.EndInput();
+    std::string record;
+    EXPECT_EQ(harness.Next("", record), Awk::RecordReadResult::Record);
+    EXPECT_EQ(record, "a\nb");
+    EXPECT_EQ(harness.Next("", record), Awk::RecordReadResult::Record);
+    EXPECT_EQ(record, "c");
+    EXPECT_EQ(harness.Next("", record), Awk::RecordReadResult::End);
+
+    // A single newline at the input's start is skipped too, as gawk's.
+    ReaderHarness oneLeading;
+    oneLeading.Feed("\na\n\nb");
+    oneLeading.EndInput();
+    EXPECT_EQ(oneLeading.Next("", record), Awk::RecordReadResult::Record);
+    EXPECT_EQ(record, "a");
+    EXPECT_EQ(oneLeading.Next("", record), Awk::RecordReadResult::Record);
+    EXPECT_EQ(record, "b");
+    EXPECT_EQ(oneLeading.Next("", record), Awk::RecordReadResult::End);
+
+    // A single newline is content: a line of blanks stays in its record.
+    ReaderHarness blanks;
+    blanks.Feed("a\n \nb\n\nc");
+    blanks.EndInput();
+    EXPECT_EQ(blanks.Next("", record), Awk::RecordReadResult::Record);
+    EXPECT_EQ(record, "a\n \nb");
+    EXPECT_EQ(blanks.Next("", record), Awk::RecordReadResult::Record);
+    EXPECT_EQ(record, "c");
+    EXPECT_EQ(blanks.Next("", record), Awk::RecordReadResult::End);
+
+    // A separator across a block boundary (65535 bytes, then "\n\ny\n").
+    ReaderHarness acrossBlocks;
+    acrossBlocks.Feed(std::string(65535, 'x') + "\n\ny\n");
+    acrossBlocks.EndInput();
+    EXPECT_EQ(acrossBlocks.Next("", record), Awk::RecordReadResult::Record);
+    EXPECT_EQ(record, std::string(65535, 'x'));
+    EXPECT_EQ(acrossBlocks.Next("", record), Awk::RecordReadResult::Record);
+    EXPECT_EQ(record, "y");
+    EXPECT_EQ(acrossBlocks.Next("", record), Awk::RecordReadResult::End);
+
+    // A single newline past the boundary is content, not a separator.
+    ReaderHarness singleAcrossBlocks;
+    singleAcrossBlocks.Feed(std::string(65535, 'x') + "\nc\n");
+    singleAcrossBlocks.EndInput();
+    EXPECT_EQ(singleAcrossBlocks.Next("", record), Awk::RecordReadResult::Record);
+    EXPECT_EQ(record, std::string(65535, 'x') + "\nc");
+    EXPECT_EQ(singleAcrossBlocks.Next("", record), Awk::RecordReadResult::End);
+
+    // The same paragraphs a few bytes at a time, so the separators straddle
+    // many block boundaries.
+    ReaderHarness inFours;
+    const std::string bytes = "\n\na\nb\n\n\nc\n\n";
+    for (size_t pos = 0; pos < bytes.size(); pos += 4) {
+        inFours.Feed(bytes.substr(pos, 4));
+    }
+    inFours.EndInput();
+    EXPECT_EQ(inFours.Next("", record), Awk::RecordReadResult::Record);
+    EXPECT_EQ(record, "a\nb");
+    EXPECT_EQ(inFours.Next("", record), Awk::RecordReadResult::Record);
+    EXPECT_EQ(record, "c");
+    EXPECT_EQ(inFours.Next("", record), Awk::RecordReadResult::End);
+}

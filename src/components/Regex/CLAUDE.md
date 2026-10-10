@@ -161,9 +161,10 @@ are flat `n`-ary nodes, so a 200000-character pattern parses in one level.
 
 - awk (POSIX awk's ERE): use `Extended`; the awk task pre-processes awk's own
   escapes first -- `\/` to `/`, `\"` to `"`, `\n \t \r \a \b \f \v \ddd`
-  to the byte (written inside brackets or escaped when it is a regex
-  metacharacter), an escape inside brackets (`[a\]b]`) into a bracket that
-  needs none (`[]ab]`, `\\` to `\`, `\-` placed last), any other `\c` with c
+  to the byte, octal `\ddd` emitted raw (a decoded metacharacter is a
+  metacharacter: `/a\052b/` matches `aab`), an escape inside brackets
+  (`[a\]b]`) into a bracket that needs none (`[]ab]`, `\\` to `\`, a
+  decoded `]` placed first, `\-` last, `^` not first), any other `\c` with c
   not a regex metacharacter to `c` (gawk --posix has no `\w \s \< \> \y`).
   Nothing else is needed from Regex for awk.
 - sed: `Basic`/`Extended`, `multiline` for the M flag, `ignoreCase` for I;

@@ -22,6 +22,7 @@ TEST_F(AwkCommandTest, VersionAndHelp) {
     ASSERT_GT(lines.size(), 1u);
     EXPECT_EQ(lines[0], "HaisosOS awk version 1.2.0 - pattern scanning and processing language");
     EXPECT_EQ(lines[1], "Based on Linux gawk: https://man7.org/linux/man-pages/man1/gawk.1.html");
+    EXPECT_NE(help.out.find("(no \\y \\w \\s, no \\< \\>)"), std::string::npos) << help.out;
 
     // -h prints the same help, as gawk's.
     const auto shortHelp = RunCaptured("awk", {"-h"});

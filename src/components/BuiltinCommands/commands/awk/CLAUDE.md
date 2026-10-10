@@ -286,7 +286,7 @@ itself. StrNum comes only from `FromInput`: the fields and `$0`, the
   change applies from the next record on). `RS = ""` is paragraph mode:
   a record is what a run of two or more newlines separates, the whole run
   consumed as one separator -- a single newline is content, so a line of
-  blanks stays in its record; a leading run is skipped, the trailing
+  blanks stays in its record; leading newlines are skipped, the trailing
   newlines of the input's last record are stripped (no empty record after
   it), and a run straddling a block read is consumed whole. The bytes past
   the record stay in the reader's own buffer

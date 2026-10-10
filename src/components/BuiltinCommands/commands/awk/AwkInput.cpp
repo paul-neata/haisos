@@ -81,15 +81,16 @@ bool RecordReader::ReadMoreBlock(bool& stopped) {
 RecordReadResult RecordReader::NextParagraph(std::string& record) {
     size_t scan = m_start;   // where the separator search resumes within this call
     while (true) {
-        // The record's start: a leading run of two or more newlines is
-        // skipped whole (a single newline is content, so a line of blanks
-        // stays in its record). A run reaching past what is read keeps going
-        // across the reads below.
+        // The record's start: newlines there -- one or more, as gawk skips
+        // them at the start of the input (a separator's whole run is
+        // consumed with its record, so only the input's start has any) --
+        // are skipped. A run reaching past what is read keeps going across
+        // the reads below.
         for (;;) {
-            if (m_start + 1 >= m_buffer.size()) {
-                break;   // not enough read yet (or the tail: the loop below)
+            if (m_start >= m_buffer.size()) {
+                break;   // nothing read yet (or the tail: the loop below)
             }
-            if (m_buffer[m_start] != '\n' || m_buffer[m_start + 1] != '\n') {
+            if (m_buffer[m_start] != '\n') {
                 break;
             }
             size_t end = m_start;

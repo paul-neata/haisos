@@ -576,7 +576,7 @@ TEST(AwkValueTest, RecordReaderStopsPromptly) {
 
 TEST(AwkValueTest, RecordReaderParagraphMode) {
     // RS = "": a record is a paragraph, its separator a run of two or more
-    // newlines; leading runs are skipped, the trailing ones stripped, with
+    // newlines; leading newlines are skipped, the trailing ones stripped, with
     // no empty record after them.
     ReaderHarness harness;
     harness.Feed("\n\na\nb\n\n\nc\n\n");
@@ -587,6 +587,16 @@ TEST(AwkValueTest, RecordReaderParagraphMode) {
     EXPECT_EQ(harness.Next("", record), Awk::RecordReadResult::Record);
     EXPECT_EQ(record, "c");
     EXPECT_EQ(harness.Next("", record), Awk::RecordReadResult::End);
+
+    // A single newline at the input's start is skipped too, as gawk's.
+    ReaderHarness oneLeading;
+    oneLeading.Feed("\na\n\nb");
+    oneLeading.EndInput();
+    EXPECT_EQ(oneLeading.Next("", record), Awk::RecordReadResult::Record);
+    EXPECT_EQ(record, "a");
+    EXPECT_EQ(oneLeading.Next("", record), Awk::RecordReadResult::Record);
+    EXPECT_EQ(record, "b");
+    EXPECT_EQ(oneLeading.Next("", record), Awk::RecordReadResult::End);
 
     // A single newline is content: a line of blanks stays in its record.
     ReaderHarness blanks;

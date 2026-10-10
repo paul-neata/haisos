@@ -134,6 +134,9 @@ TEST(AwkRegexTest, SplitByRegexCutsBetweenMatches) {
     EXPECT_EQ(Split("x*", "abc"), (std::vector<std::string>{"abc"}));
     EXPECT_EQ(Split("x*", "axxbc"), (std::vector<std::string>{"a", "bc"}));
 
+    // A range from a leading '-' stays a range ('-' to '/': - . /).
+    EXPECT_EQ(Split("[--/]", "a-b.c/d"), (std::vector<std::string>{"a", "b", "c", "d"}));
+
     // An empty text has no fields.
     EXPECT_EQ(Split("[0-9]+", ""), (std::vector<std::string>{}));
 }

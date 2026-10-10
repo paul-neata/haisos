@@ -875,6 +875,12 @@ TEST_F(AwkRunTest, ParagraphMode) {
     EXPECT_EQ(captured.status, 0);
 
     captured = RunCaptured("awk", {"BEGIN { RS = \"\" } { print NR \": \" $0 }"},
+                           "\na\nb\n\nc\n");
+    EXPECT_EQ(captured.out, "1: a\nb\n2: c\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    captured = RunCaptured("awk", {"BEGIN { RS = \"\" } { print NR \": \" $0 }"},
                            "a\n \nb\n\nc\n");
     EXPECT_EQ(captured.out, "1: a\n \nb\n2: c\n");
     EXPECT_EQ(captured.err, "");

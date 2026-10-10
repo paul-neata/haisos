@@ -23,7 +23,7 @@ public:
     //
     // |rs| == "" is paragraph mode: the record is a paragraph, its separator
     // a run of two or more newlines (a single newline is content, so a line
-    // of blanks still belongs to its record); leading runs are skipped, and
+    // of blanks still belongs to its record); leading newlines are skipped, and
     // at the end of the input the last record's trailing newlines are
     // stripped, with no empty record after them.
     RecordReadResult Next(const std::string& rs, std::string& record);

@@ -42,7 +42,7 @@ public:
             "At most 1000000 fields may be made by an assignment ($n = v, NF = n);\n"
             "gawk has no such limit.\n"
             "Regular expressions are POSIX EREs, as gawk --posix takes them\n"
-            "(no \\y \\w \\s, no \< \>); intervals are supported.\n"
+            "(no \\y \\w \\s, no \\< \\>); intervals are supported.\n"
             "Functions, printf, getline and output redirections are not\n"
             "available yet.",
             "gawk",

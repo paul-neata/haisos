@@ -305,7 +305,7 @@ void EmitBracket(std::string_view text, size_t& i, std::string& out,
         if (member.kind == BracketMember::Kind::Char && member.byte == ']'
             && (member.decoded || member.firstRaw))
             continue;  // emitted first above
-        if (member.firstRaw && member.byte == '-') {
+        if (member.kind == BracketMember::Kind::Char && member.firstRaw && member.byte == '-') {
             // A leading raw '-' is a member only right after '['; a ']' member
             // before it is written first, so it goes collated here.
             out += "[.-.]";

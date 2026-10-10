@@ -43,7 +43,7 @@ Pause: no
 | 35 | [awk--parser](tasks/awk--parser.md) | done | 0.5.36 | 34 | #78 | 1 | 0C 1H fixed, 1M 3L open | Windows red, not checked |
 | 36 | [awk--values](tasks/awk--values.md) | done | 0.5.37 | 33, 11 | #79 | 1 | 0C 0H fixed, 3M 2L open | Windows red, not checked |
 | 37 | [awk--interpreter](tasks/awk--interpreter.md) | done | 0.5.38 | 35, 36, 4 | #80 | 1 | 0C 2H fixed, 0M 3L open | Windows red, not checked |
-| 38 | [awk--records](tasks/awk--records.md) | in-progress | 0.5.39 | 37, 3 | | | | |
+| 38 | [awk--records](tasks/awk--records.md) | in-review | 0.5.39 | 37, 3 | #81 | 1 | | |
 | 39 | [awk--functions](tasks/awk--functions.md) | todo | | 38 | | | | |
 | 40 | [awk--printf-math](tasks/awk--printf-math.md) | todo | | 39, 11 | | | | |
 | 41 | [awk--io](tasks/awk--io.md) | todo | | 40, 9 | | | | |

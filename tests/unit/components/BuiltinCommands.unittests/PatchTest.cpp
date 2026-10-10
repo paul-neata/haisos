@@ -171,6 +171,16 @@ TEST_F(BuiltinCommandsTest, PatchSearchOrder) {
         "1 out of 2 hunks FAILED -- saving rejects to file x.rej\n");
     EXPECT_EQ(result.status, 1);
     EXPECT_EQ(ReadPatchFile(root, "x"), "s\nt\nu\n4\n5\n6\n7\n8\n9\nten\n");
+
+    // A stated line far beyond the file is searched from the file's end at
+    // once (GNU patch 2.7.6 -F0: the same output).
+    WriteFile("/p/x", "z\np\nq\nr\n");
+    result = patchX("@@ -1000000000000,3 +1000000000000,3 @@\n p\n-q\n+Q\n r\n");
+    EXPECT_EQ(result.out,
+        "patching file x\n"
+        "Hunk #1 succeeded at 2 (offset -999999999998 lines).\n");
+    EXPECT_EQ(result.status, 0);
+    EXPECT_EQ(ReadPatchFile(root, "x"), "z\np\nQ\nr\n");
 }
 
 // A patch already applied, detected on its first hunk, with no terminal to
@@ -179,12 +189,12 @@ TEST_F(BuiltinCommandsTest, PatchSearchOrder) {
 TEST_F(BuiltinCommandsTest, PatchReversedWithoutTerminal) {
     MakePatchDir(root);
     const std::string patched = "1\n2\n3\n4\nfive\n6\n7\n8\n9\n10\n";
-    const auto ask = [&](const std::vector<std::string>& args) {
+    const auto applyP1 = [&](const std::vector<std::string>& args) {
         WriteFile("/p/f", patched);
         return RunCaptured("patch", args, kP1, "/p");
     };
 
-    Captured result = ask({});
+    Captured result = applyP1({});
     EXPECT_EQ(result.out,
         "patching file f\n"
         "Reversed (or previously applied) patch detected!  Assume -R? [n] \n"
@@ -198,7 +208,7 @@ TEST_F(BuiltinCommandsTest, PatchReversedWithoutTerminal) {
     EXPECT_FALSE(PatchFileExists(root, "f.orig"));
 
     // -N skips without the questions.
-    result = ask({"-N"});
+    result = applyP1({"-N"});
     EXPECT_EQ(result.out,
         "patching file f\n"
         "Reversed (or previously applied) patch detected!  Skipping patch.\n"
@@ -206,7 +216,7 @@ TEST_F(BuiltinCommandsTest, PatchReversedWithoutTerminal) {
     EXPECT_EQ(result.status, 1);
 
     // -t answers the question itself and swaps the patch.
-    result = ask({"-t"});
+    result = applyP1({"-t"});
     EXPECT_EQ(result.out,
         "patching file f\n"
         "Reversed (or previously applied) patch detected!  Assuming -R.\n");
@@ -214,7 +224,7 @@ TEST_F(BuiltinCommandsTest, PatchReversedWithoutTerminal) {
     EXPECT_EQ(ReadPatchFile(root, "f"), Seq(10));
 
     // -f looks nowhere else: the hunk just fails, and the .orig is kept.
-    result = ask({"-f"});
+    result = applyP1({"-f"});
     EXPECT_EQ(result.out,
         "patching file f\n"
         "Hunk #1 FAILED at 2.\n"
@@ -224,7 +234,7 @@ TEST_F(BuiltinCommandsTest, PatchReversedWithoutTerminal) {
     EXPECT_EQ(ReadPatchFile(root, "f.orig"), patched);
 
     // -R on the patched file is the patch the file wants.
-    result = ask({"-R"});
+    result = applyP1({"-R"});
     EXPECT_EQ(result.out, "patching file f\n");
     EXPECT_EQ(result.status, 0);
     EXPECT_EQ(ReadPatchFile(root, "f"), Seq(10));
@@ -1184,6 +1194,14 @@ TEST_F(BuiltinCommandsTest, PatchOptions) {
     EXPECT_EQ(orig.out, "patching file x\n");
     EXPECT_EQ(orig.status, 0);
     EXPECT_EQ(ReadPatchFile(root, "x"), "one\n");
+
+    // A PATCHFILE operand wins over -i FILE, before or after it.
+    WriteFile("/p/y", "1\n");
+    WritePatchFile(root, "other.diff", "--- y\n+++ y\n@@ -1 +1 @@\n-1\n+other\n");
+    const Captured operandWins = RunCaptured("patch", {"-i", "other.diff", "y", "p.diff"}, "", "/p");
+    EXPECT_EQ(operandWins.out, "patching file y\n");
+    EXPECT_EQ(operandWins.status, 0);
+    EXPECT_EQ(ReadPatchFile(root, "y"), "one\n");
 
     // A `~` in a name is not quoted, and the rejects file is named after it.
     WriteFile("/p/w~", "a\n");

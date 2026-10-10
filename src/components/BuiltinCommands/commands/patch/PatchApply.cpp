@@ -90,9 +90,16 @@ int64_t LocateHunk(const PatchTarget& target, const PatchHunk& hunk, int64_t fuz
     const int64_t firstCandidate = consumedLines + 1;
     const int64_t lastCandidate = fileLines - oldCount + 1;
     const int64_t endPosition = fileLines - oldCount + 1;
+    if (lastCandidate < firstCandidate) {
+        return 0;  // no place is left for the hunk's old lines
+    }
+    // Searching outward from the nearest candidate to the expected place
+    // tries them in the same order as from the expected place itself, and a
+    // stated line far beyond the file costs no empty steps.
+    const int64_t origin = std::min(std::max(expected, firstCandidate), lastCandidate);
     for (int64_t distance = 0;; ++distance) {
-        const int64_t forward = expected + distance;
-        const int64_t backward = expected - distance;
+        const int64_t forward = origin + distance;
+        const int64_t backward = origin - distance;
         if (forward > lastCandidate && backward < firstCandidate) {
             break;  // no candidate is left, near or far
         }

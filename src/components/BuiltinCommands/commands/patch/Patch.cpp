@@ -691,8 +691,14 @@ int ApplyFilePatch(PatchRun& run, FilePatch patch) {
                     + " : No such file or directory");
                 return 2;
             }
-            WriteFully(*file, content);
+            const ssize_t wrote = WriteFully(*file, content);
             file.reset();
+            if (wrote < 0) {
+                // A partial result never replaces the file.
+                run.context.IO().RemoveFile(tmp);
+                run.Fatal("Can't write file " + ShellEscapeQuoted(tmp) + " : Input/output error");
+                return 2;
+            }
             if (run.context.IO().Rename(tmp, output) != 0) {
                 run.context.IO().RemoveFile(tmp);
                 run.Fatal("Can't create file " + ShellEscapeQuoted(output)
@@ -912,15 +918,15 @@ int PatchCommand::Run(BuiltinContext& context) {
         }
     }
 
-    // The patch text: the PATCHFILE operand, or -i FILE, else the standard
-    // input.
+    // The patch text: the PATCHFILE operand (which wins over -i FILE, before
+    // or after it, as GNU patch's), or -i FILE, else the standard input.
     std::string patchText;
     {
         std::string patchName = "-";
-        if (input) {
-            patchName = *input;
-        } else if (parsed.operands.size() >= 2) {
+        if (parsed.operands.size() >= 2) {
             patchName = parsed.operands[1];
+        } else if (input) {
+            patchName = *input;
         }
         InputOpenFailure failure = InputOpenFailure::None;
         auto file = OpenInputOperand(context, patchName, failure);

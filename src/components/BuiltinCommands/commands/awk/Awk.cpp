@@ -1,5 +1,6 @@
 #include "BuiltinCommand.h"
 #include "commands/awk/AwkInvocation.h"
+#include "commands/awk/AwkParser.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -11,7 +12,7 @@ namespace {
 class AwkCommand : public IBuiltinCommand {
 public:
     std::string Name() const override { return "awk"; }
-    std::string Version() const override { return "1.0.1"; }
+    std::string Version() const override { return "1.0.2"; }
 
     const std::vector<BuiltinOption>& Options() const override {
         return Awk::AwkOptionTable();
@@ -29,6 +30,12 @@ public:
             "syntax error at the next token.\n"
             "A backslash-newline inside a string is a continuation; gawk --posix\n"
             "refuses a physical newline in a string.\n"
+            "`break' and `continue' outside a loop are reported once, where gawk\n"
+            "prints the message twice.\n"
+            "A function name used as a parameter name is reported once, without\n"
+            "gawk's second, location-less line.\n"
+            "The end of a -f file inside a rule reports `(END OF FILE)' with the\n"
+            "caret at column 0; gawk's column varies with the file's ending.\n"
             "Running programs is not implemented yet.",
             "gawk",
         };
@@ -45,6 +52,13 @@ public:
             Awk::LoadAwkSources(context, *invocation, status);
         if (!sources) {
             return status;
+        }
+        Awk::ParseResult parsed = Awk::ParseAwkProgram(std::move(*sources));
+        if (!parsed.diagnostics.empty()) {
+            context.ErrorText(parsed.diagnostics);
+        }
+        if (parsed.failed) {
+            return 1;
         }
         context.ErrorText("awk: running programs is not implemented yet\n");
         return 2;

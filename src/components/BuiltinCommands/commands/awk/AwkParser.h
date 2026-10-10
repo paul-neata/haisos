@@ -35,6 +35,11 @@ public:
 private:
     friend ExprPtr ParseAwkExpression(const std::string& text);
 
+    // An assignment to |left| when the current token is an assignment
+    // operator and |left| is an lvalue (else |left| itself): after the
+    // ternary, and -- as gawk's -- as the right operand of || && ~ !~ and the
+    // comparisons (1 && y = 2 is 1 && (y = 2)).
+    ExprPtr ParseAssignment(ExprPtr left);
     ExprPtr ParseTernary();
     ExprPtr ParseOr();
     ExprPtr ParseAnd();

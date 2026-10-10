@@ -84,6 +84,14 @@ TEST(AwkParserTest, AssignmentAndTernary) {
     ExpectExpr("$1 = 2", "(= ($ 1) 2)");
     ExpectExpr("a[1, \"x\"] ^= 2", "(^= a[1, \"x\"] 2)");
     ExpectExpr("n /= 2", "(/= n 2)");
+    // As gawk's: an assignment as a ternary branch, or as the right operand
+    // of || && ~ !~ and the comparisons, its value a whole expression.
+    ExpectExpr("1 ? y = 5 : 2", "(?: 1 (= y 5) 2)");
+    ExpectExpr("0 ? 1 : y = 2", "(?: 0 1 (= y 2))");
+    ExpectExpr("1 && y = 0 || 1", "(&& 1 (= y (|| 0 1)))");
+    ExpectExpr("0 || y = 2", "(|| 0 (= y 2))");
+    ExpectExpr("1 < y = 2 < 3", "(< 1 (= y (< 2 3)))");
+    ExpectExpr("\"a\" !~ y = \"a\"", "(!~ \"a\" (= y \"a\"))");
 }
 
 TEST(AwkParserTest, Fields) {
@@ -130,6 +138,8 @@ TEST(AwkParserTest, GetlineForms) {
     ExpectExpr("getline < \"a\" \"b\"", "(concat (getline < \"a\") \"b\")");
     ExpectExpr("getline < \"f\" + 1", "(getline < (+ \"f\" 1))");
     ExpectExpr("getline < \"f\" < 2", "(< (getline < \"f\") 2)");
+    ExpectExpr("\"a\" | getline x | getline", "(| (| \"a\" getline x) getline)");
+    ExpectExpr("\"a\" | getline x \"b\"", "(concat (| \"a\" getline x) \"b\")");
 }
 
 TEST(AwkParserTest, ExpressionErrors) {
@@ -151,6 +161,11 @@ TEST(AwkParserTest, ExpressionErrors) {
                     1, 10);
     ExpectExprError("$1++ = 2", "unexpected newline or end of string", 2, 8);
     ExpectExprError("1 + # c", "syntax error", 2, 4);
+    ExpectExprError("1 + y = 3", "syntax error", 1, 6);
+    ExpectExprError("0 ? 1 : 2 = 3", "syntax error", 1, 10);
+    ExpectExprError("(1 && $1++ = 2)",
+                    "cannot assign a value to the result of a field post-increment expression",
+                    1, 14);
 }
 
 TEST(AwkParserTest, ErrorTextIsGawks) {

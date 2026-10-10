@@ -84,7 +84,10 @@ awk rock and adds its files here:
   level, POSIX's table): assignment (right-associative, only an lvalue may
   be assigned to; a post-increment of a field takes its value before
   gawk's `cannot assign a value to the result of a field post-increment
-  expression`), the ternary (right-associative), `||`, `&&`, `in`
+  expression`; as gawk's, an assignment may also be either branch of the
+  ternary or the right operand of `|| && ~ !~` and the comparisons, so
+  `1 && y = 2` is `1 && (y = 2)`), the ternary (right-associative), `||`,
+  `&&`, `in`
   (`match-expr { 'in' NAME }`), `~ !~` (left-associative), the comparison
   operators (non-associative), `| getline`, concatenation, `+ -`,
   `* / %`, unary `! - +`, `^` (its exponent at the unary level, so
@@ -102,9 +105,10 @@ awk rock and adds its files here:
   target (a name, `name[...]` or `$...`) and then `<` and a file operand
   parsed at the `+ -` level: arithmetic, unary and `^` included, no
   concatenation, no comparison; `"cmd" | getline [target]` is the command
-  form, and a `|` not followed by `getline` is a syntax error at the token
-  after it. A `Builtin` without `(` is allowed only for a bare `length`
-  (`length / 2` divides). Errors are gawk's: `syntax error` at the token
+  form (left-associative, concatenation going on after it: `"a" | getline x
+  "b"` concatenates `"b"`), and a `|` not followed by `getline` is a syntax
+  error at the token after it. A `Builtin` without `(` is allowed only for
+  a bare `length` (`length / 2` divides). Errors are gawk's: `syntax error` at the token
   where parsing failed, but a `Newline` there is
   `unexpected newline or end of string` reported on the line it ends (one
   more than its own), a `Newline` ending a comment is `syntax error` with

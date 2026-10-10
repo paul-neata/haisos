@@ -129,7 +129,15 @@ void Parser::Fail(const Token& token, const std::string& message) {
 }
 
 ExprPtr Parser::ParseExpression() {
-    ExprPtr left = ParseTernary();
+    ExprPtr expr = ParseAssignment(ParseTernary());
+    if (IsAssignOp(m_token.kind)) {
+        // Only an lvalue is assigned to: 3 = 4, (x-- = 2).
+        Fail(m_token, "syntax error");
+    }
+    return expr;
+}
+
+ExprPtr Parser::ParseAssignment(ExprPtr left) {
     if (!IsAssignOp(m_token.kind)) {
         return left;
     }
@@ -147,7 +155,7 @@ ExprPtr Parser::ParseExpression() {
         Fail(m_token,
              "cannot assign a value to the result of a field post-increment expression");
     }
-    Fail(m_token, "syntax error");
+    return left;
 }
 
 ExprPtr Parser::ParseTernary() {
@@ -156,12 +164,13 @@ ExprPtr Parser::ParseTernary() {
         return condition;
     }
     Advance();
-    ExprPtr ifTrue = ParseTernary();
+    // Either branch may be an assignment, as gawk's: c ? x = 1 : y = 2.
+    ExprPtr ifTrue = ParseExpression();
     if (m_token.kind != TokenKind::Colon) {
         Fail(m_token, "syntax error");
     }
     Advance();
-    ExprPtr ifFalse = ParseTernary();
+    ExprPtr ifFalse = ParseExpression();
     ExprPtr expr = std::make_unique<Expr>();
     expr->kind = ExprKind::Conditional;
     expr->position = condition->position;
@@ -175,7 +184,7 @@ ExprPtr Parser::ParseOr() {
     ExprPtr left = ParseAnd();
     while (m_token.kind == TokenKind::Or) {
         Advance();
-        left = MakeBinary(ExprOp::Or, std::move(left), ParseAnd());
+        left = MakeBinary(ExprOp::Or, std::move(left), ParseAssignment(ParseAnd()));
     }
     return left;
 }
@@ -184,7 +193,7 @@ ExprPtr Parser::ParseAnd() {
     ExprPtr left = ParseIn();
     while (m_token.kind == TokenKind::And) {
         Advance();
-        left = MakeBinary(ExprOp::And, std::move(left), ParseIn());
+        left = MakeBinary(ExprOp::And, std::move(left), ParseAssignment(ParseIn()));
     }
     return left;
 }
@@ -213,7 +222,7 @@ ExprPtr Parser::ParseMatch() {
     while (m_token.kind == TokenKind::Tilde || m_token.kind == TokenKind::NoMatch) {
         const ExprOp op = m_token.kind == TokenKind::Tilde ? ExprOp::Match : ExprOp::NoMatch;
         Advance();
-        left = MakeBinary(op, std::move(left), ParseComparison());
+        left = MakeBinary(op, std::move(left), ParseAssignment(ParseComparison()));
     }
     return left;
 }
@@ -234,27 +243,30 @@ ExprPtr Parser::ParseComparison() {
     const ExprOp op = BinaryOpOf(m_token.kind);
     // The comparison operators are non-associative: nothing follows them.
     Advance();
-    return MakeBinary(op, std::move(left), ParseGetlineCommand());
+    return MakeBinary(op, std::move(left), ParseAssignment(ParseGetlineCommand()));
 }
 
 ExprPtr Parser::ParseGetlineCommand() {
     ExprPtr command = ParseConcatenation();
-    if (m_token.kind != TokenKind::Pipe) {
-        return command;
+    while (m_token.kind == TokenKind::Pipe) {
+        Advance();
+        if (m_token.kind != TokenKind::Getline) {
+            Fail(m_token, "syntax error");
+        }
+        Advance();
+        ExprPtr expr = std::make_unique<Expr>();
+        expr->kind = ExprKind::Getline;
+        expr->position = command->position;
+        expr->getlineForm = GetlineForm::Command;
+        expr->operands.push_back(std::move(command));
+        expr->target = ParseGetlineTarget();
+        command = std::move(expr);
+        // Concatenation goes on after it, as gawk's: "cmd" | getline x "b".
+        while (StartsConcatOperand(m_token.kind)) {
+            command = MakeBinary(ExprOp::Concat, std::move(command), ParseAdditive());
+        }
     }
-    Advance();
-    if (m_token.kind != TokenKind::Getline) {
-        Fail(m_token, "syntax error");
-    }
-    const Token keyword = m_token;
-    Advance();
-    ExprPtr expr = std::make_unique<Expr>();
-    expr->kind = ExprKind::Getline;
-    expr->position = command->position;
-    expr->getlineForm = GetlineForm::Command;
-    expr->operands.push_back(std::move(command));
-    expr->target = ParseGetlineTarget();
-    return expr;
+    return command;
 }
 
 ExprPtr Parser::ParseConcatenation() {

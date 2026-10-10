@@ -11,7 +11,7 @@ namespace {
 class AwkCommand : public IBuiltinCommand {
 public:
     std::string Name() const override { return "awk"; }
-    std::string Version() const override { return "1.0.0"; }
+    std::string Version() const override { return "1.0.1"; }
 
     const std::vector<BuiltinOption>& Options() const override {
         return Awk::AwkOptionTable();
@@ -25,10 +25,10 @@ public:
             "POSIX awk, as gawk --posix runs it.\n"
             "Usage errors print gawk's two usage lines; the option summary is\n"
             "`awk --help', not gawk's own.\n"
-            "A character no token starts with is reported as invalid in\n"
-            "expression where gawk reports a syntax error at the next token.\n"
-            "A backslash-newline inside a string or regex is a continuation;\n"
-            "gawk --posix refuses a physical newline there.\n"
+            "An `@' is reported as invalid char in expression where gawk reports a\n"
+            "syntax error at the next token.\n"
+            "A backslash-newline inside a string is a continuation; gawk --posix\n"
+            "refuses a physical newline in a string.\n"
             "Running programs is not implemented yet.",
             "gawk",
         };

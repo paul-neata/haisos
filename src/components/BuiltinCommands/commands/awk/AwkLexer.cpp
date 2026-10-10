@@ -208,7 +208,8 @@ bool NewlinesSkippedAfter(TokenKind kind) {
     }
 }
 
-// A keyword's kind by its exact spelling; nullptr when the name is not one.
+// A keyword's kind by its exact spelling; TokenKind::Name when the name is
+// not one.
 TokenKind FindKeyword(const std::string& name) {
     struct Entry {
         const char* word;
@@ -258,22 +259,10 @@ Lexer::Lexer(AwkSource source) : m_source(std::move(source)) {
             m_lineStarts.push_back(i + 1);
         }
     }
-    const std::string& text = m_source.text;
-    if (text.empty()) {
-        // An empty source gets no newline of its own.
-        m_noImplicitNewline = true;
-    } else if (text.back() == '\n' && (text.size() < 2 || text[text.size() - 2] != '\\')) {
-        // Ends in a real newline (not one of a continuation pair): none is
-        // added, and EndOfInput sits on that newline's line and column.
-        m_noImplicitNewline = true;
-        const size_t newline = text.size() - 1;
-        m_eofLine = static_cast<int>(m_lineStarts.size() - 1);
-        m_eofColumn = newline - m_lineStarts[m_eofLine - 1];
-    } else {
-        // The added newline, and EndOfInput after it, sit at the end of the
-        // last line.
-        m_eofLine = static_cast<int>(m_lineStarts.size());
-        m_eofColumn = text.size() - m_lineStarts.back();
+    if (m_source.text.empty()) {
+        // An empty source gets no newline of its own; EndOfInput sits at
+        // line 1, column 0.
+        m_emptySource = true;
     }
 }
 
@@ -320,14 +309,23 @@ std::string Lexer::LineText(int line) const {
 
 void Lexer::SkipSeparators() {
     const std::string& text = m_source.text;
+    // A comment consumed here ends at the newline the caller is about to
+    // see; nothing else makes one.
+    m_commentOpen = false;
     while (!AtEnd()) {
         const char c = text[m_pos];
         if (c == ' ' || c == '\t' || c == '\r') {
+            m_lastWasRealNewline = false;
             ++m_pos;
             continue;
         }
         if (c == '#') {
-            // A comment runs to the end of the line; its newline stays.
+            // A comment runs to the end of the line; its newline stays. A
+            // backslash ending a comment belongs to the comment and
+            // continues nothing.
+            m_lastWasRealNewline = false;
+            m_commentBegin = m_pos;
+            m_commentOpen = true;
             while (!AtEnd() && text[m_pos] != '\n') {
                 ++m_pos;
             }
@@ -337,11 +335,13 @@ void Lexer::SkipSeparators() {
             // A backslash-newline (or backslash-\r\n) is removed, anywhere
             // outside a string, a regex or a comment.
             if (m_pos + 1 < text.size() && text[m_pos + 1] == '\n') {
+                m_lastWasRealNewline = false;
                 m_pos += 2;
                 NewlineConsumed();
                 continue;
             }
             if (m_pos + 2 < text.size() && text[m_pos + 1] == '\r' && text[m_pos + 2] == '\n') {
+                m_lastWasRealNewline = false;
                 m_pos += 3;
                 NewlineConsumed();
                 continue;
@@ -352,38 +352,60 @@ void Lexer::SkipSeparators() {
     }
 }
 
+Token Lexer::MakeEndOfInput() {
+    Token token;
+    token.kind = TokenKind::EndOfInput;
+    token.line = m_eofLine;
+    token.column = m_eofColumn;
+    token.begin = m_source.text.size();
+    token.end = m_source.text.size();
+    m_last = token;
+    return token;
+}
+
 Token Lexer::Next() {
     while (true) {
         SkipSeparators();
         if (!AtEnd() && m_source.text[m_pos] == '\n') {
+            // A real newline: the source ends in one when nothing follows
+            // it, and a comment it ends gives it the comment as its text.
+            m_lastWasRealNewline = true;
+            m_eofLine = m_line;
+            m_eofColumn = m_pos - m_lineStart;
+            const std::string comment =
+                m_commentOpen ? m_source.text.substr(m_commentBegin, m_pos - m_commentBegin)
+                              : std::string();
             if (NewlinesSkippedAfter(m_last.kind)) {
                 ++m_pos;
                 NewlineConsumed();
                 continue;
             }
-            Token token = Make(TokenKind::Newline, "", 0, m_pos, m_pos + 1);
+            Token token = Make(TokenKind::Newline, comment, 0, m_pos, m_pos + 1);
             ++m_pos;
             NewlineConsumed();
             return token;
         }
         if (AtEnd()) {
-            // A source that does not end in a newline gets one, at its end --
-            // after { && || , ; do else it is skipped like any other.
-            if (!m_noImplicitNewline && !m_implicitNewlineUsed) {
+            // A source that does not end in a real newline (its last byte
+            // was a token, blanks, a comment or a continuation) gets one,
+            // at its end -- after { && || , ; do else it is skipped like any
+            // other. A continuation at the very end keeps this behaviour.
+            if (!m_lastWasRealNewline && !m_emptySource && !m_implicitNewlineUsed) {
                 m_implicitNewlineUsed = true;
+                m_eofLine = m_line;
+                m_eofColumn = m_source.text.size() - m_lineStart;
                 if (NewlinesSkippedAfter(m_last.kind)) {
                     continue;
                 }
-                return Make(TokenKind::Newline, "", 0, m_source.text.size(), m_source.text.size());
+                const std::string comment =
+                    m_commentOpen
+                        ? m_source.text.substr(m_commentBegin,
+                                               m_source.text.size() - m_commentBegin)
+                        : std::string();
+                return Make(TokenKind::Newline, comment, 0, m_source.text.size(),
+                            m_source.text.size());
             }
-            Token token;
-            token.kind = TokenKind::EndOfInput;
-            token.line = m_eofLine;
-            token.column = m_eofColumn;
-            token.begin = m_source.text.size();
-            token.end = m_source.text.size();
-            m_last = token;
-            return token;
+            return MakeEndOfInput();
         }
         break;
     }
@@ -391,6 +413,7 @@ Token Lexer::Next() {
 }
 
 Token Lexer::ScanToken() {
+    m_lastWasRealNewline = false;  // a token, not a newline, was consumed
     const std::string& text = m_source.text;
     const size_t start = m_pos;
     const char c = text[start];
@@ -458,7 +481,8 @@ Token Lexer::ScanToken() {
             return One(TokenKind::Assign);
         case '&':
             if (Second('&')) return Two(TokenKind::And);
-            break;  // a lone '&' starts no token
+            // A lone '&' starts no token: gawk's syntax error, caret on it.
+            Fail("syntax error", m_line, Column());
         default:
             break;
     }

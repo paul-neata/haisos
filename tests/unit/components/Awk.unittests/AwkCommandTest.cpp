@@ -18,16 +18,16 @@ class AwkCommandTest : public BuiltinCommandsTest {};
 TEST_F(AwkCommandTest, VersionAndHelp) {
     const auto version = RunCaptured("awk", {"--version"});
     EXPECT_EQ(version.status, 0);
-    EXPECT_EQ(version.out, "awk (HaisosOS builtin) 1.0.0\n");
+    EXPECT_EQ(version.out, "awk (HaisosOS builtin) 1.0.1\n");
     const auto shortVersion = RunCaptured("awk", {"-V"});
     EXPECT_EQ(shortVersion.status, 0);
-    EXPECT_EQ(shortVersion.out, "awk (HaisosOS builtin) 1.0.0\n");
+    EXPECT_EQ(shortVersion.out, "awk (HaisosOS builtin) 1.0.1\n");
 
     const auto help = RunCaptured("awk", {"--help"});
     EXPECT_EQ(help.status, 0);
     const Lines lines = SplitLines(help.out);
     ASSERT_GT(lines.size(), 1u);
-    EXPECT_EQ(lines[0], "HaisosOS awk version 1.0.0 - pattern scanning and processing language");
+    EXPECT_EQ(lines[0], "HaisosOS awk version 1.0.1 - pattern scanning and processing language");
     EXPECT_EQ(lines[1], "Based on Linux gawk: https://man7.org/linux/man-pages/man1/gawk.1.html");
 
     // -h prints the same help, as gawk's.
@@ -76,7 +76,7 @@ TEST_F(AwkCommandTest, OptionsStopAtTheProgram) {
 TEST_F(AwkCommandTest, NotTreatedOptionsAreReported) {
     const auto lint = RunCaptured("awk", {"--lint", "BEGIN{}"});
     EXPECT_EQ(lint.status, 2);
-    EXPECT_NE(lint.err.find("Parameter --lint is not treated by HaisosOS awk v. 1.0.0"),
+    EXPECT_NE(lint.err.find("Parameter --lint is not treated by HaisosOS awk v. 1.0.1"),
         std::string::npos) << lint.err;
     EXPECT_NE(lint.err.find(kNotImplemented), std::string::npos);
 

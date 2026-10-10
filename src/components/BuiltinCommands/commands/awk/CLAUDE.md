@@ -56,8 +56,67 @@ awk rock and adds its files here:
     translating awk's regex escapes for the regex engine is awk--records'
     job. `ScanRegex` only takes the token `Next()` just returned.
   - Punctuation is longest match among the POSIX operators; gawk's `**`,
-    `**=` and `|&` are not POSIX: `**` is two `*` tokens. A byte that starts
-    no token is `invalid char '<c>' in expression`.
+    `**=` and `|&` are not POSIX: `**` is two `*` tokens. A lone `&` (not
+    `&&`) is `syntax error` with the caret on it, as gawk's. A byte that
+    starts no token is `invalid char '<c>' in expression`.
+  - A backslash ending a comment belongs to the comment: it continues
+    nothing, so a source whose last line ends in such a comment ends in a
+    real newline (no newline is added, `EndOfInput` on that line). Whether
+    the source ends in a real newline is decided as the end is reached, from
+    whether the last byte consumed was one (a `Newline` token or a skipped
+    newline), not a token, blanks, a comment or a continuation.
+  - A `Newline` token that ends a comment carries the comment as its `text`
+    (from the `#` to before the newline, the source's added newline too when
+    the comment runs to the end); every other `Newline`'s `text` is empty.
+- `AwkAst.h/.cpp` - the syntax tree every POSIX awk program parses to:
+  `Program` (the sources and the items, in source order) owning `Item`s
+  (BEGIN, END, a pattern, a range, or a function), `FunctionDefinition`s and,
+  under those, `Stmt`s and `Expr`s -- plain structs owned through
+  `unique_ptr`, held by the interpreter as a `shared_ptr<const Program>`.
+  The parser fills only the fields declared here; the interpreter's tasks
+  add `mutable` fields for what they resolve (variable slots, compiled
+  regexes) and never change these. `DumpExpr`, `DumpStmt` and `DumpProgram`
+  write the one-line dumps the tests compare against (see "AST dump"
+  below).
+- `AwkParser.h/.cpp` - the recursive-descent parser of awk expressions
+  (`Parser::ParseExpression`; the statement, item and program methods come
+  with awk--parser). The precedence chain, lowest first (one method per
+  level, POSIX's table): assignment (right-associative, only an lvalue may
+  be assigned to; a post-increment of a field takes its value before
+  gawk's `cannot assign a value to the result of a field post-increment
+  expression`; as gawk's, an assignment may also be either branch of the
+  ternary or the right operand of `|| && ~ !~` and the comparisons, so
+  `1 && y = 2` is `1 && (y = 2)`), the ternary (right-associative), `||`,
+  `&&`, `in`
+  (`match-expr { 'in' NAME }`), `~ !~` (left-associative), the comparison
+  operators (non-associative), `| getline`, concatenation, `+ -`,
+  `* / %`, unary `! - +`, `^` (its exponent at the unary level, so
+  right-associative and `-2^2` is `-(2^2)`), `++ --` (pre on an lvalue, post
+  on a primary that is one) and the primaries. The parser keeps exactly one
+  token of lookahead and the lexer never reads past it, so a `/` or `/=`
+  standing where an operand is expected is handed back to `Lexer::ScanRegex`
+  and becomes a regex literal; anywhere else it is division. Concatenation
+  continues while the current token can start an operand: Number, String,
+  Name, FuncName, Builtin, `$`, `!`, `(`, `++`, `--`, `getline` -- never `+`
+  or `-` (so `a -1` subtracts), `/` `/=` or `in`. A `$` takes a dollar
+  operand with no postfix of its own: `++`/`--` on an lvalue, `-`/`+`/`!`
+  then a dollar operand, or a primary -- so `$i++` is `($i)++`, `$++i` is
+  `$(++i)` and `$NF-1` is `($NF)-1`. `getline` takes an optional lvalue
+  target (a name, `name[...]` or `$...`) and then `<` and a file operand
+  parsed at the `+ -` level: arithmetic, unary and `^` included, no
+  concatenation, no comparison; `"cmd" | getline [target]` is the command
+  form (left-associative, concatenation going on after it: `"a" | getline x
+  "b"` concatenates `"b"`), and a `|` not followed by `getline` is a syntax
+  error at the token after it. A `Builtin` without `(` is allowed only for
+  a bare `length` (`length / 2` divides). Errors are gawk's: `syntax error` at the token
+  where parsing failed, but a `Newline` there is
+  `unexpected newline or end of string` reported on the line it ends (one
+  more than its own), a `Newline` ending a comment is `syntax error` with
+  the caret on the comment's `#`, and `EndOfInput` is
+  `unexpected newline or end of string` at its own place. Lexer errors pass
+  through unchanged. `ParseAwkExpression(text)` parses |text| (source
+  "cmd. line") as one expression that must be the whole text -- for the
+  tests.
 - `AwkInvocation.h/.cpp` - the command line, as gawk takes it:
   `AwkOptionTable` (every gawk option, treated or not: `-F -f -v` with their
   long names, `-h -V -P -r`, the rest marked for the not-treated report),
@@ -66,7 +125,7 @@ awk rock and adds its files here:
   and `LoadAwkSources` (each `-f` file read whole through `OpenInputOperand`
   and `ReadWholeInput` -- `-` is standard input; an unreadable file is
   gawk's fatal, status 2, a directory its own error, status 1).
-- `Awk.cpp` - the `awk` builtin itself: `Name`, `Version` 1.0.0, the option
+- `Awk.cpp` - the `awk` builtin itself: `Name`, `Version` 1.0.1, the option
   table, the gawk-based `--help` (`BuiltinHelp::basedOn`), and `Run`:
   parse the invocation, load the sources, then -- for now -- report `awk:
   running programs is not implemented yet` with status 2 (awk--parser
@@ -74,6 +133,36 @@ awk rock and adds its files here:
 
 The man page is the `--help` text, like most builtins (`ManPage` is not
 overridden).
+
+## AST dump
+
+`DumpExpr`, `DumpStmt` and `DumpProgram` write one line per node,
+sub-nodes in parentheses -- the format the tests compare against, exact:
+
+- Number: its source text (`1e3`, `.5`). String: the value escaped as
+  `DescribeToken` escapes a STR (`\\ \" \n \t`, other control bytes `\ooo`)
+  in quotes. Regex: `/` + the text with every `/` written `\/` + `/`.
+- Variable: the name. Field: `($ e)`. Index: `name[s1, s2]`.
+- Unary: `(- e)`, `(+ e)`, `(! e)`. Binary: `(<op> a b)` with `<op>` one of
+  `+ - * / % ^ < <= != == > >= ~ !~ && ||` or `concat`.
+- In: `(in name s1 s2)`. Conditional: `(?: c a b)`.
+- Assign: `(= lv e)`, `(+= lv e)`, `(-= ...)`, `(*= ...)`, `(/= ...)`,
+  `(%= ...)`, `(^= ...)`. IncDec: `(pre++ lv)`, `(pre-- lv)`,
+  `(post++ lv)`, `(post-- lv)`.
+- Call: `(call f a b)`, `(call f)`. BuiltinCall: a bare `length` is
+  `length`; with parentheses `(name a b)`, `(length)` for `length()`.
+- Getline: `(getline)`, `(getline x)`, `(getline < "f")`,
+  `(getline x < "f")`, `(| "cmd" getline)`, `(| "cmd" getline x)`.
+- Statements: Block `{ s1; s2 }`, empty `{ }`; Expression: its expr;
+  `print`, `print a, b`, `printf "%d\n", x`, followed by ` > t`, ` >> t` or
+  ` | t` when redirected; `if (c) S`, `if (c) S else S`; `while (c) S`;
+  `do S while (c)`; `for (I; C; U) S` (absent parts empty, so
+  `for (; ; ) S`); `for (k in a) S`; `next`, `nextfile`, `break`,
+  `continue`, `exit`, `exit e`, `return`, `return e`,
+  `delete a[s1, s2]`, `delete a`.
+- Items: `BEGIN S`, `END S`, `P S`, `P, Q S`, `P` (no action), `S` (no
+  pattern), `function f(a, b) S`. `DumpProgram` joins them with '\n', no
+  final newline.
 
 ## Documented exceptions (checked against gawk --posix 5.2.1)
 

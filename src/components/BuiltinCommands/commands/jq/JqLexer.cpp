@@ -1,5 +1,7 @@
 #include "commands/jq/JqLexer.h"
 
+#include "commands/jq/JqUtf8.h"
+
 namespace Haisos::Jq {
 namespace {
 
@@ -18,25 +20,6 @@ bool IsKeyword(const std::string& word) {
            word == "foreach" || word == "try" || word == "catch" ||
            word == "label" || word == "break" || word == "import" ||
            word == "include" || word == "module" || word == "__loc__";
-}
-
-// Appends |codePoint| to |out| as UTF-8.
-void AppendUtf8(std::string& out, unsigned int codePoint) {
-    if (codePoint < 0x80) {
-        out += static_cast<char>(codePoint);
-    } else if (codePoint < 0x800) {
-        out += static_cast<char>(0xC0 | (codePoint >> 6));
-        out += static_cast<char>(0x80 | (codePoint & 0x3F));
-    } else if (codePoint < 0x10000) {
-        out += static_cast<char>(0xE0 | (codePoint >> 12));
-        out += static_cast<char>(0x80 | ((codePoint >> 6) & 0x3F));
-        out += static_cast<char>(0x80 | (codePoint & 0x3F));
-    } else {
-        out += static_cast<char>(0xF0 | (codePoint >> 18));
-        out += static_cast<char>(0x80 | ((codePoint >> 12) & 0x3F));
-        out += static_cast<char>(0x80 | ((codePoint >> 6) & 0x3F));
-        out += static_cast<char>(0x80 | (codePoint & 0x3F));
-    }
 }
 
 int HexValue(char c) {

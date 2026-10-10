@@ -56,6 +56,8 @@ add_library(BuiltinCommands STATIC
     commands/jq/JqAst.cpp
     commands/jq/JqLexer.cpp
     commands/jq/JqParser.cpp
+    commands/jq/JqUtf8.cpp
+    commands/jq/JqValue.cpp
     commands/ls/Ls.cpp
     commands/man/Man.cpp
     commands/mkdir/Mkdir.cpp

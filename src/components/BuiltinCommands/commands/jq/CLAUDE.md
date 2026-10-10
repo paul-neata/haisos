@@ -102,7 +102,7 @@ each stage a task of its own):
 - `JqJsonReader.h/.cpp` - `JsonReader`, a push parser (`Feed` a piece,
   `Finish` the end) into a caller's `std::vector<Value>`: several values
   one after another, no recursion per input byte (nesting iterative,
-  refused past 256 levels), jq's extensions (comments, `nan`/`NaN`,
+  refused past 256 levels), jq's extensions (`nan`/`NaN`,
   `Infinity`, a leading `+`, `.5`), a repeated object key keeping its
   first place, its literal numbers kept, and ill-formed UTF-8 in strings
   repaired. Every failure is jq's message with its line and column --

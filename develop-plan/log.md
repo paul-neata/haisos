@@ -151,3 +151,4 @@
 - 2026-10-10 17:56 UTC -- tools--jq-eval: PR #87, windows-failed (ignored per Direction)
 - 2026-10-10 18:18 UTC -- tools--jq-eval merged #87 as 0.5.45: 0C 2H fixed, 4M 3L open, 1 try
 - 2026-10-10 18:31 UTC -- start tools--jq-paths (0.5.46)
+- 2026-10-10 19:32 UTC -- tools--jq-paths: run killed by host out-of-memory; restarted (0.5.46)

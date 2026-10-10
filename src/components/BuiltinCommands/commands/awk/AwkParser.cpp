@@ -6,6 +6,43 @@ namespace Haisos::Awk {
 
 namespace {
 
+// Each built-in's argument count, as POSIX awk allows it: gawk checks these
+// when the call is parsed and reports a wrong count at the ')'. maximum -1
+// means any number; a count above maximum without its own message is
+// reported as a wrong count. extensionMessage: gawk's report for an argument
+// that only its own extensions allow (and POSIX does not).
+struct BuiltinArity {
+    const char* name;
+    int minimum;
+    int maximum;                 // -1: no limit
+    const char* extensionMessage;  // null: reported as a wrong count
+};
+
+const BuiltinArity kBuiltinArities[] = {
+    {"atan2", 2, 2, nullptr},
+    {"close", 1, 1, "close: second argument is a gawk extension"},
+    {"cos", 1, 1, nullptr},
+    {"exp", 1, 1, nullptr},
+    {"fflush", 0, 1, nullptr},
+    {"gsub", 2, 3, nullptr},
+    {"index", 2, 2, nullptr},
+    {"int", 1, 1, nullptr},
+    {"length", 0, 1, nullptr},
+    {"log", 1, 1, nullptr},
+    {"match", 2, 2, "match: third argument is a gawk extension"},
+    {"rand", 0, 0, nullptr},
+    {"sin", 1, 1, nullptr},
+    {"split", 2, 4, nullptr},  // a 4th is refused when the call runs (CallBuiltin)
+    {"sprintf", 0, -1, nullptr},
+    {"sqrt", 1, 1, nullptr},
+    {"srand", 0, 1, nullptr},
+    {"sub", 2, 3, nullptr},
+    {"substr", 2, 3, nullptr},
+    {"system", 1, 1, nullptr},
+    {"tolower", 1, 1, nullptr},
+    {"toupper", 1, 1, nullptr},
+};
+
 ExprOp BinaryOpOf(TokenKind kind) {
     switch (kind) {
         case TokenKind::Plus:         return ExprOp::Add;
@@ -414,6 +451,25 @@ std::vector<ExprPtr> Parser::ParseCallArguments() {
     return arguments;
 }
 
+void Parser::CheckBuiltinArguments(const Token& nameToken, size_t count) {
+    const BuiltinArity* arity = nullptr;
+    for (const BuiltinArity& entry : kBuiltinArities) {
+        if (nameToken.text == entry.name) {
+            arity = &entry;
+            break;
+        }
+    }
+    if (!arity)
+        return;
+    const int given = static_cast<int>(count);
+    if (given >= arity->minimum && (arity->maximum < 0 || given <= arity->maximum))
+        return;
+    if (arity->extensionMessage && given == arity->maximum + 1)
+        Fail(m_token, arity->extensionMessage);
+    Fail(m_token, std::to_string(given) + " is invalid as number of arguments for "
+                     + nameToken.text);
+}
+
 ExprPtr Parser::ParseDollarOperand() {
     if (m_token.kind == TokenKind::Increment || m_token.kind == TokenKind::Decrement) {
         return ParsePreIncDec();
@@ -591,6 +647,7 @@ ExprPtr Parser::ParsePrimary() {
             }
             Advance();
             std::vector<ExprPtr> arguments = ParseCallArguments();
+            CheckBuiltinArguments(name, arguments.size());
             Advance();  // the ')'
             ExprPtr expr = MakeExpr(ExprKind::BuiltinCall, name);
             expr->text = name.text;

@@ -104,6 +104,10 @@ private:
     // The arguments of a call: [ expression { ',' expression } ] ')' -- the
     // caller has consumed the '(' and checks the ')' itself.
     std::vector<ExprPtr> ParseCallArguments();
+    // The argument count of a built-in call, gawk's parse-time check: a
+    // wrong count (or a gawk extension) fails at the call's ')', which the
+    // caller's current token is on.
+    void CheckBuiltinArguments(const Token& nameToken, size_t count);
     // --- statements, items and programs (see "Parsing programs" in the awk
     // CLAUDE.md) ---
     // '{' statements '}', the caller has checked the '{'.

@@ -46,59 +46,105 @@ int Interpreter::SlotOf(const std::string& name) {
     return slot;
 }
 
-void Interpreter::ResolveExpr(const Expr& expr) {
+namespace {
+
+// The index of |name| in a function's parameters, -1 when it is not one of
+// them (or |parameters| null: a name outside a function body).
+int ParameterIndex(const std::vector<std::string>* parameters, const std::string& name) {
+    if (parameters == nullptr) {
+        return -1;
+    }
+    for (size_t i = 0; i < parameters->size(); ++i) {
+        if ((*parameters)[i] == name) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
+} // namespace
+
+void Interpreter::ResolveExpr(const Expr& expr, const std::vector<std::string>* parameters) {
     switch (expr.kind) {
         case ExprKind::Variable:
         case ExprKind::Index:
-        case ExprKind::In:
-            expr.slot = SlotOf(expr.text);
+        case ExprKind::In: {
+            const int localSlot = ParameterIndex(parameters, expr.text);
+            if (localSlot >= 0) {
+                expr.localSlot = localSlot;   // a parameter: no global slot
+            } else {
+                expr.slot = SlotOf(expr.text);
+            }
             break;
+        }
+        case ExprKind::Call: {
+            const auto found = m_functionSlots.find(expr.text);
+            expr.functionIndex = found != m_functionSlots.end() ? found->second : -1;
+            break;
+        }
         default:
             break;
     }
     for (const ExprPtr& operand : expr.operands) {
-        ResolveExpr(*operand);
+        ResolveExpr(*operand, parameters);
     }
     if (expr.target) {
-        ResolveExpr(*expr.target);
+        ResolveExpr(*expr.target, parameters);
     }
 }
 
-void Interpreter::ResolveStmt(const Stmt& stmt) {
+void Interpreter::ResolveStmt(const Stmt& stmt, const std::vector<std::string>* parameters) {
     switch (stmt.kind) {
-        case StmtKind::ForIn:
-            stmt.slot = SlotOf(stmt.name);
-            stmt.arraySlot = SlotOf(stmt.arrayName);
+        case StmtKind::ForIn: {
+            const int localSlot = ParameterIndex(parameters, stmt.name);
+            if (localSlot >= 0) {
+                stmt.localSlot = localSlot;
+            } else {
+                stmt.slot = SlotOf(stmt.name);
+            }
+            const int localArraySlot = ParameterIndex(parameters, stmt.arrayName);
+            if (localArraySlot >= 0) {
+                stmt.localArraySlot = localArraySlot;
+            } else {
+                stmt.arraySlot = SlotOf(stmt.arrayName);
+            }
             break;
-        case StmtKind::Delete:
-            stmt.arraySlot = SlotOf(stmt.name);
+        }
+        case StmtKind::Delete: {
+            const int localArraySlot = ParameterIndex(parameters, stmt.name);
+            if (localArraySlot >= 0) {
+                stmt.localArraySlot = localArraySlot;
+            } else {
+                stmt.arraySlot = SlotOf(stmt.name);
+            }
             break;
+        }
         default:
             break;
     }
     if (stmt.expr) {
-        ResolveExpr(*stmt.expr);
+        ResolveExpr(*stmt.expr, parameters);
     }
     for (const ExprPtr& argument : stmt.args) {
-        ResolveExpr(*argument);
+        ResolveExpr(*argument, parameters);
     }
     if (stmt.redirectTarget) {
-        ResolveExpr(*stmt.redirectTarget);
+        ResolveExpr(*stmt.redirectTarget, parameters);
     }
     if (stmt.init) {
-        ResolveStmt(*stmt.init);
+        ResolveStmt(*stmt.init, parameters);
     }
     if (stmt.update) {
-        ResolveStmt(*stmt.update);
+        ResolveStmt(*stmt.update, parameters);
     }
     if (stmt.body) {
-        ResolveStmt(*stmt.body);
+        ResolveStmt(*stmt.body, parameters);
     }
     if (stmt.elseBody) {
-        ResolveStmt(*stmt.elseBody);
+        ResolveStmt(*stmt.elseBody, parameters);
     }
     for (const StmtPtr& statement : stmt.statements) {
-        ResolveStmt(*statement);
+        ResolveStmt(*statement, parameters);
     }
 }
 
@@ -107,21 +153,28 @@ void Interpreter::Prepare() {
     for (int slot = 0; slot < kSpecialSlotCount; ++slot) {
         m_globalSlots.emplace(kSpecialNames[slot], slot);
     }
-    // Every name in the program gets its slot (awk--functions will resolve
-    // a function's parameters to locals instead).
+    // Every function's name and index: a Call may precede its definition.
+    for (size_t i = 0; i < m_program->functions.size(); ++i) {
+        m_functionSlots.emplace(m_program->functions[i].name, static_cast<int>(i));
+    }
+    // Every name gets its slot: a global, or the parameter it is inside a
+    // function body.
     for (const Item& item : m_program->items) {
+        if (item.kind == ItemKind::Function) {
+            const FunctionDefinition& function =
+                m_program->functions[static_cast<size_t>(item.functionIndex)];
+            ResolveStmt(*function.body, &function.parameters);
+            continue;
+        }
         if (item.pattern) {
-            ResolveExpr(*item.pattern);
+            ResolveExpr(*item.pattern, nullptr);
         }
         if (item.rangeEnd) {
-            ResolveExpr(*item.rangeEnd);
+            ResolveExpr(*item.rangeEnd, nullptr);
         }
         if (item.action) {
-            ResolveStmt(*item.action);
+            ResolveStmt(*item.action, nullptr);
         }
-    }
-    for (const FunctionDefinition& function : m_program->functions) {
-        ResolveStmt(*function.body);
     }
     m_inRange.assign(m_program->items.size(), false);
 
@@ -179,6 +232,7 @@ void Interpreter::ApplyPreAssignment(const AwkPreAssignment& assignment) {
         }
         m_globals[kSlotFS].kind = Variable::Kind::Scalar;
         m_globals[kSlotFS].scalar = Value::FromString(decoded);
+        CheckFieldSeparator(/*withLocation=*/false);
         return;
     }
     // -v name=value: the name checked as it was written (gawk: `-v
@@ -198,7 +252,37 @@ void Interpreter::ApplyPreAssignment(const AwkPreAssignment& assignment) {
 }
 
 void Interpreter::AssignName(const std::string& name, const Value& value) {
-    AssignSlot(SlotOf(name), name, value);
+    // -v and a name=value operand: never a statement of the program, so
+    // their errors and warnings carry no location.
+    AssignSlot(SlotOf(name), name, value, /*located=*/false);
+}
+
+void Interpreter::CheckFieldSeparator(bool withLocation) {
+    const std::string& fs = SpecialString(kSlotFS);
+    if (fs.size() < 2) {
+        return;   // the empty string and one byte are never a regex
+    }
+    std::vector<std::string> warnings;
+    std::string error;
+    std::shared_ptr<const Regex> regex = m_regexCache.Get(fs, warnings, error);
+    if (withLocation) {
+        RegexWarnings(warnings, /*atRuntime=*/true);
+        if (!regex) {
+            throw AwkFatal("invalid regexp: " + error + ": /" + AwkRegexAsWritten(fs) + "/");
+        }
+        return;
+    }
+    // -F, -v and an operand: each warning once a run, no location.
+    for (const std::string& message : warnings) {
+        if (!m_regexWarningsGiven.insert(message).second) {
+            continue;
+        }
+        m_context.ErrorText(std::string(kAwkName) + ": warning: " + message + "\n");
+    }
+    if (!regex) {
+        throw AwkFatal("invalid regexp: " + error + ": /" + AwkRegexAsWritten(fs) + "/",
+                       /*withLocation=*/false);
+    }
 }
 
 // --- literal regexes, before anything runs ---
@@ -324,7 +408,7 @@ Value& Interpreter::ScalarRef(int slot, const std::string& name) {
 }
 
 Value& Interpreter::ScalarRef(const Expr& variable) {
-    return ScalarRef(variable.slot, variable.text);
+    return ScalarRefOf(variable.slot, variable.localSlot, variable.text);
 }
 
 AwkArray& Interpreter::ArrayRef(int slot, const std::string& name) {
@@ -342,13 +426,123 @@ AwkArray& Interpreter::ArrayRef(int slot, const std::string& name) {
     return *variable.array;
 }
 
-void Interpreter::AssignSlot(int slot, const std::string& name, const Value& value) {
+ActiveCall* Interpreter::CurrentCall() {
+    return m_calls.empty() ? nullptr : m_calls.back().get();
+}
+
+Variable& Interpreter::VariableOf(const Expr& variable) {
+    // NF never reaches here (its variable is unused); every other resolved
+    // Variable expression names a global or the current call's parameter.
+    return variable.localSlot >= 0
+               ? CurrentCall()->locals[static_cast<size_t>(variable.localSlot)]
+               : GlobalVariable(variable.slot);
+}
+
+std::string Interpreter::VariableName(int localSlot, const std::string& name) {
+    // A parameter passed by name reports where the argument came from.
+    const ActiveCall* call = CurrentCall();
+    if (call == nullptr || localSlot < 0
+        || localSlot >= static_cast<int>(call->locals.size())) {
+        return name;
+    }
+    const Variable& parameter = call->locals[static_cast<size_t>(localSlot)];
+    return parameter.passedFrom.empty() ? name
+                                         : name + " (from " + parameter.passedFrom + ")";
+}
+
+Value& Interpreter::ScalarRef(Variable& variable, const std::string& name) {
+    switch (variable.kind) {
+        case Variable::Kind::Array:
+            throw AwkFatal("attempt to use array `" + name + "' in a scalar context");
+        case Variable::Kind::Untyped:
+            // Typing it types every still-Untyped variable its binding chain
+            // leads to (the values unchanged: an untyped `x' passed to `a'
+            // and read as a scalar can no longer be an array).
+            for (Variable* link = &variable; link != nullptr; link = link->binding) {
+                if (link->kind != Variable::Kind::Untyped) {
+                    break;
+                }
+                link->kind = Variable::Kind::Scalar;
+            }
+            break;
+        case Variable::Kind::Scalar:
+            break;
+    }
+    return variable.scalar;
+}
+
+AwkArray& Interpreter::ArrayRef(Variable& variable, const std::string& name) {
+    switch (variable.kind) {
+        case Variable::Kind::Scalar:
+            // A parameter has its own message (a Scalar argument is passed
+            // by value, so only a parameter lands here).
+            throw AwkFatal("attempt to use scalar parameter `" + name + "' as an array");
+        case Variable::Kind::Untyped: {
+            // The array lives at the chain's last variable, shared by every
+            // link -- the caller's variable included, when the argument was
+            // passed by name.
+            std::vector<Variable*> chain;
+            for (Variable* link = &variable; link != nullptr; link = link->binding) {
+                if (link->kind == Variable::Kind::Scalar) {
+                    throw AwkFatal("attempt to use scalar parameter `" + name + "' as an array");
+                }
+                chain.push_back(link);
+                if (link->kind == Variable::Kind::Array) {
+                    break;
+                }
+            }
+            std::shared_ptr<AwkArray> array =
+                chain.back()->kind == Variable::Kind::Array
+                    ? chain.back()->array
+                    : std::make_shared<AwkArray>();
+            for (Variable* link : chain) {
+                link->kind = Variable::Kind::Array;
+                link->array = array;
+            }
+            return *array;
+        }
+        case Variable::Kind::Array:
+            break;
+    }
+    return *variable.array;
+}
+
+Value& Interpreter::ScalarRefOf(int slot, int localSlot, const std::string& name) {
+    if (localSlot < 0) {
+        return ScalarRef(slot, name);
+    }
+    ActiveCall* call = CurrentCall();
+    if (call == nullptr || localSlot >= static_cast<int>(call->locals.size())) {
+        throw AwkFatal("cannot evaluate this expression");
+    }
+    return ScalarRef(call->locals[static_cast<size_t>(localSlot)],
+                     VariableName(localSlot, name));
+}
+
+AwkArray& Interpreter::ArrayRefOf(int slot, int localSlot, const std::string& name) {
+    if (localSlot < 0) {
+        return ArrayRef(slot, name);
+    }
+    ActiveCall* call = CurrentCall();
+    if (call == nullptr || localSlot >= static_cast<int>(call->locals.size())) {
+        throw AwkFatal("cannot evaluate this expression");
+    }
+    return ArrayRef(call->locals[static_cast<size_t>(localSlot)], name);
+}
+
+void Interpreter::AssignSlot(int slot, const std::string& name, const Value& value,
+                             bool located) {
     if (slot == kSlotNF) {
         // NF lives in the FieldStore, not in its (unused) variable.
         m_fields.SetNF(AwkIntegerOf(value.ToNumber()), SpecialString(kSlotOFS));
         return;
     }
     ScalarRef(slot, name) = value;
+    if (slot == kSlotFS) {
+        // A regex FS is checked when it is assigned, not when the first
+        // record is split.
+        CheckFieldSeparator(located);
+    }
 }
 
 void Interpreter::Assign(const Expr& lvalue, const Value& value) {
@@ -377,7 +571,7 @@ Value Interpreter::ReadPlace(const Place& place) {
     const Expr& lvalue = *place.lvalue;
     switch (lvalue.kind) {
         case ExprKind::Index:
-            return ArrayRef(lvalue.slot, lvalue.text).GetOrCreate(place.key);
+            return ArrayRefOf(lvalue.slot, lvalue.localSlot, lvalue.text).GetOrCreate(place.key);
         case ExprKind::Field:
             return m_fields.Field(place.field, SpecialString(kSlotCONVFMT));
         default:
@@ -389,14 +583,26 @@ void Interpreter::WritePlace(const Place& place, const Value& value) {
     const Expr& lvalue = *place.lvalue;
     switch (lvalue.kind) {
         case ExprKind::Index:
-            ArrayRef(lvalue.slot, lvalue.text).GetOrCreate(place.key) = value;
+            ArrayRefOf(lvalue.slot, lvalue.localSlot, lvalue.text).GetOrCreate(place.key) = value;
             return;
         case ExprKind::Field:
+            if (place.field == 0) {
+                // $0 = v re-splits with the FS and RS of this moment, not
+                // the ones the record was read with.
+                m_fields.SetRecord(value.ToString(SpecialString(kSlotCONVFMT)),
+                                   SpecialString(kSlotFS),
+                                   SpecialString(kSlotRS).empty());
+                return;
+            }
             m_fields.SetField(place.field, value, SpecialString(kSlotOFS),
                               SpecialString(kSlotCONVFMT));
             return;
         default:
-            AssignSlot(lvalue.slot, lvalue.text, value);
+            if (lvalue.localSlot >= 0) {
+                ScalarRefOf(lvalue.slot, lvalue.localSlot, lvalue.text) = value;
+            } else {
+                AssignSlot(lvalue.slot, lvalue.text, value);
+            }
             return;
     }
 }
@@ -484,11 +690,12 @@ Value Interpreter::ValueOf(const Expr& expr) {
             return m_fields.Field(AwkIntegerOf(ValueOf(*expr.operands[0]).ToNumber()),
                                   SpecialString(kSlotCONVFMT));
         case ExprKind::Index:
-            return ArrayRef(expr.slot, expr.text).GetOrCreate(Subscript(expr.operands));
+            return ArrayRefOf(expr.slot, expr.localSlot, expr.text)
+                .GetOrCreate(Subscript(expr.operands));
         case ExprKind::In: {
             // `k in x' types an untyped x as an array, as using it any other
             // way types it a scalar.
-            AwkArray& array = ArrayRef(expr.slot, expr.text);
+            AwkArray& array = ArrayRefOf(expr.slot, expr.localSlot, expr.text);
             return Value::FromNumber(array.Contains(Subscript(expr.operands)) ? 1 : 0);
         }
         case ExprKind::Unary: {
@@ -637,12 +844,19 @@ int Interpreter::Run() {
 }
 
 void Interpreter::RunBeginItems() {
+    m_currentItemKind = ItemKind::Begin;
     for (const Item& item : m_program->items) {
         if (item.kind != ItemKind::Begin) {
             continue;
         }
-        if (RunStatement(*item.action) == Flow::Exit) {
-            // exit in BEGIN: the input is skipped, END still runs.
+        try {
+            if (RunStatement(*item.action) == Flow::Exit) {
+                // exit in BEGIN: the input is skipped, END still runs.
+                m_exitFromBegin = true;
+                return;
+            }
+        } catch (const FlowUnwind&) {
+            // exit out of a function body: as a plain exit in BEGIN.
             m_exitFromBegin = true;
             return;
         }
@@ -680,38 +894,51 @@ void Interpreter::RunMainLoop() {
 }
 
 Flow Interpreter::RunMainItems() {
+    m_currentItemKind = ItemKind::Main;
     for (size_t i = 0; i < m_program->items.size(); ++i) {
         const Item& item = m_program->items[i];
         if (item.kind != ItemKind::Main) {
             continue;
         }
-        if (!MatchesPattern(item, i)) {
-            continue;
-        }
-        if (item.action) {
-            const Flow flow = RunStatement(*item.action);
-            if (flow != Flow::Normal) {
-                return flow;   // next, nextfile, exit end this record's items
+        Flow flow = Flow::Normal;
+        try {
+            // A pattern may hold a call whose next/nextfile/exit unwinds
+            // here, as the action's would.
+            if (!MatchesPattern(item, i)) {
+                continue;
             }
-        } else {
-            // A pattern without an action prints the record: `print $0' with
-            // no redirection (the item has no action to carry one).
-            Stmt print;
-            print.kind = StmtKind::Print;
-            Output(print, m_fields.Record(SpecialString(kSlotCONVFMT)) +
-                              SpecialString(kSlotORS));
+            if (item.action) {
+                flow = RunStatement(*item.action);
+            } else {
+                // A pattern without an action prints the record: `print $0'
+                // with no redirection (the item has no action to carry one).
+                Stmt print;
+                print.kind = StmtKind::Print;
+                Output(print, m_fields.Record(SpecialString(kSlotCONVFMT)) +
+                                  SpecialString(kSlotORS));
+            }
+        } catch (const FlowUnwind& unwind) {
+            flow = unwind.flow;
+        }
+        if (flow != Flow::Normal) {
+            return flow;   // next, nextfile, exit end this record's items
         }
     }
     return Flow::Normal;
 }
 
 void Interpreter::RunEndItems() {
+    m_currentItemKind = ItemKind::End;
     for (const Item& item : m_program->items) {
         if (item.kind != ItemKind::End) {
             continue;
         }
-        if (RunStatement(*item.action) == Flow::Exit) {
-            return;   // exit in END stops at once
+        try {
+            if (RunStatement(*item.action) == Flow::Exit) {
+                return;   // exit in END stops at once
+            }
+        } catch (const FlowUnwind&) {
+            return;   // exit out of a function body ends END the same way
         }
     }
 }
@@ -806,14 +1033,19 @@ Flow Interpreter::RunStatement(const Stmt& stmt) {
             }
             return Flow::Normal;
         case StmtKind::ForIn: {
-            AwkArray& array = ArrayRef(stmt.arraySlot, stmt.arrayName);
+            AwkArray& array = ArrayRefOf(stmt.arraySlot, stmt.localArraySlot, stmt.arrayName);
             const std::vector<std::string> keys = array.Keys();   // a snapshot
             for (const std::string& key : keys) {
                 ThrowIfStopped();
                 if (!array.Contains(key)) {
                     continue;   // deleted by an earlier turn of this loop
                 }
-                AssignSlot(stmt.slot, stmt.name, Value::FromInput(key));
+                if (stmt.localSlot >= 0) {
+                    ScalarRefOf(stmt.slot, stmt.localSlot, stmt.name) =
+                        Value::FromInput(key);
+                } else {
+                    AssignSlot(stmt.slot, stmt.name, Value::FromInput(key));
+                }
                 const Flow flow = RunStatement(*stmt.body);
                 if (flow == Flow::Break) {
                     break;
@@ -845,12 +1077,19 @@ Flow Interpreter::RunStatement(const Stmt& stmt) {
                 m_exitCode = AwkIntegerOf(ValueOf(*stmt.expr).ToNumber());
             }
             return Flow::Exit;
-        case StmtKind::Return:
-            // The parser allows return only in a function, and no function
-            // runs yet (awk--functions).
-            throw AwkFatal("return is not implemented yet");
+        case StmtKind::Return: {
+            // The parser allows return only in a function body, so a call is
+            // always active here.
+            ActiveCall* call = CurrentCall();
+            if (call != nullptr) {
+                if (stmt.expr) {
+                    call->returnValue = ValueOf(*stmt.expr);
+                }
+            }
+            return Flow::Return;
+        }
         case StmtKind::Delete: {
-            AwkArray& array = ArrayRef(stmt.arraySlot, stmt.name);
+            AwkArray& array = ArrayRefOf(stmt.arraySlot, stmt.localArraySlot, stmt.name);
             if (stmt.args.empty()) {
                 array.Clear();
             } else {
@@ -1031,14 +1270,14 @@ bool Interpreter::MatchRegexLiteral(const Expr& regex, const std::string& text) 
     return regex.compiledRegex->Search(text, 0, match);
 }
 
-bool Interpreter::MatchRegex(const Expr& regex, const std::string& text) {
-    if (regex.kind == ExprKind::Regex && !regex.parenthesized) {
-        return MatchRegexLiteral(regex, text);
+std::shared_ptr<const Regex> Interpreter::RegexOperand(const Expr& operand) {
+    if (operand.kind == ExprKind::Regex && !operand.parenthesized) {
+        return operand.compiledRegex;
     }
     // A dynamic regex: the operand's value a string, compiled once. A
     // parenthesized regex literal comes here too: gawk takes it as the
     // value of `($0 ~ /re/)', a number whose text is then the regex.
-    const std::string value = ValueOf(regex).ToString(SpecialString(kSlotCONVFMT));
+    const std::string value = ValueOf(operand).ToString(SpecialString(kSlotCONVFMT));
     std::vector<std::string> warnings;
     std::string error;
     std::shared_ptr<const Regex> compiled = m_regexCache.Get(value, warnings, error);
@@ -1046,6 +1285,11 @@ bool Interpreter::MatchRegex(const Expr& regex, const std::string& text) {
     if (!compiled) {
         throw AwkFatal("invalid regexp: " + error + ": /" + AwkRegexAsWritten(value) + "/");
     }
+    return compiled;
+}
+
+bool Interpreter::MatchRegex(const Expr& regex, const std::string& text) {
+    std::shared_ptr<const Regex> compiled = RegexOperand(regex);
     RegexMatch match;
     return compiled->Search(text, 0, match);
 }
@@ -1070,12 +1314,92 @@ void Interpreter::RuntimeWarning(const std::string& message) {
 
 // --- the hooks awk's later tasks fill ---
 
-Value Interpreter::CallBuiltin(const Expr& call) {
-    throw AwkFatal("function `" + call.text + "' is not implemented yet");
-}
-
 Value Interpreter::CallFunction(const Expr& call) {
-    throw AwkFatal("function `" + call.text + "' is not implemented yet");
+    if (call.functionIndex < 0) {
+        // Only when the call runs: a definition may come later in the
+        // program, and a call never made is fine.
+        throw AwkFatal("function `" + call.text + "' not defined");
+    }
+    const FunctionDefinition& function =
+        m_program->functions[static_cast<size_t>(call.functionIndex)];
+    if (call.operands.size() > function.parameters.size()) {
+        RuntimeWarning("function `" + call.text + "' called with more arguments than declared");
+    }
+    if (m_calls.size() >= kAwkMaxCallDepth) {
+        throw AwkFatal("function call nesting too deep (more than " +
+                       std::to_string(kAwkMaxCallDepth) + " calls)");
+    }
+    auto active = std::make_unique<ActiveCall>();
+    active->function = &function;
+    active->locals.resize(function.parameters.size());
+    for (size_t i = 0; i < call.operands.size(); ++i) {
+        const Expr& argument = *call.operands[i];
+        if (i >= active->locals.size()) {
+            ValueOf(argument);   // an extra argument: evaluated, then dropped
+            continue;
+        }
+        Variable& parameter = active->locals[i];
+        // A bare variable is passed by name when it is an array or untyped;
+        // the special variables (NF's own variable is unused) are always by
+        // value, as any other expression is.
+        const bool bareVariable = argument.kind == ExprKind::Variable
+                                  && !argument.parenthesized && argument.slot != kSlotNF;
+        if (!bareVariable) {
+            parameter.kind = Variable::Kind::Scalar;
+            parameter.scalar = ValueOf(argument);
+            continue;
+        }
+        Variable& passed = VariableOf(argument);
+        parameter.passedFrom = argument.text;
+        switch (passed.kind) {
+            case Variable::Kind::Array:
+                parameter.kind = Variable::Kind::Array;
+                parameter.array = passed.array;
+                break;
+            case Variable::Kind::Untyped:
+                // The callee may make it an array (or a scalar) in the
+                // caller, through the binding chain.
+                parameter.kind = Variable::Kind::Untyped;
+                parameter.binding = &passed;
+                break;
+            case Variable::Kind::Scalar:
+                parameter.kind = Variable::Kind::Scalar;
+                parameter.scalar = passed.scalar;
+                break;
+        }
+    }
+    const SourcePosition position = m_position;
+    m_calls.push_back(std::move(active));
+    Flow flow;
+    try {
+        flow = RunStatement(*function.body);
+    } catch (...) {
+        // A fatal, a stop or a nested flow: this call is unwound either way.
+        m_calls.pop_back();
+        throw;
+    }
+    Value result = std::move(m_calls.back()->returnValue);
+    m_calls.pop_back();
+    m_position = position;
+    switch (flow) {
+        case Flow::Normal:
+        case Flow::Return:
+            return result;
+        case Flow::Next:
+        case Flow::NextFile:
+            if (m_currentItemKind != ItemKind::Main) {
+                const char* statement = flow == Flow::Next ? "next" : "nextfile";
+                throw AwkFatal(std::string("`") + statement + "' cannot be called from a `" +
+                               (m_currentItemKind == ItemKind::Begin ? "BEGIN" : "END") +
+                               "' rule");
+            }
+            throw FlowUnwind{flow};
+        case Flow::Exit:
+            throw FlowUnwind{Flow::Exit};   // m_exitCode is already set
+        default:
+            break;   // break/continue: the parser refuses them in a function
+    }
+    return result;
 }
 
 Value Interpreter::EvaluateGetline(const Expr& expr) {

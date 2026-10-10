@@ -67,9 +67,14 @@ struct Expr {
     GetlineForm getlineForm = GetlineForm::Simple;
     ExprPtr target;                        // Getline's variable, field or element; null when none
     // The interpreter's resolution of a name (Variable, Index, In): the
-    // global slot it stored the name under. Mutable: the program is held
-    // const; the dump ignores this.
+    // global slot it stored the name under, or the parameter it is inside a
+    // function body (localSlot). Mutable: the program is held const; the
+    // dump ignores this.
     mutable int slot = -1;
+    mutable int localSlot = -1;
+    // Call: the index of the definition in Program::functions (mutable as
+    // slot; the dump ignores this).
+    mutable int functionIndex = -1;
     // Regex: the interpreter's compiled form, filled before anything runs
     // (mutable as slot; the dump ignores this).
     mutable std::shared_ptr<const Regex> compiledRegex;
@@ -101,9 +106,12 @@ struct Stmt {
     std::string name;                 // ForIn: the loop variable; Delete: the array
     std::string arrayName;            // ForIn: the array
     // The interpreter's resolution of the names (mutable as Expr::slot):
-    // ForIn's variable in slot, ForIn's array and Delete's array in arraySlot.
+    // ForIn's variable in slot (localSlot inside a function body), ForIn's
+    // array and Delete's array in arraySlot (localArraySlot likewise).
     mutable int slot = -1;
     mutable int arraySlot = -1;
+    mutable int localSlot = -1;
+    mutable int localArraySlot = -1;
 };
 
 enum class ItemKind { Begin, End, Main, Function };

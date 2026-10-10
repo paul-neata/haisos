@@ -136,7 +136,9 @@ void FieldStore::SetField(intmax_t index, const Value& value, const std::string&
     }
     if (index == 0) {
         // $0 = value: a new record, re-split with the FS saved with the
-        // current record. |convfmt| converts a Number value.
+        // current record (the interpreter itself sets $0 through SetRecord,
+        // with the FS and RS of the moment of the assignment). |convfmt|
+        // converts a Number value.
         SetRecord(value.ToString(convfmt), m_fs, m_paragraph);
         return;
     }

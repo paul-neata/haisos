@@ -3,7 +3,7 @@
 - Rock: awk
 - Depends on: awk--lexer, coreutils--printf-seq (`BuiltinPrintf.h`)
 - Size: ~900 changed lines in ~9 files
-- Plan checked against: develop @ ccb9dbe
+- Plan checked against: develop @ 5370ec9
 - PR title: Add awk's value model, arrays, field splitting and record reading
 
 ## Goal
@@ -28,22 +28,53 @@ awk--io reuse them (`split()`, `getline`).
 
 ## Context
 
+**Clean room** (root `CLAUDE.md`, "Clean-room rule", above every other
+rule): all code is written from scratch. Never read, copy, port, translate
+or paraphrase another program's source (gawk, mawk, the one true awk,
+busybox, ...), whatever its licence, and never name another program's
+internal functions, variables, types or flags. Behaviour is matched from
+documentation (POSIX awk, the gawk manual, man pages) and from the observed
+output of real awks. The value, array, field-store and reader designs below
+are this plan's own, derived from POSIX's description of awk's values and
+gawk's observed output -- not from any awk's internals.
+
+**Write in pieces**: never more than ~250 lines in one Write/Edit call;
+build a file up with several Edits; commit after each file or step.
+
 Read first: `src/components/BuiltinCommands/commands/awk/CLAUDE.md`,
-`AwkError.h`; `BuiltinCommand.h` (`BuiltinContext::StopRequested`),
-`interfaces/IFileDescriptor.h` (`Read`, `kIOInterrupted`), and how
-`commands/wc/Wc.cpp` reads a descriptor and stops.
+`AwkError.h/.cpp`; `BuiltinCommand.h` (`BuiltinContext`, its constructor
+and `StopRequested`), `BuiltinPrintf.h`, `interfaces/IFileDescriptor.h`
+(`Read`, `kIOInterrupted`), and how `commands/wc/Wc.cpp` reads a
+descriptor and stops.
 
 What earlier tasks provide (on develop):
-- awk--lexer: `commands/awk/` with `AwkError.h` (`AwkSyntaxError`,
-  `AwkLocationPrefix`, ...), the `Awk.unittests` executable.
-- coreutils--printf-seq: `BuiltinPrintf.h` -- `struct PrintfSpec`,
+- awk--lexer, awk--expressions, awk--parser (#76, #77, #78):
+  `src/components/BuiltinCommands/commands/awk/` -- `AwkError.h/.cpp`
+  (`kAwkName`, `AwkSource`, `AwkWarning`, `AwkSyntaxError`,
+  `AwkLocationPrefix`, `FormatAwkSyntaxError`, `FormatAwkWarning`,
+  `FormatAwkError`), `AwkLexer`, `AwkAst`, `AwkParser`
+  (`ParseAwkProgram`), `AwkInvocation`, `Awk.cpp` (which still reports
+  `awk: running programs is not implemented yet` -- unchanged here), all in
+  namespace `Haisos::Awk`, and the awk `CLAUDE.md`. Tests:
+  `tests/unit/components/Awk.unittests/` (`AwkLexerTest.cpp`,
+  `AwkParserTest.cpp`, `AwkCommandTest.cpp`), one executable
+  `Awk.unittests` whose `CMakeLists.txt` lists its sources in
+  `add_executable` and already includes
+  `tests/unit/components/BuiltinCommands.unittests` (for
+  `BuiltinCommandsFixture.h`) and links `BuiltinCommands`, `Environment`,
+  `Factory`.
+- coreutils--printf-seq: `src/components/BuiltinCommands/BuiltinPrintf.h`
+  (namespace `Haisos`) -- `struct PrintfSpec` (`flags`, `width`,
+  `precision`, `widthFromArgument`, `precisionFromArgument`, `conversion`),
   `bool ParsePrintfSpec(std::string_view format, size_t& pos, PrintfSpec& spec)`
-  (pos on the `%`; `%%` gives conversion `%`; length modifiers skipped),
+  (pos on the `%`; `%%` gives conversion `%`; length modifiers skipped;
+  false when the format ends inside the specification),
   `FormatPrintfSigned(spec, intmax_t)`, `FormatPrintfUnsigned(spec, uintmax_t)`,
   `FormatPrintfFloat(spec, long double)`, `FormatPrintfString(spec, string_view)`
   -- glibc's output.
 
-Every expected value below was checked with gawk 5.2.1 `--posix`.
+Every expected value below was checked with gawk 5.2.1 `--posix` on the
+host (re-checked at 5370ec9).
 
 ## Changes
 
@@ -91,18 +122,19 @@ public:
     bool ToBoolean() const;
 };
 
-// gawk --posix's rule, which is strtod's: skip leading blanks (space \t \n
-// \v \f \r), convert the longest prefix std::strtod takes (decimal, hex
-// "0x1A", "inf", "infinity", "nan", any case) -- no prefix is 0.
+// As gawk --posix converts a string (observed: "3x"+0 is 3, "0x1A"+0 26,
+// "info"+0 +inf): leading blanks (space \t \n \v \f \r) skipped, then the
+// longest prefix std::strtod accepts (decimal, hex "0x1A", "inf",
+// "infinity", "nan", any case) -- none at all is 0.
 double StringToNumber(std::string_view text);
 // True when that conversion took at least one byte and only blanks follow it.
 bool LooksNumeric(std::string_view text, double& number);
 
 // A number as awk shows it:
 //  - NaN and infinities: "+nan", "-nan", "+inf", "-inf" (the sign bit decides);
-//  - an integral value with |v| < 2^63: its decimal integer ("-0" is "0");
-//  - any other integral value: all its digits ("%.0f": 1e30 is
-//    1000000000000000019884624838656);
+//  - an integral value: its decimal integer, every digit, whatever its size
+//    and whatever |format| (as "%.0f" prints it: 1e30 is
+//    1000000000000000019884624838656, 2^64 18446744073709551616; "-0" is "0");
 //  - otherwise FormatAwkNumber(format, number).
 std::string AwkNumberToString(double number, const std::string& format);
 // |format| (CONVFMT or OFMT) applied to one number: bytes copied, "%%" a
@@ -112,13 +144,20 @@ std::string AwkNumberToString(double number, const std::string& format);
 // value converted as glibc would, through intmax_t); c: FormatPrintfString
 // of the byte (unsigned char) of the integer; e E f F g G a A:
 // FormatPrintfFloat; any other conversion, or a format ending inside one,
-// copied as written. A '*' width or precision counts as absent.
+// copied as written ("%q" stays "%q", "abc" "abc", "%5" "%5"). A '*' width
+// or precision counts as absent (gawk stops with a fatal error -- a
+// documented difference).
 std::string FormatAwkNumber(const std::string& format, double number);
 
+// What CompareValues returns when a numeric comparison has a NaN on either
+// side: the two are unordered, so < <= == > >= are all false and != true
+// (gawk --posix: x = "nan"+0; x == x, x < x and x > x are all 0).
+inline constexpr int kAwkUnordered = 2;
 // POSIX's comparison: numeric (by ToNumber) when both are IsNumeric(),
 // else the two ToString(convfmt) compared byte by byte as unsigned chars.
-// Negative, zero or positive. Numeric: -1 if a < b, 1 if a > b, else 0 (so
-// NaN compares equal to nothing and less than nothing).
+// Numeric: -1 if a < b, 1 if a > b, 0 if equal, kAwkUnordered with a NaN.
+// String: negative, zero or positive (never kAwkUnordered). The interpreter
+// maps the result to each relational operator, kAwkUnordered first.
 int CompareValues(const Value& a, const Value& b, const std::string& convfmt);
 
 // [A-Za-z_][A-Za-z0-9_]*: a legal awk variable name (for -v and var=value).
@@ -229,7 +268,9 @@ uses the C locale).
 
 ## Tests
 
-`tests/unit/components/Awk.unittests/AwkValueTest.cpp` (new, in the CMakeLists), plain `TEST`s:
+`tests/unit/components/Awk.unittests/AwkValueTest.cpp` (new; add it to
+`add_executable(Awk.unittests ...)` in that directory's `CMakeLists.txt`),
+plain `TEST`s:
 - `AwkValueTest.StringToNumber`: `"3x"` 3, `" 12 "` 12, `"0x1A"` 26,
   `"1e3x"` 1000, `".e1"` 0, `"+"` 0, `""` 0, `"nancy"` NaN, `"info"` +inf,
   `"-inf"` -inf.
@@ -241,12 +282,15 @@ uses the C locale).
   123456.7 -> `123457`; 1234567.8 -> `1.23457e+06`; -0.0 -> `0`;
   2^31 -> `2147483648`; -2^63 -> `-9223372036854775808`; 1e6*1e6 ->
   `1000000000000`; 100.0/3 -> `33.3333`; +inf -> `+inf`; -inf -> `-inf`;
-  NaN with the sign bit clear -> `+nan`; 3.14159 with `%.2f` -> `3.14`;
+  NaN with the sign bit clear -> `+nan`, with it set -> `-nan`; 3.14159 with `%.2f` -> `3.14`;
   2.5 with `%d` -> `2`; 255.5 with `%x` -> `ff`; 3.14159 with `x=%.1f%%` -> `x=3.1%`.
 - `AwkValueTest.Comparisons`: Number 1 vs Number 1.0 -> 0; String "10" vs
   String "9" -> negative; StrNum "10" vs StrNum "9" -> positive; StrNum
   "10" vs String "9" -> negative (string); Uninitialized vs Number 0 -> 0;
-  Uninitialized vs String "" -> 0; Number 2 vs Number 10 -> negative.
+  Uninitialized vs String "" -> 0; Number 2 vs Number 10 -> negative;
+  Number NaN vs Number NaN, and vs Number 1 -> `kAwkUnordered`; StrNum
+  "nan" vs Number 5 -> `kAwkUnordered` (numeric: `"nan"` from input is a
+  StrNum under `--posix`).
 - `AwkValueTest.Truth`: Number 0 false, String "0" true, StrNum "0" false,
   String "" false, Uninitialized false, StrNum " 1 " true.
 - `AwkValueTest.ArrayKeepsInsertionOrder`: insert z a m, `Keys()` z a m;
@@ -265,10 +309,15 @@ uses the C locale).
   `a\nb` -> `a`, `b`, End; `a\n\n` -> `a`, ``, End; RS `X` on `aXbXc` ->
   `a b c`; RS `ab` on `xaby\nzabw` -> `x`, `by\nz`, `bw`; RS changed between
   calls takes effect at the next record; a 200 KiB line comes back whole.
-  The reader needs a `BuiltinContext`: build one over a fake process as
-  `BuiltinCommandsTest.cpp` does (`FakeProcess` over a `ProcessFileIO`;
-  copy that class into the test file), with any registered command object
-  (`CreateStandardBuiltinCommands()`'s awk) and an `std::atomic<bool>` stop flag.
+  The reader needs a `BuiltinContext`: build one as
+  `tests/unit/components/BuiltinCommands.unittests/BuiltinCommandsTest.cpp`'s
+  `BuiltinContextTest` tests do -- `ProcessFileIO::Create({}, "/")` with
+  `InstallStandardStreams` of `Mocks::MockFileDescriptor`s, its
+  `FakeProcess` and `FindStandardCommand` (both in that file's anonymous
+  namespace: write the same small Haisos test helpers into this test file,
+  `FindStandardCommand("awk")`), `BuiltinContext context(process, *awk, {},
+  stop)` with an `std::atomic<bool> stop`. Also: a stop flag set before
+  `Next` gives `Stopped`.
 
 Commands:
 ```
@@ -279,12 +328,19 @@ bash ./scripts/test_linux.sh L U
 
 ## Docs
 
-`commands/awk/CLAUDE.md`: an "Values, fields and records" section -- the
-four types and where StrNum comes from, the conversions (strtod rule, the
-integer/`%.0f`/CONVFMT rule, inf/nan spellings), the comparison rule,
-insertion-ordered arrays (a documented difference from gawk, whose order is
-unspecified), the field store (FS saved per record, lazy split, rebuild
-with OFS), the record reader (RS's first byte, the paragraph mode to come).
+`src/components/BuiltinCommands/commands/awk/CLAUDE.md`: a bullet each for
+`AwkValue.h/.cpp`, `AwkFields.h/.cpp` and `AwkInput.h/.cpp` in the file
+list (before `Awk.cpp`'s), `AwkFatal` added to the `AwkError.h/.cpp`
+bullet, and a "Values, fields and records" section -- the four types and
+where StrNum comes from, the conversions (the strtod-prefix rule, integral
+values in full, CONVFMT/OFMT otherwise, inf/nan spellings), the comparison
+rule (`kAwkUnordered`), insertion-ordered arrays, the field store (FS saved
+per record, lazy split, rebuild with OFS), the record reader (RS's first
+byte, the paragraph mode to come). Under "Documented exceptions": `for (k
+in a)` visits keys in insertion order (gawk's order is unspecified); a `*`
+in CONVFMT/OFMT counts as absent (gawk: fatal); strnum NaNs compare
+unordered (gawk 5.2.1 `--posix` gives `$1 == $2` true for fields `nan` and
+`+nan`).
 
 ## Acceptance
 
@@ -296,6 +352,9 @@ with OFS), the record reader (RS's first byte, the paragraph mode to come).
   read); bytes read past the record it returns stay in its own buffer for
   the next call (it is the only reader of its descriptor).
 - [ ] New sources in the CMakeLists; all unit tests green.
+- [ ] Clean room: every line written from scratch from behaviour (POSIX,
+  the gawk manual, observed gawk output); no other awk's source read or
+  mirrored, none of its internal names used.
 
 ## Out of scope
 

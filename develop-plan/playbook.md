@@ -41,7 +41,7 @@ Pause: no
 | 33 | [awk--lexer](tasks/awk--lexer.md) | done | 0.5.34 | 9, 4 | #76 | 1 | 0C 1H fixed, 3M 4L open | Windows red, not checked |
 | 34 | [awk--expressions](tasks/awk--expressions.md) | done | 0.5.35 | 33 | #77 | 1 | 0C 2H fixed, 2M 1L open | Windows red, not checked |
 | 35 | [awk--parser](tasks/awk--parser.md) | done | 0.5.36 | 34 | #78 | 1 | 0C 1H fixed, 1M 3L open | Windows red, not checked |
-| 36 | [awk--values](tasks/awk--values.md) | todo | | 33, 11 | | | | |
+| 36 | [awk--values](tasks/awk--values.md) | in-progress | 0.5.37 | 33, 11 | | | | |
 | 37 | [awk--interpreter](tasks/awk--interpreter.md) | todo | | 35, 36, 4 | | | | |
 | 38 | [awk--records](tasks/awk--records.md) | todo | | 37, 3 | | | | |
 | 39 | [awk--functions](tasks/awk--functions.md) | todo | | 38 | | | | |
@@ -114,3 +114,4 @@ Pause: no
 - 2026-10-10 (implement) awk--lexer re-checked clean-room against 03f8369 (Opus): two gawk-internal references reworded as behaviour, clean-room and write-in-pieces paragraphs added, messages verified on gawk --posix 5.2.1; list/CMake/test slots (awk after [), ReadWholeInput for -f
 - 2026-10-10 (implement) awk--expressions re-checked clean-room against 308a07c (Opus): awkgram.y / gawk-internals references replaced by POSIX's precedence table and gawk --posix output; grammar corrected (~ !~ left-assoc, getline in concatenation, getline < operand at + - level, $e++ assignment error); lexer's real API; folded in #76's findings (& syntax error, comment-backslash NL, FindKeyword comment, --help notes, CMakeLists newline)
 - 2026-10-10 (implement) awk--parser re-checked clean-room against eb11783 (Opus): one gawk-internal passage (EOF caret) restated as behaviour, a documented exception (always column 0); real names from #76/#77; folded in #77's findings (parenthesized lvalues refused, shared ParseVariableOrElement/ParseField, alignment); awk 1.0.2
+- 2026-10-10 (implement) awk--values re-checked clean-room against 5370ec9 (Opus): no copied internals, two rules restated as output only; real names from #76-78 and BuiltinPrintf.h; conversions/strnum/comparisons verified on gawk --posix; NaN rule fixed (kAwkUnordered); documented differences: NaN comparisons, '*' in CONVFMT/OFMT counts as absent, arrays walked in insertion order

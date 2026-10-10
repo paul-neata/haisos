@@ -139,10 +139,15 @@ int64_t LocateHunk(const PatchTarget& target, const PatchHunk& hunk,
     const bool endAnchored = trailing < leading;
 
     // The candidates: the hunk's first old line (ignored ones included) at
-    // L >= 1 and not before the last line the earlier hunks of this file
-    // used up (fuzz cannot reach back into it), its compared lines inside
-    // the file, its ignored trailing lines possibly past the file's end.
-    const int64_t firstCandidate = std::max<int64_t>(1, consumedLines);
+    // L >= 1, its first compared line (L + the ignored leading ones) not
+    // before the last line the earlier hunks of this file used up (fuzz
+    // cannot reach back into it), and its ground reaching past that line
+    // (a hunk matching wholly inside it would garble the output); the
+    // compared lines lie inside the file, the ignored trailing ones may
+    // run past its end.
+    const int64_t firstCandidate = std::max<int64_t>(1,
+        std::max(consumedLines - split.leadingIgnored,
+                 consumedLines - oldCount + 2));
     const int64_t lastCandidate = fileLines - oldCount + split.trailingIgnored + 1;
     const int64_t endPosition = lastCandidate;
     if (lastCandidate < firstCandidate) {

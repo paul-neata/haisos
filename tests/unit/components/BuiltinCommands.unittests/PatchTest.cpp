@@ -1,61 +1,6 @@
-#include <gtest/gtest.h>
-#include <cstdint>
-#include <memory>
-#include <string>
-#include <vector>
-#include "BuiltinCommandsFixture.h"
+#include "PatchTestHelpers.h"
 
 namespace Haisos {
-namespace {
-
-// The patch every expectation below was observed from GNU patch 2.7.6
-// against (LC_ALL=C, no terminal); P1 is the plan's recurring example.
-constexpr char kP1[] =
-    "--- f\n"
-    "+++ g\n"
-    "@@ -2,7 +2,7 @@\n"
-    " 2\n"
-    " 3\n"
-    " 4\n"
-    "-5\n"
-    "+five\n"
-    " 6\n"
-    " 7\n"
-    " 8\n";
-
-// The lines `1\n` .. `10\n`.
-std::string Seq(size_t count) {
-    std::string text;
-    for (size_t i = 1; i <= count; ++i) {
-        text += std::to_string(i) + "\n";
-    }
-    return text;
-}
-
-// The directory the patch tests work in, with a file written into it.
-void MakePatchDir(const std::shared_ptr<IFileSystem>& fs) {
-    ASSERT_EQ(fs->CreateDirectory("/p", kDirMode), 0);
-}
-
-void WritePatchFile(const std::shared_ptr<IFileSystem>& fs, const std::string& name,
-                    const std::string& content) {
-    auto file = fs->OpenFile("/p/" + name, kFileOpenWriteCreateTruncate, kFileCreateMode);
-    ASSERT_NE(file, nullptr) << name;
-    file->Write(content.data(), content.size());
-}
-
-std::string ReadPatchFile(const std::shared_ptr<IFileSystem>& fs, const std::string& name) {
-    std::string content;
-    ReadWholeFile(*fs, "/p/" + name, content);
-    return content;
-}
-
-bool PatchFileExists(const std::shared_ptr<IFileSystem>& fs, const std::string& name) {
-    FileStatus status;
-    return fs->Stat("/p/" + name, status) == 0;
-}
-
-} // namespace
 
 // A unified diff applies at its stated place; no .orig, no temporary file.
 TEST_F(BuiltinCommandsTest, PatchAppliesUnified) {

@@ -140,3 +140,4 @@
 - 2026-10-10 11:54 UTC -- awk--printf-math merged #83 as 0.5.41: 0C 1H 4M fixed, 0M 3L open, 1 try
 - 2026-10-10 12:05 UTC -- start awk--io (0.5.42)
 - 2026-10-10 12:46 UTC -- awk--io: PR #84, windows-failed (ignored per Direction)
+- 2026-10-10 13:05 UTC -- awk--io merged #84 as 0.5.42: 0C 1H fixed, 2M 2L open, 1 try

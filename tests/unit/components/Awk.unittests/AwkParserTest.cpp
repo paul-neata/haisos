@@ -142,6 +142,234 @@ TEST(AwkParserTest, GetlineForms) {
     ExpectExpr("\"a\" | getline x \"b\"", "(concat (| \"a\" getline x) \"b\")");
 }
 
+TEST(AwkParserTest, ParenthesizedLvalues) {
+    // A one-expression grouping is never an lvalue, as gawk's.
+    ExpectExpr("(x) ++y", "(concat x (pre++ y))");
+    ExpectExpr("$(x) = 3", "(= ($ x) 3)");
+    ExpectExprError("(x) = 3", "syntax error", 1, 4);
+    ExpectExprError("(x) += 3", "syntax error", 1, 4);
+    ExpectExprError("x = (y) = 2", "syntax error", 1, 8);
+    ExpectExprError("++(x)", "syntax error", 1, 2);
+    ExpectExprError("--(a[1])", "syntax error", 1, 2);
+}
+
+namespace {
+
+using Haisos::Awk::ParseResult;
+
+// |text| (source "cmd. line") parsed as a whole program: nothing failed, no
+// diagnostics, and the dump of it |dump|.
+void ExpectProgram(const std::string& text, const std::string& dump) {
+    ParseResult result = Haisos::Awk::ParseAwkProgram({{"cmd. line", text}});
+    ASSERT_NE(result.program, nullptr) << text << "\n" << result.diagnostics;
+    EXPECT_EQ(Haisos::Awk::DumpProgram(*result.program), dump) << text;
+    EXPECT_FALSE(result.failed) << text;
+    EXPECT_EQ(result.diagnostics, "") << text;
+}
+
+// |text| parsed as a whole program that fails: |diagnostics| exact, and no
+// program.
+void ExpectDiagnostics(const std::string& text, const std::string& diagnostics) {
+    ParseResult result = Haisos::Awk::ParseAwkProgram({{"cmd. line", text}});
+    EXPECT_TRUE(result.failed) << text;
+    EXPECT_EQ(result.program, nullptr) << text;
+    EXPECT_EQ(result.diagnostics, diagnostics) << text;
+}
+
+} // namespace
+
+TEST(AwkProgramParserTest, Items) {
+    ExpectProgram("BEGIN { x = 1 } END { print x }",
+                  "BEGIN { (= x 1) }\nEND { print x }");
+    ExpectProgram("NR > 1 { s += $3 } END { printf \"%.2f\\n\", s }",
+                  "(> NR 1) { (+= s ($ 3)) }\nEND { printf \"%.2f\\n\", s }");
+    // A pattern-only item ends at the newline or `;`: two items both ways.
+    ExpectProgram("NR==1\n{ print }", "(== NR 1)\n{ print }");
+    ExpectProgram("NR==1;{ print }", "(== NR 1)\n{ print }");
+    ExpectProgram("/a/,/b/", "/a/, /b/");
+    ExpectProgram("$1 == \"x\", 0 { next }", "(== ($ 1) \"x\"), 0 { next }");
+    ExpectProgram("{}", "{ }");
+    ExpectProgram("BEGIN{}END{}", "BEGIN { }\nEND { }");
+    ExpectProgram("\n\n;BEGIN{}\n\n", "BEGIN { }");
+}
+
+TEST(AwkProgramParserTest, Functions) {
+    ExpectProgram("function f(a, b) { return a + b }\nBEGIN { print f(1, 2) }",
+                  "function f(a, b) { return (+ a b) }\nBEGIN { print (call f 1 2) }");
+    ExpectProgram("func g() {}", "function g() { }");
+    // Newlines are skipped between the parameters and the body.
+    ExpectProgram("function h(x)\n\n{ }", "function h(x) { }");
+}
+
+TEST(AwkProgramParserTest, Statements) {
+    ExpectProgram("{ if (x) print 1; else print 2 }", "{ if (x) print 1 else print 2 }");
+    ExpectProgram("{ if (x)\n print 1\n else\n print 2 }",
+                  "{ if (x) print 1 else print 2 }");
+    ExpectProgram("{ while (i < 3) i++ }", "{ while ((< i 3)) (post++ i) }");
+    ExpectProgram("{ do x++; while (x < 3) }", "{ do (post++ x) while ((< x 3)) }");
+    ExpectProgram("{ for (i = 0; i < 3; i++) s += i }",
+                  "{ for ((= i 0); (< i 3); (post++ i)) (+= s i) }");
+    ExpectProgram("{ for (;;) break }", "{ for (; ; ) break }");
+    ExpectProgram("{ for (k in a) delete a[k]; delete a }",
+                  "{ for (k in a) delete a[k]; delete a }");
+    ExpectProgram("{ exit } END { exit 3 }", "{ exit }\nEND { exit 3 }");
+    ExpectProgram("{ next; nextfile }", "{ next; nextfile }");
+    ExpectProgram("{ getline line < \"f\" }", "{ (getline line < \"f\") }");
+    ExpectProgram("{ ; ; x }", "{ x }");
+    // A lone `;` body is an empty Block.
+    ExpectProgram("{ if (x) ; }", "{ if (x) { } }");
+    ExpectProgram("{\n  a = 1\n  b = 2\n}", "{ (= a 1); (= b 2) }");
+}
+
+TEST(AwkProgramParserTest, PrintAndRedirections) {
+    ExpectProgram("{ print > \"f\" }", "{ print > \"f\" }");
+    // The redirection target is parsed at the concatenation level.
+    ExpectProgram("{ print $1, $2 > \"out\" \".txt\" }",
+                  "{ print ($ 1), ($ 2) > (concat \"out\" \".txt\") }");
+    ExpectProgram("{ print a >> f }", "{ print a >> f }");
+    ExpectProgram("{ print | \"sort\" }", "{ print | \"sort\" }");
+    // `print (`: a grouping continues the first argument; a parenthesized
+    // list ends it.
+    ExpectProgram("{ print (1)(2) }", "{ print (concat 1 2) }");
+    ExpectProgram("{ print (1, 2) > \"f\" }", "{ print 1, 2 > \"f\" }");
+    ExpectProgram("{ print (1, 2) in a }", "{ print (in a 1 2) }");
+    ExpectProgram("{ print (a > b) }", "{ print (> a b) }");
+    ExpectProgram("{ printf(\"%s\\n\", $1) | \"cat\" }", "{ printf \"%s\\n\", ($ 1) | \"cat\" }");
+    ExpectProgram("{ print \"x\" | \"cat\"; \"date\" | getline d }",
+                  "{ print \"x\" | \"cat\"; (| \"date\" getline d) }");
+    // Outside print, `>` is a comparison.
+    ExpectProgram("{ x = \"a\" \"b\" > \"c\" }", "{ (= x (> (concat \"a\" \"b\") \"c\")) }");
+    ExpectProgram("{ print length $0 }", "{ print (concat length ($ 0)) }");
+    ExpectProgram("{ printf }", "{ printf }");
+}
+
+TEST(AwkProgramParserTest, SyntaxErrors) {
+    ExpectDiagnostics("BEGIN { x = = 1 }",
+                      "awk: cmd. line:1: BEGIN { x = = 1 }\n"
+                      "awk: cmd. line:1:             ^ syntax error\n");
+    ExpectDiagnostics("BEGIN { print 1 }}",
+                      "awk: cmd. line:1: BEGIN { print 1 }}\n"
+                      "awk: cmd. line:1:                  ^ syntax error\n");
+    ExpectDiagnostics("BEGIN{x=1",
+                      "awk: cmd. line:1: BEGIN{x=1\n"
+                      "awk: cmd. line:1:          ^ unexpected newline or end of string\n");
+    ExpectDiagnostics("BEGIN { print 1; print 2;",
+                      "awk: cmd. line:1: BEGIN { print 1; print 2;\n"
+                      "awk: cmd. line:1:                          ^ unexpected newline or end of string\n");
+    ExpectDiagnostics("BEGIN {\nprint 1\nx = \n}",
+                      "awk: cmd. line:4: x = \n"
+                      "awk: cmd. line:4:     ^ unexpected newline or end of string\n");
+    ExpectDiagnostics("BEGIN { print 1 +* 2 }",
+                      "awk: cmd. line:1: BEGIN { print 1 +* 2 }\n"
+                      "awk: cmd. line:1:                  ^ syntax error\n");
+    ExpectDiagnostics("BEGIN { if (x) }",
+                      "awk: cmd. line:1: BEGIN { if (x) }\n"
+                      "awk: cmd. line:1:                ^ syntax error\n");
+    ExpectDiagnostics("BEGIN { print \"a\" > }",
+                      "awk: cmd. line:1: BEGIN { print \"a\" > }\n"
+                      "awk: cmd. line:1:                     ^ syntax error\n");
+    ExpectDiagnostics("BEGIN { getline < }",
+                      "awk: cmd. line:1: BEGIN { getline < }\n"
+                      "awk: cmd. line:1:                   ^ syntax error\n");
+    // The redirection target takes no ternary.
+    ExpectDiagnostics("BEGIN { print 1 > 2 ? \"a\" : \"b\" }",
+                      "awk: cmd. line:1: BEGIN { print 1 > 2 ? \"a\" : \"b\" }\n"
+                      "awk: cmd. line:1:                     ^ syntax error\n");
+    ExpectDiagnostics("BEGIN { return }",
+                      "awk: cmd. line:1: BEGIN { return }\n"
+                      "awk: cmd. line:1:         ^ `return' used outside function context\n");
+    ExpectDiagnostics("function length() {}",
+                      "awk: cmd. line:1: function length() {}\n"
+                      "awk: cmd. line:1:          ^ `length' is a built-in function, it cannot be redefined\n");
+    // A lexer warning comes out before the syntax error.
+    ExpectDiagnostics("BEGIN { x = \"\\q\" ; = }",
+                      "awk: cmd. line:1: warning: escape sequence `\\q' treated as plain `q'\n"
+                      "awk: cmd. line:1: BEGIN { x = \"\\q\" ; = }\n"
+                      "awk: cmd. line:1:                    ^ syntax error\n");
+}
+
+TEST(AwkProgramParserTest, ParseTimeErrors) {
+    ExpectDiagnostics("BEGIN { next }",
+                      "awk: cmd. line:1: error: `next' used in BEGIN action\n");
+    ExpectDiagnostics("END { nextfile }",
+                      "awk: cmd. line:1: error: `nextfile' used in END action\n");
+    ExpectDiagnostics("BEGIN { break }",
+                      "awk: cmd. line:1: error: `break' is not allowed outside a loop or switch\n");
+    ExpectDiagnostics("BEGIN { continue }",
+                      "awk: cmd. line:1: error: `continue' is not allowed outside a loop\n");
+    ExpectDiagnostics("function f(a) {} function f(b) {}",
+                      "awk: cmd. line:1: error: function name `f' previously defined\n");
+    ExpectDiagnostics("function f(a, a) {}",
+                      "awk: cmd. line:1: error: function `f': parameter #2, `a', duplicates parameter #1\n");
+    ExpectDiagnostics("function f(NR) {}",
+                      "awk: cmd. line:1: error: function `f': cannot use special variable `NR' as a function parameter\n");
+    ExpectDiagnostics("function f(f) {}",
+                      "awk: cmd. line:1: error: function `f': cannot use function name as parameter name\n");
+    ExpectDiagnostics("function f(x) { return } BEGIN { f (1) }",
+                      "awk: cmd. line:1: error: function `f' called with space between name and `(',\n"
+                      "or used as a variable or an array\n");
+    // In a loop, and in a function, the same statements are fine.
+    ExpectProgram("{ while (x) { break; continue } } function g() { next }",
+                  "{ while (x) { break; continue } }\nfunction g() { next }");
+}
+
+TEST(AwkProgramParserTest, SeveralSources) {
+    ParseResult result = Haisos::Awk::ParseAwkProgram(
+        {{"/a.awk", "BEGIN { x = 1 }\n"}, {"/b.awk", "END { print x }\n"}});
+    ASSERT_NE(result.program, nullptr);
+    EXPECT_FALSE(result.failed);
+    EXPECT_EQ(result.diagnostics, "");
+    EXPECT_EQ(Haisos::Awk::DumpProgram(*result.program),
+              "BEGIN { (= x 1) }\nEND { print x }");
+    ASSERT_EQ(result.program->items.size(), 2u);
+    EXPECT_EQ(result.program->items[0].position.source, 0);
+    EXPECT_EQ(result.program->items[0].position.line, 1);
+    EXPECT_EQ(result.program->items[1].position.source, 1);
+    EXPECT_EQ(result.program->items[1].position.line, 1);
+
+    // The end of a -f file inside an item is gawk's own report.
+    result = Haisos::Awk::ParseAwkProgram({{"/p.awk", "BEGIN {\n"}});
+    EXPECT_TRUE(result.failed);
+    EXPECT_EQ(result.program, nullptr);
+    EXPECT_EQ(result.diagnostics,
+              "awk: /p.awk:1: (END OF FILE)\n"
+              "awk: /p.awk:1: ^ source files / command-line arguments must contain "
+              "complete functions or rules\n");
+}
+
+TEST(AwkProgramParserTest, ParenthesizedLvalues) {
+    // In a program, each is a syntax error where gawk reports it.
+    ExpectDiagnostics("BEGIN { (x) = 3 }",
+                      "awk: cmd. line:1: BEGIN { (x) = 3 }\n"
+                      "awk: cmd. line:1:             ^ syntax error\n");
+    ExpectDiagnostics("BEGIN { (x)++ }",
+                      "awk: cmd. line:1: BEGIN { (x)++ }\n"
+                      "awk: cmd. line:1:               ^ syntax error\n");
+    ExpectDiagnostics("BEGIN { ++(x) }",
+                      "awk: cmd. line:1: BEGIN { ++(x) }\n"
+                      "awk: cmd. line:1:           ^ syntax error\n");
+    ExpectDiagnostics("BEGIN { x = 1; (x)--; print x }",
+                      "awk: cmd. line:1: BEGIN { x = 1; (x)--; print x }\n"
+                      "awk: cmd. line:1:                     ^ syntax error\n");
+    ExpectDiagnostics("BEGIN { ($1) = 3 }",
+                      "awk: cmd. line:1: BEGIN { ($1) = 3 }\n"
+                      "awk: cmd. line:1:              ^ syntax error\n");
+    ExpectDiagnostics("BEGIN { 1 && (y) = 2 }",
+                      "awk: cmd. line:1: BEGIN { 1 && (y) = 2 }\n"
+                      "awk: cmd. line:1:                  ^ syntax error\n");
+    ExpectDiagnostics("BEGIN { c ? (x) = 1 : 2 }",
+                      "awk: cmd. line:1: BEGIN { c ? (x) = 1 : 2 }\n"
+                      "awk: cmd. line:1:                 ^ syntax error\n");
+    ExpectDiagnostics("BEGIN { print (x) = 3 }",
+                      "awk: cmd. line:1: BEGIN { print (x) = 3 }\n"
+                      "awk: cmd. line:1:                   ^ syntax error\n");
+    ExpectDiagnostics("BEGIN { a[1]; for ((k) in a) print k }",
+                      "awk: cmd. line:1: BEGIN { a[1]; for ((k) in a) print k }\n"
+                      "awk: cmd. line:1:                            ^ syntax error\n");
+    // The Field is the lvalue, not its parenthesized operand.
+    ExpectProgram("BEGIN { $(x) = 3 }", "BEGIN { (= ($ x) 3) }");
+}
+
 TEST(AwkParserTest, ExpressionErrors) {
     ExpectExprError("a + * b", "syntax error", 1, 4);
     ExpectExprError("1 < 2 < 3", "syntax error", 1, 6);

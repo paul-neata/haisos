@@ -11,6 +11,7 @@ namespace Haisos {
 // objects' -- program data compiled into Haisos, so man may reach them here
 // without breaking the ICurrentProcess rule) and tests need this list; any
 // other command itself needs only BuiltinCommand.h.
+std::shared_ptr<IBuiltinCommand> CreateAwkCommand();
 std::shared_ptr<IBuiltinCommand> CreateBracketCommand();
 std::shared_ptr<IBuiltinCommand> CreateBasenameCommand();
 std::shared_ptr<IBuiltinCommand> CreateCatCommand();
@@ -64,6 +65,7 @@ std::shared_ptr<IBuiltinCommand> CreateXargsCommand();
 // the haisosfile `haisos --init` generates.
 inline std::vector<std::shared_ptr<IBuiltinCommand>> CreateStandardBuiltinCommands() {
     return {
+        CreateAwkCommand(),
         CreateBracketCommand(),
         CreateBasenameCommand(),
         CreateCatCommand(),

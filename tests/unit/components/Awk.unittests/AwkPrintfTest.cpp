@@ -101,6 +101,13 @@ TEST_F(AwkPrintfTest, CharacterConversion) {
     EXPECT_EQ(captured.out, std::string("\000|\000|\000|", 6));
     EXPECT_EQ(captured.err, "");
     EXPECT_EQ(captured.status, 0);
+
+    // The precision is ignored, 0 included; an infinity is byte 0.
+    captured = RunCaptured("awk",
+        {R"(BEGIN { printf "[%.0c][%*.*c][%c][%c]\n", "x", 3, 0, 65, -log(0), log(0) })"});
+    EXPECT_EQ(captured.out, std::string("[x][  A][\000][\000]\n", 15));
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
 }
 
 TEST_F(AwkPrintfTest, NumbersAndStrings) {
@@ -126,6 +133,14 @@ TEST_F(AwkPrintfTest, NumbersAndStrings) {
               "1000000000000000019884624838656 -1000000000000000019884624838656 "
               "0|-1000000000000000019884624838656\n"
               "26|12|0|9007199254740992\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    // '#' adds no '.' to the digits beyond 64 bits.
+    captured = RunCaptured("awk",
+        {R"(BEGIN { printf "%#d|%#5d|%#.0d\n", 1e30, -1e30, 2^64 })"});
+    EXPECT_EQ(captured.out, "1000000000000000019884624838656|-1000000000000000019884624838656|"
+                            "18446744073709551616\n");
     EXPECT_EQ(captured.err, "");
     EXPECT_EQ(captured.status, 0);
 
@@ -282,6 +297,12 @@ TEST_F(AwkPrintfTest, MathFunctions) {
               "awk: cmd. line:1: warning: exp: argument 1000 is out of range\n"
               "awk: cmd. line:1: warning: exp: argument -1000 is out of range\n"
               "awk: cmd. line:1: warning: exp: argument 1e+10 is out of range\n");
+    EXPECT_EQ(captured.status, 0);
+
+    // A subnormal result is not out of range.
+    captured = RunCaptured("awk", {R"(BEGIN { print exp(-709), exp(-745) })"});
+    EXPECT_EQ(captured.out, "1.21678e-308 4.94066e-324\n");
+    EXPECT_EQ(captured.err, "");
     EXPECT_EQ(captured.status, 0);
 
     // log and sqrt of a negative argument: a warning, the result -nan.

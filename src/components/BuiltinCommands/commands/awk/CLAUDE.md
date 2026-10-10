@@ -598,13 +598,13 @@ The math built-ins (`AwkBuiltins.cpp`): `sin`, `cos`, `atan2`, `exp`,
 `log`, `sqrt`, `int` (truncated toward zero, like `AwkIntegerOf` but
 keeping the value a double), `rand` and `srand`.
 
-- `exp` out of range -- a result that is infinite, or below `DBL_MIN`
-  (0 included) -- warns ``exp: argument <x> is out of range``, the
+- `exp` out of range -- a result that is infinite or 0 (a subnormal one
+  is not) -- warns ``exp: argument <x> is out of range``, the
   argument through `%g`. `log` and `sqrt` of a negative argument warn
   (``log: received negative argument <x>``, the same for sqrt) and give
   `-nan`. The warnings go through `RuntimeWarning`, so they carry the
   place.
-- `rand()`: gawk's shape on Haisos's own generator -- `std::mt19937`
+- `rand()`: Haisos's own generator -- `std::mt19937`
   seeded 1, each draw two outputs, `(floor(x1/32)*2^26 +
   floor(x2/64))/2^53`, a double in [0, 1) with all 53 bits. The sequence
   is Haisos's, not gawk's.

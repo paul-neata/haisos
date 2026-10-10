@@ -1,5 +1,6 @@
 #include "commands/awk/AwkFormat.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -60,8 +61,11 @@ int StarValueOf(const Value& value) {
 }
 
 // The byte a numeric %c stands for: the integer truncated toward zero, its
-// low 8 bits (defined for any finite value: 321 and -191 are both 'A').
+// low 8 bits (321 and -191 are both 'A'); an infinity or a NaN is byte 0.
 char ByteOfCharacter(double number) {
+    if (!std::isfinite(number)) {
+        return '\0';
+    }
     double reduced = std::fmod(std::trunc(number), 256.0);
     if (reduced < 0) {
         reduced += 256.0;
@@ -211,7 +215,9 @@ std::string FormatAwkPrintf(const std::string& format, const std::vector<Value>&
                 const std::string text = value.ToString(convfmt);
                 byte = text.empty() ? '\0' : text[0];
             }
-            // One byte: the precision is ignored (gawk: %.3c of "xyz" is x).
+            // One byte: the precision is ignored (gawk: %.3c of "xyz" is x,
+            // %.0c of "x" is x too).
+            spec.precision.reset();
             out += FormatPrintfString(spec, std::string_view(&byte, 1));
         } else {
             const double number = nextArgument(i).ToNumber();
@@ -225,7 +231,10 @@ std::string FormatAwkPrintf(const std::string& format, const std::vector<Value>&
                     out += FormatPrintfSigned(spec, static_cast<intmax_t>(t));
                 } else {
                     // Beyond 64 bits: every digit, as %.0f prints it, with
-                    // the same flags and width.
+                    // the same flags and width -- but no '#', which would
+                    // add a '.' that gawk does not print.
+                    spec.flags.erase(std::remove(spec.flags.begin(), spec.flags.end(), '#'),
+                                     spec.flags.end());
                     spec.conversion = 'f';
                     spec.precision = 0;
                     out += FormatPrintfFloat(spec, number);

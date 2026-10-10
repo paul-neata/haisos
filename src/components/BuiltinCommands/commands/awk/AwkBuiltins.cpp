@@ -336,10 +336,9 @@ Value Interpreter::CallBuiltin(const Expr& call) {
     if (call.text == "exp") {
         const double x = ValueOf(*args[0]).ToNumber();
         const double result = std::exp(x);
-        // A finite x whose result is infinite, or falls below DBL_MIN (0
-        // included), is out of range; the result is kept.
-        if (std::isfinite(x)
-            && (!std::isfinite(result) || result < std::numeric_limits<double>::min())) {
+        // A finite x whose result is infinite or 0 is out of range (a
+        // subnormal result is not, as gawk's); the result is kept.
+        if (std::isfinite(x) && (!std::isfinite(result) || result == 0.0)) {
             RuntimeWarning("exp: argument " + FormatAwkNumber("%g", x) + " is out of range");
         }
         return Value::FromNumber(result);

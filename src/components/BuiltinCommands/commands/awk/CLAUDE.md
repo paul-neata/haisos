@@ -73,20 +73,24 @@ awk rock and adds its files here:
   (BEGIN, END, a pattern, a range, or a function), `FunctionDefinition`s and,
   under those, `Stmt`s and `Expr`s -- plain structs owned through
   `unique_ptr`, held by the interpreter as a `shared_ptr<const Program>`.
-  The parser fills only the fields declared here; the interpreter's tasks
-  add `mutable` fields for what they resolve (variable slots, compiled
-  regexes) and never change these. `DumpExpr`, `DumpStmt` and `DumpProgram`
-  write the one-line dumps the tests compare against (see "AST dump"
-  below).
+  `Expr::parenthesized` marks the result of a one-expression grouping
+  `( e )`: never an lvalue (gawk's `(x) = 3` is a syntax error), ignored by
+  the dump. The parser fills only the fields declared here; the
+  interpreter's tasks add `mutable` fields for what they resolve (variable
+  slots, compiled regexes) and never change these. `DumpExpr`, `DumpStmt`
+  and `DumpProgram` write the one-line dumps the tests compare against
+  (see "AST dump" below).
 - `AwkParser.h/.cpp` - the recursive-descent parser of awk expressions
-  (`Parser::ParseExpression`; the statement, item and program methods come
-  with awk--parser). The precedence chain, lowest first (one method per
-  level, POSIX's table): assignment (right-associative, only an lvalue may
-  be assigned to; a post-increment of a field takes its value before
-  gawk's `cannot assign a value to the result of a field post-increment
-  expression`; as gawk's, an assignment may also be either branch of the
-  ternary or the right operand of `|| && ~ !~` and the comparisons, so
-  `1 && y = 2` is `1 && (y = 2)`), the ternary (right-associative), `||`,
+  (`Parser::ParseExpression`) and of whole programs (`ParseAwkProgram`;
+  see "Parsing programs" below). The precedence chain, lowest first (one
+  method per level, POSIX's table): assignment (right-associative, only an
+  lvalue may be assigned to -- a parenthesized expression never one
+  (`Expr::parenthesized`); a post-increment of a field takes its value
+  before gawk's `cannot assign a value to the result of a field
+  post-increment expression`; as gawk's, an assignment may also be either
+  branch of the ternary or the right operand of `|| && ~ !~` and the
+  comparisons, so `1 && y = 2` is `1 && (y = 2)`), the ternary
+  (right-associative), `||`,
   `&&`, `in`
   (`match-expr { 'in' NAME }`), `~ !~` (left-associative), the comparison
   operators (non-associative), `| getline`, concatenation, `+ -`,
@@ -117,6 +121,54 @@ awk rock and adds its files here:
   through unchanged. `ParseAwkExpression(text)` parses |text| (source
   "cmd. line") as one expression that must be the whole text -- for the
   tests.
+- "Parsing programs" -- what `ParseAwkProgram` (and `Parser`'s statement,
+  item and function levels) do, from POSIX's grammar and gawk's observed
+  behaviour:
+  - Sources are parsed one by one, each by its own `Parser`, their items
+    and functions appended to one `Program` in source order -- a rule may
+    not span two sources. Items: an optional leading newline or `;`, then
+    `function` (`func`) Name `(` parameters `)` newlines block; `BEGIN`/`END`
+    blocks; a pattern, a range `pattern, pattern`, each with an optional
+    block (no block means `print $0`, a null action); a block alone.
+    Newlines and `;` separate items; after an item ending in `}` the next
+    may follow directly (`BEGIN{}END{}`), but a pattern-only item must end
+    at a newline, `;` or the end (`NR==1\n{ print }` is two items).
+  - Statements: newlines and `;` are skipped inside a block, `}` ends it;
+    `if`/`else`, `while`, `do`/`while`, the classic `for` and `for`-`in`,
+    `print`/`printf`, `next`, `nextfile`, `exit`/`return` (an expression
+    unless a terminator or `}` follows), `break`, `continue`, `delete`, and
+    an expression. A simple statement ends at `;`, a newline or nothing
+    before `}`; a body that is a lone `;` is an empty block. After `for (`,
+    an expression that is an `in` of one plain variable and closes at `)`
+    is a `for`-`in` loop; anything else must be a classic `for` (`for ((k)
+    in a)` is a syntax error at its `)`, as gawk's).
+  - The print context: while `print`/`printf` arguments are parsed, `>`
+    is not a comparison and `|` is not `| getline` -- both end the list and
+    start a redirection (`>`, `>>`, `|`) whose target is parsed at the
+    concatenation level. `(`, `[` and call arguments clear the context for
+    their contents. `print (`: a parenthesized list closed by `)`, `>`,
+    `>>`, `|` or a terminator is the argument list; otherwise, with one
+    expression inside, it was a grouping and the first argument continues
+    from it (`print (1)(2)` prints the concatenation); with several, `in`
+    must follow. A grouping so continued is `parenthesized`: `print (x) = 3`
+    is a syntax error at the `=`, as gawk's.
+  - Parse-time errors (FormatAwkError, parsing goes on, status 1, texts
+    gawk's): `` `next' used in BEGIN action `` and the END/`nextfile`
+    forms; `` `break' is not allowed outside a loop or switch `` and
+    `` `continue' is not allowed outside a loop ``; a function defined
+    twice; a duplicated parameter, the function's own name as a parameter,
+    a special variable as a parameter; and, after the whole program, a
+    defined function's name used as a variable or an array
+    (`` function `f' called with space between name and `(',\nor used as a
+    variable or an array ``). Syntax errors (AwkSyntaxError, parsing
+    stops): `` `return' used outside function context ``, `` `length' is a
+    built-in function, it cannot be redefined ``, and the expression
+    level's.
+  - Diagnostics come out in the order found: lexer warnings, parse-time
+    errors and, last, the syntax error that stopped parsing. A `-f` source
+    ending inside an item reports `` source files / command-line arguments
+    must contain complete functions or rules `` with the line text
+    `(END OF FILE)` (see the exceptions below).
 - `AwkInvocation.h/.cpp` - the command line, as gawk takes it:
   `AwkOptionTable` (every gawk option, treated or not: `-F -f -v` with their
   long names, `-h -V -P -r`, the rest marked for the not-treated report),
@@ -125,11 +177,12 @@ awk rock and adds its files here:
   and `LoadAwkSources` (each `-f` file read whole through `OpenInputOperand`
   and `ReadWholeInput` -- `-` is standard input; an unreadable file is
   gawk's fatal, status 2, a directory its own error, status 1).
-- `Awk.cpp` - the `awk` builtin itself: `Name`, `Version` 1.0.1, the option
+- `Awk.cpp` - the `awk` builtin itself: `Name`, `Version` 1.0.2, the option
   table, the gawk-based `--help` (`BuiltinHelp::basedOn`), and `Run`:
-  parse the invocation, load the sources, then -- for now -- report `awk:
-  running programs is not implemented yet` with status 2 (awk--parser
-  replaces this).
+  parse the invocation, load the sources, parse the program
+  (`ParseAwkProgram`) -- its diagnostics go to stderr and any failure is
+  status 1 -- then -- for now -- report `awk: running programs is not
+  implemented yet` with status 2 (awk--interpreter replaces this).
 
 The man page is the `--help` text, like most builtins (`ManPage` is not
 overridden).
@@ -175,5 +228,11 @@ sub-nodes in parentheses -- the format the tests compare against, exact:
 - A backslash-newline inside a string is a continuation where gawk
   `--posix` refuses a physical newline there (`POSIX does not allow physical
   newlines in string values`).
-- Running programs is not implemented yet (this task is the lexer); later
-  tasks of the rock append their exceptions here.
+- `break` and `continue` outside a loop are reported once; gawk prints the
+  message twice.
+- A function name used as its own parameter is reported once, without
+  gawk's second, location-less line.
+- The `(END OF FILE)` report's caret is always at column 0; gawk's column
+  varies with how the `-f` file ends.
+- Running programs is not implemented yet; later tasks of the rock append
+  their exceptions here.

@@ -135,3 +135,4 @@
 - 2026-10-10 08:58 UTC -- start awk--functions (0.5.40)
 - 2026-10-10 09:40 UTC -- awk--functions: PR #82, windows-failed (ignored per Direction)
 - 2026-10-10 09:45 UTC -- awk--functions merged #82 as 0.5.40: 0C 0H, 2M 3L open, 1 try
+- 2026-10-10 11:05 UTC -- start awk--printf-math (0.5.41)

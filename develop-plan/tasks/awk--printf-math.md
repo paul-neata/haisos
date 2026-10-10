@@ -2,12 +2,15 @@
 
 - Rock: awk
 - Depends on: awk--functions, coreutils--printf-seq (`BuiltinPrintf.h`)
-- Size: ~600 changed lines in ~8 files
-- Plan checked against: develop @ ccb9dbe
+- Size: ~650 changed lines in ~10 files
+- Plan checked against: develop @ b334335
 - PR title: Add awk printf, sprintf and the math functions
 
 Split off from awk--functions (which came to ~1500 lines with these): this
 task adds awk's format engine on `BuiltinPrintf` and the numeric built-ins.
+It also takes the open findings of awk--functions' review (#82): a
+parameter bound to a variable that later became an array, the "(from x)"
+names, and two small clean-ups (see "#82 follow-ups" below).
 
 ## Goal
 
@@ -35,43 +38,81 @@ END { printf "%.2f\n", s }' data.csv` prints what gawk prints.
 
 ## Context
 
-Read first: `src/components/BuiltinCommands/commands/awk/CLAUDE.md` (and
-the files it lists: `AwkInterpreter.h/.cpp`, `AwkBuiltins.cpp`,
-`AwkValue.h`), `src/components/BuiltinCommands/BuiltinPrintf.h`;
-`tests/unit/components/Awk.unittests/AwkRunFixture.h` and
-`AwkFunctionsTest.cpp`.
+**Clean room** (root `CLAUDE.md`, "Clean-room rule", above every other
+rule): all code is written from scratch. Never read, copy, port, translate
+or paraphrase another program's source (gawk, mawk, the one true awk,
+busybox, glibc's printf, ...), whatever its licence, and never name another
+program's internal functions, variables, types or fields -- not in code, not
+in comments. Behaviour is matched from documentation (POSIX awk, the gawk
+manual, man pages) and from the observed output of real awks. Everything
+below describes behaviour; every name in it is this project's own.
 
-What earlier tasks provide (on develop; their plans are the authority):
-- coreutils--printf-seq: `BuiltinPrintf.h` -- `struct PrintfSpec { flags,
-  width, precision, widthFromArgument, precisionFromArgument, conversion }`,
-  `bool ParsePrintfSpec(std::string_view format, size_t& pos, PrintfSpec& spec)`
-  (flags from `-+ #0'I`, width, `.precision`, length modifiers skipped,
-  `%%` gives conversion `%`), `FormatPrintfSigned(spec, intmax_t)`,
+**Write in pieces**: never more than ~250 lines in one Write/Edit call;
+build a file up with several Edits; commit after each file or step.
+
+Read first: `src/components/BuiltinCommands/commands/awk/CLAUDE.md` (and
+the files it lists, above all `AwkInterpreter.h/.cpp`, `AwkBuiltins.cpp`,
+`AwkValue.h`, `AwkError.h`), `src/components/BuiltinCommands/BuiltinPrintf.h`;
+`tests/unit/components/Awk.unittests/AwkRunFixture.h`,
+`AwkFunctionsTest.cpp` and `AwkInterpreterTest.cpp` (`NotYetAvailable`);
+root `CLAUDE.md` ("Clean-room rule", "Builtin Commands").
+
+What is on develop already (#76-#82, all in
+`src/components/BuiltinCommands/commands/awk/`, namespace `Haisos::Awk`):
+- `BuiltinPrintf.h` (coreutils--printf-seq, namespace `Haisos`): `struct
+  PrintfSpec { std::string flags; std::optional<int> width, precision; bool
+  widthFromArgument, precisionFromArgument; char conversion; }`; `bool
+  ParsePrintfSpec(std::string_view format, size_t& pos, PrintfSpec& spec)`
+  (at `format[pos] == '%'`: flags from `-+ #0'I`, a width of digits or `*`,
+  `.` and a precision of digits -- none is 0 -- or `*`, the length modifiers
+  `h l L j z t` skipped, then the conversion character stored whatever it
+  is; `%%` gives `%`; true with `pos` one past the conversion, false when
+  the format ends first); `FormatPrintfSigned(spec, intmax_t)`,
   `FormatPrintfUnsigned(spec, uintmax_t)`, `FormatPrintfFloat(spec, long
   double)`, `FormatPrintfString(spec, std::string_view)` (glibc's output;
-  a negative width is the `-` flag; `0` pads `%s`/`%c` with spaces; handles
-  NUL bytes).
-- awk--values: `Value` (`IsNumeric()` is true for Number, StrNum and
-  Uninitialized; `ToNumber`, `ToString(format)`), `AwkNumberToString`,
+  the caller puts a `*` argument into `width`/`precision`; a negative width
+  is the `-` flag, a negative precision none; the `'` and `I` flags change
+  nothing; `0` pads `%s`/`%c` with spaces; NUL bytes kept). Its `q` gap
+  (#53: `q` is not among the skipped length modifiers) does not matter
+  here: awk decides on the character after the precision itself, before
+  `ParsePrintfSpec` is called, and a `q` there is an unknown conversion,
+  copied -- so `BuiltinPrintf.h` stays unchanged.
+- `AwkValue.h`: `Value` (`FromNumber`, `FromString`, `FromInput`,
+  `GetType()`, `IsNumeric()` -- true for Number, StrNum and Uninitialized --,
+  `ToNumber()`, `ToString(format)`, `ToBoolean()`), `AwkNumberToString`,
   `FormatAwkNumber(format, number)` (CONVFMT/OFMT -- unchanged here),
-  `AwkFatal`.
-- awk--interpreter: `Execute` of a `Printf` statement is the placeholder
-  `AwkFatal("printf is not implemented yet")`; `Output(const Stmt& print,
-  const std::string& text)` writes print's bytes (standard output; awk--io
-  adds redirections); `SpecialString(kSlotCONVFMT)`.
-- awk--functions: `Interpreter::CallBuiltin` in `AwkBuiltins.cpp`, with
-  `sprintf` and `sin cos atan2 exp log sqrt int rand srand` still the
-  placeholder fatal (``function `<name>' is not implemented yet``);
-  `RuntimeWarning(message)` (`awk: <src>:<line>: [(FILENAME=<f> FNR=<n>) ]warning: <message>\n`);
-  the parser already checks argument counts (`sprintf` takes any number;
-  `rand` 0; `srand` 0-1; `atan2` 2; the others 1); the `AwkRunTest`
-  fixture in `AwkRunFixture.h`.
+  `AwkIntegerOf` (a NaN or out-of-intmax value is INTMAX_MIN: not for
+  printf, which needs every digit).
+- `AwkError.h`: `AwkFatal(message, withLocation = true)`; the interpreter's
+  `Run` reports it (``awk: <src>:<line>: [(FILENAME=<f> FNR=<n>) ]fatal:
+  <message>\n``) and exits 2.
+- `AwkInterpreter.h/.cpp`: `Interpreter::RunStatement`'s `case
+  StmtKind::Printf:` is the placeholder `throw AwkFatal("printf is not
+  implemented yet")`; the `Print` case builds its text and calls
+  `Output(stmt, text)`, print's one door (a redirection is still
+  ``output redirection is not implemented yet``: awk--io); `ValueOf(expr)`,
+  `SpecialString(kSlotCONVFMT)`, `RuntimeWarning(message)` (``awk:
+  <src>:<line>: [(FILENAME=<f> FNR=<n>) ]warning: <message>\n``). The
+  printf statement's arguments are `stmt.args` (empty for a bare `printf`).
+- `AwkBuiltins.cpp`: `Interpreter::CallBuiltin(const Expr& call)` (the name
+  in `call.text`, the arguments in `call.operands`) handles the string
+  built-ins and ends with the fallback ``function `<name>' is not
+  implemented yet`` -- reached now by `sprintf`, the math functions,
+  `close`, `fflush` and `system`.
+- `AwkParser.cpp`'s argument-count table already checks the built-ins at
+  parse time: `sprintf` 0 or more, `rand` 0, `srand` 0-1, `atan2` 2, `sin
+  cos exp log sqrt int` 1.
+- Tests: the `AwkRunTest` fixture (`AwkRunFixture.h`: `RunCaptured("awk",
+  {args...}, stdin)` gives `out`, `err`, `status`; the files `/abc.txt`,
+  `/data.csv` = `x,1,2.5\ny,2,3.25\nz,3,4\n`, `/para.txt`);
+  `AwkRunTest.NotYetAvailable` in `AwkInterpreterTest.cpp` still expects
+  the sprintf and printf placeholders.
 
 Every expected text below was produced by gawk 5.2.1 `--posix` with
-`LC_ALL=C` (`gawk:` replaced by `awk:`), except `rand()`'s values (see
-below). The task container has only mawk: never change an expectation to
-mawk's, and never look for or copy gawk's (or any other awk's) source code
--- the behaviour described here is the specification.
+`LC_ALL=C` (`gawk:` replaced by `awk:`), re-run at this re-check, except
+`rand()`'s values (see below). The task container has only mawk: never
+change an expectation to mawk's -- the behaviour described here is the
+specification.
 
 ## Changes
 
@@ -88,22 +129,30 @@ std::string FormatAwkPrintf(const std::string& format, const std::vector<Value>&
                             const std::string& convfmt);
 ```
 
-One pass over `format`, bytes copied until a `%`. At a `%`, pre-scan the
-specification (awk's rules differ from `ParsePrintfSpec`'s, so look first):
-flags from `- + space # 0 '` only (not `I`), then a width (digits or `*`),
-then `.` and a precision (digits or `*`), then one character c:
-1. c is `h l L j z t` -> `AwkFatal("`<c>' is not permitted in POSIX awk
-   formats")` (`q` is not a modifier for awk: it is an unknown conversion).
-2. c is `%` -> one `%` (width and precision ignored: `%5%` and `%5.2%` print
+**What a format means** (gawk `--posix`, observed): bytes outside a
+specification are copied as they are. A specification is a `%`, then flags
+from `- + space # 0 '` (any order, repeats allowed -- not `I`), then an
+optional width (digits or `*`), then an optional `.` and precision (digits
+or `*`), then one character c, which decides what it is:
+1. c is one of `h l L j z t`: a fatal error, `` `<c>' is not permitted in
+   POSIX awk formats `` (`q` is not a modifier for awk: it is an unknown
+   conversion, rule 4).
+2. c is `%`: one `%`, width and precision ignored (`%5%` and `%5.2%` print
    `%`); no argument is used.
-3. c is one of `c d i o u x X e E f F g G a A s` -> `ParsePrintfSpec` from
-   the `%` (it reads the same text) and format one argument as below; a `*`
-   takes the next argument first (its number truncated toward zero; a
-   negative width means the `-` flag, a negative precision none).
-4. anything else, or the format ending inside the specification -> the text
+3. c is one of `c d i o u x X e E f F g G a A s`: one argument, formatted
+   as below. Haisos reads such a specification with `ParsePrintfSpec` from
+   the `%` (it reads the same text: c is no length modifier, and an `I` never
+   gets this far); a `*` takes the next argument first (its number truncated
+   toward zero; a negative width means the `-` flag, a negative precision
+   none).
+4. anything else, or the format ending inside the specification: the text
    from the `%` through c (or to the end) is copied as written, no argument
    used (`%k` -> `%k`, `%5kc` -> `%5kc`, `%I d` -> `%I d`, a final `%5`
-   -> `%5`).
+   -> `%5`, a final `%-` -> `%-`).
+
+Haisos decides between the four by looking at the text itself before
+calling `ParsePrintfSpec` (whose rules differ: it skips modifiers and
+accepts `I`).
 
 **Running out**: when a `*` or a conversion needs an argument and none is
 left, throw `AwkFatal` with exactly this message (the interpreter adds the
@@ -129,17 +178,17 @@ arguments are ignored silently.
   of +inf is `  inf`, `%X` of +inf is `inf`, `%d` of `log(-1)` is `-nan`,
   `%F` of +inf `INF`.
 - `d i`: t = v truncated toward zero; -2^63 <= t < 2^63 ->
-  `FormatPrintfSigned(spec, t)`; otherwise all t's digits: `FormatPrintfFloat`
-  of t with the same flags and width, conversion `f`, precision 0
-  (`%d` of 2^63 is `9223372036854775808`, of 1e30
-  `1000000000000000019884624838656`; `%.3d` of -1e30 the same digits).
+  `FormatPrintfSigned(spec, t)`; otherwise all of t's digits, as `%.0f`
+  prints t with the same flags and width (`FormatPrintfFloat` with
+  conversion `f`, precision 0): `%d` of 2^63 is `9223372036854775808`, of
+  1e30 `1000000000000000019884624838656`; `%.3d` of -1e30 the same digits.
   `%d` of -0.5 is `0`.
 - `o u x X`: t as above; -2^63 <= t < 2^64 -> `FormatPrintfUnsigned` of t
   (a negative t as its 64-bit two's complement: `%u` of -1 is
-  `18446744073709551615`, `%o` of -8 `1777777777777777777770`); otherwise
-  `FormatPrintfFloat` of v with the same flags, width and precision and
-  conversion `g` (`%20x` of 2^64 is `         1.84467e+19`, `%.3x` gives
-  `1.84e+19`).
+  `18446744073709551615`, `%o` of -8 `1777777777777777777770`); otherwise v
+  as `%g` with the same flags, width and precision (`FormatPrintfFloat`,
+  conversion `g`): `%20x` of 2^64 is `         1.84467e+19`, `%.3x` gives
+  `1.84e+19`.
 - `e E f F g G a A`: `FormatPrintfFloat(spec, v)`. (`%a`/`%A` show the
   platform's `long double`: `0x8p-3` for 1 on x86-64 where gawk prints
   `0x1p+0` -- a documented exception.)
@@ -154,26 +203,30 @@ arguments are ignored silently.
 
 ### `commands/awk/AwkInterpreter.h` / `.cpp`
 
-- `Execute(Printf)`: no arguments -> nothing (gawk: `printf` alone prints
-  nothing). Else evaluate every argument left to right, the first's
-  `ToString(CONVFMT)` is the format; `FormatAwkPrintf(format, rest, CONVFMT)`;
-  the text goes to `Output(stmt, text)` -- the same hook as `print`, so
-  awk--io's redirections apply to both.
-- The random state: `std::mt19937 m_random{1};` and `int64_t m_seed = 1;`
-  (`<random>`).
+- `RunStatement`, `case StmtKind::Printf:` (replacing the placeholder): no
+  arguments -> nothing (gawk: `printf` alone prints nothing). Else evaluate
+  every argument left to right with `ValueOf`; the first's
+  `ToString(CONVFMT)` is the format (`CONVFMT = "%.2f"; printf 3.14159265`
+  prints `3.14`); `FormatAwkPrintf(format, rest, CONVFMT)`; the text goes
+  to `Output(stmt, text)` -- the same door as `print`, so awk--io's
+  redirections apply to both. Return `Flow::Normal`.
+- The random state, new members: `std::mt19937 m_random{1};` and `int64_t
+  m_seed = 1;` (`<random>`).
 
 ### `commands/awk/AwkBuiltins.cpp`
 
-Replace the placeholders:
+Replace the fallback for these names (`close`, `fflush` and `system` keep
+it):
 - **sprintf(fmt, ...)**: no argument -> `AwkFatal("sprintf: no arguments")`
   when the call runs (`if (0) print sprintf()` is fine); else
-  `Value::FromString(FormatAwkPrintf(...))` as printf does.
+  `Value::FromString(FormatAwkPrintf(...))`, the arguments evaluated as
+  printf's.
 - **sin, cos, atan2(y, x), exp, log, sqrt**: the `<cmath>` functions on
   `ToNumber()`. Warnings through `RuntimeWarning`, the argument written with
   `FormatAwkNumber("%g", x)`:
   - `log` of a negative x (or -inf): `log: received negative argument <x>`,
     and the result is a NaN with the sign bit set (`-std::numeric_limits<double>::quiet_NaN()`,
-    printed `-nan`, as gawk on x86-64 prints it -- the same on every platform);
+    printed `-nan`, as gawk prints it on x86-64 -- the same on every platform);
     `log(0)` is `-inf` with no warning.
   - `sqrt` of a negative x: `sqrt: received negative argument <x>`, result
     `-nan` the same way.
@@ -183,48 +236,125 @@ Replace the placeholders:
 - **int(x)**: `std::trunc` (NaN and infinities unchanged).
 - **rand()**: Haisos's own generator -- POSIX leaves it to the
   implementation, and gawk's sequence is a documented difference. Exactly:
-  `a = m_random() >> 5; b = m_random() >> 6; return (a * 67108864.0 + b) / 9007199254740992.0;`
-  (a double in [0, 1), the same on every platform: `std::mt19937` is fully
-  specified by the standard).
+  two outputs x1 then x2 of `m_random`, and the result is
+  `(floor(x1 / 32) * 2^26 + floor(x2 / 64)) / 2^53` (the 53-bit double built
+  from two 32-bit outputs that MT19937's authors publish with the
+  generator), a double in [0, 1) and the same on every platform:
+  `std::mt19937` is fully specified by the C++ standard.
 - **srand([x])**: returns the previous seed (a Number). With x: the seed is
   `ToNumber(x)` truncated toward zero into `int64_t` (NaN -> 0, clamped to
   the range), stored in `m_seed`; without: the current time in seconds since
   the epoch (`std::time(nullptr)`). The generator is reseeded with the low 32
   bits: `m_random.seed(static_cast<uint32_t>(static_cast<uint64_t>(m_seed)))`
-  -- so `srand(2^32 + 3)` gives `srand(3)`'s sequence, as gawk. Before any
-  `srand`, the seed is 1 and the generator is seeded with 1 (`rand()` without
-  `srand` gives `srand(1)`'s sequence; the first `srand()` returns 1).
+  -- so `srand(2^32 + 3)` gives `srand(3)`'s sequence, as gawk's does. Before
+  any `srand`, the seed is 1 and the generator is seeded with 1 (`rand()`
+  without `srand` gives `srand(1)`'s sequence; the first `srand()` returns 1).
+
+### #82 follow-ups (`AwkInterpreter.h/.cpp`, `AwkBuiltins.cpp`, the awk `CLAUDE.md`)
+
+Small items from awk--functions' review, each with a test (all verified on
+gawk 5.2.1 `--posix`):
+
+1. **A binding chain that ends in an array, read as a scalar**
+   (`AwkInterpreter.cpp` ~453, `ScalarRef(Variable&, name)`): an untyped
+   parameter's chain is walked as now, every still-Untyped link typed
+   Scalar -- but an Array met on the chain (the caller's variable became an
+   array after the call began) is the fatal ``attempt to use array `<name>'
+   in a scalar context``, as for a parameter that is an Array itself. Today
+   the walk stops there and the read gives an empty scalar.
+   `function f(a){x[1]=1; print "[" a "]"} BEGIN{f(x)}` -> err
+   ``awk: cmd. line:1: fatal: attempt to use array `a (from x)' in a scalar context\n``,
+   status 2, out empty; the same for `a = 3`, `a++` and `if (a)` in its
+   place.
+2. **One helper for the chain's kind**: `Variable::Kind BoundKind(const
+   Variable& variable)` (a free function or a private static in
+   `AwkInterpreter`) -- the kind of the first link of the binding chain that
+   is not Untyped, Untyped when every link is (a global, having no binding,
+   is its own kind). Items 1, 4 and 5 use it.
+3. **The "(from ...)" name, built only when it is needed**
+   (`AwkInterpreter.cpp` ~510): `ScalarRefOf` passes the plain name, and
+   `ScalarRef(Variable&, name)` writes `<name> (from <passedFrom>)` only
+   when it throws (the parameter's own `passedFrom`; empty: the plain
+   name). `VariableName` then has no caller: remove it from the `.h` and
+   the `.cpp`. And as gawk, the name lists the whole chain: an argument
+   that is itself a parameter with a `passedFrom` gives the new parameter
+   `<argument>, from <its passedFrom>` (in `CallFunction`, where
+   `passedFrom` is set):
+   `function g(b){print b} function f(a){g(a)} BEGIN{x[1]=1; f(x)}` ->
+   ``...fatal: attempt to use array `b (from a, from x)' in a scalar context\n``;
+   `function h(c){x[1]=1; print c} function g(b){h(b)} function f(a){g(a)} BEGIN{f(x)}`
+   -> ``... `c (from b, from a, from x)' ...``; a local made an array,
+   `function g(b){print b} function f(a, l){l[1]=1; g(l)} BEGIN{f(1)}` ->
+   ``... `b (from l)' ...``. ``attempt to use scalar parameter `b' as an
+   array`` keeps the plain name (`function g(b){b[1]=1} function f(a){x=1;
+   g(a)} BEGIN{f(x)}`).
+4. **length** (`AwkBuiltins.cpp` ~113): a bare-variable argument whose
+   `BoundKind` is Array is ``length: received array argument`` -- not only
+   when the parameter itself is an Array:
+   `function f(a){x[1]=1; print length(a)} BEGIN{f(x)}` and
+   `function g(b){x[1]=1; print length(b)} function f(a){g(a)} BEGIN{f(x)}`
+   -> ``awk: cmd. line:1: fatal: length: received array argument\n``, 2.
+   Unchanged: `function f(a){x = 5; print length(a)} BEGIN{f(x)}` prints
+   `0` (the parameter's own value, still empty).
+5. **split** (`AwkBuiltins.cpp` ~184): a second argument whose `BoundKind`
+   is Scalar is ``split: second argument is not an array`` before
+   `ArrayRef` is reached (today a chain ending in a scalar gives
+   ``attempt to use scalar parameter ...``):
+   `function f(a){x=1; split("a b", a)} BEGIN{f(x)}` and
+   `function g(b){x=1; split("a", b)} function f(a){g(a)} BEGIN{f(x)}` ->
+   ``awk: cmd. line:1: fatal: split: second argument is not an array\n``, 2.
+6. **RunBeginItems / RunEndItems**: make the caught `FlowUnwind`'s flow
+   explicit, in `RunMainItems`' shape -- `Flow flow = Flow::Normal; try {
+   flow = RunStatement(*item.action); } catch (const FlowUnwind& unwind) {
+   flow = unwind.flow; }`, then act on `flow == Flow::Exit` (BEGIN: set
+   `m_exitFromBegin`, return; END: return). No other flow can arrive there
+   (`CallFunction` makes next/nextfile out of BEGIN/END a fatal); a comment
+   says so. Behaviour unchanged; the existing tests cover it.
+7. **The awk `CLAUDE.md`'s `split(s, a[i])` bullet** (under "Documented
+   exceptions") has a stray backtick: write it ``- `split(s, a[i])` is
+   refused (`split: second argument is not an array`); gawk makes `a[i]` a
+   sub-array, an extension.``
 
 ### `commands/awk/Awk.cpp`
 
-`Help().notes`: drop printf/sprintf/math from "not available yet"; add the
-documented exceptions `rand() has its own sequence (srand's seeds and return
-values are gawk's)` and `%a/%A print the platform's long double`.
+`Version()` 1.3.0 -> 1.4.0. `Help().notes`: "printf, sprintf, the math
+functions, getline and output redirections are not available yet." becomes
+"getline and output redirections are not available yet."; add the
+documented exceptions "rand() has its own sequence; srand's seeds and
+return values are gawk's." and "%a and %A print the platform's long double
+(0x8p-3 for 1 on x86-64; gawk prints 0x1p+0)."
 
 ### Build
 
-`src/components/BuiltinCommands/CMakeLists.txt`: add `commands/awk/AwkFormat.cpp`.
+`src/components/BuiltinCommands/CMakeLists.txt`: add
+`commands/awk/AwkFormat.cpp` (after `AwkFields.cpp`, keeping the list
+sorted).
 
 ### Rules that apply (root `CLAUDE.md`)
 
+- Clean room: everything above is behaviour, verified on gawk; write the
+  code from it, never from another awk's (or a C library's) source.
 - `ICurrentProcess` is the only door out: nothing here reaches files or
-  processes; output goes through the existing `Output` hook only.
+  processes; output goes through the existing `Output` door only.
 - Output byte for byte as gawk `--posix` (C locale); exceptions documented
-  in `--help` notes (from `BuiltinHelpText`) and the CLAUDE.md table.
+  in `--help` notes (from `BuiltinHelpText`) and the CLAUDE.md tables; the
+  version bumped (above).
 - Portable C++17 (Linux, MSVC, WASM): no POSIX headers, no `<regex>`; the
   non-finite spellings are built by awk, never left to the C library.
 
 ## Tests
 
-New `tests/unit/components/Awk.unittests/AwkPrintfTest.cpp` (in that
+New `tests/unit/components/Awk.unittests/AwkPrintfTest.cpp` (added to that
 directory's `CMakeLists.txt`). Programs are the awk text (C++ raw strings);
 expected texts use C escapes (`\000` is a NUL byte).
 
-Plain `TEST`s on the engine:
-- `AwkFormatTest.Engine`: `FormatAwkPrintf("%d|%s|%c", {Number 42.9, String "s", String ""}, "%.6g")`
+Plain `TEST`s on the engine (`#include "commands/awk/AwkFormat.h"`):
+- `AwkFormatTest.Engine`: `FormatAwkPrintf("%d|%s|%c", {Value::FromNumber(42.9), Value::FromString("s"), Value::FromString("")}, "%.6g")`
   is `42|s|` followed by a NUL byte; `FormatAwkPrintf("%5%|%k", {}, "%.6g")`
-  is `%|%k`; `"%ld"` throws `AwkFatal` with ``what()`` `` `l' is not permitted in POSIX awk formats ``;
-  `"%s %s"` with one argument throws with the message `not enough arguments to satisfy format string\n\t`%s %s'\n\t    ^ ran out for this one`.
+  is `%|%k`; `"%ld"` throws `AwkFatal` whose `what()` is
+  `` `l' is not permitted in POSIX awk formats ``; `"%s %s"` with one
+  argument throws with the message
+  `not enough arguments to satisfy format string\n\t`%s %s'\n\t    ^ ran out for this one`.
 
 `class AwkPrintfTest : public AwkRunTest {};` (`AwkRunFixture.h`), `TEST_F`s
 on `RunCaptured` with exact out/err/status (0 and empty err unless given):
@@ -235,7 +365,8 @@ on `RunCaptured` with exact out/err/status (0 and empty err unless given):
   -> `  007|+5| 5|010|0xff|1.234568E+04|1.234E-05|1e+04|3.|s|   ab|3    \n`;
   `BEGIN { printf "%*d|%-*d|%.*f|%*s|%.*d|\n", 5, 42, 4, 7, 2, 3.14159, -6, "ab", 3, 7 }`
   -> `   42|7   |3.14|ab    |007|\n`;
-  `BEGIN { printf("%s-%s\n", "a", "b"); printf "%d|%5.1f|%s|\n", "", "", "" }` -> `a-b\n0|  0.0||\n`.
+  `BEGIN { printf("%s-%s\n", "a", "b"); printf "%d|%5.1f|%s|\n", "", "", "" }` -> `a-b\n0|  0.0||\n`;
+  `BEGIN { CONVFMT = "%.2f"; printf 3.14159265; print "" }` -> `3.14\n`.
 - `CharacterConversion`: input `65 hello 3.0\n`,
   `{ printf "%c|%c|%c|%c|%c|%5c|%-3c|%.3c|\n", $1, $2, 321, -191, 65.7, "x", 66, "xyz"; printf "[%s][%s][%d]\n", $3, $3 + 0, $3 }`
   -> `A|h|A|A|A|    x|B  |x|\n[3.0][3][3]\n`;
@@ -267,7 +398,7 @@ on `RunCaptured` with exact out/err/status (0 and empty err unless given):
 - `SprintfAndBarePrintf`:
   `BEGIN { printf "x\n", 1, 2; printf; x = sprintf("%d%%", 50); print x, length(x); print sprintf("abc"), sprintf(5) }`
   -> `x\n50% 3\nabc 5\n`; input `a b\n`, `{ printf }` -> nothing;
-  `BEGIN { print sprintf() }` -> `awk: cmd. line:1: fatal: sprintf: no arguments\n`, 2;
+  `BEGIN { print sprintf() }` -> err `awk: cmd. line:1: fatal: sprintf: no arguments\n`, 2;
   `BEGIN { if (0) print sprintf(); print "ok" }` -> `ok\n`.
 - `SumsWithPrintf`: `-F, 'NR > 1 { s += $3 } END { printf "%.2f\n", s }' /data.csv` -> `7.25\n`.
 - `MathFunctions`:
@@ -287,47 +418,74 @@ on `RunCaptured` with exact out/err/status (0 and empty err unless given):
   `BEGIN { a = rand(); srand(1); b = rand(); print (a == b) }` -> `1\n`;
   `BEGIN { srand(2^32 + 3); a = rand(); srand(3); b = rand(); print (a == b) }` -> `1\n`;
   `BEGIN { srand(0); a = rand(); srand(1); b = rand(); print (a == b) }` -> `0\n`;
-  Haisos's own sequence (not gawk's): `BEGIN { print rand(), rand(), rand(); srand(10); print rand() }`
+  Haisos's own sequence (not gawk's; checked against `std::mt19937` and the
+  formula above): `BEGIN { print rand(), rand(), rand(); srand(10); print rand() }`
   -> `0.417022 0.720324 0.000114375\n0.771321\n`.
 
-Change awk--functions' `AwkFunctionsTest.NotYetAvailable` (sprintf now
-runs): make it check that `close("x")` is still
-``awk: cmd. line:1: fatal: function `close' is not implemented yet\n``, 2
-(awk--io changes it). Remove awk--interpreter's printf placeholder
-expectation if one is left.
+In `AwkFunctionsTest.cpp`, a new `TEST_F(AwkFunctionsTest, LateArrayBinding)`
+with the #82 follow-up cases above (items 1, 3, 4 and 5: each program, its
+exact err, status 2 and empty out; the `length(a)` of a scalar-bound `a`
+printing `0\n`, status 0). The existing `FunctionErrors` expectations
+(``a (from x)``, ``scalar parameter `a'``) stay as they are.
+
+`AwkRunTest.NotYetAvailable` (`AwkInterpreterTest.cpp`): drop the sprintf
+and printf runs (both work now); add `BEGIN { close("x") }` ->
+err ``awk: cmd. line:1: fatal: function `close' is not implemented yet\n``,
+status 2 (awk--io changes it); keep the redirection and getline runs.
 
 Commands:
 ```
 bash ./scripts/build_linux_on_linux.sh
 bash ./scripts/test_linux.sh L U Awk
-./output/linux/Awk.unittests --gtest_filter='AwkPrintfTest.*:AwkFormatTest.*'
+./output/linux/Awk.unittests --gtest_filter='AwkPrintfTest.*:AwkFormatTest.*:AwkFunctionsTest.*'
 bash ./scripts/test_linux.sh L U
 ```
 
 ## Docs
 
-- `commands/awk/CLAUDE.md`: a "printf and sprintf" section (the pre-scan
-  and its four outcomes, each conversion's rule, the non-finite spellings,
-  the running-out message and its caret) and a "Math" section (the warnings,
-  `-nan`, the generator and seed rules); `AwkFormat.h/.cpp` in the file list;
-  the two exceptions under "Documented exceptions".
-- `src/components/BuiltinCommands/CLAUDE.md` and root `CLAUDE.md`: the awk
-  rows gain printf/sprintf and the math functions, with the two exceptions.
+- `commands/awk/CLAUDE.md`: `AwkFormat.h/.cpp` in the file list, and
+  `AwkBuiltins.cpp`'s line naming sprintf and the math functions too; a
+  "printf and sprintf" section (what a format means -- the four outcomes,
+  each conversion's rule, the non-finite spellings, the running-out message
+  and its caret) and a "Math" section (the warnings, `-nan`, the generator
+  and the seed rules); "Running"'s hooks bullet and the end of "Built-in
+  functions" no longer list printf, sprintf and the math functions as not
+  implemented; "Functions": an Array met on a parameter's chain read as a
+  scalar is the fatal, and the "(from a, from x)" chain naming; "Documented
+  exceptions": the two new ones (rand's sequence, `%a`/`%A`), the "parts
+  that do not run yet" bullet down to getline and the output redirections,
+  and the `split(s, a[i])` bullet fixed (item 7).
+- `src/components/BuiltinCommands/CLAUDE.md`: the awk row -- version 1.4.0,
+  printf/sprintf and the math functions among the treated, the two
+  exceptions, the not-implemented list down to getline, the output
+  redirections, close, fflush and system; the `BuiltinPrintf.h` bullet says
+  awk's printf/sprintf use it (find's `-printf` scans its own directives).
+- Root `CLAUDE.md`: the awk row in "Builtin Commands" the same way.
 
 ## Acceptance
 
 - [ ] `FormatAwkPrintf` declared exactly; every conversion rule above, the
   refused modifiers, the copied unknown specifications, the running-out
-  message byte for byte.
+  message byte for byte; `BuiltinPrintf.h` unchanged.
 - [ ] `printf` goes through `Output` (so redirections in awk--io cover it);
   `sprintf()` with no argument fails only when it runs.
 - [ ] The math warnings and `-nan` exactly; `rand()` is the specified
   `std::mt19937` formula; `srand` seeds and returns as specified.
-- [ ] Every test above passes; no expectation changed to mawk's; all unit
-  tests green; CLAUDE.md files updated.
+- [ ] The #82 follow-ups: an array at a chain's end read as a scalar is
+  gawk's fatal; length and split give their own messages through
+  `BoundKind`; the "(from ...)" name built only on the error path and
+  listing the whole chain; `VariableName` removed; BEGIN/END's caught flow
+  explicit; the CLAUDE.md backtick fixed.
+- [ ] Version 1.4.0; every test above passes; no expectation changed to
+  mawk's; all unit tests green; the three CLAUDE.md files updated.
+- [ ] Clean room: no other awk's (or C library's) source read; no other
+  program's internal names in code or comments.
 
 ## Out of scope
 
-- Output redirection of `printf` (`>`, `>>`, `|`: awk--io, through `Output`).
+- Output redirection of `printf` (`>`, `>>`, `|`: awk--io, through `Output`);
+  `close`, `fflush`, `system`, `getline`.
 - gawk extensions: `%'d` grouping (the flag is accepted, the C locale groups
   nothing), positional `%1$s`, `PROCINFO`, `-M`.
+- The Windows/WASM stack depth of 200 nested calls (#82's other medium
+  finding): not this task's.

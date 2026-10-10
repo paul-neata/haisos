@@ -14,6 +14,10 @@ add_library(BuiltinCommands STATIC
     BuiltinSize.cpp
     BuiltinTestExpression.cpp
     BuiltinText.cpp
+    commands/awk/Awk.cpp
+    commands/awk/AwkError.cpp
+    commands/awk/AwkInvocation.cpp
+    commands/awk/AwkLexer.cpp
     commands/basename/Basename.cpp
     commands/cat/Cat.cpp
     commands/chmod/Chmod.cpp

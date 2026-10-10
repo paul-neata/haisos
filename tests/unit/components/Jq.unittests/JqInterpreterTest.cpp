@@ -232,6 +232,9 @@ TEST(JqInterpreterTest, Functions) {
     EXPECT_EQ(RunJq("def f($a; $b): [$a, $b]; [f(1,2; 3,4)]"),
               "[[1,3],[1,4],[2,3],[2,4]]");
     EXPECT_EQ(RunJq("def f(x): x as $v | $v; [f(1,2)]"), "[1,2]");
+    // A $value parameter is also its argument as a filter, run again.
+    EXPECT_EQ(RunJq("def f($a): $a, a; [f(1,2)]"), "[1,1,2,2,1,2]");
+    EXPECT_EQ(RunJq("def f($a): a; [f(1,2)]"), "[1,2,1,2]");
     EXPECT_EQ(RunJq("def f: def g: 3; g; f"), "3");
     EXPECT_EQ(RunJq("def fac: if . <= 1 then 1 else . * (. - 1 | fac) end; "
                     "10 | fac"),
@@ -368,10 +371,8 @@ TEST(JqInterpreterTest, DepthLimit) {
               "error: Maximum evaluation depth (1024) exceeded");
     // A tall tree within the parser's bound evaluates.
     EXPECT_EQ(RunJq("[" + Repeat("1,", 400) + "1] | .[400]"), "1");
-    // Chained bindings (each costs about two tree levels, so the tree
-    // bound allows roughly 250 of them: the plan's 300 is more than the
-    // 512-level tree height, and 200 sit well inside it).
-    EXPECT_EQ(RunJq(Repeat(". as $x | ", 200) + "$x"), "null");
+    // 300 chained bindings (one tree level each) parse and run.
+    EXPECT_EQ(RunJq(Repeat(". as $x | ", 300) + "$x"), "null");
 }
 
 TEST(JqInterpreterTest, PreludeParses) {

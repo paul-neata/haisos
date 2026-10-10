@@ -99,6 +99,12 @@ TEST(JqParserTest, Bindings) {
     auto result = ParseProgram(chain);
     EXPECT_TRUE(result.errors.empty());
     ASSERT_TRUE(result.root);
+    std::string bindings;
+    for (int i = 0; i < 300; ++i)
+        bindings += ". as $x | ";
+    result = ParseProgram(bindings + "$x");
+    EXPECT_TRUE(result.errors.empty());
+    ASSERT_TRUE(result.root);
     std::string deeper = chain;
     for (int i = 200; i < 2000; ++i)
         deeper += " | . as $x" + std::to_string(i) + " | $x" + std::to_string(i);

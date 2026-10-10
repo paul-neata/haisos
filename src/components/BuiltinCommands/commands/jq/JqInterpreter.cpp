@@ -18,10 +18,8 @@ struct Env {
     std::string name;      // every kind, without '$' or '@'
     int arity = 0;         // Function (a filter parameter and a $value
                            // parameter's filter are arity 0)
-    Value value;           // Variable; Function with no definition: its
-                           // $value parameter's value
-    const FunctionDefinition* definition = nullptr;  // Function, or a
-                                                      // value-yielding one
+    Value value;           // Variable
+    const FunctionDefinition* definition = nullptr;  // Function
     std::weak_ptr<const Env> definitionEnv;  // Function: where its body runs
                                              // (weakly: a recursive
                                              // definition's own env holds the
@@ -93,20 +91,6 @@ EnvPtr MakeFilterParamEnv(const EnvPtr& parent, std::string name,
     env->kind = Env::Kind::FilterParam;
     env->name = std::move(name);
     env->closure = std::move(closure);
-    env->parent = parent;
-    return env;
-}
-
-// The filter a $value parameter is also bound as: called, it yields the
-// bound value.
-EnvPtr MakeValueFilterEnv(const EnvPtr& parent, const std::string& name,
-                           Value value) {
-    auto env = std::make_shared<Env>();
-    env->kind = Env::Kind::Function;
-    env->name = name;
-    env->arity = 0;
-    env->definition = nullptr;
-    env->value = std::move(value);
     env->parent = parent;
     return env;
 }
@@ -371,9 +355,13 @@ void CallUser(Interpreter& interp, const Env& binding, const Node& node,
                 const std::string& param = definition.params[i];
                 if (!param.empty() && param[0] == '$') {
                     const std::string name = param.substr(1);
+                    // Bound as $name, and as the filter name -- the
+                    // argument itself, run again where it is called, as the
+                    // manual's 'def f(a): a as $a | ...' reading has it
+                    // (def f($a): a; [f(1,2)] is [1,2,1,2]).
+                    bodyEnv = MakeFilterParamEnv(
+                        bodyEnv, name, Closure{node.children[i].get(), callerEnv});
                     bodyEnv = MakeVariableEnv(bodyEnv, name, values[valueIndex]);
-                    bodyEnv = MakeValueFilterEnv(bodyEnv, name,
-                                                  values[valueIndex]);
                     ++valueIndex;
                 } else {
                     bodyEnv = MakeFilterParamEnv(
@@ -891,11 +879,6 @@ void Interpreter::EvalCall(const Node& node, const Value& input,
     if (binding) {
         if (binding->kind == Env::Kind::FilterParam) {
             EvalClosure(binding->closure, input, emit);
-            return;
-        }
-        if (binding->definition == nullptr) {
-            // A $value parameter, called as the filter of its own name.
-            emit(binding->value);
             return;
         }
         CallUser(*this, *binding, node, input, env, emit);

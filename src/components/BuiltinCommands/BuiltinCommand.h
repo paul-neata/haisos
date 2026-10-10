@@ -34,6 +34,9 @@ struct BuiltinOption {
     BuiltinArgument argument = BuiltinArgument::None;
     std::string argumentName; // shown in --help: "COLS" gives "-w, --width=COLS"
     std::string description;  // a few words, for --help; treated options only
+    // An obsolete spelling the real command accepts but does not document
+    // (uniq's -N): parsed like any other option, never shown in --help.
+    bool hidden = false;
 };
 
 struct ParsedBuiltinOption {
@@ -57,7 +60,14 @@ struct ParsedBuiltinArgs {
 // long option may be abbreviated to any unambiguous prefix ("--rec"), options
 // and operands may be mixed ("ls dir -l"), and "--" ends the options. A lone
 // "-" is an operand. --help and --version are recognized for every command.
-ParsedBuiltinArgs ParseBuiltinArgs(const std::vector<std::string>& args, const std::vector<BuiltinOption>& options);
+//
+// GNU's "+" getopt mode is |stopAtFirstOperand|: options are only those before
+// the first operand -- the first argument that is not an option ("-" alone
+// included) and every argument after it, "--" included, become operands
+// untouched. A "--" before any operand still ends the options and is dropped.
+// env (and later xargs) work this way: what follows COMMAND is never options.
+ParsedBuiltinArgs ParseBuiltinArgs(const std::vector<std::string>& args,
+    const std::vector<BuiltinOption>& options, bool stopAtFirstOperand = false);
 
 // What --help says beyond the option table.
 struct BuiltinHelp {
@@ -72,6 +82,10 @@ struct BuiltinHelp {
     // builtin's own: "dash" for hsh. Empty: the builtin's own name. The "Based
     // on Linux <command>: <url>" line of --help names it and links its page.
     std::string basedOn;
+    // Where the real command is documented, when not the Linux man-pages
+    // project's page for it (ripgrep has none): used as the url of that line.
+    // Empty: BuiltinReferenceUrl of the real command.
+    std::string referenceUrl;
 };
 
 class IBuiltinCommand;
@@ -241,8 +255,17 @@ std::string ShellEscapeQuoted(const std::string& name, bool always = false);
 // with the Try line) and not-treated options (reported, then ignored).
 // Returns the parsed arguments to go on with, or nullopt when the command is
 // already done, with *exitStatus set -- 0 after --help/--version,
-// usageErrorStatus after a usage error.
+// usageErrorStatus after a usage error, and parses with the given
+// stopAtFirstOperand mode (see ParseBuiltinArgs).
 std::optional<ParsedBuiltinArgs> BeginBuiltin(
-    BuiltinContext& context, const IBuiltinCommand& command, int usageErrorStatus, int& exitStatus);
+    BuiltinContext& context, const IBuiltinCommand& command, int usageErrorStatus, int& exitStatus,
+    bool stopAtFirstOperand = false);
+
+// The same, on an argument list of the caller's rather than the context's own:
+// chmod's mode may look like an option ("chmod -w f"), so it takes the mode
+// words out of the arguments before they are parsed.
+std::optional<ParsedBuiltinArgs> BeginBuiltin(
+    BuiltinContext& context, const std::vector<std::string>& args, const IBuiltinCommand& command,
+    int usageErrorStatus, int& exitStatus, bool stopAtFirstOperand = false);
 
 } // namespace Haisos

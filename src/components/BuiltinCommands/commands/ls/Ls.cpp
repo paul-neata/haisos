@@ -1,13 +1,11 @@
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
 #include <cstdio>
-#include <ctime>
-#include <cstring>
 #include <string>
 #include "BuiltinCommand.h"
+#include "BuiltinDate.h"
+#include "BuiltinSize.h"
 #include "src/components/Filesystem/FilesystemUtils.h"
-#include "src/components/libheaders/CrtInvalidParameterAsError.h"
 
 namespace Haisos {
 
@@ -101,150 +99,36 @@ struct LsEntry {
 
 // --- Formatting pieces ---
 
-// GNU's -h: powers of 1024, rounded up, one decimal below 10 ("1.5K", "12K").
-std::string HumanSize(uint64_t bytes) {
-    if (bytes < 1024) {
-        return std::to_string(bytes);
-    }
-    static const char kUnits[] = "KMGTPEZY";
-    double value = static_cast<double>(bytes);
-    size_t unit = 0;
-    value /= 1024;
-    while (true) {
-        double shown = value < 10 ? std::ceil(value * 10) / 10 : std::ceil(value);
-        if (shown < 1024 || unit + 1 >= sizeof(kUnits) - 1) {
-            char buffer[32];
-            if (shown < 10) {
-                std::snprintf(buffer, sizeof(buffer), "%.1f%c", shown, kUnits[unit]);
-            } else {
-                std::snprintf(buffer, sizeof(buffer), "%.0f%c", shown, kUnits[unit]);
-            }
-            return buffer;
-        }
-        value /= 1024;
-        ++unit;
-    }
-}
-
 // Allocated size, as -s and the total line show it: 1K blocks (rounded up),
 // or with -h, human-readable bytes.
 std::string AllocatedSize(uint64_t blocks512, bool human) {
-    return human ? HumanSize(blocks512 * 512) : std::to_string((blocks512 + 1) / 2);
+    return human ? FormatHumanSize(blocks512 * 512, /*si=*/false) : std::to_string((blocks512 + 1) / 2);
 }
 
-std::tm LocalTime(int64_t seconds) {
-    const std::time_t asTimeT = static_cast<std::time_t>(seconds);
-    std::tm local{};
-#ifdef _WIN32
-    // A time before 1970, which a file on the disk can have, is an invalid
-    // parameter to localtime_s -- by default the end of the program (see
-    // CrtInvalidParameterAsError). In scope, the call just fails, and |local|
-    // stays zeroed.
-    CrtInvalidParameterAsError crtErrors;
-    localtime_s(&local, &asTimeT);
-#else
-    localtime_r(&asTimeT, &local);
-#endif
-    return local;
-}
-
-#ifdef _WIN32
-// Whether the Microsoft C runtime's strftime knows the conversion starting at
-// format[i], just after its '%': one of its conversion characters, perhaps
-// after the '#' flag or an E or O modifier. Handed any other, that strftime
-// treats the whole call as an invalid parameter, which by default ends the
-// program (see CrtInvalidParameterAsError).
-bool MsvcStrftimeKnows(const std::string& format, size_t i) {
-    static const char kConversions[] = "aAbBcCdDeFgGhHIjmMnprRStTuUVwWxXyYzZ%";
-    if (i < format.size() && (format[i] == '#' || format[i] == 'E' || format[i] == 'O')) {
-        ++i;
-    }
-    return i < format.size() && format[i] != '\0' && std::strchr(kConversions, format[i]) != nullptr;
-}
-#endif
-
-// strftime, with %N (nanoseconds, as GNU date and ls have it), %e (the day,
-// space-padded -- not every C library knows it) and %s (seconds since the
-// epoch, a GNU extension) expanded first. On Windows a conversion its C
-// runtime does not know is written out as it stands, as glibc writes one it
-// does not know, rather than handed to that strftime, which would fail the
-// whole call -- and, by default, the program with it.
-std::string FormatDateTime(const std::string& format, const FileDateTime& time) {
-    const std::tm local = LocalTime(time.seconds);
-    std::string expanded;
-    for (size_t i = 0; i < format.size(); ++i) {
-        if (format[i] == '%' && i + 1 < format.size()) {
-            char buffer[16];
-            if (format[i + 1] == 'N') {
-                std::snprintf(buffer, sizeof(buffer), "%09u", static_cast<unsigned>(time.nanoseconds));
-                expanded += buffer;
-                ++i;
-                continue;
-            }
-            if (format[i + 1] == 'e') {
-                std::snprintf(buffer, sizeof(buffer), "%2d", local.tm_mday);
-                expanded += buffer;
-                ++i;
-                continue;
-            }
-            if (format[i + 1] == 's') {
-                expanded += std::to_string(time.seconds);
-                ++i;
-                continue;
-            }
-            if (format[i + 1] == '%') {
-                expanded += "%%";
-                ++i;
-                continue;
-            }
-#ifdef _WIN32
-            if (!MsvcStrftimeKnows(format, i + 1)) {
-                // The '%' as a literal one; what follows it is copied as the
-                // plain text it then is.
-                expanded += "%%";
-                continue;
-            }
-#endif
-        }
-#ifdef _WIN32
-        else if (format[i] == '%') {
-            // A '%' ending the format starts no conversion at all.
-            expanded += "%%";
-            continue;
-        }
-#endif
-        expanded += format[i];
-    }
-    char buffer[256];
-    // Should that strftime still take exception to something, the call fails
-    // (and the column is left empty) rather than the program.
-    CrtInvalidParameterAsError crtErrors;
-    const size_t written = std::strftime(buffer, sizeof(buffer), expanded.c_str(), &local);
-    return std::string(buffer, written);
-}
-
-// The time column for --time-style STYLE (already validated).
+// The time column for --time-style STYLE (already validated). The formats
+// are BuiltinDate's FormatDateTime's, GNU's own for each style, in the
+// host's local zone.
 std::string FormatTimeColumn(const std::string& style, const FileDateTime& time, int64_t now) {
     const bool recent = time.seconds <= now && now - time.seconds < kSixMonths;
     if (style == "full-iso") {
-        return FormatDateTime("%Y-%m-%d %H:%M:%S.%N %z", time);
+        return FormatDateTime("%Y-%m-%d %H:%M:%S.%N %z", time, false);
     }
     if (style == "long-iso") {
-        return FormatDateTime("%Y-%m-%d %H:%M", time);
+        return FormatDateTime("%Y-%m-%d %H:%M", time, false);
     }
     if (style == "iso") {
-        return FormatDateTime(recent ? "%m-%d %H:%M" : "%Y-%m-%d ", time);
+        return FormatDateTime(recent ? "%m-%d %H:%M" : "%Y-%m-%d ", time, false);
     }
     if (!style.empty() && style[0] == '+') {
         // "+FORMAT", or "+OLD<newline>RECENT".
         const std::string formats = style.substr(1);
         const size_t newline = formats.find('\n');
         if (newline == std::string::npos) {
-            return FormatDateTime(formats, time);
+            return FormatDateTime(formats, time, false);
         }
-        return FormatDateTime(recent ? formats.substr(newline + 1) : formats.substr(0, newline), time);
+        return FormatDateTime(recent ? formats.substr(newline + 1) : formats.substr(0, newline), time, false);
     }
-    return FormatDateTime(recent ? "%b %e %H:%M" : "%b %e  %Y", time);
+    return FormatDateTime(recent ? "%b %e %H:%M" : "%b %e  %Y", time, false);
 }
 
 bool IsValidTimeStyle(const std::string& style) {
@@ -268,7 +152,7 @@ bool ParseWidth(const std::string& text, size_t& width) {
 class LsCommand : public IBuiltinCommand {
 public:
     std::string Name() const override { return "ls"; }
-    std::string Version() const override { return "1.3.0"; }
+    std::string Version() const override { return "1.3.1"; }
 
     const std::vector<BuiltinOption>& Options() const override {
         using A = BuiltinArgument;
@@ -340,7 +224,6 @@ public:
             "list directory contents",
             {"ls [OPTION]... [FILE]..."},
             "Owner and group show as haisos; permissions as rwxrwxrwx.\n"
-            "On Windows, a --time-style=+FORMAT conversion its C library lacks prints as written.\n"
             "Exit status: 0 if OK, 2 if a FILE could not be accessed.\n"};
     }
 
@@ -733,7 +616,7 @@ private:
                 minorWidth = std::max(minorWidth, std::to_string(entry.status.deviceMinor).size());
                 sizeWidth = std::max(sizeWidth, majorWidth + 2 + minorWidth);
             } else {
-                sizes.push_back(settings.human ? HumanSize(entry.status.size) : std::to_string(entry.status.size));
+                sizes.push_back(settings.human ? FormatHumanSize(entry.status.size, /*si=*/false) : std::to_string(entry.status.size));
                 sizeWidth = std::max(sizeWidth, sizes.back().size());
             }
         }

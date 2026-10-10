@@ -72,7 +72,7 @@ branches never touch `HAISOS_VERSION` (the gate refuses it).
 - Base: master @ <base>
 
 ## Settings
-- Task models: kimi-k3:cloud
+- Task models: glm-5.3:cloud
 - Attempts per model: 2
 - CI fix rounds: 3
 - Task timeout minutes: 120

@@ -70,6 +70,13 @@ public:
     virtual int CreateDirectory(const std::string& pathname, int mode) = 0;
     virtual int RemoveDirectory(const std::string& pathname) = 0;
     virtual int RemoveFile(const std::string& pathname) = 0;
+    // As rename(): both paths resolved against the working directory; see
+    // IFileSystem::Rename, including kFileSystemCrossDevice across filesystems.
+    virtual int Rename(const std::string& oldPath, const std::string& newPath) = 0;
+    // As utimensat(): see IFileSystem::SetTimes.
+    virtual int SetTimes(const std::string& path,
+                         const std::optional<FileDateTime>& accessTime,
+                         const std::optional<FileDateTime>& modificationTime) = 0;
     virtual std::vector<DirectoryEntry> ReadDirectory(const std::string& path) = 0;
     virtual int Stat(const std::string& path, FileStatus& out) = 0;
 

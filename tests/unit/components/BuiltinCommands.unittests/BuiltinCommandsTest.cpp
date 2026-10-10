@@ -92,7 +92,9 @@ std::shared_ptr<IBuiltinCommand> FindStandardCommand(const std::string& name) {
 
 TEST_F(BuiltinCommandsTest, ListsEveryBuiltinSortedWithAVersion) {
     const auto commands = builtins->GetCommands();
-    EXPECT_EQ(commands, (Lines{"cat", "echo", "hsh", "ls", "man", "mkdir", "pwd", "wc"}));
+    EXPECT_EQ(commands, (Lines{"[", "awk", "basename", "cat", "chmod", "cmp", "cp", "cut", "date", "diff", "dirname", "du", "echo",
+        "egrep", "env", "false", "fgrep", "find", "grep", "head", "hsh", "ls", "man", "mkdir", "mv", "nl", "patch", "printf", "pwd", "realpath", "rg", "rm",
+        "rmdir", "sed", "seq", "sleep", "sort", "stat", "tail", "tee", "test", "touch", "tr", "true", "uniq", "wc", "which", "xargs"}));
     for (const auto& name : commands) {
         EXPECT_FALSE(builtins->GetBuiltinVersion(name).empty()) << name;
     }
@@ -123,13 +125,26 @@ TEST_F(BuiltinCommandsTest, ABuiltinProcessLooksLikeAnyOther) {
 TEST_F(BuiltinCommandsTest, EveryBuiltinsHelpHasTheSameShape) {
     for (const auto& command : CreateStandardBuiltinCommands()) {
         const std::string name = command->Name();
-        int status = -1;
-        auto help = Run(name, {"--help"}, &status);
-        EXPECT_EQ(status, 0) << name;
+        // test takes no options: --help is an ordinary non-empty string
+        // operand to it, as GNU's test, so running it shows nothing. Its
+        // help has the same shape anyway -- and [ , its other name, is the
+        // one of the pair that runs --help.
+        Lines help;
+        int status = 0;
+        if (name == "test") {
+            help = SplitLines(BuiltinHelpText(*command));
+        } else {
+            help = Run(name, {"--help"}, &status);
+        }
+        // GNU's false exits 1 even after --help; every other builtin 0.
+        EXPECT_EQ(status, name == "false" ? 1 : 0) << name;
         ASSERT_GE(help.size(), 5u) << name;
         EXPECT_EQ(help[0].rfind("HaisosOS " + name + " version " + command->Version() + " - ", 0), 0u) << help[0];
         const std::string& real = command->Help().basedOn.empty() ? name : command->Help().basedOn;
-        EXPECT_EQ(help[1], "Based on Linux " + real + ": https://man7.org/linux/man-pages/man1/" + real + ".1.html");
+        const std::string& url = command->Help().referenceUrl.empty()
+            ? "https://man7.org/linux/man-pages/man1/" + real + ".1.html"
+            : command->Help().referenceUrl;
+        EXPECT_EQ(help[1], "Based on Linux " + real + ": " + url);
         EXPECT_EQ(help[2], "");
         EXPECT_EQ(help[3].rfind("Usage: " + name, 0), 0u) << help[3];
         EXPECT_TRUE(Contains(help, "      --help"));
@@ -140,6 +155,9 @@ TEST_F(BuiltinCommandsTest, EveryBuiltinsHelpHasTheSameShape) {
         ASSERT_EQ(last.rfind("Not treated arguments: ", 0), 0u) << name << ": " << last;
         bool anyNotTreated = false;
         for (const auto& option : command->Options()) {
+            if (option.hidden) {
+                continue;  // an obsolete spelling: parsed, never documented
+            }
             const std::string spelling = option.longName.empty()
                 ? std::string("-") + option.shortName : "--" + option.longName;
             if (option.id == kBuiltinNotTreated) {
@@ -168,9 +186,14 @@ TEST_F(BuiltinCommandsTest, EveryBuiltinsManPageIsItsHelp) {
 
 TEST_F(BuiltinCommandsTest, EveryBuiltinHasAVersion) {
     for (const auto& name : builtins->GetCommands()) {
+        if (name == "test") {
+            continue;  // --version is a non-empty string operand to test, as
+                       // GNU's; [ --version is the pair's version line
+        }
         int status = -1;
         auto version = Run(name, {"--version"}, &status);
-        EXPECT_EQ(status, 0) << name;
+        // GNU's false exits 1 even after --version; every other builtin 0.
+        EXPECT_EQ(status, name == "false" ? 1 : 0) << name;
         EXPECT_EQ(version, (Lines{name + " (HaisosOS builtin) " + builtins->GetBuiltinVersion(name)})) << name;
     }
 }
@@ -594,13 +617,24 @@ TEST_F(BuiltinCommandsTest, LsTimeStyles) {
 }
 
 // A conversion strftime does not know is printed as written, as glibc prints
-// one; on Windows, whose C runtime would end the whole program over it, ls
-// writes it out before strftime sees it. %s, a GNU extension, is the time in
-// seconds since the epoch everywhere.
+// one, everywhere -- BuiltinDate's FormatDateTime never hands one to the C
+// library. %s, a GNU extension, is the time in seconds since the epoch
+// everywhere.
 TEST_F(BuiltinCommandsTest, LsTimeStyleWithAConversionStrftimeDoesNotKnow) {
     const auto lines = Run("ls", {"-l", "--time-style=+%Q|%s|%", "/docs/a.md"});
     ASSERT_EQ(lines.size(), 1u);
     EXPECT_TRUE(std::regex_match(lines[0], std::regex("-rwxrwxrwx 1 haisos haisos 5 %Q\\|[0-9]+\\|% /docs/a\\.md")))
+        << lines[0];
+}
+
+// --time-style=+FORMAT takes GNU's flags: '-' does not pad, '_' pads with
+// spaces, so the day of month and the month come out as ls's own styles write
+// them too.
+TEST_F(BuiltinCommandsTest, LsTimeStyleTakesGnuFlags) {
+    const auto lines = Run("ls", {"-l", "--time-style=+%-d.%_m.%Y", "/docs/a.md"});
+    ASSERT_EQ(lines.size(), 1u);
+    EXPECT_TRUE(std::regex_match(lines[0], std::regex(
+        "-rwxrwxrwx 1 haisos haisos 5 [1-9][0-9]?\\.[ 1][0-9]\\.[0-9]{4} /docs/a\\.md")))
         << lines[0];
 }
 
@@ -646,7 +680,7 @@ TEST_F(BuiltinCommandsTest, LsSortOrders) {
     int status = 0;
     auto lines = Run("ls", {"--sort=version", "-1", "/docs/sub"}, &status);
     EXPECT_EQ(status, 0);
-    EXPECT_EQ(lines, (Lines{"Parameter --sort=version is not treated by HaisosOS ls v. 1.3.0", "b.md"}));
+    EXPECT_EQ(lines, (Lines{"Parameter --sort=version is not treated by HaisosOS ls v. 1.3.1", "b.md"}));
 }
 
 TEST_F(BuiltinCommandsTest, LsLayouts) {

@@ -36,6 +36,36 @@ behaves identically no matter what you mount onto.
   A descriptor keeps working after its filesystem is unmounted, and after the
   last outside reference to that filesystem is gone, until it is released.
 - Provides file removal (unlink, via `RemoveFile`) and directory operations: mkdir, rmdir
+- Provides `Rename`, as rename(): a one-step move where a file at the new path
+  is replaced, a directory only by an empty directory, and a path renamed to
+  itself a no-op. The refusals: the root, a builtin command, a directory a
+  builtin pins, a mount point or a directory holding one
+  (`MountPoints::HasMountAtOrBelow` -- Linux answers EBUSY) never move, a
+  directory cannot move into itself or below itself, and a file does not
+  replace a directory nor a directory a file. Across two different
+  filesystems -- on either side of a mount point, a composed overlay included,
+  or on two host devices -- it returns `kFileSystemCrossDevice` (as EXDEV,
+  `-2`; `kFileSystemError`, `-1`, is every other failure, for there is no
+  errno contract) and moves nothing. `MountableFileSystem::Rename` decides
+  that by resolving both paths against the mount table and comparing the
+  filesystems it lands on, reporting a missing source as an ordinary error
+  first, as rename() reports ENOENT before EXDEV. On Windows, where
+  `MoveFileExW` cannot replace a directory, an empty target directory is
+  removed first and put back -- times and attributes included -- if the move
+  fails, so a failed rename changes nothing; a directory is refused a move
+  below itself before anything is touched. In-memory descriptors
+  follow their path, not their file (see the descriptor bullet): after a
+  rename a descriptor opened on the old path finds nothing (`kIOError`), as
+  one on a removed file already does, and one opened on the replaced target
+  reads the moved file.
+- Provides `SetTimes`, as utimensat(): the access time and the modification
+  time of a path, each a `FileDateTime`, with a `nullopt` leaving that time
+  alone; the change time becomes now, unless both are `nullopt`. A builtin
+  refuses it (its times are those of its placing), a read-only filesystem
+  refuses everything, and a device keeps its times: `SetTimes` on one
+  succeeds and changes nothing. Windows sets them with `SetFileTime`
+  (`FILETIME` being 100 ns ticks since 1601, `UTIME_OMIT` a null pointer),
+  where `Stat` reports whole seconds, as `_stat64` does.
 - Provides custom directory listing via `ReadDirectory`, which starts every
   listing of a directory with `.` and `..`, as `readdir()` does. They are put in
   by `MountableFileSystem`, once for every filesystem: each `Local*ReadDirectory`

@@ -144,8 +144,9 @@ task of the hsh rock and adds its files here:
 - `HshBuiltinRead.cpp` - `read`: one input line (a byte at a time, so a pipe
   is never over-read), backslash processing unless `-r`, `-p` prompting when
   stdin is a terminal, and dash's IFS splitting into the named variables.
-- `HshBuiltinTest.cpp` - `test` and `[` (one builtin, two names): dash's
-  POSIX reductions and expression descent byte for byte (see "test" below).
+- `HshBuiltinTest.cpp` - the `test` and `[` entry (one builtin, two names):
+  "["'s last-argument check, then `BuiltinTestExpression`'s Dash dialect
+  (see "test" below).
 - `HshQuote.h/.cpp` - `ShellSingleQuote`: dash's single_quote -- a value as
   `'plain'`, `''`, or `'it'"'"'s'` -- for the `export -p`/`set` listings.
 - `HshNumber.h/.cpp` - `Atomax10`: dash's atomax10 -- blanks, a sign,
@@ -596,24 +597,29 @@ included; nothing is parsed here.
 ## The test builtin
 
 `test` and `[` (`HshBuiltinTest.cpp`, one entry, two names; a regular
-builtin) are dash's `bltin/test.c` ported with the same window: an index pair
-over the arguments, the POSIX two-, three- and four-operand reductions at the
-top (so `test a -a` is 1 and `test a -o` is 0, as dash), then the descent
-`!` -> `-a` -> `-o` over primary expressions. A bare expression token can
-still be an operator when an operand follows it and a binary operator follows
-that (`test -a a` is `-a: unexpected operator`); a trailing `(` before the
-end is an operand. Errors are reported and the status is 2 (`missing ]`,
-`unexpected operator`, `argument expected`, `closing paren expected`,
-`Illegal number: <x>`; `[` only needs its last argument to *begin* with `]`
--- `]foo` closes fine, as dash). Numbers are `Atomax10` -- blanks and a sign
-around decimal digits, overflow rejected exactly as dash's atomax10 (so
-`" 12 " -eq 12` is true). Documented exceptions, all pinned in
-`HshBuiltinsTest.cpp`: `-r`/`-w`/`-x`/`-O`/`-G` only test that the file is
-there (no permissions or users yet), `-h`/`-L` are always false (nothing in
-Haisos creates a link) and so are `-b`/`-p`/`-S`/`-u`/`-g`/`-k` (no device
-kinds beyond files, directories and character devices, no set-user-id bits),
-and `-ef` compares what `ResolvePath` gives for the two paths (there are no
-inode numbers to compare).
+builtin) are dash's `bltin/test.c` via `BuiltinTestExpression`'s Dash dialect
+(the evaluator itself lives in the component's
+`BuiltinTestExpression.cpp`, shared with the `test` and `[` commands; the
+shell's entry passes it the arguments after the command name, its
+`Shell::IO` and a report that prefixes the command). The descent is dash's,
+with the same window: an index pair over the arguments, the POSIX two-, three-
+and four-operand reductions at the top (so `test a -a` is 1 and `test a -o`
+is 0, as dash), then the descent `!` -> `-a` -> `-o` over primary
+expressions. A bare expression token can still be an operator when an
+operand follows it and a binary operator follows that (`test -a a` is
+`-a: unexpected operator`); a trailing `(` before the end is an operand.
+Errors are reported and the status is 2 (`missing ]`, `unexpected operator`,
+`argument expected`, `closing paren expected`, `Illegal number: <x>`;
+`[` only needs its last argument to *begin* with `]` -- `]foo` closes fine,
+as dash). Numbers are `Atomax10` -- blanks and a sign around decimal digits,
+overflow rejected exactly as dash's atomax10 (so `" 12 " -eq 12` is true).
+Documented exceptions, all pinned in `HshBuiltinsTest.cpp`:
+`-r`/`-w`/`-x`/`-O`/`-G` only test that the file is there (no permissions or
+users yet), `-h`/`-L` are always false (nothing in Haisos creates a link) and
+so are `-b`/`-p`/`-S`/`-u`/`-g`/`-k` (no device kinds beyond files,
+directories and character devices, no set-user-id bits), and `-ef` compares
+what `ResolvePath` gives for the two paths (there are no inode numbers to
+compare).
 
 ## The interactive protocol
 

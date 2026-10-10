@@ -1,0 +1,154 @@
+# Log
+
+- 2026-10-08 03:23 UTC -- implement session started
+- 2026-10-08 03:23 UTC -- start base--fs-rename-times (0.5.1)
+- 2026-10-08 03:49 UTC -- base--fs-rename-times: PR #43, ready
+- 2026-10-08 03:51 UTC -- base--fs-rename-times merged #43 as 0.5.1: 0C 0H fixed, 1M 2L open, 2 tries
+- 2026-10-08 03:52 UTC -- start base--regex-syntax (0.5.2)
+- 2026-10-08 04:03 UTC -- stopped: base--regex-syntax run killed, host critically low on memory
+- 2026-10-08 04:28 UTC -- resume base--regex-syntax (0.5.2), host memory OK
+- 2026-10-08 05:07 UTC -- base--regex-syntax: PR #44, windows-failed
+- 2026-10-08 05:29 UTC -- base--regex-syntax merged #44 as 0.5.2: 0C 3H fixed, 3M 3L open, 2 tries (Windows green on CI re-run)
+- 2026-10-08 05:30 UTC -- start base--regex-match (0.5.3)
+- 2026-10-08 05:48 UTC -- user: continue without the host Windows build
+- 2026-10-08 06:30 UTC -- base--regex-match: PR #45, ready
+- 2026-10-08 06:59 UTC -- base--regex-match merged #45 as 0.5.3: 1C 4H fixed, 3M 3L open, 1 try
+- 2026-10-08 07:00 UTC -- start base--rename-fix (0.5.4)
+- 2026-10-08 07:11 UTC -- base--rename-fix: PR #46, ready
+- 2026-10-08 07:13 UTC -- base--rename-fix merged #46 as 0.5.4: 0C 0H fixed, 0M 1L open, 1 try
+- 2026-10-08 07:14 UTC -- start coreutils--sort (0.5.5)
+- 2026-10-08 07:40 UTC -- coreutils--sort: PR #47, ready
+- 2026-10-08 07:53 UTC -- coreutils--sort merged #47 as 0.5.5: 0C 3H fixed, 1M 4L open, 1 try
+- 2026-10-08 07:54 UTC -- start coreutils--sort-orders (0.5.6)
+- 2026-10-08 08:16 UTC -- coreutils--sort-orders: PR #48, ready
+- 2026-10-08 08:30 UTC -- coreutils--sort-orders merged #48 as 0.5.6: 0C 3H fixed, 1M 4L open, 1 try
+- 2026-10-08 08:31 UTC -- start coreutils--rm-rmdir (0.5.7)
+- 2026-10-08 08:50 UTC -- coreutils--rm-rmdir: PR #49, ready
+- 2026-10-08 09:00 UTC -- coreutils--rm-rmdir merged #49 as 0.5.7: 0C 1H fixed, 1M 3L open, 1 try; question: rm -r follows dir symlinks
+- 2026-10-08 09:02 UTC -- start coreutils--cp (0.5.8)
+- 2026-10-08 09:31 UTC -- coreutils--cp: PR #50, ready
+- 2026-10-08 09:43 UTC -- coreutils--cp merged #50 as 0.5.8: 0C 2H fixed, 3M 4L open, 1 try
+- 2026-10-08 09:43 UTC -- names-env ahead of mv-touch (waiting on the symlink question)
+- 2026-10-08 09:44 UTC -- start coreutils--names-env (0.5.9)
+- 2026-10-08 10:09 UTC -- coreutils--names-env: PR #51, ready
+- 2026-10-08 10:28 UTC -- coreutils--names-env merged #51 as 0.5.9: 0C 1H fixed, 2M 6L open, 1 try (Windows green on CI re-run)
+- 2026-10-08 10:29 UTC -- start coreutils--chmod-paths (0.5.10)
+- 2026-10-08 10:55 UTC -- coreutils--chmod-paths: PR #52, windows-failed
+- 2026-10-08 11:07 UTC -- coreutils--chmod-paths merged #52 as 0.5.10: 0C 0H fixed, 1M 3L open, 1 try (Windows green on CI re-run); question: fix the HaisosOS Windows flake
+- 2026-10-08 11:08 UTC -- start coreutils--printf-seq (0.5.11)
+- 2026-10-08 11:36 UTC -- coreutils--printf-seq: PR #53, windows-failed
+- 2026-10-08 11:50 UTC -- coreutils--printf-seq merged #53 as 0.5.11: 0C 1H fixed, 2M 3L open, 1 try
+- 2026-10-08 11:52 UTC -- start coreutils--test-program (0.5.12)
+- 2026-10-08 12:56 UTC -- coreutils--test-program: PR #54, ready
+- 2026-10-08 13:08 UTC -- coreutils--test-program merged #54 as 0.5.12: 0C 2H fixed, 1M 2L open, 1 try
+- 2026-10-08 13:09 UTC -- start coreutils--uniq-cut (0.5.13)
+- 2026-10-08 13:37 UTC -- coreutils--uniq-cut: PR #55, ready
+- 2026-10-08 13:42 UTC -- coreutils--uniq-cut merged #55 as 0.5.13: 0C 0H fixed, 2M 6L open, 1 try
+- 2026-10-08 13:43 UTC -- start coreutils--tr-tee-nl (0.5.14)
+- 2026-10-08 15:53 UTC -- coreutils--tr-tee-nl: PR #56, Linux CI hung in Build (93 min), cancelled and re-run
+- 2026-10-08 15:59 UTC -- coreutils--tr-tee-nl: PR #56 green on CI re-run, in review
+- 2026-10-08 16:12 UTC -- coreutils--tr-tee-nl merged #56 as 0.5.14: 0C 3H fixed, 2M 2L open, 1 try
+- 2026-10-08 16:14 UTC -- start search--grep-core (0.5.15)
+- 2026-10-08 16:54 UTC -- search--grep-core: PR #57, windows-failed
+- 2026-10-08 17:17 UTC -- search--grep-core merged #57 as 0.5.15: 0C 3H fixed, 1M 2L open, 1 try (MSVC errors fixed in review)
+- 2026-10-08 17:18 UTC -- start search--grep-recursive (0.5.16)
+- 2026-10-08 18:33 UTC -- implement session started
+- 2026-10-08 18:34 UTC -- restart search--grep-recursive (0.5.16) after an interrupted session; Windows checks ignored per Direction
+- 2026-10-08 19:18 UTC -- search--grep-recursive: PR #58, ready
+- 2026-10-08 19:30 UTC -- search--grep-recursive merged #58 as 0.5.16: 0C 3H fixed, 2M 3L open, 1 try
+- 2026-10-08 19:31 UTC -- start coreutils--mv-touch (0.5.17)
+- 2026-10-08 19:52 UTC -- coreutils--mv-touch: PR #59, ready
+- 2026-10-08 20:00 UTC -- coreutils--mv-touch blocked: Ollama monthly usage limit (429); review 5H open; stopped
+- 2026-10-08 20:24 UTC -- Ollama credits reset; coreutils--mv-touch: fix round on #59
+- 2026-10-08 20:45 UTC -- coreutils--mv-touch merged #59 as 0.5.17: 0C 5H fixed, 3M 1L open, 3 tries
+- 2026-10-08 20:47 UTC -- start coreutils--date (0.5.18)
+- 2026-10-08 21:24 UTC -- coreutils--date: PR #60, windows-failed (ignored per Direction)
+- 2026-10-08 22:28 UTC -- coreutils--date merged #60 as 0.5.18: 0C 0H fixed, 6M 5L open, 1 try
+- 2026-10-08 22:31 UTC -- start coreutils--stat (0.5.19)
+- 2026-10-08 23:00 UTC -- coreutils--stat: PR #61, windows-failed (ignored per Direction)
+- 2026-10-08 23:14 UTC -- coreutils--stat merged #61 as 0.5.19: 0C 1H fixed, 3M 2L open, 1 try
+- 2026-10-08 23:15 UTC -- start coreutils--du-cmp (0.5.20)
+- 2026-10-08 23:56 UTC -- coreutils--du-cmp: PR #62, windows-failed (ignored per Direction)
+- 2026-10-09 00:10 UTC -- coreutils--du-cmp merged #62 as 0.5.20: 0C 1H fixed, 3M 6L open, 1 try
+- 2026-10-09 00:11 UTC -- start coreutils--head-tail (0.5.21)
+- 2026-10-09 00:56 UTC -- coreutils--head-tail: PR #63, windows-failed (ignored per Direction)
+- 2026-10-09 01:08 UTC -- coreutils--head-tail merged #63 as 0.5.21: 0C 2H fixed, 3M 5L open, 1 try
+- 2026-10-09 01:09 UTC -- start search--find-tests (0.5.22)
+- 2026-10-09 03:18 UTC -- search--find-tests: PR #64, windows-failed (ignored per Direction)
+- 2026-10-09 03:34 UTC -- search--find-tests merged #64 as 0.5.22: 0C 3H 2M fixed, 0M 5L open, 1 try
+- 2026-10-09 03:36 UTC -- start search--find-actions (0.5.23)
+- 2026-10-09 04:21 UTC -- search--find-actions: PR #65, windows-failed (ignored per Direction)
+- 2026-10-09 06:27 UTC -- search--find-actions merged #65 as 0.5.23: 0C 1H fixed, 1M 4L open, 1 try
+- 2026-10-09 06:29 UTC -- start search--xargs (0.5.24)
+- 2026-10-09 06:43 UTC -- implement session started
+- 2026-10-09 06:44 UTC -- restart search--xargs (0.5.24) after an interrupted run
+- 2026-10-09 07:38 UTC -- search--xargs: PR #66, windows-failed (ignored per Direction)
+- 2026-10-09 07:56 UTC -- search--xargs merged #66 as 0.5.24: 1C 2H fixed, 4M 2L open, 1 try
+- 2026-10-09 08:05 UTC -- start search--sed-core (0.5.25)
+- 2026-10-09 09:25 UTC -- search--sed-core: PR #67, windows-failed (ignored per Direction)
+- 2026-10-09 09:53 UTC -- search--sed-core merged #67 as 0.5.25: 1C 4H 3M 1L fixed, 4M 1L open, 1 try
+- 2026-10-09 09:54 UTC -- start search--sed-advanced (0.5.26)
+- 2026-10-09 11:36 UTC -- search--sed-advanced: PR #68, windows-failed (ignored per Direction)
+- 2026-10-09 11:51 UTC -- search--sed-advanced merged #68 as 0.5.26: 0C 2H fixed, 4M 3L open, 1 try
+- 2026-10-09 11:53 UTC -- start search--rg-search (0.5.27)
+- 2026-10-09 14:44 UTC -- search--rg-search: PR #69, windows-failed (ignored per Direction)
+- 2026-10-09 14:58 UTC -- search--rg-search merged #69 as 0.5.27: 0C 2H fixed, 0M 3L open, 1 try
+- 2026-10-09 14:59 UTC -- start search--rg-regex (0.5.28)
+- 2026-10-09 15:58 UTC -- user: clean-room rule added (no copied code, any licence) to CLAUDE.md, goal, playbook Directions; audit of merged code asked in Questions
+- 2026-10-09 16:25 UTC -- search--rg-regex: PR #70, windows-failed (ignored per Direction)
+- 2026-10-09 16:39 UTC -- search--rg-regex merged #70 as 0.5.28: 0C 1H fixed, 3M 4L open, 1 try
+- 2026-10-09 16:40 UTC -- start search--rg-ignore (0.5.29)
+- 2026-10-09 17:49 UTC -- search--rg-ignore: PR #71, windows-failed (ignored per Direction), 2 runs
+- 2026-10-09 18:05 UTC -- search--rg-ignore merged #71 as 0.5.29: 0C 2H fixed, 4M 3L open, 2 tries
+- 2026-10-09 18:23 UTC -- start diff--diff-core (0.5.30), re-planned clean-room
+- 2026-10-09 19:09 UTC -- diff--diff-core: PR #72 holds only a 56-line header (model exited 1); fix round to implement the plan
+- 2026-10-09 19:53 UTC -- diff--diff-core: 3 runs (32000-token cap twice, then Ollama 429; account changed by the user); engine committed, fix round 4 for the rest
+- 2026-10-09 20:27 UTC -- diff--diff-core: PR #72 complete after 4 runs (+2273), windows-failed (ignored)
+- 2026-10-09 21:02 UTC -- diff--diff-core merged #72 as 0.5.30: 1C 2H 2M 1L fixed, 1M 2L open, 4 tries
+- 2026-10-09 21:04 UTC -- start diff--diff-recursive (0.5.31)
+- 2026-10-09 22:00 UTC -- diff--diff-recursive: PR #73, windows-failed (ignored per Direction)
+- 2026-10-09 22:20 UTC -- diff--diff-recursive merged #73 as 0.5.31: 1C 2H fixed, 1M 2L open, 1 try
+- 2026-10-09 22:34 UTC -- start diff--patch-core (0.5.32), re-planned clean-room
+- 2026-10-10 00:05 UTC -- diff--patch-core: PR #74, windows-failed (ignored per Direction)
+- 2026-10-10 00:30 UTC -- diff--patch-core merged #74 as 0.5.32: 0C 4H 1L fixed, 4M 2L open, 1 try
+- 2026-10-10 00:59 UTC -- start diff--patch-fuzz-rej (0.5.33), re-planned clean-room
+- 2026-10-10 02:28 UTC -- diff--patch-fuzz-rej: PR #75, windows-failed (ignored per Direction)
+- 2026-10-10 02:48 UTC -- diff--patch-fuzz-rej merged #75 as 0.5.33: 1C 2H 1M fixed, 1M 3L open, 1 try
+- 2026-10-10 02:52 UTC -- start awk--lexer (0.5.34)
+- 2026-10-10 03:33 UTC -- awk--lexer: PR #76, windows-failed (ignored per Direction)
+- 2026-10-10 03:50 UTC -- awk--lexer merged #76 as 0.5.34: 0C 1H fixed, 3M 4L open, 1 try
+- 2026-10-10 03:59 UTC -- start awk--expressions (0.5.35)
+- 2026-10-10 04:35 UTC -- awk--expressions: PR #77, windows-failed (ignored per Direction)
+- 2026-10-10 04:49 UTC -- awk--expressions merged #77 as 0.5.35: 0C 2H fixed, 2M 1L open, 1 try
+- 2026-10-10 04:55 UTC -- start awk--parser (0.5.36)
+- 2026-10-10 05:24 UTC -- awk--parser: PR #78, windows-failed (ignored per Direction)
+- 2026-10-10 05:42 UTC -- awk--parser merged #78 as 0.5.36: 0C 1H fixed, 1M 3L open, 1 try
+- 2026-10-10 05:48 UTC -- start awk--values (0.5.37)
+- 2026-10-10 06:13 UTC -- awk--values: PR #79, windows-failed (ignored per Direction)
+- 2026-10-10 06:18 UTC -- awk--values merged #79 as 0.5.37: 0C 0H, 3M 2L open, 1 try
+- 2026-10-10 06:29 UTC -- start awk--interpreter (0.5.38)
+- 2026-10-10 07:11 UTC -- awk--interpreter: PR #80, windows-failed (ignored per Direction)
+- 2026-10-10 07:30 UTC -- awk--interpreter merged #80 as 0.5.38: 0C 2H fixed, 0M 3L open, 1 try
+- 2026-10-10 07:38 UTC -- start awk--records (0.5.39)
+- 2026-10-10 08:31 UTC -- awk--records: PR #81, windows-failed (ignored per Direction)
+- 2026-10-10 08:46 UTC -- awk--records merged #81 as 0.5.39: 0C 1H 2M fixed, 1M 2L open, 1 try
+- 2026-10-10 08:58 UTC -- start awk--functions (0.5.40)
+- 2026-10-10 09:40 UTC -- awk--functions: PR #82, windows-failed (ignored per Direction)
+- 2026-10-10 09:45 UTC -- awk--functions merged #82 as 0.5.40: 0C 0H, 2M 3L open, 1 try
+- 2026-10-10 11:05 UTC -- start awk--printf-math (0.5.41)
+- 2026-10-10 11:34 UTC -- awk--printf-math: PR #83, windows-failed (ignored per Direction)
+- 2026-10-10 11:54 UTC -- awk--printf-math merged #83 as 0.5.41: 0C 1H 4M fixed, 0M 3L open, 1 try
+- 2026-10-10 12:05 UTC -- start awk--io (0.5.42)
+- 2026-10-10 12:46 UTC -- awk--io: PR #84, windows-failed (ignored per Direction)
+- 2026-10-10 13:05 UTC -- awk--io merged #84 as 0.5.42: 0C 1H fixed, 2M 2L open, 1 try
+- 2026-10-10 13:14 UTC -- start tools--jq-parse (0.5.43)
+- 2026-10-10 14:39 UTC -- tools--jq-parse: PR #85, windows-failed (ignored per Direction)
+- 2026-10-10 14:59 UTC -- tools--jq-parse merged #85 as 0.5.43: 0C 1H 1M fixed, 3M 2L open, 1 try
+- 2026-10-10 15:07 UTC -- start tools--jq-json (0.5.44)
+- 2026-10-10 16:12 UTC -- tools--jq-json: PR #86, windows-failed (ignored per Direction)
+- 2026-10-10 16:34 UTC -- tools--jq-json merged #86 as 0.5.44: 0C 2H 1M fixed, 4M 4L open, 1 try
+- 2026-10-10 16:51 UTC -- start tools--jq-eval (0.5.45)
+- 2026-10-10 17:56 UTC -- tools--jq-eval: PR #87, windows-failed (ignored per Direction)
+- 2026-10-10 18:18 UTC -- tools--jq-eval merged #87 as 0.5.45: 0C 2H fixed, 4M 3L open, 1 try
+- 2026-10-10 18:31 UTC -- start tools--jq-paths (0.5.46)
+- 2026-10-10 19:32 UTC -- tools--jq-paths: run killed by host out-of-memory; restarted (0.5.46)

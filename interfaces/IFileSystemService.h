@@ -43,6 +43,11 @@ struct FileDateTime {
     bool operator>=(const FileDateTime& other) const { return !(*this < other); }
 };
 
+// What IFileSystem's (and IFileIO's) int-returning operations return on
+// failure. Every failure is kFileSystemError unless telling it apart matters.
+constexpr int kFileSystemError = -1;        // any failure (ENOENT, EEXIST, EACCES, ...)
+constexpr int kFileSystemCrossDevice = -2;  // Rename between two different filesystems (EXDEV)
+
 // What IFileSystem::Stat reports about a path: the part of POSIX's struct stat
 // that means something on every filesystem here. There are no permissions or
 // owners yet, so they are not pretended to.
@@ -124,6 +129,33 @@ public:
     // removes a file, never a directory (use RemoveDirectory for those). On a
     // disk, a symbolic link is removed itself, as unlink() does.
     virtual int RemoveFile(const std::string& pathname) = 0;
+
+    // Rename is the IFileSystem counterpart of the C rename() function: moves
+    // what is at |oldPath| to |newPath| in one step and returns 0. A file at
+    // newPath is replaced; a directory at newPath is replaced only by a directory,
+    // and only when empty. Renaming a path to itself does nothing and succeeds.
+    // Fails with kFileSystemError if oldPath does not exist, newPath's directory
+    // does not, a directory would be moved into itself or below itself, a file
+    // would replace a directory or a directory a file, either path is the root,
+    // a builtin command, a mount point or a directory holding one, or a
+    // directory a builtin pins (see the builtin rules below). Fails with
+    // kFileSystemCrossDevice -- as EXDEV, the way a caller tells it apart --
+    // when oldPath exists but the two paths are served by different filesystems
+    // (on either side of a mount point, or on two host devices); nothing is
+    // moved, and a caller wanting the move anyway copies and removes (as mv does).
+    virtual int Rename(const std::string& oldPath, const std::string& newPath) = 0;
+
+    // SetTimes is the IFileSystem counterpart of the C utimensat() function:
+    // sets the access time and the modification time of what is at |path|
+    // (following symbolic links), each left as it is when nullopt, and returns
+    // 0; the change time becomes now, as on POSIX, unless both are nullopt.
+    // Fails with kFileSystemError if nothing is at |path|, the filesystem is
+    // read-only, or |path| is a builtin command (its times are those of its
+    // placing). A device keeps its times: SetTimes on one succeeds and changes
+    // nothing.
+    virtual int SetTimes(const std::string& path,
+                         const std::optional<FileDateTime>& accessTime,
+                         const std::optional<FileDateTime>& modificationTime) = 0;
 
     // Mount makes |toBeMounted| serve every path at or under |whereToMount| on
     // THIS filesystem, in place -- unlike IFileSystemService::CreateComposedFileSystem,

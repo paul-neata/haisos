@@ -38,6 +38,11 @@ public:
     // Longest mount point first, so nested mounts resolve to the innermost one.
     Route Resolve(const std::string& path) const;
 
+    // Whether a mount point is |path| itself or lies strictly below it ("/"
+    // has every mount below it). Renaming refuses such a path: a mount point,
+    // or a directory with a mount inside it, does not move (EBUSY on Linux).
+    bool HasMountAtOrBelow(const std::string& path) const;
+
     // The next path segment towards each mount point under |directory|, so a
     // listing can show the way down to a mount even when the host filesystem has
     // no real directory there.

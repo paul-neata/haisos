@@ -1,15 +1,108 @@
 add_library(BuiltinCommands STATIC
     BuiltinCommand.cpp
     BuiltinCommands.cpp
+    BuiltinCompare.cpp
     BuiltinConfigurator.cpp
+    BuiltinCopy.cpp
+    BuiltinDate.cpp
+    BuiltinFnmatch.cpp
     BuiltinProcess.cpp
+    BuiltinPrintf.cpp
+    BuiltinPrompt.cpp
+    BuiltinRemove.cpp
+    BuiltinRunProgram.cpp
+    BuiltinSize.cpp
+    BuiltinTestExpression.cpp
+    BuiltinText.cpp
+    commands/awk/Awk.cpp
+    commands/awk/AwkAst.cpp
+    commands/awk/AwkBuiltins.cpp
+    commands/awk/AwkError.cpp
+    commands/awk/AwkFields.cpp
+    commands/awk/AwkFormat.cpp
+    commands/awk/AwkInput.cpp
+    commands/awk/AwkInterpreter.cpp
+    commands/awk/AwkInvocation.cpp
+    commands/awk/AwkLexer.cpp
+    commands/awk/AwkParser.cpp
+    commands/awk/AwkRegex.cpp
+    commands/awk/AwkStreams.cpp
+    commands/awk/AwkValue.cpp
+    commands/basename/Basename.cpp
     commands/cat/Cat.cpp
+    commands/chmod/Chmod.cpp
+    commands/cmp/Cmp.cpp
+    commands/cp/Cp.cpp
+    commands/cut/Cut.cpp
+    commands/date/Date.cpp
+    commands/diff/Diff.cpp
+    commands/diff/DiffDirectories.cpp
+    commands/diff/DiffEngine.cpp
+    commands/diff/DiffOutput.cpp
+    commands/dirname/Dirname.cpp
+    commands/du/Du.cpp
     commands/echo/Echo.cpp
+    commands/env/Env.cpp
+    commands/false/False.cpp
+    commands/find/Find.cpp
+    commands/find/FindActions.cpp
+    commands/find/FindParser.cpp
+    commands/find/FindTests.cpp
+    commands/grep/Grep.cpp
+    commands/grep/GrepContext.cpp
+    commands/grep/GrepFile.cpp
+    commands/grep/GrepMatcher.cpp
+    commands/head/Head.cpp
+    commands/jq/JqAst.cpp
+    commands/jq/JqJsonReader.cpp
+    commands/jq/JqJsonWriter.cpp
+    commands/jq/JqLexer.cpp
+    commands/jq/JqParser.cpp
+    commands/jq/JqArithmetic.cpp
+    commands/jq/JqFormat.cpp
+    commands/jq/JqIndex.cpp
+    commands/jq/JqInterpreter.cpp
+    commands/jq/JqNatives.cpp
+    commands/jq/JqPrelude.cpp
+    commands/jq/JqProgram.cpp
+    commands/jq/JqUtf8.cpp
+    commands/jq/JqValue.cpp
     commands/ls/Ls.cpp
     commands/man/Man.cpp
     commands/mkdir/Mkdir.cpp
+    commands/mv/Mv.cpp
+    commands/nl/Nl.cpp
+    commands/patch/Patch.cpp
+    commands/patch/PatchApply.cpp
+    commands/patch/PatchParse.cpp
+    commands/printf/Printf.cpp
     commands/pwd/Pwd.cpp
+    commands/realpath/Realpath.cpp
+    commands/rg/Rg.cpp
+    commands/rg/RgSearch.cpp
+    commands/rg/RgRegex.cpp
+    commands/rg/RgIgnore.cpp
+    commands/rg/RgTypes.cpp
+    commands/rm/Rm.cpp
+    commands/rmdir/Rmdir.cpp
+    commands/sed/Sed.cpp
+    commands/sed/SedExecutor.cpp
+    commands/sed/SedParser.cpp
+    commands/seq/Seq.cpp
+    commands/sleep/Sleep.cpp
+    commands/sort/Sort.cpp
+    commands/sort/SortKeys.cpp
+    commands/stat/Stat.cpp
+    commands/tail/Tail.cpp
+    commands/tee/Tee.cpp
+    commands/test/Test.cpp
+    commands/touch/Touch.cpp
+    commands/tr/Tr.cpp
+    commands/true/True.cpp
+    commands/uniq/Uniq.cpp
     commands/wc/Wc.cpp
+    commands/which/Which.cpp
+    commands/xargs/Xargs.cpp
     commands/hsh/HshWord.cpp
     commands/hsh/HshLexer.cpp
     commands/hsh/HshAst.cpp
@@ -43,5 +136,5 @@ target_include_directories(BuiltinCommands PUBLIC
     ${CMAKE_SOURCE_DIR}/interfaces
     ${CMAKE_SOURCE_DIR}/src/components/BuiltinCommands
 )
-target_link_libraries(BuiltinCommands PUBLIC Logger Filesystem ProcessFileIO Unicode)
+target_link_libraries(BuiltinCommands PUBLIC Logger Filesystem ProcessFileIO Regex Unicode)
 target_compile_features(BuiltinCommands PUBLIC cxx_std_17)

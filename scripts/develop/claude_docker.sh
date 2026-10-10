@@ -11,7 +11,7 @@
 # Usage:
 #   claude_docker.sh prepare [<model>] [--launcher ollama|direct]
 #                         snapshot this clone's state, write the session;
-#                         prints "SESSION: <id>" (model: kimi-k3:cloud by default)
+#                         prints "SESSION: <id>" (model: glm-5.3:cloud by default)
 #   claude_docker.sh open <id>     open a terminal tab running the session (or
 #                                  print the command to run)
 #   claude_docker.sh run <id>      the interactive container itself (in a terminal)

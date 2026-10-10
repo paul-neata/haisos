@@ -217,6 +217,95 @@ int InMemoryFileSystem::LocalRemoveFile(const std::string& pathname) {
     return 0;
 }
 
+int InMemoryFileSystem::LocalRename(const std::string& oldPath, const std::string& newPath) {
+    // An open descriptor refers to its file by path, not by identity (see
+    // InMemoryFileDescriptor), so it follows the path: after a rename a
+    // descriptor opened on the old path finds nothing (kIOError), as one on a
+    // removed file already does, and one opened on the replaced target reads
+    // the moved file. That is the one difference from POSIX, where a
+    // descriptor follows its file across a rename.
+    std::lock_guard<std::mutex> lock(m_mutex);
+    const std::string from = NormalizeVirtualPath(oldPath);
+    const std::string to = NormalizeVirtualPath(newPath);
+    if (from == "/" || to == "/" || m_nodes.find(from) == m_nodes.end()) {
+        return kFileSystemError;
+    }
+    if (from == to) {
+        return 0;
+    }
+    // A directory cannot move into itself or below itself.
+    if (to.compare(0, from.size() + 1, from + "/") == 0) {
+        return kFileSystemError;
+    }
+    const std::string newParent = ParentOf(to);
+    const auto parentIt = m_nodes.find(newParent);
+    if (parentIt == m_nodes.end() || !parentIt->second.isDirectory) {
+        return kFileSystemError;
+    }
+    const auto newIt = m_nodes.find(to);
+    if (newIt != m_nodes.end()) {
+        if (newIt->second.isDirectory != m_nodes.find(from)->second.isDirectory) {
+            return kFileSystemError; // a file would replace a directory, or a directory a file
+        }
+        if (newIt->second.isDirectory) {
+            const std::string prefix = to + "/";
+            for (const auto& entry : m_nodes) {
+                if (entry.first.compare(0, prefix.size(), prefix) == 0) {
+                    return kFileSystemError; // a directory is replaced only when empty
+                }
+            }
+        }
+        m_nodes.erase(newIt);
+    }
+    // Re-key the node and, for a directory, everything below it: the keys are
+    // collected first and then each node is extracted and re-inserted, so the
+    // map is never modified while being iterated.
+    std::vector<std::string> keys;
+    keys.push_back(from);
+    const std::string prefix = from + "/";
+    for (const auto& entry : m_nodes) {
+        if (entry.first.compare(0, prefix.size(), prefix) == 0) {
+            keys.push_back(entry.first);
+        }
+    }
+    for (const auto& key : keys) {
+        auto handle = m_nodes.extract(key);
+        handle.key() = (key == from) ? to : to + key.substr(from.size());
+        if (key == from) {
+            // rename() updates ctime, not the times of what is inside.
+            handle.mapped().changeTime = CurrentFileDateTime();
+        }
+        m_nodes.insert(std::move(handle));
+    }
+    TouchDirectory(ParentOf(from));
+    if (newParent != ParentOf(from)) {
+        TouchDirectory(newParent);
+    }
+    return 0;
+}
+
+int InMemoryFileSystem::LocalSetTimes(const std::string& path,
+                                     const std::optional<FileDateTime>& accessTime,
+                                     const std::optional<FileDateTime>& modificationTime) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    const std::string normalized = NormalizeVirtualPath(path);
+    auto it = m_nodes.find(normalized);
+    if (it == m_nodes.end()) {
+        return kFileSystemError;
+    }
+    if (accessTime) {
+        it->second.accessTime = *accessTime;
+    }
+    if (modificationTime) {
+        it->second.modificationTime = *modificationTime;
+    }
+    // utimensat() sets ctime unless nothing is set at all.
+    if (accessTime || modificationTime) {
+        it->second.changeTime = CurrentFileDateTime();
+    }
+    return 0;
+}
+
 std::vector<DirectoryEntry> InMemoryFileSystem::LocalReadDirectory(const std::string& path) {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::string normalized = NormalizeVirtualPath(path);

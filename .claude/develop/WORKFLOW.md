@@ -149,7 +149,7 @@ playbook.
 - Base: master @ <short hash>
 
 ## Settings
-- Task models: kimi-k3:cloud
+- Task models: glm-5.3:cloud
 - Attempts per model: 2
 - CI fix rounds: 3
 - Task timeout minutes: 120
@@ -172,10 +172,10 @@ later the seed of exploratory tests>
 The version is not here: it is `HAISOS_VERSION` (see "Versions"). The
 `- Key: value` lines under `## Settings` are read by the scripts.
 `Task models` is a comma-separated list, tried in order (see "Running a
-task"); models suited to agentic coding on Ollama include `kimi-k3:cloud`,
-`kimi-k2.6:cloud`, `minimax-m2.7:cloud` and `gpt-oss:120b-cloud` (smaller
-context) -- any model with tool calling works (`scripts/develop/preflight.sh`
-checks). A task can name its own model (its `- Model:` line).
+task"); models suited to agentic coding on Ollama include `glm-5.3:cloud`,
+`kimi-k3:cloud`, `kimi-k2.6:cloud`, `minimax-m2.7:cloud` and
+`gpt-oss:120b-cloud` (smaller context) -- any model with tool calling works
+(`scripts/develop/preflight.sh` checks). A task can name its own model (its `- Model:` line).
 
 ### `rocks.md`
 

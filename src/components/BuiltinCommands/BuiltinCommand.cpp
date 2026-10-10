@@ -199,10 +199,17 @@ const BuiltinOption* FindShortOption(char name, const std::vector<BuiltinOption>
 
 } // namespace
 
-ParsedBuiltinArgs ParseBuiltinArgs(const std::vector<std::string>& args, const std::vector<BuiltinOption>& options) {
+ParsedBuiltinArgs ParseBuiltinArgs(const std::vector<std::string>& args,
+    const std::vector<BuiltinOption>& options, bool stopAtFirstOperand) {
     ParsedBuiltinArgs parsed;
     for (size_t i = 0; i < args.size(); ++i) {
         const std::string& arg = args[i];
+        if (stopAtFirstOperand && !(arg.size() > 1 && arg[0] == '-')) {
+            // "+" mode: the first operand ("-" alone included) ends the
+            // options; every argument from it on is an operand untouched.
+            parsed.operands.insert(parsed.operands.end(), args.begin() + static_cast<std::ptrdiff_t>(i), args.end());
+            break;
+        }
         if (arg == "--") {
             parsed.operands.insert(parsed.operands.end(), args.begin() + static_cast<std::ptrdiff_t>(i) + 1, args.end());
             break;
@@ -287,7 +294,8 @@ std::string BuiltinHelpText(const IBuiltinCommand& command) {
     const std::string name = command.Name();
     const std::string& real = help.basedOn.empty() ? name : help.basedOn;
     std::string text = "HaisosOS " + name + " version " + command.Version() + " - " + help.summary + "\n";
-    text += "Based on Linux " + real + ": " + BuiltinReferenceUrl(real) + "\n\n";
+    const std::string& url = help.referenceUrl.empty() ? BuiltinReferenceUrl(real) : help.referenceUrl;
+    text += "Based on Linux " + real + ": " + url + "\n\n";
 
     for (size_t i = 0; i < help.usage.size(); ++i) {
         text += (i == 0 ? "Usage: " : "  or:  ") + help.usage[i] + "\n";
@@ -296,6 +304,9 @@ std::string BuiltinHelpText(const IBuiltinCommand& command) {
     std::vector<const BuiltinOption*> treated;
     std::vector<const BuiltinOption*> notTreated;
     for (const auto& option : command.Options()) {
+        if (option.hidden) {
+            continue;  // an obsolete spelling: parsed, never documented
+        }
         (option.id == kBuiltinNotTreated ? notTreated : treated).push_back(&option);
     }
     for (const auto& option : CommonOptions()) {
@@ -431,9 +442,17 @@ std::string ShellEscapeQuoted(const std::string& name, bool always) {
 }
 
 std::optional<ParsedBuiltinArgs> BeginBuiltin(
-    BuiltinContext& context, const IBuiltinCommand& command, int usageErrorStatus, int& exitStatus)
+    BuiltinContext& context, const IBuiltinCommand& command, int usageErrorStatus, int& exitStatus,
+    bool stopAtFirstOperand)
 {
-    ParsedBuiltinArgs parsed = ParseBuiltinArgs(context.Args(), command.Options());
+    return BeginBuiltin(context, context.Args(), command, usageErrorStatus, exitStatus, stopAtFirstOperand);
+}
+
+std::optional<ParsedBuiltinArgs> BeginBuiltin(
+    BuiltinContext& context, const std::vector<std::string>& args, const IBuiltinCommand& command,
+    int usageErrorStatus, int& exitStatus, bool stopAtFirstOperand)
+{
+    ParsedBuiltinArgs parsed = ParseBuiltinArgs(args, command.Options(), stopAtFirstOperand);
     if (!parsed.error.empty()) {
         context.Error(parsed.error);
         context.TryHelp();

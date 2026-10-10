@@ -7,6 +7,7 @@
 #include "src/components/Logger/Logger.h"
 #include "src/components/libheaders/ExitCodes.h"
 #include "BuiltinCommand.h"
+#include "BuiltinRunProgram.h"
 #include "commands/hsh/HshBuiltins.h"
 #include "commands/hsh/HshDescriptors.h"
 #include "commands/hsh/HshParser.h"
@@ -25,8 +26,6 @@ namespace {
 constexpr uint64_t kWaitSliceMs = 50;
 // How long a stopped child is given to finish before the shell stops waiting.
 constexpr uint64_t kStopGraceMs = 5000;
-// What PATH is when the environment brought none (dash's default).
-constexpr const char* kDefaultPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 // How many background jobs the shell keeps; past that, finished ones are dropped.
 constexpr size_t kMaxJobs = 1024;
 
@@ -84,7 +83,7 @@ Shell::Shell(BuiltinContext& context, Invocation invocation)
     if (!m_state.variables.IsSet("PS1")) m_state.variables.Set("PS1", "$ ");
     if (!m_state.variables.IsSet("PS2")) m_state.variables.Set("PS2", "> ");
     if (!m_state.variables.IsSet("PS4")) m_state.variables.Set("PS4", "+ ");
-    if (!m_state.variables.IsSet("PATH")) m_state.variables.Set("PATH", kDefaultPath);
+    if (!m_state.variables.IsSet("PATH")) m_state.variables.Set("PATH", kBuiltinDefaultSearchPath);
     m_state.variables.Set("PWD", IO().GetCurrentDirectory());
     m_state.variables.Export("PWD");
 

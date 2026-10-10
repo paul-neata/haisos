@@ -463,6 +463,17 @@ TEST_F(AwkIoTest, SpecialFiles) {
     EXPECT_EQ(captured.err, "");
     EXPECT_EQ(captured.status, 0);
 
+    // Only `>' and `>>' name the standard streams: after `|' the name is a
+    // command, run by the shell (gawk: `sh: 1: /dev/stderr: Permission
+    // denied', a status not 0), and the stream is a pipe found again by name.
+    captured = RunCaptured("awk",
+        {R"(BEGIN { print "x" | "/dev/stderr"; print "y" | "/dev/stderr"; )"
+         R"(r = close("/dev/stderr"); print (r != 0), close("/dev/stderr") })"});
+    EXPECT_EQ(captured.out, "1 -1\n");
+    EXPECT_NE(captured.err.find("/dev/stderr"), std::string::npos);
+    EXPECT_EQ(captured.err.find("x\n"), std::string::npos);
+    EXPECT_EQ(captured.status, 0);
+
     // Standard input: each name a stream of its own, its own reader.
     captured = RunCaptured("awk",
         {R"(BEGIN { getline v < "-"; print v; getline w < "/dev/stdin"; print "[" w "]" })"},

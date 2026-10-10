@@ -74,9 +74,10 @@ void AwkStreams::Write(RedirectKind redirect, const std::string& name, const std
 }
 
 AwkStreams::Stream& AwkStreams::OpenOutput(RedirectKind redirect, const std::string& name) {
-    if (IsStandardOutputName(name)) {
+    if (redirect != RedirectKind::Pipe && IsStandardOutputName(name)) {
         // Registered like any stream, so close() and fflush() find them; their
-        // bytes go through the BuiltinContext, sharing awk's own order.
+        // bytes go through the BuiltinContext, sharing awk's own order. Only
+        // `>' and `>>' name them: `| "/dev/stderr"' is a command, as in gawk.
         m_streams.push_back(
             Stream{name, AwkStreamKind::OutputFile, nullptr, "", nullptr, nullptr, false, false});
         return m_streams.back();

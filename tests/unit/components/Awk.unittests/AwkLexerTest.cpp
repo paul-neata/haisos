@@ -170,6 +170,27 @@ TEST(AwkLexerTest, NewlinesAndComments) {
         "{ NAME(x) && NAME(y) || NAME(z) , NAME(w) ; NAME(v) do NAME(u) else NAME(t)"
         " NL } NL EOF");
     EXPECT_EQ(Lex("a ;# c\n b"), "NAME(a) ; NAME(b) NL EOF");
+
+    // A backslash ending a comment belongs to the comment: it continues
+    // nothing, and the newline it precedes ends the source.
+    const std::vector<Token> commentBackslash = AllTokens("a # c \\\n");
+    EXPECT_EQ(JoinTokens(commentBackslash), "NAME(a) NL EOF");
+    ASSERT_EQ(commentBackslash.size(), 3u);
+    EXPECT_EQ(commentBackslash[1].line, 1);
+    EXPECT_EQ(commentBackslash[1].column, 7u);
+    EXPECT_EQ(commentBackslash[1].text, "# c \\");
+    EXPECT_EQ(commentBackslash[2].line, 1);
+    EXPECT_EQ(commentBackslash[2].column, 7u);
+    EXPECT_EQ(Lex("a # c \\\nb"), "NAME(a) NL NAME(b) NL EOF");
+
+    // A Newline that ends a comment carries the comment as its text; every
+    // other Newline's text is empty.
+    const std::vector<Token> commentToEnd = AllTokens("a # c");
+    ASSERT_EQ(commentToEnd.size(), 3u);
+    EXPECT_EQ(commentToEnd[1].text, "# c");
+    const std::vector<Token> plainNewline = AllTokens("a\n");
+    ASSERT_EQ(plainNewline.size(), 3u);
+    EXPECT_EQ(plainNewline[1].text, "");
 }
 
 TEST(AwkLexerTest, Continuations) {
@@ -227,6 +248,9 @@ TEST(AwkLexerTest, Errors) {
     ExpectError("/abc", "unterminated regexp", 1, 1, true);
     ExpectError("/ab\nc/", "unterminated regexp", 1, 1, true);
     ExpectError("a \\ b", "backslash not last character on line", 1, 2);
+    // A lone '&' is gawk's syntax error, the caret on it.
+    ExpectError("x = 1 & 2", "syntax error", 1, 6);
+    ExpectError("a &", "syntax error", 1, 2);
     ExpectError("\n\nx = `", "invalid char '`' in expression", 3, 4);
 }
 

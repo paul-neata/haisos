@@ -29,7 +29,8 @@ struct Token {
     // Number: the text as written ("1e3"); String: the value, escapes
     // decoded; Regex: the regex text (see Lexer::ScanRegex); Name/FuncName/
     // Builtin: the name; keywords: the keyword as written ("func" or
-    // "function").
+    // "function"); a Newline ending a comment: the comment, from the '#'
+    // to before the newline (every other Newline's text is empty).
     std::string text;
     double number = 0;   // Number: its value
     int line = 1;        // the line the token starts on, from 1
@@ -85,6 +86,8 @@ private:
     bool AtEnd() const { return m_pos >= m_source.text.size(); }
     size_t Column() const { return m_pos - m_lineStart; }
     void NewlineConsumed();  // a '\n' was consumed: on to the next line
+    // The EndOfInput token, at m_eofLine/m_eofColumn.
+    Token MakeEndOfInput();
     // Blanks, comments and backslash-newline continuations between tokens;
     // a backslash before anything but a newline is a lexical error.
     void SkipSeparators();
@@ -103,7 +106,15 @@ private:
     std::vector<AwkWarning> m_warnings;
     Token m_last;                 // the last token Next() returned
     bool m_implicitNewlineUsed = false;  // the source's added newline, given?
-    bool m_noImplicitNewline = false;    // empty source, or one already ending in '\n'
+    bool m_emptySource = false;          // an empty source gets no newline of its own
+    // Whether the source ends in a real newline, decided as the end is
+    // reached: the last byte consumed was a real '\n' (a Newline token or a
+    // skipped newline), not a token, blanks, a comment or a continuation.
+    // A backslash ending a comment belongs to the comment and continues
+    // nothing, so such a source ends in a real newline.
+    bool m_lastWasRealNewline = false;
+    size_t m_commentBegin = 0;    // the '#' of a comment just consumed
+    bool m_commentOpen = false;
     int m_eofLine = 1;            // where EndOfInput sits: the last line, its end
     size_t m_eofColumn = 0;
 };

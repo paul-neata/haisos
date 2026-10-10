@@ -191,8 +191,10 @@ awk rock and adds its files here:
 - `AwkInterpreter.h/.cpp` - the `Interpreter` that runs a parsed program
   (see "Running" below).
 - `AwkBuiltins.cpp` - `Interpreter::CallBuiltin`: the string built-in
-  functions (see "Built-in functions" below).
-- `Awk.cpp` - the `awk` builtin itself: `Name`, `Version` 1.3.0, the option
+  functions, sprintf and the math functions (see "Built-in functions" below).
+- `AwkFormat.h/.cpp` - `FormatAwkPrintf`, the printf/sprintf format engine
+  (see "printf and sprintf" below).
+- `Awk.cpp` - the `awk` builtin itself: `Name`, `Version` 1.4.0, the option
   table, the gawk-based `--help` (`BuiltinHelp::basedOn`), and `Run`:
   parse the invocation, load the sources, parse the program
   (`ParseAwkProgram`) -- its diagnostics go to stderr and any failure is
@@ -420,10 +422,9 @@ fill its hooks without changing it.
   mode in "Regexes" above); `MatchRegex` is the one place a literal and a
   dynamic regex both go through (see "Regexes" above).
 - The hooks later tasks fill: `EvaluateGetline` (awk--io) and the
-  built-ins not yet made -- printf and sprintf, the math functions,
-  close, fflush, system -- report ``... is not implemented yet`` for now
-  (`CallFunction` and the string built-ins in "Functions" and
-  "Built-in functions" below).
+  built-ins not yet made -- close, fflush, system -- report ``... is not
+  implemented yet`` for now (`CallFunction` and the string built-ins in
+  "Functions" and "Built-in functions" below).
 - An `AwkFatal` unwinds to `Run`, which reports gawk's ``fatal:`` line --
   with a location ``awk: <source>:<line>: (FILENAME=<f> FNR=<n>) fatal:
   <message>``, the FILENAME/FNR part only past the first record, without
@@ -464,16 +465,20 @@ User-defined functions, resolved and run by the `Interpreter`
   frame the argument was passed from (raw, not owned: the caller's frame
   outlives every call made from it). Reading the parameter's scalar
   (`ScalarRef`) types every still-Untyped variable on the chain Scalar,
-  and an Array met on it is the fatal ``attempt to use array `a (from x)'
-  in a scalar context`` -- the parameter's name and the variable it was
-  passed from; taking its array (`ArrayRef`) walks the chain to its end
-  and creates the array there, sharing it into every link, and a Scalar
-  met is the fatal ``attempt to use scalar parameter `a' as an array``,
-  the plain name. A global used the other way round fails as before
-  (``attempt to use scalar `x' as an array`` / ``attempt to use array
-  `x' in a scalar context``). `m_globals` is a deque because a binding
-  points into the caller's own frame: a vector's reallocation on a new
-  slot would leave them dangling.
+  and an Array met on it -- the variable it was passed from turned array
+  after the call began, or one deeper down a chain of by-name calls -- is
+  the fatal ``attempt to use array `a (from x)' in a scalar context``,
+  the parameter's name and the chain it was passed through (a parameter
+  passed on by name carries its own `passedFrom` along: ``b (from a,
+  from x)``); the name is built only on that error, the plain name
+  otherwise. Taking the parameter's array (`ArrayRef`) walks the chain to
+  its end and creates the array there, sharing it into every link, and a
+  Scalar met is the fatal ``attempt to use scalar parameter `a' as an
+  array``, the plain name. A global used the other way round fails as
+  before (``attempt to use scalar `x' as an array`` / ``attempt to use
+  array `x' in a scalar context``). `m_globals` is a deque because a
+  binding points into the caller's own frame: a vector's reallocation on
+  a new slot would leave them dangling.
 - Flow: `return` leaves the value its expression gave, uninitialized
   without one, in the frame's `returnValue`. `next`/`nextfile` unwind the
   calls (each frame popped as the flow passes through it, a `FlowUnwind`
@@ -502,17 +507,20 @@ The string built-ins, `Interpreter::CallBuiltin`
   regex itself, anything else is the value's text as a dynamic regex
   (a parenthesized `(/re/` `)` among them: its value is `$0 ~ /re/`).
 - `length`: without an argument $0; a bare variable argument is its
-  variable -- an array is ``length: received array argument``, an
-  untyped one taken as (and made) a scalar -- anything else its value's
+  variable -- an array, or a parameter whose binding chain turns out to be
+  one (`BoundKind`), is ``length: received array argument``, an untyped
+  one taken as (and made) a scalar -- anything else its value's
   string. `substr`: the start and length truncate toward zero; a start
   below 1 is 1 without shortening the length, NaN is 1, +inf past the
   end; a length of none at all (NaN, 0, negative) is none; without a
   third argument, to the end. `index`: the first occurrence, an empty t
   found at 1. `tolower`/`toupper`: ASCII letters only, bytes kept.
 - `split(s, a[, fs])`: the second argument must be a plain variable
-  (used as an array -- a scalar or anything else is ``split: second
-  argument is not an array``; gawk makes an element `a[i]` a sub-array,
-  an extension). The array is cleared first; the pieces are strnum
+  (used as an array -- a scalar, or a parameter whose binding chain turns
+  out to be one (`BoundKind`, checked before `ArrayRef`), or anything
+  else is ``split: second argument is not an array``; gawk makes an
+  element `a[i]` a sub-array, an extension). The array is cleared first;
+  the pieces are strnum
   (`Value::FromInput`), keyed "1", "2", ... and the count returned. The
   separator: none is the current FS with the record rules
   (`SplitRecord`); a `/re/` literal, or a value of two or more bytes,
@@ -533,8 +541,78 @@ The string built-ins, `Interpreter::CallBuiltin`
   length in RLENGTH (0 and -1 without a match), and the position
   returned.
 
-printf, sprintf, the math functions, close, fflush and system are later
-tasks of the rock; each reports ``... is not implemented yet``.
+printf, sprintf and the math functions run (the sections below); close,
+fflush and system are later tasks of the rock and report ``... is not
+implemented yet``.
+
+## printf and sprintf
+
+`AwkFormat.h/.cpp` -- `FormatAwkPrintf(format, arguments, convfmt)`, the
+one engine behind the `printf` statement and the `sprintf` built-in
+(awk--printf-math). It applies the format to the arguments (already
+evaluated, in order) gawk's way, through `BuiltinPrintf.h`'s
+`ParsePrintfSpec`/`FormatPrintf*` for each conversion, and throws
+`AwkFatal` on the two refusals; the statement's output goes through
+`Output`, so awk--io's redirections will pass through it too, and the
+whole text is built before any of it is written.
+
+- A specification, from the `%` on, is one of four things: a length
+  modifier (`h l L j z t` -- `q` is not one of gawk's, so `%qd` is an
+  unknown conversion) is the fatal `` `<c>' is not permitted in POSIX awk
+  formats``; `%%` is one `%` (flags, width and precision ignored); a
+  known conversion takes one argument; anything else -- an unknown
+  conversion, or the format ending inside the specification -- is copied
+  as written, `%` to the end of what it holds. The flags are `-+ #0'`
+  (`I` is not one of awk's: `%I d` is unknown, copied as written).
+- The arguments may run out: the fatal ``not enough arguments to satisfy
+  format string`` followed by the format in backquotes and, below it,
+  a caret at the place that ran out -- the `*` of a width or precision,
+  or the conversion byte -- with `` ^ ran out for this one``. A `*`
+  takes the next argument first: a negative width is the `-` flag, a
+  negative precision none, a non-integer truncated toward zero, NaN as
+  0.
+- Conversions: `%s` the argument through CONVFMT; `%c` a numeric argument
+  (a strnum included: `$1`) its low 8 bits, a string its first byte or a
+  NUL when empty (precision ignored); `d`/`i` through
+  `FormatPrintfSigned` when the value is in [-2^63, 2^63), beyond that
+  the same digits as `%.0f` with the same flags and width; `o`/`u`/`x`/`X`
+  through `FormatPrintfUnsigned` in [-2^63, 2^64) (a negative value its
+  64-bit two's complement), beyond that `%g` with the same flags, width
+  and precision; `e E f F g G a A` through `FormatPrintfFloat` -- `%a`
+  and `%A` the platform's long double (see the exceptions below).
+- A non-finite argument (`inf`, `nan`) is built by awk itself, not
+  handed to the C library: the sign by the value's sign bit or the `+`
+  and space flags, `inf`/`nan` uppercase only for `E F G A`, space
+  padded to the width, never padded with `0`, a negative NaN `-nan`.
+
+The `printf` statement: no argument prints nothing; the first argument
+is the format (through CONVFMT when it is not a string), the rest the
+values. `sprintf` with no argument at all is the fatal ``sprintf: no
+arguments`` -- checked when the call runs, so a call never taken is no
+error (a call's arity is the parser's count check; sprintf takes any
+count).
+
+## Math
+
+The math built-ins (`AwkBuiltins.cpp`): `sin`, `cos`, `atan2`, `exp`,
+`log`, `sqrt`, `int` (truncated toward zero, like `AwkIntegerOf` but
+keeping the value a double), `rand` and `srand`.
+
+- `exp` out of range -- a result that is infinite, or below `DBL_MIN`
+  (0 included) -- warns ``exp: argument <x> is out of range``, the
+  argument through `%g`. `log` and `sqrt` of a negative argument warn
+  (``log: received negative argument <x>``, the same for sqrt) and give
+  `-nan`. The warnings go through `RuntimeWarning`, so they carry the
+  place.
+- `rand()`: gawk's shape on Haisos's own generator -- `std::mt19937`
+  seeded 1, each draw two outputs, `(floor(x1/32)*2^26 +
+  floor(x2/64))/2^53`, a double in [0, 1) with all 53 bits. The sequence
+  is Haisos's, not gawk's.
+- `srand(x)`: the previous seed returned (1 before any srand), the seed
+  truncated toward zero into `int64_t` (NaN as 0, out of range clamped)
+  and only its low 32 bits reaching the generator; `srand()` with no
+  argument seeds with the current time. A seed of 0 is a seed like any
+  other.
 
 ## Documented exceptions (checked against gawk --posix 5.2.1)
 
@@ -564,11 +642,15 @@ tasks of the rock; each reports ``... is not implemented yet``.
   depends on its build.
 - User-defined functions may nest at most 200 calls deep
   (`kAwkMaxCallDepth`); gawk has no fixed limit.
-- `split(s, a[i])' is refused (second argument is not an array); gawk
-  makes a[i] a sub-array, an extension.`
-- The parts that do not run yet (`printf`, `sprintf`, the math functions,
-  `getline`, output redirections) report ``... is not implemented yet``;
-  later tasks of the rock append their exceptions here.
+- ``split(s, a[i])`` is refused (``split: second argument is not an
+  array``); gawk makes a[i] a sub-array, an extension.
+- `rand()` has its own sequence (std::mt19937, the formula in "Math"
+  above); gawk's seeds and return values are matched, its draws not.
+- `%a` and `%A` print the platform's long double (1 as `0x8p-3` on
+  x86-64); gawk prints its own (`0x1p+0` for 1).
+- The parts that do not run yet (`getline`, output redirections, `close`,
+  `fflush`, `system`) report ``... is not implemented yet``; later tasks
+  of the rock append their exceptions here.
 - A literal regex's escape warnings come after the program's string-escape
   warnings, all of them, wherever in the source either is; gawk
   interleaves the two in source order.

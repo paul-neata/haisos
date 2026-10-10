@@ -1,8 +1,11 @@
 #include <cmath>
+#include <cstdint>
+#include <ctime>
 #include <limits>
 #include <string>
 #include <vector>
 
+#include "commands/awk/AwkFormat.h"
 #include "commands/awk/AwkInterpreter.h"
 
 namespace Haisos::Awk {
@@ -94,6 +97,23 @@ void Substitute(const std::string& text, const Regex& regex, const std::string& 
     }
 }
 
+// srand's seed: the number truncated toward zero into int64_t (a NaN is 0,
+// as gawk's own conversions take it; anything outside is clamped to the
+// range).
+int64_t SeedOf(double number) {
+    if (std::isnan(number)) {
+        return 0;
+    }
+    const double t = std::trunc(number);
+    if (t >= 9223372036854775808.0) {
+        return std::numeric_limits<int64_t>::max();
+    }
+    if (t <= -9223372036854775808.0) {
+        return std::numeric_limits<int64_t>::min();
+    }
+    return static_cast<int64_t>(t);
+}
+
 } // namespace
 
 // --- the built-in string functions ---
@@ -108,10 +128,11 @@ Value Interpreter::CallBuiltin(const Expr& call) {
             text = m_fields.Record(convfmt);   // length() is length($0)
         } else if (args[0]->kind == ExprKind::Variable && !args[0]->parenthesized
                    && args[0]->slot != kSlotNF) {
-            // A variable argument is its variable: an array is refused, an
-            // untyped one taken as (and made) a scalar.
+            // A variable argument is its variable: an array is refused --
+            // one the binding chain ends in too -- an untyped one taken as
+            // (and made) a scalar.
             Variable& variable = VariableOf(*args[0]);
-            if (variable.kind == Variable::Kind::Array) {
+            if (BoundKind(variable) == Variable::Kind::Array) {
                 throw AwkFatal("length: received array argument");
             }
             text = ScalarRefOf(args[0]->slot, args[0]->localSlot, args[0]->text)
@@ -182,7 +203,9 @@ Value Interpreter::CallBuiltin(const Expr& call) {
             throw AwkFatal("split: second argument is not an array");
         }
         Variable& variable = VariableOf(arrayExpr);
-        if (variable.kind == Variable::Kind::Scalar) {
+        if (BoundKind(variable) == Variable::Kind::Scalar) {
+            // A chain that ends in a scalar says so here, before ArrayRef
+            // would report it as a scalar parameter.
             throw AwkFatal("split: second argument is not an array");
         }
         AwkArray& array = arrayExpr.localSlot >= 0
@@ -285,7 +308,89 @@ Value Interpreter::CallBuiltin(const Expr& call) {
         return Value::FromString(std::move(text));
     }
 
-    // sprintf, the math functions, close, fflush and system: later tasks.
+    if (call.text == "sprintf") {
+        // No argument fails only when the call runs.
+        if (args.empty()) {
+            throw AwkFatal("sprintf: no arguments");
+        }
+        std::vector<Value> arguments;
+        arguments.reserve(args.size());
+        for (const ExprPtr& argument : args) {
+            arguments.push_back(ValueOf(*argument));
+        }
+        const std::string format = arguments[0].ToString(convfmt);
+        arguments.erase(arguments.begin());
+        return Value::FromString(FormatAwkPrintf(format, arguments, convfmt));
+    }
+
+    if (call.text == "sin") {
+        return Value::FromNumber(std::sin(ValueOf(*args[0]).ToNumber()));
+    }
+    if (call.text == "cos") {
+        return Value::FromNumber(std::cos(ValueOf(*args[0]).ToNumber()));
+    }
+    if (call.text == "atan2") {
+        return Value::FromNumber(std::atan2(ValueOf(*args[0]).ToNumber(),
+                                            ValueOf(*args[1]).ToNumber()));
+    }
+    if (call.text == "exp") {
+        const double x = ValueOf(*args[0]).ToNumber();
+        const double result = std::exp(x);
+        // A finite x whose result is infinite, or falls below DBL_MIN (0
+        // included), is out of range; the result is kept.
+        if (std::isfinite(x)
+            && (!std::isfinite(result) || result < std::numeric_limits<double>::min())) {
+            RuntimeWarning("exp: argument " + FormatAwkNumber("%g", x) + " is out of range");
+        }
+        return Value::FromNumber(result);
+    }
+    if (call.text == "log") {
+        const double x = ValueOf(*args[0]).ToNumber();
+        if (x < 0) {   // -inf included; log(0) is -inf, with no warning
+            RuntimeWarning("log: received negative argument " + FormatAwkNumber("%g", x));
+            // The sign bit set, so the number prints "-nan" -- as gawk's
+            // result does on x86-64, the same on every platform.
+            return Value::FromNumber(-std::numeric_limits<double>::quiet_NaN());
+        }
+        return Value::FromNumber(std::log(x));
+    }
+    if (call.text == "sqrt") {
+        const double x = ValueOf(*args[0]).ToNumber();
+        if (x < 0) {
+            RuntimeWarning("sqrt: received negative argument " + FormatAwkNumber("%g", x));
+            return Value::FromNumber(-std::numeric_limits<double>::quiet_NaN());
+        }
+        return Value::FromNumber(std::sqrt(x));
+    }
+    if (call.text == "int") {
+        // Truncated toward zero; NaN and the infinities unchanged.
+        return Value::FromNumber(std::trunc(ValueOf(*args[0]).ToNumber()));
+    }
+    if (call.text == "rand") {
+        // Haisos's own generator (POSIX leaves rand to the implementation;
+        // the sequence is a documented difference from gawk's): the 53-bit
+        // double built from two 32-bit outputs, in [0, 1) and the same on
+        // every platform.
+        const uint32_t x1 = m_random();
+        const uint32_t x2 = m_random();
+        const double value =
+            (std::floor(x1 / 32.0) * 67108864.0 + std::floor(x2 / 64.0)) / 9007199254740992.0;
+        return Value::FromNumber(value);
+    }
+    if (call.text == "srand") {
+        const int64_t previous = m_seed;
+        if (args.empty()) {
+            m_seed = static_cast<int64_t>(std::time(nullptr));   // seconds since the epoch
+        } else {
+            m_seed = SeedOf(ValueOf(*args[0]).ToNumber());
+        }
+        // The generator takes the low 32 bits: srand(2^32 + 3) gives srand(3)'s
+        // sequence, as gawk's does.
+        m_random.seed(static_cast<uint32_t>(static_cast<uint64_t>(m_seed)));
+        return Value::FromNumber(static_cast<double>(previous));
+    }
+
+    // close, fflush and system: later tasks.
     throw AwkFatal("function `" + call.text + "' is not implemented yet");
 }
 

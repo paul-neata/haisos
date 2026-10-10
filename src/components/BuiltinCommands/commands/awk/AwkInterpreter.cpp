@@ -4,6 +4,7 @@
 
 #include "BuiltinText.h"
 #include "commands/awk/AwkError.h"
+#include "commands/awk/AwkFormat.h"
 #include "commands/awk/AwkLexer.h"
 #include "interfaces/IFileIO.h"
 
@@ -438,28 +439,40 @@ Variable& Interpreter::VariableOf(const Expr& variable) {
                : GlobalVariable(variable.slot);
 }
 
-std::string Interpreter::VariableName(int localSlot, const std::string& name) {
-    // A parameter passed by name reports where the argument came from.
-    const ActiveCall* call = CurrentCall();
-    if (call == nullptr || localSlot < 0
-        || localSlot >= static_cast<int>(call->locals.size())) {
-        return name;
+Variable::Kind Interpreter::BoundKind(const Variable& variable) {
+    // The first link of the binding chain that is not Untyped -- a global,
+    // having no binding, is its own kind.
+    for (const Variable* link = &variable; link != nullptr; link = link->binding) {
+        if (link->kind != Variable::Kind::Untyped) {
+            return link->kind;
+        }
     }
-    const Variable& parameter = call->locals[static_cast<size_t>(localSlot)];
-    return parameter.passedFrom.empty() ? name
-                                         : name + " (from " + parameter.passedFrom + ")";
+    return Variable::Kind::Untyped;
 }
 
 Value& Interpreter::ScalarRef(Variable& variable, const std::string& name) {
+    // The "(from ...)" name is built only on the error path: it is the
+    // parameter's own passedFrom, the whole chain included.
+    const auto fatal = [&variable, &name]() {
+        throw AwkFatal(variable.passedFrom.empty()
+                           ? "attempt to use array `" + name + "' in a scalar context"
+                           : "attempt to use array `" + name + " (from " + variable.passedFrom +
+                                 ")' in a scalar context");
+    };
     switch (variable.kind) {
         case Variable::Kind::Array:
-            throw AwkFatal("attempt to use array `" + name + "' in a scalar context");
+            fatal();
         case Variable::Kind::Untyped:
             // Typing it types every still-Untyped variable its binding chain
             // leads to (the values unchanged: an untyped `x' passed to `a'
-            // and read as a scalar can no longer be an array).
+            // and read as a scalar can no longer be an array). A variable the
+            // chain reaches that has become an array since the call began is
+            // gawk's fatal, as an Array parameter itself is.
             for (Variable* link = &variable; link != nullptr; link = link->binding) {
-                if (link->kind != Variable::Kind::Untyped) {
+                if (link->kind == Variable::Kind::Array) {
+                    fatal();
+                }
+                if (link->kind == Variable::Kind::Scalar) {
                     break;
                 }
                 link->kind = Variable::Kind::Scalar;
@@ -515,8 +528,7 @@ Value& Interpreter::ScalarRefOf(int slot, int localSlot, const std::string& name
     if (call == nullptr || localSlot >= static_cast<int>(call->locals.size())) {
         throw AwkFatal("cannot evaluate this expression");
     }
-    return ScalarRef(call->locals[static_cast<size_t>(localSlot)],
-                     VariableName(localSlot, name));
+    return ScalarRef(call->locals[static_cast<size_t>(localSlot)], name);
 }
 
 AwkArray& Interpreter::ArrayRefOf(int slot, int localSlot, const std::string& name) {
@@ -849,14 +861,17 @@ void Interpreter::RunBeginItems() {
         if (item.kind != ItemKind::Begin) {
             continue;
         }
+        // Only exit can arrive here, run or unwound: CallFunction makes next
+        // and nextfile out of a BEGIN rule a fatal, and break/continue never
+        // leave a function body.
+        Flow flow = Flow::Normal;
         try {
-            if (RunStatement(*item.action) == Flow::Exit) {
-                // exit in BEGIN: the input is skipped, END still runs.
-                m_exitFromBegin = true;
-                return;
-            }
-        } catch (const FlowUnwind&) {
-            // exit out of a function body: as a plain exit in BEGIN.
+            flow = RunStatement(*item.action);
+        } catch (const FlowUnwind& unwind) {
+            flow = unwind.flow;
+        }
+        if (flow == Flow::Exit) {
+            // exit in BEGIN: the input is skipped, END still runs.
             m_exitFromBegin = true;
             return;
         }
@@ -933,12 +948,15 @@ void Interpreter::RunEndItems() {
         if (item.kind != ItemKind::End) {
             continue;
         }
+        // Only exit can arrive here, run or unwound (RunBeginItems' comment).
+        Flow flow = Flow::Normal;
         try {
-            if (RunStatement(*item.action) == Flow::Exit) {
-                return;   // exit in END stops at once
-            }
-        } catch (const FlowUnwind&) {
-            return;   // exit out of a function body ends END the same way
+            flow = RunStatement(*item.action);
+        } catch (const FlowUnwind& unwind) {
+            flow = unwind.flow;
+        }
+        if (flow == Flow::Exit) {
+            return;   // exit in END stops at once
         }
     }
 }
@@ -969,8 +987,24 @@ Flow Interpreter::RunStatement(const Stmt& stmt) {
             Output(stmt, text);
             return Flow::Normal;
         }
-        case StmtKind::Printf:
-            throw AwkFatal("printf is not implemented yet");
+        case StmtKind::Printf: {
+            // A bare printf prints nothing (and no ORS, as gawk's).
+            if (stmt.args.empty()) {
+                return Flow::Normal;
+            }
+            std::vector<Value> arguments;
+            arguments.reserve(stmt.args.size());
+            for (const ExprPtr& argument : stmt.args) {
+                arguments.push_back(ValueOf(*argument));
+            }
+            const std::string& convfmt = SpecialString(kSlotCONVFMT);
+            const std::string format = arguments[0].ToString(convfmt);
+            arguments.erase(arguments.begin());
+            // The whole text is built before anything is written, so a format
+            // that runs out fails its printf whole.
+            Output(stmt, FormatAwkPrintf(format, arguments, convfmt));
+            return Flow::Normal;
+        }
         case StmtKind::If:
             if (ValueOf(*stmt.expr).ToBoolean()) {
                 return RunStatement(*stmt.body);
@@ -1350,17 +1384,24 @@ Value Interpreter::CallFunction(const Expr& call) {
             continue;
         }
         Variable& passed = VariableOf(argument);
-        parameter.passedFrom = argument.text;
+        // Where the argument came from, for the "(from ...)" error texts:
+        // the argument's name, and after it its own chain when it is itself
+        // a parameter passed by name ("a", or "a, from x").
+        const std::string passedFrom =
+            passed.passedFrom.empty() ? argument.text
+                                      : argument.text + ", from " + passed.passedFrom;
         switch (passed.kind) {
             case Variable::Kind::Array:
                 parameter.kind = Variable::Kind::Array;
                 parameter.array = passed.array;
+                parameter.passedFrom = passedFrom;
                 break;
             case Variable::Kind::Untyped:
                 // The callee may make it an array (or a scalar) in the
                 // caller, through the binding chain.
                 parameter.kind = Variable::Kind::Untyped;
                 parameter.binding = &passed;
+                parameter.passedFrom = passedFrom;
                 break;
             case Variable::Kind::Scalar:
                 parameter.kind = Variable::Kind::Scalar;

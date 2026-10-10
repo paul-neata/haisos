@@ -585,12 +585,8 @@ TEST_F(AwkRunTest, RuntimeErrors) {
 
 TEST_F(AwkRunTest, NotYetAvailable) {
     // Each unimplemented part fails with its own fatal error.
-    Captured captured = RunCaptured("awk", {"BEGIN { print sprintf(\"%d\", 1) }"});
-    EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: function `sprintf' is not implemented yet\n");
-    EXPECT_EQ(captured.status, 2);
-
-    captured = RunCaptured("awk", {"BEGIN { printf \"%d\", 1 }"});
-    EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: printf is not implemented yet\n");
+    Captured captured = RunCaptured("awk", {"BEGIN { close(\"x\") }"});
+    EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: function `close' is not implemented yet\n");
     EXPECT_EQ(captured.status, 2);
 
     captured = RunCaptured("awk", {"BEGIN { print \"a\" > \"/f\" }"});

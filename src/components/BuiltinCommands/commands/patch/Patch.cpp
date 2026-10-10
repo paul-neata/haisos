@@ -816,10 +816,11 @@ int ApplyFilePatch(PatchRun& run, FilePatch patch) {
     }
 
     // A patch whose new side is surely absent says the file should be gone;
-    // with content left it is not, said before the summary.
+    // with content left it is not, said before the summary (a patch skipped
+    // at its question says nothing of it).
     const bool removeResult = ResultRemoved(patch, content, run);
-    if (!removeResult && patch.newAbsence == SideAbsence::Surely && !content.empty()
-        && !run.outputFile && !run.dryRun) {
+    if (!skipped && !removeResult && patch.newAbsence == SideAbsence::Surely
+        && !content.empty() && !run.outputFile && !run.dryRun) {
         if (!run.silent) {
             run.Out("Not deleting file " + ShellEscapeQuoted(output)
                 + " as content differs from patch\n");
@@ -894,40 +895,43 @@ int ApplyFilePatch(PatchRun& run, FilePatch patch) {
                 run.Fatal("Can't write file " + ShellEscapeQuoted(tmp) + " : Input/output error");
                 return 2;
             }
-            // The backup, once per file per run: -b asks for one always, a
+            // The backups, once per file per run: -b asks for them always, a
             // patch that did not apply cleanly otherwise (unless told not
-            // to). The original is moved there just before the new content
-            // takes its place; a file that did not exist gets an empty one.
-            // The file written is the one backed up (a rename's source
-            // included, moved under the written file's name) and the key,
-            // not the backup's name: a numbered backup of a file patched
-            // twice in one run still counts once.
+            // to). What the new content replaces is moved to its backup just
+            // before it takes its place -- the file written, an empty backup
+            // when it was not there -- and a git rename's source, which the
+            // rename takes away, under its own backup name first; a copy's
+            // source is left alone. The key is the file, not the backup's
+            // name: a numbered backup of a file patched twice in one run
+            // still counts once.
             const bool mismatch = anyOffset || anyFuzz || !rejHunks.empty();
             if (run.backup || (run.mismatchBackup && mismatch)) {
-                const std::string backupPath = BackupPathFor(run.context, output,
-                    run.backupMode, run.backupSuffix);
-                const std::string key = run.context.IO().ResolvePath(output);
-                if (run.backupMade.insert(key).second) {
-                    bool backupOk = true;
-                    std::string backupFailure;
-                    if (run.Exists(input)) {
-                        if (run.context.IO().Rename(input, backupPath) != 0) {
-                            backupFailure = BackupRenameFailedReason(run, backupPath);
-                            backupOk = false;
-                        }
-                    } else {
-                        auto backup = run.context.IO().OpenFile(backupPath,
-                            kFileOpenWriteCreateTruncate, kFileCreateMode);
-                        if (!backup) {
-                            backupFailure = CreateFailedReason(run, backupPath);
-                            backupOk = false;
-                        }
+                std::vector<std::string> originals;
+                if (removeOldAfter && input != output && run.Exists(input)) {
+                    originals.push_back(input);
+                }
+                originals.push_back(output);
+                for (const std::string& original : originals) {
+                    if (!run.backupMade.insert(run.context.IO().ResolvePath(original)).second) {
+                        continue;
                     }
-                    if (!backupOk) {
+                    const std::string backupPath = BackupPathFor(run.context, original,
+                        run.backupMode, run.backupSuffix);
+                    const bool exists = run.Exists(original);
+                    std::string backupFailure;
+                    if (exists) {
+                        if (run.context.IO().Rename(original, backupPath) != 0) {
+                            backupFailure = BackupRenameFailedReason(run, backupPath);
+                        }
+                    } else if (!run.context.IO().OpenFile(backupPath,
+                                   kFileOpenWriteCreateTruncate, kFileCreateMode)) {
+                        backupFailure = CreateFailedReason(run, backupPath);
+                    }
+                    if (!backupFailure.empty()) {
                         // The file is left exactly as it was.
                         run.context.IO().RemoveFile(tmp);
-                        if (run.Exists(input)) {
-                            run.Fatal("Can't rename file " + ShellEscapeQuoted(input) + " to "
+                        if (exists) {
+                            run.Fatal("Can't rename file " + ShellEscapeQuoted(original) + " to "
                                 + ShellEscapeQuoted(backupPath) + " : " + backupFailure);
                         } else {
                             run.Fatal("Can't create file " + ShellEscapeQuoted(backupPath)

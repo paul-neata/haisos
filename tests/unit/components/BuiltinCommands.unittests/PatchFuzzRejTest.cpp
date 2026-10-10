@@ -77,7 +77,7 @@ std::string ReversedQuestion() {
            "1 out of 1 hunk ignored -- saving rejects to file f.rej\n";
 }
 
-// A refused backup-method word: GNU's XARGMATCH block, without the Try line.
+// A refused backup-method word: the block GNU patch prints, without the Try line.
 std::string BadBackupWord(const std::string& kind, const std::string& word,
                           const std::string& option) {
     return "patch: " + kind + " argument '" + word + "' for '" + option + "'\n"
@@ -1646,6 +1646,67 @@ TEST_F(BuiltinCommandsTest, PatchNotDeletingBeforeSummary) {
     EXPECT_EQ(ReadPatchFile(root, "old.rej"),
         "*** old\n--- /dev/null\n***************\n*** 1,2 ****\n- a\n- b\n"
         "--- 0 ----\n");
+
+    // Without -f the reversed probe finds the deletion's swap and the patch
+    // is skipped at its question: nothing is said of deleting.
+    root->RemoveFile("/p/old.rej");
+    result = RunCaptured("patch", {},
+        "*** old\n--- /dev/null\n***************\n*** 1,2 ****\n- a\n- b\n"
+        "--- 0 ----\n", "/p");
+    EXPECT_EQ(result.out,
+        "patching file old\n"
+        "Reversed (or previously applied) patch detected!  Assume -R? [n] \n"
+        "Apply anyway? [n] \n"
+        "Skipping patch.\n"
+        "1 out of 1 hunk ignored -- saving rejects to file old.rej\n");
+    EXPECT_EQ(result.status, 1);
+    EXPECT_EQ(ReadPatchFile(root, "old"), "x\ny\n");
+}
+
+// The backups of a git copy or rename: the file written is backed up (empty
+// when it was not there); a rename's source is moved to its own backup, a
+// copy's source is left alone.
+TEST_F(BuiltinCommandsTest, PatchGitCopyAndRenameBackups) {
+    MakePatchDir(root);
+    const auto gitPatch = [](const char* how) {
+        return std::string("diff --git a/old b/new\nsimilarity index 80%\n") + how
+            + " from old\n" + how + " to new\n--- a/old\n+++ b/new\n"
+            "@@ -1,3 +1,3 @@\n 1\n-2\n+TWO\n 3\n";
+    };
+    const auto reset = [&](const char* old) {
+        WriteFile("/p/old", old);
+        for (const char* name : {"new", "new.orig", "old.orig"}) {
+            root->RemoveFile(std::string("/p/") + name);
+        }
+    };
+
+    reset("1\n2\n3\n");
+    Captured result = RunCaptured("patch", {"-p1", "-b"}, gitPatch("copy"), "/p");
+    EXPECT_EQ(result.out, "patching file new (copied from old)\n");
+    EXPECT_EQ(result.status, 0);
+    EXPECT_EQ(ReadPatchFile(root, "new"), "1\nTWO\n3\n");
+    EXPECT_EQ(ReadPatchFile(root, "new.orig"), "");
+    EXPECT_EQ(ReadPatchFile(root, "old"), "1\n2\n3\n");
+
+    // A mismatch backup of a copy keeps its source too.
+    reset("0\n1\n2\n3\n");
+    result = RunCaptured("patch", {"-p1"}, gitPatch("copy"), "/p");
+    EXPECT_EQ(result.out,
+        "patching file new (copied from old)\nHunk #1 succeeded at 2 (offset 1 line).\n");
+    EXPECT_EQ(result.status, 0);
+    EXPECT_EQ(ReadPatchFile(root, "new"), "0\n1\nTWO\n3\n");
+    EXPECT_EQ(ReadPatchFile(root, "new.orig"), "");
+    EXPECT_EQ(ReadPatchFile(root, "old"), "0\n1\n2\n3\n");
+
+    reset("0\n1\n2\n3\n");
+    result = RunCaptured("patch", {"-p1"}, gitPatch("rename"), "/p");
+    EXPECT_EQ(result.out,
+        "patching file new (renamed from old)\nHunk #1 succeeded at 2 (offset 1 line).\n");
+    EXPECT_EQ(result.status, 0);
+    EXPECT_EQ(ReadPatchFile(root, "new"), "0\n1\nTWO\n3\n");
+    EXPECT_EQ(ReadPatchFile(root, "new.orig"), "");
+    EXPECT_EQ(ReadPatchFile(root, "old.orig"), "0\n1\n2\n3\n");
+    EXPECT_FALSE(PatchFileExists(root, "old"));
 }
 
 } // namespace Haisos

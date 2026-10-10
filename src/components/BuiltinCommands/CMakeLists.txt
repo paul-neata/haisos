@@ -54,6 +54,7 @@ add_library(BuiltinCommands STATIC
     commands/grep/GrepMatcher.cpp
     commands/head/Head.cpp
     commands/jq/JqAst.cpp
+    commands/jq/JqJsonWriter.cpp
     commands/jq/JqLexer.cpp
     commands/jq/JqParser.cpp
     commands/jq/JqUtf8.cpp

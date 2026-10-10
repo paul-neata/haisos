@@ -151,6 +151,7 @@ Token Lexer::Next() {
         Bracket popped;
         if (!CloseBracket(c, popped)) {
             if (c == ')' && popped == Bracket::Interp) {
+                ++m_pos;  // the ')' is the interpolation's, not string text
                 m_inString = true;
                 Token t;
                 t.type = TokenType::InterpolationEnd;

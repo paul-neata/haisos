@@ -25,7 +25,7 @@ enum class TokenType {
     InterpolationEnd,    // the ) closing \(
     StringEnd,           // the closing "
     Keyword,             // as def if then elif else end and or reduce foreach try
-                         // catch label import include module __loc__
+                         // catch label break import include module __loc__
     Operator,            // != == // //= |= += -= *= /= %= <= >= .. ?//
     Char,                // one of . ? = ; , : | + - * / % $ < > ( ) [ ] { }
 };

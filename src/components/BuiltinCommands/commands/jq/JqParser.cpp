@@ -1286,7 +1286,7 @@ void Parser::Run(ParseResult& result) {
             // Empty, or only comments.
             m_errors.push_back({"Top-level program not given (try \".\")",
                                 kNoOffset});
-            return;
+            throw StopParsing{};
         }
         m_atTopStart = true;
         result.root = ParsePipe();

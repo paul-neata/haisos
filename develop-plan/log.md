@@ -134,3 +134,4 @@
 - 2026-10-10 08:46 UTC -- awk--records merged #81 as 0.5.39: 0C 1H 2M fixed, 1M 2L open, 1 try
 - 2026-10-10 08:58 UTC -- start awk--functions (0.5.40)
 - 2026-10-10 09:40 UTC -- awk--functions: PR #82, windows-failed (ignored per Direction)
+- 2026-10-10 09:45 UTC -- awk--functions merged #82 as 0.5.40: 0C 0H, 2M 3L open, 1 try

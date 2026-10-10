@@ -22,6 +22,7 @@ const char* const kSpecialNames[kSpecialSlotCount] = {
 Interpreter::Interpreter(BuiltinContext& context, std::shared_ptr<const Program> program,
                         const AwkInvocation& invocation)
     : m_context(context)
+    , m_streams(context)
     , m_program(std::move(program))
     , m_invocation(invocation)
     , m_globals(kSpecialSlotCount)
@@ -61,6 +62,17 @@ int ParameterIndex(const std::vector<std::string>* parameters, const std::string
         }
     }
     return -1;
+}
+
+// gawk's fatal for an array used as a scalar: the parameter's own "(from ...)"
+// name, the whole chain included, whether the Array is the parameter itself
+// or a link its binding chain reaches. [[noreturn]] so no `case' calling it
+// can fall through into the next one.
+[[noreturn]] void ScalarContextArrayFatal(const Variable& variable, const std::string& name) {
+    throw AwkFatal(variable.passedFrom.empty()
+                       ? "attempt to use array `" + name + "' in a scalar context"
+                       : "attempt to use array `" + name + " (from " + variable.passedFrom +
+                             ")' in a scalar context");
 }
 
 } // namespace
@@ -214,7 +226,15 @@ void Interpreter::Prepare() {
             Value::FromInput(m_invocation.operands[i]);
     }
     m_globals[kSlotENVIRON].kind = Variable::Kind::Array;
-    m_globals[kSlotENVIRON].array = std::make_shared<AwkArray>();  // awk--io fills it
+    m_globals[kSlotENVIRON].array = std::make_shared<AwkArray>();
+    // ENVIRON is a copy: changing it changes nothing for the commands awk
+    // runs, which get the process's own environment (as gawk's do).
+    if (auto environment = m_context.Process().GetEnvironment()) {
+        for (const std::string& name : environment->GetVariableNames()) {
+            m_globals[kSlotENVIRON].array->GetOrCreate(name) =
+                Value::FromInput(*environment->GetVariable(name));
+        }
+    }
 
     // -F and -v, in the order given on the command line.
     for (const AwkPreAssignment& assignment : m_invocation.preAssignments) {
@@ -451,17 +471,9 @@ Variable::Kind Interpreter::BoundKind(const Variable& variable) {
 }
 
 Value& Interpreter::ScalarRef(Variable& variable, const std::string& name) {
-    // The "(from ...)" name is built only on the error path: it is the
-    // parameter's own passedFrom, the whole chain included.
-    const auto fatal = [&variable, &name]() {
-        throw AwkFatal(variable.passedFrom.empty()
-                           ? "attempt to use array `" + name + "' in a scalar context"
-                           : "attempt to use array `" + name + " (from " + variable.passedFrom +
-                                 ")' in a scalar context");
-    };
     switch (variable.kind) {
         case Variable::Kind::Array:
-            fatal();
+            ScalarContextArrayFatal(variable, name);
         case Variable::Kind::Untyped:
             // Typing it types every still-Untyped variable its binding chain
             // leads to (the values unchanged: an untyped `x' passed to `a'
@@ -470,7 +482,7 @@ Value& Interpreter::ScalarRef(Variable& variable, const std::string& name) {
             // gawk's fatal, as an Array parameter itself is.
             for (Variable* link = &variable; link != nullptr; link = link->binding) {
                 if (link->kind == Variable::Kind::Array) {
-                    fatal();
+                    ScalarContextArrayFatal(variable, name);
                 }
                 if (link->kind == Variable::Kind::Scalar) {
                     break;
@@ -838,21 +850,32 @@ Value Interpreter::ValueOf(const Expr& expr) {
 // --- Run ---
 
 int Interpreter::Run() {
+    int status = 0;
     try {
         Prepare();
         if (!CompileLiteralRegexes()) {
-            return 1;   // the error reported, nothing runs
+            status = 1;   // the error reported, nothing runs
+        } else {
+            RunBeginItems();
+            RunMainLoop();
+            RunEndItems();
+            status = static_cast<int>(m_exitCode & 0xFF);
         }
-        RunBeginItems();
-        RunMainLoop();
-        RunEndItems();
     } catch (const AwkFatal& error) {
         ReportFatal(error);
-        return 2;
+        status = 2;
     } catch (const Stopped&) {
+        status = 143;
+    }
+    // Every stream closed on every way out -- gawk writes the message, then
+    // its pipes finish, before its buffered stdout -- so the children's output
+    // reaches the shared descriptors first. A stop asked for while the last
+    // pipes are being closed still ends stopped.
+    m_streams.CloseAll();
+    if (m_context.StopRequested()) {
         return 143;
     }
-    return static_cast<int>(m_exitCode & 0xFF);
+    return status;
 }
 
 void Interpreter::RunBeginItems() {
@@ -1165,17 +1188,24 @@ bool Interpreter::MatchesPattern(const Item& item, size_t itemIndex) {
 }
 
 bool Interpreter::NextMainRecord() {
+    std::string record;
+    if (!NextMainRecordText(record)) {
+        return false;
+    }
+    m_fields.SetRecord(std::move(record), SpecialString(kSlotFS),
+                       SpecialString(kSlotRS).empty());
+    return true;
+}
+
+bool Interpreter::NextMainRecordText(std::string& record) {
     while (true) {
         if (m_reader) {
-            std::string record;
             const RecordReadResult result = m_reader->Next(SpecialString(kSlotRS), record);
             if (result == RecordReadResult::Record) {
                 m_globals[kSlotNR].scalar =
                     Value::FromNumber(m_globals[kSlotNR].scalar.ToNumber() + 1);
                 m_globals[kSlotFNR].scalar =
                     Value::FromNumber(m_globals[kSlotFNR].scalar.ToNumber() + 1);
-                m_fields.SetRecord(std::move(record), SpecialString(kSlotFS),
-                                   SpecialString(kSlotRS).empty());
                 return true;
             }
             if (result == RecordReadResult::Stopped) {
@@ -1221,7 +1251,8 @@ bool Interpreter::OpenNextInput() {
             continue;
         }
         InputOpenFailure failure = InputOpenFailure::None;
-        std::shared_ptr<IFileDescriptor> input = OpenInputOperand(m_context, text, failure);
+        std::shared_ptr<IFileDescriptor> input =
+            OpenInputOperand(m_context, text == "/dev/stdin" ? "-" : text, failure);
         if (!input) {
             throw AwkFatal("cannot open file `" + text + "' for reading: " +
                                OpenFailureText(failure), /*withLocation=*/false);
@@ -1255,10 +1286,21 @@ bool Interpreter::OpenNextInput() {
 }
 
 void Interpreter::Output(const Stmt& print, const std::string& text) {
-    if (print.redirect != RedirectKind::None) {
-        throw AwkFatal("output redirection is not implemented yet");
+    if (print.redirect == RedirectKind::None) {
+        m_context.Out(text);
+        return;
     }
-    m_context.Out(text);
+    const std::string name = ValueOf(*print.redirectTarget).ToString(SpecialString(kSlotCONVFMT));
+    if (name.empty()) {
+        const char* redirect = print.redirect == RedirectKind::File ? ">"
+                              : print.redirect == RedirectKind::Append ? ">>"
+                                                                       : "|";
+        throw AwkFatal(std::string("expression for `") + redirect +
+                       "' redirection has null string value");
+    }
+    m_streams.Write(print.redirect, name, text,
+                    print.kind == StmtKind::Printf ? "printf" : "print");
+    ThrowIfStopped();
 }
 
 void Interpreter::SplitRecord(std::string_view record, const std::string& fs, bool paragraphMode,
@@ -1385,23 +1427,26 @@ Value Interpreter::CallFunction(const Expr& call) {
         }
         Variable& passed = VariableOf(argument);
         // Where the argument came from, for the "(from ...)" error texts:
-        // the argument's name, and after it its own chain when it is itself
-        // a parameter passed by name ("a", or "a, from x").
-        const std::string passedFrom =
-            passed.passedFrom.empty() ? argument.text
-                                      : argument.text + ", from " + passed.passedFrom;
+        // the argument's name, and after it its own chain when it is itself a
+        // parameter passed by name ("a", or "a, from x"). Built only where it
+        // is used -- an Array or Untyped argument; a Scalar one never says
+        // where it came from.
+        const auto passedFrom = [&passed, &argument]() {
+            return passed.passedFrom.empty() ? argument.text
+                                             : argument.text + ", from " + passed.passedFrom;
+        };
         switch (passed.kind) {
             case Variable::Kind::Array:
                 parameter.kind = Variable::Kind::Array;
                 parameter.array = passed.array;
-                parameter.passedFrom = passedFrom;
+                parameter.passedFrom = passedFrom();
                 break;
             case Variable::Kind::Untyped:
                 // The callee may make it an array (or a scalar) in the
                 // caller, through the binding chain.
                 parameter.kind = Variable::Kind::Untyped;
                 parameter.binding = &passed;
-                parameter.passedFrom = passedFrom;
+                parameter.passedFrom = passedFrom();
                 break;
             case Variable::Kind::Scalar:
                 parameter.kind = Variable::Kind::Scalar;
@@ -1444,7 +1489,45 @@ Value Interpreter::CallFunction(const Expr& call) {
 }
 
 Value Interpreter::EvaluateGetline(const Expr& expr) {
-    throw AwkFatal("getline is not implemented yet");
+    // Paragraph mode is RS now, as the main input's records are split.
+    const bool paragraphMode = SpecialString(kSlotRS).empty();
+    if (expr.getlineForm == GetlineForm::Simple && expr.target == nullptr) {
+        // The main input's next record into $0 and NF, NR and FNR +1 (in
+        // BEGIN it opens the first operand; the main loop goes on from the
+        // record after it).
+        const bool got = NextMainRecord();
+        ThrowIfStopped();
+        return Value::FromNumber(got ? 1 : 0);
+    }
+    std::string text;
+    int result = 0;
+    if (expr.getlineForm == GetlineForm::Simple) {
+        // With a target: NR and FNR +1, $0 untouched.
+        result = NextMainRecordText(text) ? 1 : 0;
+    } else {
+        // A file or a command: NR and FNR unchanged (gawk), $0 and NF only
+        // without a target.
+        const std::string name =
+            ValueOf(*expr.operands[0]).ToString(SpecialString(kSlotCONVFMT));
+        if (name.empty()) {
+            throw AwkFatal(std::string("expression for `") +
+                           (expr.getlineForm == GetlineForm::File ? "<" : "|") +
+                           "' redirection has null string value");
+        }
+        result = m_streams.ReadRecord(expr.getlineForm == GetlineForm::File
+                                          ? AwkStreamKind::InputFile
+                                          : AwkStreamKind::InputPipe,
+                                      name, SpecialString(kSlotRS), text);
+    }
+    if (result == 1) {
+        if (expr.target != nullptr) {
+            Assign(*expr.target, Value::FromInput(text));
+        } else {
+            m_fields.SetRecord(text, SpecialString(kSlotFS), paragraphMode);
+        }
+    }
+    ThrowIfStopped();
+    return Value::FromNumber(static_cast<double>(result));
 }
 
 // --- errors and stopping ---

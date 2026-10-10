@@ -318,9 +318,14 @@ Value Interpreter::CallBuiltin(const Expr& call) {
         for (const ExprPtr& argument : args) {
             arguments.push_back(ValueOf(*argument));
         }
-        const std::string format = arguments[0].ToString(convfmt);
+        // CONVFMT as it is once every argument has been evaluated -- an
+        // argument that assigns it counts, for the format's own conversion
+        // and for its %s conversions alike (the printf statement in
+        // RunStatement already does).
+        const std::string formatConvfmt = SpecialString(kSlotCONVFMT);
+        const std::string format = arguments[0].ToString(formatConvfmt);
         arguments.erase(arguments.begin());
-        return Value::FromString(FormatAwkPrintf(format, arguments, convfmt));
+        return Value::FromString(FormatAwkPrintf(format, arguments, formatConvfmt));
     }
 
     if (call.text == "sin") {
@@ -389,7 +394,38 @@ Value Interpreter::CallBuiltin(const Expr& call) {
         return Value::FromNumber(static_cast<double>(previous));
     }
 
-    // close, fflush and system: later tasks.
+    if (call.text == "close") {
+        // The most recently opened stream of that name, whatever its kind:
+        // 0 a file, the command's status a pipe, -1 nothing of that name.
+        return Value::FromNumber(
+            static_cast<double>(m_streams.Close(ValueOf(*args[0]).ToString(convfmt))));
+    }
+
+    if (call.text == "fflush") {
+        int result = 0;
+        if (args.empty()) {
+            result = m_streams.Flush(nullptr);
+        } else {
+            const std::string name = ValueOf(*args[0]).ToString(convfmt);
+            if (name.empty()) {
+                result = m_streams.Flush(nullptr);
+            } else {
+                result = m_streams.Flush(&name);
+                if (result < 0) {
+                    RuntimeWarning("fflush: `" + name +
+                                   "' is not an open file, pipe or co-process");
+                }
+            }
+        }
+        return Value::FromNumber(static_cast<double>(result));
+    }
+
+    if (call.text == "system") {
+        const int result = m_streams.RunSystem(ValueOf(*args[0]).ToString(convfmt));
+        ThrowIfStopped();
+        return Value::FromNumber(static_cast<double>(result));
+    }
+
     throw AwkFatal("function `" + call.text + "' is not implemented yet");
 }
 

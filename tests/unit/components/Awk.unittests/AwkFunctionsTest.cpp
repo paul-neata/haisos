@@ -102,6 +102,15 @@ TEST_F(AwkFunctionsTest, UserFunctions) {
     EXPECT_EQ(captured.out, "199\n");
     EXPECT_EQ(captured.err, "");
     EXPECT_EQ(captured.status, 0);
+
+    // A Scalar argument passed by name: its own copy, and no "(from ...)"
+    // name built for it.
+    captured = RunCaptured("awk",
+        {R"(function f(a) { a = a + 1; return a } function g(b) { return f(b) } )"
+         R"(BEGIN { x = 1; print g(x), x })"});
+    EXPECT_EQ(captured.out, "2 1\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
 }
 
 TEST_F(AwkFunctionsTest, ArraysByReference) {
@@ -267,6 +276,16 @@ TEST_F(AwkFunctionsTest, FunctionErrors) {
     EXPECT_EQ(captured.out, "");
     EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: attempt to use scalar parameter "
                            "`a' as an array\n");
+    EXPECT_EQ(captured.status, 2);
+
+    // Through a chain: the Array parameter itself, the "(from ...)" names of
+    // the whole chain joined.
+    captured = RunCaptured("awk",
+        {R"(function f(a) { return a } function g(b) { return f(b) } )"
+         R"(BEGIN { y[1]; g(y) })"});
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: attempt to use array "
+                           "`a (from b, from y)' in a scalar context\n");
     EXPECT_EQ(captured.status, 2);
 
     // next/nextfile out of BEGIN or END.

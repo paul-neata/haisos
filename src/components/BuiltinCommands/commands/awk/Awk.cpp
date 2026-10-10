@@ -13,7 +13,7 @@ namespace {
 class AwkCommand : public IBuiltinCommand {
 public:
     std::string Name() const override { return "awk"; }
-    std::string Version() const override { return "1.4.0"; }
+    std::string Version() const override { return "1.5.0"; }
 
     const std::vector<BuiltinOption>& Options() const override {
         return Awk::AwkOptionTable();
@@ -47,7 +47,12 @@ public:
             "gawk's.\n"
             "%a and %A print the platform's long double (0x8p-3 for 1 on\n"
             "x86-64; gawk prints 0x1p+0).\n"
-            "getline and output redirections are not available yet.\n"
+            "Commands run in hsh (-c), found in PATH.\n"
+            "/dev/stdout, /dev/stderr, /dev/stdin and - are awk's own streams\n"
+            "(gawk --posix opens the devices).\n"
+            "system() and close() of a pipe return the command's exit status as\n"
+            "plain gawk does (256 + the signal for a command stopped or\n"
+            "broken-piped, also inside the shell), not gawk --posix's values.\n"
             "User-defined functions may nest at most 200 calls deep; gawk has\n"
             "no fixed limit.\n"
             "`split(s, a[i])' is refused (second argument is not an array);\n"

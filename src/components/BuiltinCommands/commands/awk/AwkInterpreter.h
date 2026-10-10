@@ -13,6 +13,7 @@
 #include "commands/awk/AwkInput.h"
 #include "commands/awk/AwkInvocation.h"
 #include "commands/awk/AwkRegex.h"
+#include "commands/awk/AwkStreams.h"
 #include "commands/awk/AwkValue.h"
 
 namespace Haisos::Awk {
@@ -156,6 +157,10 @@ private:
     // --- items and input ---
     bool MatchesPattern(const Item& item, size_t itemIndex);  // ranges kept per item
     bool NextMainRecord();                   // next record of the operands into $0; false at the end
+    // The same reader half without the SetRecord: NR and FNR +1, its fatals.
+    // getline's Simple form reads the main input through it (with a target,
+    // $0 is untouched), and the main loop goes on from the next record.
+    bool NextMainRecordText(std::string& record);
     bool OpenNextInput();                    // the next ARGV element that is an input; false at the end
     void Output(const Stmt& print, const std::string& text);  // print's bytes: stdout here; awk--io adds redirections
     void SplitRecord(std::string_view record, const std::string& fs, bool paragraphMode,
@@ -186,6 +191,7 @@ private:
     std::string SourceNameAt(const SourcePosition& position); // its source's name
 
     BuiltinContext& m_context;
+    AwkStreams m_streams;                    // the redirections' and getlines' streams
     std::shared_ptr<const Program> m_program;
     const AwkInvocation& m_invocation;
     // A deque: a parameter's binding points into the caller's own globals,

@@ -273,6 +273,29 @@ TEST_F(AwkPrintfTest, SumsWithPrintf) {
     EXPECT_EQ(captured.status, 0);
 }
 
+TEST_F(AwkPrintfTest, SprintfReadsConvfmtAfterItsArguments) {
+    // CONVFMT is read once every argument is evaluated: an argument that
+    // assigns it counts, for the format's own conversion and for its %s
+    // conversions alike (the printf statement already did).
+    Captured captured = RunCaptured("awk",
+        {R"(BEGIN { x = 3.14159; s = sprintf("%s %s", x, CONVFMT = "%.2f"); print s })"});
+    EXPECT_EQ(captured.out, "3.14 %.2f\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    captured = RunCaptured("awk",
+        {R"(BEGIN { x = 3.14159; print sprintf(x, CONVFMT = "%.2f") })"});
+    EXPECT_EQ(captured.out, "3.14\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    captured = RunCaptured("awk",
+        {R"(BEGIN { x = 3.14159; printf "%s %s\n", x, CONVFMT = "%.3f" })"});
+    EXPECT_EQ(captured.out, "3.142 %.3f\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+}
+
 TEST_F(AwkPrintfTest, MathFunctions) {
     Captured captured = RunCaptured("awk",
         {R"(BEGIN { print sin(0), cos(0), atan2(0, -1), exp(1), log(10), sqrt(2), )"

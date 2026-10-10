@@ -620,7 +620,7 @@ use a builtin with what it already knows about the real command:
 | Builtin | Description |
 |---------|-------------|
 | `[` | The `[ EXPRESSION ]` program, one with `test`: its last argument must be exactly `]`, `--help`/`--version` only as its sole argument; the expression is `test`'s |
-| `awk` | POSIX awk, as gawk `--posix` runs it: options so far (`-F -f -v --` and every other gawk option accepted, untreated ones reported); the program is loaded (the operand, or every `-f` file, `-f -` standard input) but not run yet |
+| `awk` | POSIX awk, as gawk `--posix` runs it: options so far (`-F -f -v --` and every other gawk option accepted, untreated ones reported); the program (the operand, or every `-f` file, `-f -` standard input) is parsed whole -- items, BEGIN/END, ranges, function definitions, every POSIX statement, `print`/`printf` redirections -- with gawk `--posix`'s syntax and parse-time errors on stderr (status 1), but not run yet |
 | `basename` | Strips directories and a suffix from names (`-a -s SUFFIX -z`), GNU's trailing-slash rules |
 | `cat` | Concatenates files and standard input (`-A -b -e -E -n -s -t -T -u -v`) |
 | `chmod` | Changes file mode bits (`-c -f -v --no-preserve-root --preserve-root --reference=RFILE -R`), GNU 9.4's mode grammar; Haisos has no permissions: the mode is validated and nothing changes, every mode taken as 0777, the umask as 0 |

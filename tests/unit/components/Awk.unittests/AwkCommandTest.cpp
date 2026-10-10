@@ -18,16 +18,16 @@ class AwkCommandTest : public BuiltinCommandsTest {};
 TEST_F(AwkCommandTest, VersionAndHelp) {
     const auto version = RunCaptured("awk", {"--version"});
     EXPECT_EQ(version.status, 0);
-    EXPECT_EQ(version.out, "awk (HaisosOS builtin) 1.0.1\n");
+    EXPECT_EQ(version.out, "awk (HaisosOS builtin) 1.0.2\n");
     const auto shortVersion = RunCaptured("awk", {"-V"});
     EXPECT_EQ(shortVersion.status, 0);
-    EXPECT_EQ(shortVersion.out, "awk (HaisosOS builtin) 1.0.1\n");
+    EXPECT_EQ(shortVersion.out, "awk (HaisosOS builtin) 1.0.2\n");
 
     const auto help = RunCaptured("awk", {"--help"});
     EXPECT_EQ(help.status, 0);
     const Lines lines = SplitLines(help.out);
     ASSERT_GT(lines.size(), 1u);
-    EXPECT_EQ(lines[0], "HaisosOS awk version 1.0.1 - pattern scanning and processing language");
+    EXPECT_EQ(lines[0], "HaisosOS awk version 1.0.2 - pattern scanning and processing language");
     EXPECT_EQ(lines[1], "Based on Linux gawk: https://man7.org/linux/man-pages/man1/gawk.1.html");
 
     // -h prints the same help, as gawk's.
@@ -76,7 +76,7 @@ TEST_F(AwkCommandTest, OptionsStopAtTheProgram) {
 TEST_F(AwkCommandTest, NotTreatedOptionsAreReported) {
     const auto lint = RunCaptured("awk", {"--lint", "BEGIN{}"});
     EXPECT_EQ(lint.status, 2);
-    EXPECT_NE(lint.err.find("Parameter --lint is not treated by HaisosOS awk v. 1.0.1"),
+    EXPECT_NE(lint.err.find("Parameter --lint is not treated by HaisosOS awk v. 1.0.2"),
         std::string::npos) << lint.err;
     EXPECT_NE(lint.err.find(kNotImplemented), std::string::npos);
 
@@ -108,4 +108,33 @@ TEST_F(AwkCommandTest, ProgramSources) {
     const auto standardInput = RunCaptured("awk", {"-f", "-"}, "BEGIN{}");
     EXPECT_EQ(standardInput.status, 2);
     EXPECT_EQ(standardInput.err, kNotImplemented);
+}
+
+TEST_F(AwkCommandTest, SyntaxErrorsAreReported) {
+    // A syntax error in the program operand: gawk's report, status 1.
+    const auto operand = RunCaptured("awk", {"BEGIN { x = = 1 }"});
+    EXPECT_EQ(operand.status, 1);
+    EXPECT_EQ(operand.out, "");
+    EXPECT_EQ(operand.err,
+        "awk: cmd. line:1: BEGIN { x = = 1 }\n"
+        "awk: cmd. line:1:             ^ syntax error\n");
+
+    // The end of a -f file inside a rule: gawk's (END OF FILE) report.
+    WriteFile("/p.awk", "BEGIN {\n");
+    const auto file = RunCaptured("awk", {"-f", "/p.awk"});
+    EXPECT_EQ(file.status, 1);
+    EXPECT_EQ(file.out, "");
+    EXPECT_EQ(file.err,
+        "awk: /p.awk:1: (END OF FILE)\n"
+        "awk: /p.awk:1: ^ source files / command-line arguments must contain "
+        "complete functions or rules\n");
+}
+
+TEST_F(AwkCommandTest, ParsedProgramsDoNotRunYet) {
+    // A program that parses still does not run (awk--interpreter removes
+    // this).
+    const auto parsed = RunCaptured("awk", {"BEGIN { print 1 }"});
+    EXPECT_EQ(parsed.status, 2);
+    EXPECT_EQ(parsed.out, "");
+    EXPECT_EQ(parsed.err, kNotImplemented);
 }

@@ -21,7 +21,7 @@ using ExprPtr = std::unique_ptr<Expr>;
 using StmtPtr = std::unique_ptr<Stmt>;
 
 enum class ExprKind {
-    Number,       // number, text: the source text ("1e3")
+    Number,        // number, text: the source text ("1e3")
     String,        // text: the value
     Regex,         // text: the regex text as the lexer kept it; alone, it means $0 ~ /re/
     Variable,      // text: the name
@@ -57,11 +57,15 @@ struct Expr {
     std::string text;
     std::vector<ExprPtr> operands;
     bool hasParentheses = true;            // BuiltinCall: false only for a bare `length`
+    // The result of a one-expression grouping `( e )`: never an lvalue; the
+    // dump ignores it.
+    bool parenthesized = false;
     GetlineForm getlineForm = GetlineForm::Simple;
     ExprPtr target;                        // Getline's variable, field or element; null when none
 };
 
-// An lvalue: Variable, Field or Index.
+// An lvalue: Variable, Field or Index -- never a parenthesized one, as
+// gawk's: `(x) = 3` is a syntax error.
 bool IsLvalue(const Expr& expr);
 
 enum class StmtKind {

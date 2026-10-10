@@ -5,6 +5,9 @@
 namespace Haisos::Awk {
 
 bool IsLvalue(const Expr& expr) {
+    if (expr.parenthesized) {
+        return false;
+    }
     return expr.kind == ExprKind::Variable || expr.kind == ExprKind::Field ||
            expr.kind == ExprKind::Index;
 }
@@ -63,9 +66,9 @@ const char* DumpBinaryOp(ExprOp op) {
         case ExprOp::Concat:   return "concat";
         case ExprOp::Less:         return "<";
         case ExprOp::LessEqual:    return "<=";
-        case ExprOp::NotEqual:    return "!=";
+        case ExprOp::NotEqual:     return "!=";
         case ExprOp::Equal:        return "==";
-        case ExprOp::Greater:     return ">";
+        case ExprOp::Greater:      return ">";
         case ExprOp::GreaterEqual: return ">=";
         case ExprOp::Match:    return "~";
         case ExprOp::NoMatch:  return "!~";
@@ -210,7 +213,8 @@ std::string DumpStmt(const Stmt& stmt) {
             return stmt.args.empty() ? "print" + DumpRedirect(stmt)
                                     : "print " + DumpArgs(stmt.args) + DumpRedirect(stmt);
         case StmtKind::Printf:
-            return "printf " + DumpArgs(stmt.args) + DumpRedirect(stmt);
+            return stmt.args.empty() ? "printf" + DumpRedirect(stmt)
+                                     : "printf " + DumpArgs(stmt.args) + DumpRedirect(stmt);
         case StmtKind::If: {
             std::string out = "if (" + DumpExpr(*stmt.expr) + ") " + DumpStmt(*stmt.body);
             if (stmt.elseBody) {

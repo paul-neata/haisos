@@ -78,12 +78,9 @@ std::shared_ptr<IFileDescriptor> OpenEmptyInput(BuiltinContext& context) {
     return input;
 }
 
-int RunProgramAndWait(BuiltinContext& context, const std::string& programPath,
-                      const std::vector<std::string>& args,
-                      const RunProgramOptions& options, bool* started) {
-    if (started) {
-        *started = true;
-    }
+std::shared_ptr<IProcess> StartProgram(BuiltinContext& context, const std::string& programPath,
+                                       const std::vector<std::string>& args,
+                                       const RunProgramOptions& options) {
     // Whatever the caller has buffered must be out before the child writes to
     // the same descriptor.
     context.Flush();
@@ -108,34 +105,28 @@ int RunProgramAndWait(BuiltinContext& context, const std::string& programPath,
     // process is the only door out, and nothing here keeps a path around it.
     auto os = context.Process().OS();
     if (!os) {
-        if (started) {
-            *started = false;
-        }
-        return kExitCodeNotStarted;
+        return nullptr;
     }
     std::shared_ptr<IProcess> child =
         os->StartProcess(environment, programPath, args, workingDirectory, processOptions);
     os.reset();
-    if (!child) {
-        if (started) {
-            *started = false;
-        }
-        return kExitCodeNotStarted;
-    }
+    return child;
+}
 
+int WaitForProgram(BuiltinContext& context, IProcess& child) {
     // Wait in slices, as Shell::WaitForChild does, so a stop of the caller
     // reaches the child: it is stopped once, then given up to 5 s more.
     uint64_t waitedAfterStop = 0;
     bool stopPassedOn = false;
     bool finished = false;
     while (!finished) {
-        finished = child->WaitToFinish(kWaitSliceMs);
+        finished = child.WaitToFinish(kWaitSliceMs);
         if (finished) {
             break;
         }
         if (context.StopRequested()) {
             if (!stopPassedOn) {
-                child->TriggerStop();
+                child.TriggerStop();
                 stopPassedOn = true;
             }
             waitedAfterStop += kWaitSliceMs;
@@ -147,7 +138,23 @@ int RunProgramAndWait(BuiltinContext& context, const std::string& programPath,
     if (!finished) {
         return kExitCodeStopped;
     }
-    return child->ExitCode().value_or(kExitCodeStopped);
+    return child.ExitCode().value_or(kExitCodeStopped);
+}
+
+int RunProgramAndWait(BuiltinContext& context, const std::string& programPath,
+                      const std::vector<std::string>& args,
+                      const RunProgramOptions& options, bool* started) {
+    if (started) {
+        *started = true;
+    }
+    std::shared_ptr<IProcess> child = StartProgram(context, programPath, args, options);
+    if (!child) {
+        if (started) {
+            *started = false;
+        }
+        return kExitCodeNotStarted;
+    }
+    return WaitForProgram(context, *child);
 }
 
 } // namespace Haisos

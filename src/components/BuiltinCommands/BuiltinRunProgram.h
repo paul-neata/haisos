@@ -52,6 +52,21 @@ struct RunProgramOptions {
     std::shared_ptr<IEnvironment> environment;
 };
 
+// Starts |programPath| as RunProgramAndWait does -- the descriptors, working
+// directory and environment from |options| by the same rules, the caller's
+// stdout flushed first, through context.Process().OS()->StartProcess and
+// nothing else, the OS released at once -- but returns without waiting: the
+// child, or null when it could not be started.
+std::shared_ptr<IProcess> StartProgram(BuiltinContext& context, const std::string& programPath,
+                                       const std::vector<std::string>& args,
+                                       const RunProgramOptions& options = {});
+
+// Waits for a child StartProgram started, as RunProgramAndWait waits: in
+// 50 ms slices; once the caller is asked to stop, the child is stopped
+// (TriggerStop, once) and waited for up to 5000 ms more. Its exit code, or
+// 143 when it has not finished.
+int WaitForProgram(BuiltinContext& context, IProcess& child);
+
 // Starts |programPath| (absolute, e.g. from FindProgramInPath) with |args|
 // (argv[1] onwards) through context.Process().OS()->StartProcess -- never
 // another way -- and waits for it. Returns its exit code; 127 if it could not

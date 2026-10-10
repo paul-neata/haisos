@@ -13,11 +13,11 @@ bool IsNameChar(char c) {
 
 bool IsKeyword(const std::string& word) {
     return word == "as" || word == "def" || word == "if" || word == "then" ||
-           word == "elif" || word == "else" || word == "end" || word == "and" ||
-           word == "or" || word == "reduce" || word == "foreach" ||
-           word == "try" || word == "catch" || word == "label" ||
-           word == "import" || word == "include" || word == "module" ||
-           word == "__loc__";
+           word == "elif" || word == "else" || word == "end" ||
+           word == "and" || word == "or" || word == "reduce" ||
+           word == "foreach" || word == "try" || word == "catch" ||
+           word == "label" || word == "break" || word == "import" ||
+           word == "include" || word == "module" || word == "__loc__";
 }
 
 // Appends |codePoint| to |out| as UTF-8.
@@ -324,6 +324,14 @@ bool Lexer::CloseBracket(char closing, Bracket& popped) {
     if (m_brackets.empty()) {
         popped = Bracket::Paren;
         return true;
+    }
+    // A '\(' interpolation closes only with ')'.
+    if (m_brackets.back() == Bracket::Interp) {
+        if (closing != ')')
+            return true;
+        popped = m_brackets.back();
+        m_brackets.pop_back();
+        return false;
     }
     const Bracket wanted = closing == ')' ? Bracket::Paren
                           : closing == ']' ? Bracket::Square

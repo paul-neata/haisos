@@ -98,7 +98,7 @@ each stage a task of its own):
   mode's `\uXXXX` and surrogate pairs); `DumpTruncated` (a value cut to
   a width, never inside a UTF-8 sequence); and jq's ANSI colours for
   `--color-output` (field names blue, strings green, null grey, the
-  rest uncoloured, the punctuation bold white).
+  rest uncoloured, the punctuation bold in the default colour (`1;39`)).
 - `JqJsonReader.h/.cpp` - `JsonReader`, a push parser (`Feed` a piece,
   `Finish` the end) into a caller's `std::vector<Value>`: several values
   one after another, no recursion per input byte (nesting iterative,

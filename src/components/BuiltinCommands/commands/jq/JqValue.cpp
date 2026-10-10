@@ -3,8 +3,19 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <unordered_map>
 
 namespace Haisos::Jq {
+
+// From this many members on, an object's payload carries a key index.
+constexpr size_t kObjectIndexThreshold = 16;
+
+// An object's members in insertion order, with a key-to-position index
+// from kObjectIndexThreshold members up.
+struct Value::ObjectPayload {
+    std::vector<ObjectEntry> entries;
+    std::unordered_map<std::string, size_t> index;
+};
 
 const char* KindName(Kind kind) {
     switch (kind) {
@@ -62,7 +73,12 @@ Value Value::Array(std::vector<Value> elements) {
 Value Value::Object(std::vector<ObjectEntry> entries) {
     Value v;
     v.m_kind = Kind::Object;
-    v.m_object = std::make_shared<const std::vector<ObjectEntry>>(std::move(entries));
+    auto payload = std::make_unique<ObjectPayload>();
+    payload->entries = std::move(entries);
+    if (payload->entries.size() >= kObjectIndexThreshold)
+        for (size_t i = 0; i < payload->entries.size(); ++i)
+            payload->index.emplace(payload->entries[i].first, i);
+    v.m_object = std::move(payload);
     return v;
 }
 
@@ -88,28 +104,50 @@ const std::vector<Value>& Value::AsArray() const {
 
 const std::vector<ObjectEntry>& Value::AsObject() const {
     static const std::vector<ObjectEntry> empty;
-    return m_object ? *m_object : empty;
+    return m_object ? m_object->entries : empty;
 }
 
 const Value* Value::Find(const std::string& key) const {
-    if (m_kind != Kind::Object)
+    if (m_kind != Kind::Object || !m_object)
         return nullptr;
-    for (const ObjectEntry& entry : *m_object)
+    const ObjectPayload& payload = *m_object;
+    if (!payload.index.empty()) {
+        const auto it = payload.index.find(key);
+        return it == payload.index.end() ? nullptr
+                                         : &payload.entries[it->second].second;
+    }
+    for (const ObjectEntry& entry : payload.entries)
         if (entry.first == key)
             return &entry.second;
     return nullptr;
 }
 
+// The position of |key| in |payload|'s members, or SIZE_MAX when absent.
+size_t Value::MemberPosition(const ObjectPayload& payload,
+                             const std::string& key) {
+    if (!payload.index.empty()) {
+        const auto it = payload.index.find(key);
+        return it == payload.index.end() ? std::string::npos : it->second;
+    }
+    for (size_t i = 0; i < payload.entries.size(); ++i)
+        if (payload.entries[i].first == key)
+            return i;
+    return std::string::npos;
+}
+
 Value Value::WithMember(const std::string& key, Value v) const {
-    std::vector<ObjectEntry> entries;
-    if (m_kind == Kind::Object && m_object)
-        entries = *m_object;
-    for (ObjectEntry& entry : entries) {
-        if (entry.first == key) {  // an existing member keeps its place
-            entry.second = std::move(v);
+    if (m_kind == Kind::Object && m_object) {
+        const size_t at = MemberPosition(*m_object, key);
+        if (at != std::string::npos) {  // an existing member keeps its place
+            std::vector<ObjectEntry> entries = m_object->entries;
+            entries[at].second = std::move(v);
             return Object(std::move(entries));
         }
+        std::vector<ObjectEntry> entries = m_object->entries;
+        entries.emplace_back(key, std::move(v));
+        return Object(std::move(entries));
     }
+    std::vector<ObjectEntry> entries;
     entries.emplace_back(key, std::move(v));
     return Object(std::move(entries));
 }
@@ -117,7 +155,7 @@ Value Value::WithMember(const std::string& key, Value v) const {
 Value Value::WithoutMember(const std::string& key) const {
     std::vector<ObjectEntry> entries;
     if (m_kind == Kind::Object && m_object)
-        entries = *m_object;
+        entries = m_object->entries;
     entries.erase(std::remove_if(entries.begin(), entries.end(),
                                 [&key](const ObjectEntry& entry) { return entry.first == key; }),
                  entries.end());
@@ -203,13 +241,7 @@ int CompareLiteralMagnitude(const LiteralParts& a, const LiteralParts& b) {
     if (a.adjusted != b.adjusted)
         return a.adjusted < b.adjusted ? -1 : 1;
     const int c = a.digits.compare(b.digits);
-    if (c != 0)
-        return c < 0 ? -1 : 1;
-    // Equal as far as they go: the one with more digits left is larger
-    // (they cannot both be canonical, but rounding made them equal).
-    if (a.digits.size() != b.digits.size())
-        return a.digits.size() < b.digits.size() ? -1 : 1;
-    return 0;
+    return c < 0 ? -1 : c > 0 ? 1 : 0;
 }
 
 int CompareNumbers(const Value& a, const Value& b) {

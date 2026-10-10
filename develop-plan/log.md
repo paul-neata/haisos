@@ -118,3 +118,4 @@
 - 2026-10-10 03:33 UTC -- awk--lexer: PR #76, windows-failed (ignored per Direction)
 - 2026-10-10 03:50 UTC -- awk--lexer merged #76 as 0.5.34: 0C 1H fixed, 3M 4L open, 1 try
 - 2026-10-10 03:59 UTC -- start awk--expressions (0.5.35)
+- 2026-10-10 04:35 UTC -- awk--expressions: PR #77, windows-failed (ignored per Direction)

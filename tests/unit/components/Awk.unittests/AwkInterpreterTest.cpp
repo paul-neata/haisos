@@ -583,21 +583,6 @@ TEST_F(AwkRunTest, RuntimeErrors) {
     EXPECT_EQ(captured.status, 2);
 }
 
-TEST_F(AwkRunTest, NotYetAvailable) {
-    // Each unimplemented part fails with its own fatal error.
-    Captured captured = RunCaptured("awk", {"BEGIN { close(\"x\") }"});
-    EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: function `close' is not implemented yet\n");
-    EXPECT_EQ(captured.status, 2);
-
-    captured = RunCaptured("awk", {"BEGIN { print \"a\" > \"/f\" }"});
-    EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: output redirection is not implemented yet\n");
-    EXPECT_EQ(captured.status, 2);
-
-    captured = RunCaptured("awk", {"BEGIN { getline }"}, "a\n");
-    EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: getline is not implemented yet\n");
-    EXPECT_EQ(captured.status, 2);
-}
-
 // --- stopping ---
 
 // --- regexes ---

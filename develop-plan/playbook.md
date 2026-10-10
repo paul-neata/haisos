@@ -44,7 +44,7 @@ Pause: no
 | 36 | [awk--values](tasks/awk--values.md) | done | 0.5.37 | 33, 11 | #79 | 1 | 0C 0H fixed, 3M 2L open | Windows red, not checked |
 | 37 | [awk--interpreter](tasks/awk--interpreter.md) | done | 0.5.38 | 35, 36, 4 | #80 | 1 | 0C 2H fixed, 0M 3L open | Windows red, not checked |
 | 38 | [awk--records](tasks/awk--records.md) | done | 0.5.39 | 37, 3 | #81 | 1 | 0C 1H 2M fixed, 1M 2L open | Windows red, not checked |
-| 39 | [awk--functions](tasks/awk--functions.md) | todo | | 38 | | | | |
+| 39 | [awk--functions](tasks/awk--functions.md) | in-progress | 0.5.40 | 38 | | | | |
 | 40 | [awk--printf-math](tasks/awk--printf-math.md) | todo | | 39, 11 | | | | |
 | 41 | [awk--io](tasks/awk--io.md) | todo | | 40, 9 | | | | |
 | 42 | [tools--jq-parse](tasks/tools--jq-parse.md) | todo | | - | | | | |
@@ -117,3 +117,4 @@ Pause: no
 - 2026-10-10 (implement) awk--values re-checked clean-room against 5370ec9 (Opus): no copied internals, two rules restated as output only; real names from #76-78 and BuiltinPrintf.h; conversions/strnum/comparisons verified on gawk --posix; NaN rule fixed (kAwkUnordered); documented differences: NaN comparisons, '*' in CONVFMT/OFMT counts as absent, arrays walked in insertion order
 - 2026-10-10 (implement) awk--interpreter re-checked clean-room against c433419 (Opus): Cell->Variable, Execute->RunStatement, Evaluate->ValueOf (other awks' internal names), kAwkUnordered handled; folded in #78's if/do separator rule and #79's findings (reader start offset, rebuilt $0 a string, CONVFMT at rebuild); NF capped at 1,000,000 with Haisos's own fatal message (documented difference; gawk's names its internals); ~1300 lines, kept as one task
 - 2026-10-10 (implement) awk--records re-checked clean-room against c45c82e (Opus): real names from #76-#80, no old internal names; four rules corrected on gawk --posix (first bad literal regex only, escape warnings once per run, paragraph-mode newline split only for single-byte/space FS, parenthesized regex dynamic); folded in #80's three lows; awk 1.2.0
+- 2026-10-10 (implement) awk--functions re-checked clean-room against 8ca0cbc (Opus): new interpreter names, Frame->ActiveCall (one true awk's struct name); real APIs from #76-#81; m_globals a deque; split(s, a[i]) a documented exception; folded in #81's findings (regex FS fatal at assignment, $0 = v re-splits with current FS/RS, test leftover); awk 1.3.0

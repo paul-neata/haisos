@@ -74,7 +74,7 @@ TEST(JqParserTest, Bindings) {
               "(+ 1 (as 2 $x (, 10 20)))");
     EXPECT_EQ(Dump("-1 as $x | 2"), "(neg (as 1 $x 2))");
     EXPECT_EQ(Dump(". as [$a, {b: $c, $d}] | $a"),
-              "(as . (arr $a (obj (b $c) ($d))) $a)");
+              "(as . (arr $a (obj (\"b\" $c) ($d))) $a)");
     EXPECT_EQ(Dump(".[] as [$a] ?// $a | $a"),
               "(as (iterate .) (?// (arr $a) $a) $a)");
     EXPECT_EQ(Dump("reduce .[] as $x (0; . + $x)"),
@@ -83,6 +83,36 @@ TEST(JqParserTest, Bindings) {
               "(foreach (iterate .) $x 0 (+ . $x) (array (, $x .)))");
     EXPECT_EQ(Dump("label $f | 1, break $f"),
               "(label $f (, 1 (break $f)))");
+    // A binding's body is the rest of its pipe context, whatever operator
+    // follows, and a try's body and catch own their own contexts.
+    EXPECT_EQ(Dump(". as $x | -1"), "(as . $x (neg 1))");
+    EXPECT_EQ(Dump("1 + . as $x | $x * 2"), "(+ 1 (as . $x (* $x 2)))");
+    EXPECT_EQ(Dump("try . as $x | $x catch 5"), "(try (as . $x $x) 5)");
+    EXPECT_EQ(Dump("try error(\"x\") catch . as $y | $y, 1"),
+              R"((try (call error "x") (as . $y (, $y 1))))");
+    // A long chain of bindings parses without recursion (each link of the
+    // chain is three levels tall), and one past the tree's height bound is
+    // refused by the height check, not a crash.
+    std::string chain = ". as $x0 | $x0";
+    for (int i = 1; i < 200; ++i)
+        chain += " | . as $x" + std::to_string(i) + " | $x" + std::to_string(i);
+    auto result = ParseProgram(chain);
+    EXPECT_TRUE(result.errors.empty());
+    ASSERT_TRUE(result.root);
+    std::string bindings;
+    for (int i = 0; i < 300; ++i)
+        bindings += ". as $x | ";
+    result = ParseProgram(bindings + "$x");
+    EXPECT_TRUE(result.errors.empty());
+    ASSERT_TRUE(result.root);
+    std::string deeper = chain;
+    for (int i = 200; i < 2000; ++i)
+        deeper += " | . as $x" + std::to_string(i) + " | $x" + std::to_string(i);
+    result = ParseProgram(deeper);
+    ASSERT_EQ(result.errors.size(), 1u);
+    EXPECT_EQ(result.errors[0].message,
+              "program nested too deeply (more than 512 levels)");
+    EXPECT_FALSE(result.root);
 }
 
 TEST(JqParserTest, Definitions) {
@@ -325,9 +355,146 @@ TEST(JqParserTest, SyntaxErrors) {
         {" # c",
          "jq: error: Top-level program not given (try \".\")\n"
          "jq: 1 compile error\n"},
+        // reduce/foreach: nothing expected after a lone '.' source, the
+        // postfix forms otherwise.
+        {"reduce . $x",
+         "jq: error: syntax error, unexpected BINDING (Unix shell quoting "
+         "issues?) at <top-level>, line 1:\n"
+         "reduce . $x         \n"
+         "jq: 1 compile error\n"},
+        {"foreach . 1",
+         "jq: error: syntax error, unexpected LITERAL (Unix shell quoting "
+         "issues?) at <top-level>, line 1:\n"
+         "foreach . 1          \n"
+         "jq: 1 compile error\n"},
+        {"reduce .a 1",
+         "jq: error: syntax error, unexpected LITERAL, expecting FIELD or as "
+         "or '.' or '[' (Unix shell quoting issues?) at <top-level>, line 1:\n"
+         "reduce .a 1          \n"
+         "jq: 1 compile error\n"},
+        {"reduce 1 1",
+         "jq: error: syntax error, unexpected LITERAL, expecting FIELD or as "
+         "or '.' or '[' (Unix shell quoting issues?) at <top-level>, line 1:\n"
+         "reduce 1 1         \n"
+         "jq: 1 compile error\n"},
+        {"reduce $x 1",
+         "jq: error: syntax error, unexpected LITERAL, expecting FIELD or as "
+         "or '.' or '[' (Unix shell quoting issues?) at <top-level>, line 1:\n"
+         "reduce $x 1          \n"
+         "jq: 1 compile error\n"},
+        {"foreach .a 1",
+         "jq: error: syntax error, unexpected LITERAL, expecting FIELD or as "
+         "or '.' or '[' (Unix shell quoting issues?) at <top-level>, line 1:\n"
+         "foreach .a 1           \n"
+         "jq: 1 compile error\n"},
+        // foreach's init is followed by ';' or nothing expected.
+        {"foreach . as $x (0 1)",
+         "jq: error: syntax error, unexpected LITERAL (Unix shell quoting "
+         "issues?) at <top-level>, line 1:\n"
+         "foreach . as $x (0 1)                   \n"
+         "jq: 1 compile error\n"},
+        // Call arguments are separated by ';' and closed by ')'.
+        {"f(1 2)",
+         "jq: error: syntax error, unexpected LITERAL, expecting ';' or ')' "
+         "(Unix shell quoting issues?) at <top-level>, line 1:\n"
+         "f(1 2)    \n"
+         "jq: 1 compile error\n"},
+        {"f(1; 2 3)",
+         "jq: error: syntax error, unexpected LITERAL, expecting ';' or ')' "
+         "(Unix shell quoting issues?) at <top-level>, line 1:\n"
+         "f(1; 2 3)       \n"
+         "jq: 1 compile error\n"},
+        {"f(1, 2 3)",
+         "jq: error: syntax error, unexpected LITERAL, expecting ';' or ')' "
+         "(Unix shell quoting issues?) at <top-level>, line 1:\n"
+         "f(1, 2 3)       \n"
+         "jq: 1 compile error\n"},
     };
     for (const auto& one : cases)
         EXPECT_EQ(Errors(one.program), one.expected) << one.program;
+}
+
+TEST(JqParserTest, TallTrees) {
+    // The parser folds long chains without recursion, so the tree, not the
+    // parser, is what a long program wears out: anything above 512 levels
+    // of nodes is refused in one pass, the deepest node named.
+    const std::string refused =
+        "jq: error: program nested too deeply (more than 512 levels) at "
+        "<top-level>, line 1:\n";
+
+    // 400 comma levels inside an array parse (the whole tree is 402 tall).
+    std::string wide = "[";
+    for (int i = 0; i < 400; ++i)
+        wide += "1,";
+    wide += "1]";
+    auto result = ParseProgram(wide);
+    EXPECT_TRUE(result.errors.empty()) << wide.substr(0, 20);
+    EXPECT_TRUE(result.root);
+
+    // Every kind of folded chain, 600 deep, is refused. The error is
+    // placed at the deepest node: the leftmost operand of a left-folded
+    // chain, offset 0 for each of these.
+    const std::vector<std::string> tall = {
+        [] {
+            std::string s;
+            for (int i = 0; i < 600; ++i)
+                s += "1,";
+            s += "1";
+            return s;
+        }(),
+        [] {
+            std::string s;
+            for (int i = 0; i < 600; ++i)
+                s += ".a";
+            return s;
+        }(),
+        [] {
+            std::string s = "1";
+            s.append(600, '?');
+            return s;
+        }(),
+        [] {
+            std::string s = "1";
+            for (int i = 0; i < 600; ++i)
+                s += "+1";
+            return s;
+        }(),
+    };
+    for (const auto& program : tall) {
+        result = ParseProgram(program);
+        ASSERT_EQ(result.errors.size(), 1u) << program.substr(0, 20);
+        EXPECT_EQ(result.errors[0].message,
+                  "program nested too deeply (more than 512 levels)")
+            << program.substr(0, 20);
+        EXPECT_EQ(result.errors[0].offset, 0u) << program.substr(0, 20);
+        EXPECT_FALSE(result.root);
+    }
+
+    // One of them, printed exactly as jq prints a compile error (the whole
+    // line, the padding of the offset, the count line).
+    {
+        std::string commas;
+        for (int i = 0; i < 600; ++i)
+            commas += "1,";
+        commas += "1";
+        EXPECT_EQ(Errors(commas.c_str()),
+                  refused + commas + "\njq: 1 compile error\n");
+    }
+
+    // A program as long as it likes: 200000 comma levels are refused
+    // without a crash.
+    {
+        std::string huge;
+        huge.reserve(400002);
+        for (int i = 0; i < 200000; ++i)
+            huge += "1,";
+        huge += "1";
+        auto big = ParseProgram(huge);
+        ASSERT_EQ(big.errors.size(), 1u);
+        EXPECT_EQ(big.errors[0].message,
+                  "program nested too deeply (more than 512 levels)");
+        EXPECT_FALSE(big.root);
+    }
 }
 
 TEST(JqParserTest, DeepNestingIsRefused) {

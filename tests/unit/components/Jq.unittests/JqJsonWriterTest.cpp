@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <limits>
 #include <string>
 #include "commands/jq/JqJsonWriter.h"
 #include "commands/jq/JqValue.h"
@@ -20,7 +21,7 @@ std::string Write(const Value& v, WriteOptions options) {
     return out;
 }
 
-TEST(JqJsonWriter, ComputedNumbers) {
+TEST(JqJsonWriterTest, ComputedNumbers) {
     // jq prints a computed number as its shortest round-trip form, plain
     // while the exponent stays in range, scientific beyond.
     EXPECT_EQ(FormatNumber(Num(1e15)), "1000000000000000");
@@ -50,9 +51,12 @@ TEST(JqJsonWriter, ComputedNumbers) {
     EXPECT_EQ(FormatNumber(Num(0.00001234)), "1.234e-05");
     // jq prints the infinities as the largest double it formats, and NaN
     // as null.
-    EXPECT_EQ(FormatNumber(Num(1e300 * 1e300)), "1.7976931348623157e+308");
-    EXPECT_EQ(FormatNumber(Num(-(1e300 * 1e300))), "-1.7976931348623157e+308");
-    EXPECT_EQ(FormatNumber(Num(0.0 / 0.0)), "null");
+    EXPECT_EQ(FormatNumber(Num(std::numeric_limits<double>::infinity())),
+              "1.7976931348623157e+308");
+    EXPECT_EQ(FormatNumber(Num(-std::numeric_limits<double>::infinity())),
+              "-1.7976931348623157e+308");
+    EXPECT_EQ(FormatNumber(Num(std::numeric_limits<double>::quiet_NaN())),
+              "null");
     // A literal keeps its own canonical text.
     std::string canonical;
     double parsed = 0.0;
@@ -60,7 +64,7 @@ TEST(JqJsonWriter, ComputedNumbers) {
     EXPECT_EQ(FormatNumber(Value::NumberLiteral(parsed, canonical)), "1.0");
 }
 
-TEST(JqJsonWriter, PrettyAndCompact) {
+TEST(JqJsonWriterTest, PrettyAndCompact) {
     Value doc = Value::Array({
         Num(1),
         Value::Array({Num(2),
@@ -92,7 +96,7 @@ TEST(JqJsonWriter, PrettyAndCompact) {
               "[\n  {}\n]");
 }
 
-TEST(JqJsonWriter, SortKeys) {
+TEST(JqJsonWriterTest, SortKeys) {
     WriteOptions sorted;
     sorted.sortKeys = true;
     sorted.indent = 0;
@@ -117,7 +121,7 @@ TEST(JqJsonWriter, SortKeys) {
               "{\"b\":{\"d\":1,\"c\":2},\"a\":[]}");
 }
 
-TEST(JqJsonWriter, StringEscapes) {
+TEST(JqJsonWriterTest, StringEscapes) {
     EXPECT_EQ(QuoteJsonString("\b\f\n\r\t\"\\", false),
               "\"\\b\\f\\n\\r\\t\\\"\\\\\"");
     EXPECT_EQ(QuoteJsonString("\x01\x1f\x7f", false),
@@ -133,7 +137,7 @@ TEST(JqJsonWriter, StringEscapes) {
     EXPECT_EQ(QuoteJsonString("a/b", false), "\"a/b\"");
 }
 
-TEST(JqJsonWriter, Colours) {
+TEST(JqJsonWriterTest, Colours) {
     WriteOptions colour;
     colour.indent = 0;
     colour.color = true;
@@ -163,7 +167,7 @@ TEST(JqJsonWriter, Colours) {
               "\x1b[1;39m\n\x1b[1;39m}\x1b[0m");
 }
 
-TEST(JqJsonWriter, DumpTruncated) {
+TEST(JqJsonWriterTest, DumpTruncated) {
     EXPECT_EQ(DumpTruncated(Value::String("abcdefghijkl"), 15),
               "\"abcdefghijkl\"");
     // A cut lands before the "..." and never inside a UTF-8 sequence: the

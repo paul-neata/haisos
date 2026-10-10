@@ -68,6 +68,12 @@ struct Node {
     std::vector<FunctionDefinition> definitions;  // Defs
     bool hasCatch = false;  // Try
     bool hasElse = false;   // If
+
+    // No recursion: the parser's operator loops fold long chains ('1,1,...',
+    // '1+1+...', '.a.a...') into trees a program's length deep, so a tree
+    // the parser refuses, or one a syntax error leaves half-built, can be
+    // any height (defined in JqAst.cpp).
+    ~Node();
 };
 
 // One line naming the node, what the tests compare: '.' '..' '(index T K)'
@@ -83,5 +89,19 @@ struct Node {
 // '(break $name)'. A pattern: '$x', '(arr P ...)', '(obj ENTRY ...)' with
 // an entry '($a)', '($a P)' or '(K P)'; alternatives '(?// P1 P2 ...)'.
 std::string DumpNode(const Node& node);
+
+// The tree's height is bounded to this (a documented difference: jq has no
+// such limit). The parser itself loops over long chains, so the bound is
+// checked once, on the parsed tree; DumpNode and the evaluator only ever
+// see accepted trees.
+constexpr size_t kMaxTreeDepth = 512;
+
+// The height of |root| -- the most levels of nodes above a leaf -- without
+// recursion: an explicit stack walks children, object entries (key and
+// value), the key nodes of patterns (at any nesting depth of the patterns;
+// the parser's nesting limit bounds that) and definition bodies.
+// |deepestBegin|, when not null, gets the begin of the first node found at
+// the greatest level.
+size_t TreeHeight(const Node& root, size_t* deepestBegin = nullptr);
 
 } // namespace Haisos::Jq

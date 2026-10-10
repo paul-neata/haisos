@@ -53,12 +53,19 @@ public:
     Value WithElement(size_t index, Value v) const;          // index < size
 
 private:
+    // An object's payload: its members in insertion order and, from
+    // kObjectIndexThreshold members up, a key-to-position index, so lookups
+    // stay quick on large objects. Defined in JqValue.cpp.
+    struct ObjectPayload;
+    static size_t MemberPosition(const ObjectPayload& payload,
+                                 const std::string& key);
+
     Kind m_kind = Kind::Null;
     double m_number = 0.0;
     std::shared_ptr<const std::string> m_literal;             // numbers
     std::shared_ptr<const std::string> m_string;              // strings
     std::shared_ptr<const std::vector<Value>> m_array;        // arrays
-    std::shared_ptr<const std::vector<ObjectEntry>> m_object; // objects
+    std::shared_ptr<const ObjectPayload> m_object;             // objects
 };
 
 // jq's total order, as `sort`, `<` and `==` show it: by Kind first; numbers
@@ -77,8 +84,9 @@ bool Equal(const Value& a, const Value& b);  // Compare == 0
 int CompareDecimalLiterals(const std::string& a, const std::string& b);
 
 // The canonical form of a number written in JSON or a jq program ("1.0",
-// "1E+2", ".5" -> "0.5", "01" -> "1"), and its double; the plan's number
-// layout. An adjusted exponent above 999999999 keeps no literal (an empty
+// "1E+2", ".5" -> "0.5", "01" -> "1"), and its double: the layout jq keeps
+// a literal in (see commands/jq/CLAUDE.md), so the output echoes "1.0" as
+// "1.0". An adjusted exponent above 999999999 keeps no literal (an empty
 // |canonical|) and the value is the double. Returns false if |text| is not
 // a number.
 bool CanonicalNumberLiteral(std::string_view text, std::string& canonical,

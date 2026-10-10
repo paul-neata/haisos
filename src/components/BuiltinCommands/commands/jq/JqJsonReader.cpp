@@ -28,6 +28,9 @@ int HexDigitValue(char c) {
 
 const char kSurrogateMessage[] = "Invalid \\uXXXX\\uXXXX surrogate pair escape";
 
+// From this many members on, an object's frame keeps a key-to-position map.
+constexpr size_t kMemberIndexThreshold = 16;
+
 } // namespace
 
 JsonReader::JsonReader(std::vector<Value>& out) : m_out(out) {}
@@ -117,14 +120,35 @@ bool JsonReader::Deliver(const Value& value, Delivery delivery, bool atEof) {
             Frame& frame = m_stack.back();
             const std::string& key = frame.pendingKey.AsString();
             // A repeated key keeps its first place and takes the last
-            // value, as jq reads it.
-            for (ObjectEntry& entry : frame.members) {
-                if (entry.first == key) {
-                    entry.second = value;
-                    m_state = State::ObjectDone;
-                    return true;
+            // value, as jq reads it. From kMemberIndexThreshold members
+            // on, the frame's map finds it without a scan.
+            size_t at = std::string::npos;
+            if (frame.memberIndex) {
+                const auto it = frame.memberIndex->find(key);
+                if (it != frame.memberIndex->end())
+                    at = it->second;
+            } else {
+                for (size_t i = 0; i < frame.members.size(); ++i) {
+                    if (frame.members[i].first == key) {
+                        at = i;
+                        break;
+                    }
                 }
             }
+            if (at != std::string::npos) {
+                frame.members[at].second = value;
+                m_state = State::ObjectDone;
+                return true;
+            }
+            if (!frame.memberIndex &&
+                frame.members.size() + 1 >= kMemberIndexThreshold) {
+                frame.memberIndex =
+                    std::make_unique<std::unordered_map<std::string, size_t>>();
+                for (size_t j = 0; j < frame.members.size(); ++j)
+                    frame.memberIndex->emplace(frame.members[j].first, j);
+            }
+            if (frame.memberIndex)
+                (*frame.memberIndex)[key] = frame.members.size();
             frame.members.emplace_back(key, value);
             m_state = State::ObjectDone;
             return true;

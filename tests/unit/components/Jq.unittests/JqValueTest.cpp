@@ -33,7 +33,7 @@ std::string Dump(const Value& v) {
     return out;
 }
 
-TEST(JqValue, ObjectsKeepInsertionOrder) {
+TEST(JqValueTest, ObjectsKeepInsertionOrder) {
     Value o = Value::Object({
         {"b", Num(1)},
         {"a", Num(2)},
@@ -56,7 +56,7 @@ TEST(JqValue, ObjectsKeepInsertionOrder) {
     EXPECT_EQ(keys, "bcda");
 }
 
-TEST(JqValue, CompareFollowsJqOrder) {
+TEST(JqValueTest, CompareFollowsJqOrder) {
     std::vector<Value> values = {
         Value::Null(),
         Value::Boolean(true),
@@ -83,7 +83,7 @@ TEST(JqValue, CompareFollowsJqOrder) {
               "{\"a\":2};{\"a\":1,\"b\":0};{\"b\":1};");
 }
 
-TEST(JqValue, CompareObjectsSortedKeysFirst) {
+TEST(JqValueTest, CompareObjectsSortedKeysFirst) {
     std::vector<Value> values = {
         Value::Object({{"a", Value::Array({Num(1)})}}),
         Value::Object({{"a", Value::Array({Num(0), Num(5)})}}),
@@ -103,7 +103,7 @@ TEST(JqValue, CompareObjectsSortedKeysFirst) {
     EXPECT_TRUE(values[4].Find("b") != nullptr);
 }
 
-TEST(JqValue, CompareNumbers) {
+TEST(JqValueTest, CompareNumbers) {
     const double nan = std::nan("");
     EXPECT_EQ(Compare(Value::Number(nan), Value::Number(nan)), -1);
     // NaN is a number in jq's order, before every other number (jq's
@@ -122,7 +122,7 @@ TEST(JqValue, CompareNumbers) {
     EXPECT_TRUE(Equal(big2, Num(1e20)));
 }
 
-TEST(JqValue, CompareDecimalLiteralsTable) {
+TEST(JqValueTest, CompareDecimalLiteralsTable) {
     EXPECT_EQ(CompareDecimalLiterals("1.0", "1"), 0);
     EXPECT_EQ(CompareDecimalLiterals("1.10", "1.1"), 0);
     EXPECT_EQ(CompareDecimalLiterals("-0", "0"), 0);
@@ -142,7 +142,7 @@ void CheckCanonical(const char* text, const char* want, double wantValue) {
     EXPECT_DOUBLE_EQ(value, wantValue) << text;
 }
 
-TEST(JqValue, CanonicalLiterals) {
+TEST(JqValueTest, CanonicalLiterals) {
     CheckCanonical("1", "1", 1.0);
     CheckCanonical("1.0", "1.0", 1.0);
     CheckCanonical("1e2", "1E+2", 100.0);
@@ -187,7 +187,7 @@ void CheckCanonicalText(const char* text, const std::string& want) {
     EXPECT_EQ(canonical, want) << text;
 }
 
-TEST(JqValue, CanonicalLiteralTexts) {
+TEST(JqValueTest, CanonicalLiteralTexts) {
     CheckCanonicalText("1.000", "1.000");
     CheckCanonicalText("1.50", "1.50");
     CheckCanonicalText("1E01", "1E+1");
@@ -214,7 +214,7 @@ TEST(JqValue, CanonicalLiteralTexts) {
     CheckCanonicalText(thousand.c_str(), thousand);
 }
 
-TEST(JqValue, CopiesShareTheirPayload) {
+TEST(JqValueTest, CopiesShareTheirPayload) {
     const Value a = Value::Array({Num(1), Num(2)});
     const Value b = a;
     EXPECT_EQ(&a.AsArray(), &b.AsArray());
@@ -231,7 +231,7 @@ TEST(JqValue, CopiesShareTheirPayload) {
     EXPECT_EQ(&c.AsArray()[1].AsString(), &arr.AsArray()[1].AsString());
 }
 
-TEST(JqValue, KindAndTruthy) {
+TEST(JqValueTest, KindAndTruthy) {
     EXPECT_EQ(Value::Null().GetKind(), Kind::Null);
     EXPECT_EQ(Value::Boolean(false).GetKind(), Kind::False);
     EXPECT_EQ(Value::Boolean(true).GetKind(), Kind::True);

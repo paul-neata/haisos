@@ -59,7 +59,7 @@ std::string ReadOne(const std::string& text) {
     return out;
 }
 
-TEST(JqJsonReader, ReadsSeveralValues) {
+TEST(JqJsonReaderTest, ReadsSeveralValues) {
     // One value after another, the input fed in small pieces of every size.
     for (size_t pieceSize = 1; pieceSize <= 3; ++pieceSize) {
         std::vector<Value> values;
@@ -93,7 +93,7 @@ TEST(JqJsonReader, ReadsSeveralValues) {
     EXPECT_EQ(Dump(values[4]), "3");
 }
 
-TEST(JqJsonReader, KeepsLiterals) {
+TEST(JqJsonReaderTest, KeepsLiterals) {
     EXPECT_EQ(ReadOne("[1.0, 1e2, -0]"), "[1.0,1E+2,-0]\n");
     EXPECT_EQ(ReadOne("100000000000000000001"),
               "100000000000000000001\n");
@@ -103,12 +103,42 @@ TEST(JqJsonReader, KeepsLiterals) {
     EXPECT_EQ(ReadOne("1e1000000000"), "1.7976931348623157e+308\n");
 }
 
-TEST(JqJsonReader, ObjectKeys) {
+TEST(JqJsonReaderTest, ObjectKeys) {
     // A repeated key keeps its first place and takes the last value.
     EXPECT_EQ(ReadOne("{\"a\":1,\"b\":2,\"a\":3}"), "{\"a\":3,\"b\":2}\n");
 }
 
-TEST(JqJsonReader, ErrorMessages) {
+TEST(JqJsonReaderTest, LargeObjectIndexedLookup) {
+    // 100000 distinct keys, one of them repeated at the end: the repeated
+    // key keeps its first place and takes the last value, and every key
+    // is found afterwards (the frame's key index makes this quick; a
+    // scan of every member for each would take minutes).
+    const int count = 100000;
+    std::string json = "{";
+    for (int i = 0; i < count; ++i) {
+        if (i)
+            json += ',';
+        json += "\"k" + std::to_string(i) + "\":" + std::to_string(i);
+    }
+    json += ",\"k0\":999}";
+    std::vector<Value> values;
+    std::string error;
+    ASSERT_TRUE(Read(json, values, error)) << error;
+    ASSERT_EQ(values.size(), 1u);
+    const Value& object = values[0];
+    ASSERT_EQ(object.AsObject().size(), 100000u);
+    EXPECT_EQ(object.AsObject()[0].second.AsNumber(), 999);
+    EXPECT_EQ(object.AsObject().back().first, "k99999");
+    for (int i = 1; i < count; i += 997) {
+        const std::string key = "k" + std::to_string(i);
+        const Value* found = object.Find(key);
+        ASSERT_TRUE(found);
+        EXPECT_EQ(found->AsNumber(), i);
+    }
+    EXPECT_FALSE(object.Find("k100000"));
+}
+
+TEST(JqJsonReaderTest, ErrorMessages) {
     EXPECT_EQ(ReadOne(","),
               "ERR|Expected value before ',' at line 1, column 1\n");
     EXPECT_EQ(ReadOne("1,"),  // the value is not jq's: the ',' was refused
@@ -181,7 +211,7 @@ TEST(JqJsonReader, ErrorMessages) {
         EXPECT_EQ(ReadOne(row.first), row.second) << row.first;
 }
 
-TEST(JqJsonReader, StringErrors) {
+TEST(JqJsonReaderTest, StringErrors) {
     EXPECT_EQ(ReadOne("\"a\\\""),  // the quote escaped: the string never closes
               "ERR|Unfinished string at EOF at line 1, column 4\n");
     EXPECT_EQ(ReadOne("\"\\u12\""),
@@ -210,7 +240,7 @@ TEST(JqJsonReader, StringErrors) {
     EXPECT_EQ(ReadOne("\"\\udc00\""), "\"\xef\xbf\xbd\"\n");
 }
 
-TEST(JqJsonReader, LiteralTokens) {
+TEST(JqJsonReaderTest, LiteralTokens) {
     EXPECT_EQ(ReadOne("true"), "true\n");
     EXPECT_EQ(ReadOne("false"), "false\n");
     EXPECT_EQ(ReadOne("null"), "null\n");
@@ -304,7 +334,7 @@ TEST(JqJsonReader, LiteralTokens) {
             << row.first;
 }
 
-TEST(JqJsonReader, InvalidUtf8Repaired) {
+TEST(JqJsonReaderTest, InvalidUtf8Repaired) {
     // Every ill-formed sequence becomes one replacement character, the
     // bytes around it kept; a sequence cut short by the closing quote too.
     EXPECT_EQ(ReadOne("\"\xff" "a\xc3\""),
@@ -317,7 +347,7 @@ TEST(JqJsonReader, InvalidUtf8Repaired) {
     EXPECT_EQ(ReadOne("\"\xf0\x9f\x98\x80\""), "\"\xf0\x9f\x98\x80\"\n");
 }
 
-TEST(JqJsonReader, LineCountsAcrossFeeds) {
+TEST(JqJsonReaderTest, LineCountsAcrossFeeds) {
     EXPECT_EQ(ReadOne("{\"a\":1\n\"b\":2}"),
               "ERR|Expected separator between values at line 2, column 3\n");
     EXPECT_EQ(ReadOne("{\n\"a\":1}\n{"),
@@ -333,7 +363,7 @@ TEST(JqJsonReader, LineCountsAcrossFeeds) {
 }
 
 // Every ill-formed sequence one U+FFFD, the bytes around it kept.
-TEST(JqJsonReader, RepairUtf8Sequences) {
+TEST(JqJsonReaderTest, RepairUtf8Sequences) {
     const std::string R = "\xef\xbf\xbd";  // U+FFFD
     const std::vector<std::pair<std::string, std::string>> cases = {
         {"a\xc0\xaf" "b", "a" + R + R + "b"},
@@ -357,7 +387,7 @@ TEST(JqJsonReader, RepairUtf8Sequences) {
         EXPECT_EQ(RepairUtf8(row.first), row.second);
 }
 
-TEST(JqJsonReader, DepthLimit) {
+TEST(JqJsonReaderTest, DepthLimit) {
     // 256 levels parse; the 257th is refused.
     const std::string deep256 = std::string(256, '[') + "1" + std::string(256, ']');
     std::vector<Value> values;
@@ -371,7 +401,7 @@ TEST(JqJsonReader, DepthLimit) {
               "ERR|Exceeds depth limit for parsing at line 1, column 257\n");
 }
 
-TEST(JqJsonReader, ParseSingle) {
+TEST(JqJsonReaderTest, ParseSingle) {
     Value out;
     std::string error;
     ASSERT_TRUE(ParseSingleJson("[1,2]", out, error)) << error;

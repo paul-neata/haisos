@@ -58,6 +58,13 @@ add_library(BuiltinCommands STATIC
     commands/jq/JqJsonWriter.cpp
     commands/jq/JqLexer.cpp
     commands/jq/JqParser.cpp
+    commands/jq/JqArithmetic.cpp
+    commands/jq/JqFormat.cpp
+    commands/jq/JqIndex.cpp
+    commands/jq/JqInterpreter.cpp
+    commands/jq/JqNatives.cpp
+    commands/jq/JqPrelude.cpp
+    commands/jq/JqProgram.cpp
     commands/jq/JqUtf8.cpp
     commands/jq/JqValue.cpp
     commands/ls/Ls.cpp

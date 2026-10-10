@@ -1,7 +1,9 @@
 #pragma once
 
+#include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "commands/jq/JqValue.h"
@@ -58,11 +60,14 @@ private:
 
     // A container being read. The finished container is delivered to
     // |delivery|; an object holds its members and the key waiting for
-    // its ':'.
+    // its ':' -- and, from kMemberIndexThreshold members on, a
+    // key-to-position map, so a large object's repeated keys are found
+    // without scanning every member.
     struct Frame {
         bool isArray = true;
         std::vector<Value> elements;
         std::vector<ObjectEntry> members;
+        std::unique_ptr<std::unordered_map<std::string, size_t>> memberIndex;
         Value pendingKey;
         Delivery delivery = Delivery::Top;
     };

@@ -133,6 +133,14 @@ private:
 
     // --- the grammar's levels (lowest first) ---
     std::unique_ptr<Node> ParsePipe();
+    // A pipe context, closing its 'as' bindings without recursion: comma
+    // segments, '|' between them, until a segment opens no binding and no
+    // '|' follows; the bindings opened inside are folded in at the end (a
+    // binding's body is the rest of the context it was opened in). |first|
+    // is a try's body or catch already parsed (null for a whole pipe
+    // expression), with |firstOpenBefore| the binding count before it was.
+    std::unique_ptr<Node> ParsePipeSegments(std::unique_ptr<Node> first,
+                                            size_t firstOpenBefore);
     std::unique_ptr<Node> ParseComma();
     std::unique_ptr<Node> ParseAlt();
     std::unique_ptr<Node> ParseAssign();
@@ -181,6 +189,11 @@ private:
     std::vector<size_t> m_brackets;   // open brackets, by begin offset
     std::vector<Construct> m_constructs;
     std::vector<CompileError> m_errors;
+    // The 'as' bindings opened inside the current pipe context, outermost
+    // first; each stays open (its body unfilled) until its context folds it
+    // in. The operator loops below stop the moment a binding opens, so at
+    // most one opens per comma segment.
+    std::vector<Node*> m_openBindings;
     int m_depth = 0;
     int m_pipeDepth = 0;
     bool m_atTopStart = false;
@@ -267,31 +280,67 @@ std::unique_ptr<Node> Parser::ParsePipe() {
         node->children.push_back(std::move(scope));
         result = std::move(node);
     } else {
-        // Folded iteratively: 'a | b | c' is a | (b | c), and a long chain
-        // must not recurse.
-        std::vector<std::unique_ptr<Node>> parts;
-        parts.push_back(ParseComma());
-        while (IsChar('|')) {
-            Advance();
-            parts.push_back(ParseComma());
-        }
-        result = std::move(parts.back());
-        parts.pop_back();
-        while (!parts.empty()) {
-            auto pipe = MakeNode(NodeType::Pipe, parts.back()->begin);
-            pipe->children.push_back(std::move(parts.back()));
-            parts.pop_back();
-            pipe->children.push_back(std::move(result));
-            result = std::move(pipe);
-        }
+        result = ParsePipeSegments(nullptr, 0);
     }
     --m_pipeDepth;
     return result;
 }
 
+// A pipe context's segments and how each continues into the next: a '|', or
+// a binding opened inside it (its body is what follows).
+std::unique_ptr<Node> Parser::ParsePipeSegments(std::unique_ptr<Node> first,
+                                                size_t firstOpenBefore) {
+    struct Segment {
+        std::unique_ptr<Node> node;
+        size_t openBefore;  // the binding count when the segment started
+        bool joinBinding;   // a binding opened inside it
+    };
+    std::vector<Segment> segments;
+    if (first) {
+        segments.push_back({std::move(first), firstOpenBefore, false});
+    } else {
+        const size_t openBefore = m_openBindings.size();
+        segments.push_back({ParseComma(), openBefore, false});
+    }
+    for (;;) {
+        Segment& last = segments.back();
+        last.joinBinding = m_openBindings.size() > last.openBefore;
+        if (!last.joinBinding) {
+            if (!IsChar('|'))
+                break;
+            Advance();
+        }
+        const size_t openBefore = m_openBindings.size();
+        segments.push_back({ParseComma(), openBefore, false});
+    }
+    // Fold right to left: '|' joins jq's right-associative way, and a
+    // binding segment's Bind -- only one can have opened in it -- takes the
+    // folded rest as its body, so a chain of bindings costs no recursion.
+    std::unique_ptr<Node> result = std::move(segments.back().node);
+    segments.pop_back();
+    while (!segments.empty()) {
+        Segment& segment = segments.back();
+        if (segment.joinBinding) {
+            Node* bind = m_openBindings[segment.openBefore];
+            m_openBindings.erase(m_openBindings.begin() +
+                                  static_cast<std::ptrdiff_t>(segment.openBefore));
+            bind->children.push_back(std::move(result));
+            result = std::move(segment.node);
+        } else {
+            auto pipe = MakeNode(NodeType::Pipe, segment.node->begin);
+            pipe->children.push_back(std::move(segment.node));
+            pipe->children.push_back(std::move(result));
+            result = std::move(pipe);
+        }
+        segments.pop_back();
+    }
+    return result;
+}
+
 std::unique_ptr<Node> Parser::ParseComma() {
+    const size_t bindings = m_openBindings.size();
     auto left = ParseAlt();
-    while (IsChar(',')) {
+    while (m_openBindings.size() == bindings && IsChar(',')) {
         Advance();
         auto right = ParseAlt();
         left = MakeBinaryNode(NodeType::Comma, ",", std::move(left),
@@ -302,9 +351,10 @@ std::unique_ptr<Node> Parser::ParseComma() {
 
 // '//', right-associative, folded iteratively.
 std::unique_ptr<Node> Parser::ParseAlt() {
+    const size_t bindings = m_openBindings.size();
     std::vector<std::unique_ptr<Node>> parts;
     parts.push_back(ParseAssign());
-    while (IsOp("//")) {
+    while (m_openBindings.size() == bindings && IsOp("//")) {
         Advance();
         parts.push_back(ParseAssign());
     }
@@ -323,21 +373,23 @@ std::unique_ptr<Node> Parser::ParseAlt() {
 // The assignment operators bind looser than '//'; a second one is jq's
 // error, with nothing expected.
 std::unique_ptr<Node> Parser::ParseAssign() {
+    const size_t bindings = m_openBindings.size();
     auto left = ParseOr();
-    if (!IsAssignOp())
+    if (!IsAssignOp() || m_openBindings.size() != bindings)
         return left;
     const Token op = m_token;
     Advance();
     auto right = ParseOr();
-    if (IsAssignOp())
+    if (IsAssignOp() && m_openBindings.size() == bindings)
         Fail(m_token, nullptr);
     return MakeBinaryNode(NodeType::Assign, op.text, std::move(left),
                           std::move(right));
 }
 
 std::unique_ptr<Node> Parser::ParseOr() {
+    const size_t bindings = m_openBindings.size();
     auto left = ParseAnd();
-    while (IsKeyword("or")) {
+    while (m_openBindings.size() == bindings && IsKeyword("or")) {
         Advance();
         auto right = ParseAnd();
         left = MakeBinaryNode(NodeType::Or, "or", std::move(left),
@@ -347,8 +399,9 @@ std::unique_ptr<Node> Parser::ParseOr() {
 }
 
 std::unique_ptr<Node> Parser::ParseAnd() {
+    const size_t bindings = m_openBindings.size();
     auto left = ParseCompare();
-    while (IsKeyword("and")) {
+    while (m_openBindings.size() == bindings && IsKeyword("and")) {
         Advance();
         auto right = ParseCompare();
         left = MakeBinaryNode(NodeType::And, "and", std::move(left),
@@ -359,21 +412,24 @@ std::unique_ptr<Node> Parser::ParseAnd() {
 
 // Non-associative: '1 == 2 == 3' is jq's error at the second '=='.
 std::unique_ptr<Node> Parser::ParseCompare() {
+    const size_t bindings = m_openBindings.size();
     auto left = ParseAdd();
-    if (!IsCompareOp())
+    if (!IsCompareOp() || m_openBindings.size() != bindings)
         return left;
     const Token op = m_token;
     Advance();
     auto right = ParseAdd();
-    if (IsCompareOp())
+    if (IsCompareOp() && m_openBindings.size() == bindings)
         Fail(m_token, nullptr);
     return MakeBinaryNode(NodeType::Binary, op.text, std::move(left),
                           std::move(right));
 }
 
 std::unique_ptr<Node> Parser::ParseAdd() {
+    const size_t bindings = m_openBindings.size();
     auto left = ParseMul();
-    while (IsChar('+') || IsChar('-')) {
+    while (m_openBindings.size() == bindings &&
+           (IsChar('+') || IsChar('-'))) {
         const Token op = m_token;
         Advance();
         auto right = ParseMul();
@@ -384,8 +440,10 @@ std::unique_ptr<Node> Parser::ParseAdd() {
 }
 
 std::unique_ptr<Node> Parser::ParseMul() {
+    const size_t bindings = m_openBindings.size();
     auto left = ParseUnary(false);
-    while (IsChar('*') || IsChar('/') || IsChar('%')) {
+    while (m_openBindings.size() == bindings &&
+           (IsChar('*') || IsChar('/') || IsChar('%'))) {
         const Token op = m_token;
         Advance();
         auto right = ParseUnary(false);
@@ -439,15 +497,20 @@ std::unique_ptr<Node> Parser::ParseUnary(bool inTryBody) {
 
     auto node = ParsePostfix(inTryBody);
     if (IsKeyword("as")) {
-        Depth depth(*this, at);
         Advance();
         auto bind = MakeNode(NodeType::Bind, at.begin);
         bind->children.push_back(std::move(node));
-        bind->patterns = ParseDestructuring();
+        {
+            // The binding's own nesting: its patterns alone -- the body
+            // costs no recursion, the pipe context that owns it parses the
+            // rest and folds it in (ParsePipeSegments).
+            Depth depth(*this, at);
+            bind->patterns = ParseDestructuring();
+        }
         if (!IsChar('|'))
             Fail(m_token, "'|'");
         Advance();
-        bind->children.push_back(ParsePipe());
+        m_openBindings.push_back(bind.get());
         return bind;
     }
     return node;
@@ -458,8 +521,13 @@ std::unique_ptr<Node> Parser::ParseReduce(const Token& at) {
     Advance();
     auto node = MakeNode(NodeType::Reduce, at.begin);
     node->children.push_back(ParsePostfix(false));
-    if (!IsKeyword("as"))
-        Fail(m_token, "as");
+    if (!IsKeyword("as")) {
+        // jq expects nothing after a lone '.' there, the postfix forms
+        // otherwise.
+        if (node->children[0]->type == NodeType::Identity)
+            Fail(m_token, nullptr);
+        Fail(m_token, "FIELD or as or '.' or '['");
+    }
     Advance();
     node->patterns = ParseDestructuring();
     if (!IsChar('('))
@@ -490,8 +558,12 @@ std::unique_ptr<Node> Parser::ParseForeach(const Token& at) {
     Advance();
     auto node = MakeNode(NodeType::Foreach, at.begin);
     node->children.push_back(ParsePostfix(false));
-    if (!IsKeyword("as"))
-        Fail(m_token, "as");
+    if (!IsKeyword("as")) {
+        // As reduce's: nothing expected after a lone '.'.
+        if (node->children[0]->type == NodeType::Identity)
+            Fail(m_token, nullptr);
+        Fail(m_token, "FIELD or as or '.' or '['");
+    }
     Advance();
     node->patterns = ParseDestructuring();
     if (!IsChar('('))
@@ -501,7 +573,7 @@ std::unique_ptr<Node> Parser::ParseForeach(const Token& at) {
     PushBracket(open);
     node->children.push_back(ParsePipe());
     if (!IsChar(';'))
-        Fail(m_token, "';'");
+        Fail(m_token, nullptr);
     Advance();
     node->children.push_back(ParsePipe());
     if (IsChar(';')) {
@@ -570,7 +642,13 @@ std::unique_ptr<Node> Parser::ParseTry(const Token& at) {
     construct.catchFirst = kNoOffset;
     m_constructs.push_back(construct);
     auto node = MakeNode(NodeType::Try, at.begin);
-    node->children.push_back(ParseUnary(true));
+    const size_t openBefore = m_openBindings.size();
+    auto body = ParseUnary(true);
+    // A binding opened in the body owns the rest of the try's pipe context
+    // (try . as $x | $x catch .).
+    if (m_openBindings.size() > openBefore)
+        body = ParsePipeSegments(std::move(body), openBefore);
+    node->children.push_back(std::move(body));
     if (IsChar('?')) {
         // The '?' belongs to the try itself: a catch cannot follow it.
         m_constructs.pop_back();
@@ -585,7 +663,11 @@ std::unique_ptr<Node> Parser::ParseTry(const Token& at) {
     if (IsKeyword("catch")) {
         Advance();
         m_constructs.back().catchFirst = EffectiveOffset(m_token);
-        node->children.push_back(ParseUnary(false));
+        const size_t catchBefore = m_openBindings.size();
+        auto catchBody = ParseUnary(false);
+        if (m_openBindings.size() > catchBefore)
+            catchBody = ParsePipeSegments(std::move(catchBody), catchBefore);
+        node->children.push_back(std::move(catchBody));
         node->hasCatch = true;
     }
     m_constructs.pop_back();
@@ -918,7 +1000,7 @@ std::unique_ptr<Node> Parser::ParseCallRest(const Token& name) {
         node->children.push_back(ParsePipe());
     }
     if (!IsChar(')'))
-        Fail(m_token, nullptr);
+        Fail(m_token, "';' or ')'");
     Advance();
     PopBracket();
     return node;
@@ -988,6 +1070,9 @@ std::unique_ptr<Node> Parser::ParseObject(const Token& open) {
                 Fail(m_token, nullptr);
             Advance();
             PopBracket();
+            // The key begins at its '(' (where a semantic error about it is
+            // placed), not at whatever the parentheses opened with.
+            key->begin = parenOpen;
             if (!IsChar(':'))
                 Fail(m_token, "':'");
         } else {
@@ -1007,6 +1092,14 @@ std::unique_ptr<Node> Parser::ParseObject(const Token& open) {
                 auto identity = MakeNode(NodeType::Identity, key->begin);
                 auto index = MakeNode(NodeType::Index, key->begin);
                 index->children.push_back(std::move(identity));
+                // The key is cloned, recursively: its own height is bounded
+                // first (the parenthesized expression can be a chain a
+                // program's length deep).
+                size_t deepest = 0;
+                if (TreeHeight(*key, &deepest) > kMaxTreeDepth)
+                    StopWith("program nested too deeply (more than " +
+                                 std::to_string(kMaxTreeDepth) + " levels)",
+                             deepest, kNoOffset, false);
                 index->children.push_back(CloneNode(*key));
                 value = std::move(index);
             }
@@ -1143,8 +1236,8 @@ void Parser::ParsePatternEntry(Pattern& pattern) {
     std::unique_ptr<Node> key;
     if (m_token.type == TokenType::Identifier ||
         m_token.type == TokenType::Keyword) {
-        key = MakeNode(NodeType::Literal, at.begin);
-        key->text = at.text;
+        key = MakeNode(NodeType::String, at.begin);
+        key->stringParts.push_back(at.text);
         Advance();
     } else if (m_token.type == TokenType::StringStart) {
         Token empty;  // no format
@@ -1158,6 +1251,8 @@ void Parser::ParsePatternEntry(Pattern& pattern) {
             Fail(m_token, nullptr);
         Advance();
         PopBracket();
+        // The key begins at its '(', as an object construction key does.
+        key->begin = open;
     } else {
         // $__loc__ included: it starts nothing here either.
         Fail(m_token, nullptr);
@@ -1296,6 +1391,14 @@ void Parser::Run(ParseResult& result) {
         result.root = ParsePipe();
         if (m_token.type != TokenType::End)
             Fail(m_token, "end of file");
+        // The parser folds long chains without recursion, so the tree
+        // itself can be as deep as the program is long: its height is
+        // bounded here, once, in one non-recursive pass.
+        size_t deepest = 0;
+        if (TreeHeight(*result.root, &deepest) > kMaxTreeDepth)
+            StopWith("program nested too deeply (more than " +
+                         std::to_string(kMaxTreeDepth) + " levels)",
+                     deepest, kNoOffset, false);
     } catch (const StopParsing&) {
     }
     result.errors = std::move(m_errors);

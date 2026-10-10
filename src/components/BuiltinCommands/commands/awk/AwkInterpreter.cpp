@@ -169,28 +169,138 @@ void Interpreter::Prepare() {
 }
 
 void Interpreter::ApplyPreAssignment(const AwkPreAssignment& assignment) {
-    std::vector<std::string> warnings;
-    const std::string decoded = DecodeAwkStringEscapes(assignment.text, warnings);
-    for (const std::string& warning : warnings) {
-        m_context.ErrorText(std::string(kAwkName) + ": warning: " + warning + "\n");
-    }
     if (assignment.fieldSeparator) {
         // -F fs: FS as a string (gawk --posix: only the escapes decoded, -F t
         // a `t', -F '' an empty FS).
+        std::vector<std::string> warnings;
+        const std::string decoded = DecodeAwkStringEscapes(assignment.text, warnings);
+        for (const std::string& warning : warnings) {
+            m_context.ErrorText(std::string(kAwkName) + ": warning: " + warning + "\n");
+        }
         m_globals[kSlotFS].kind = Variable::Kind::Scalar;
         m_globals[kSlotFS].scalar = Value::FromString(decoded);
         return;
     }
-    const size_t equals = decoded.find('=');
-    const std::string name = decoded.substr(0, equals);
+    // -v name=value: the name checked as it was written (gawk: `-v
+    // 'a\x41=1'' names no variable), only the value's escapes decoded.
+    const size_t equals = assignment.text.find('=');
+    const std::string name = assignment.text.substr(0, equals);
     if (!IsAwkIdentifier(name)) {
         throw AwkFatal("`" + name + "' is not a legal variable name", /*withLocation=*/false);
     }
-    AssignName(name, Value::FromInput(decoded.substr(equals + 1)));
+    std::vector<std::string> warnings;
+    const std::string decoded = DecodeAwkStringEscapes(
+        std::string_view(assignment.text).substr(equals + 1), warnings);
+    for (const std::string& warning : warnings) {
+        m_context.ErrorText(std::string(kAwkName) + ": warning: " + warning + "\n");
+    }
+    AssignName(name, Value::FromInput(decoded));
 }
 
 void Interpreter::AssignName(const std::string& name, const Value& value) {
     AssignSlot(SlotOf(name), name, value);
+}
+
+// --- literal regexes, before anything runs ---
+
+void Interpreter::CompileRegexesExpr(const Expr& expr) {
+    if (m_regexCompileFailed) {
+        return;
+    }
+    if (expr.kind == ExprKind::Regex) {
+        m_position = expr.position;
+        std::vector<std::string> warnings;
+        const std::string translated = TranslateAwkRegex(expr.text, warnings);
+        RegexWarnings(warnings, /*atRuntime=*/false);
+        std::string error;
+        expr.compiledRegex = Regex::Compile(translated, RegexOptions{RegexSyntax::Extended}, error);
+        if (!expr.compiledRegex) {
+            m_context.ErrorText(FormatAwkError(SourceNameAt(expr.position), expr.position.line,
+                                               error + ": /" + AwkRegexAsWritten(expr.text) + "/"));
+            m_regexCompileFailed = true;
+            return;
+        }
+    }
+    for (const ExprPtr& operand : expr.operands) {
+        CompileRegexesExpr(*operand);
+    }
+    if (expr.target) {
+        CompileRegexesExpr(*expr.target);
+    }
+}
+
+void Interpreter::CompileRegexesStmt(const Stmt& stmt) {
+    if (m_regexCompileFailed) {
+        return;
+    }
+    switch (stmt.kind) {
+        case StmtKind::For:
+            // Its parts as written: init, condition, update, body.
+            if (stmt.init) {
+                CompileRegexesStmt(*stmt.init);
+            }
+            if (stmt.expr) {
+                CompileRegexesExpr(*stmt.expr);
+            }
+            if (stmt.update) {
+                CompileRegexesStmt(*stmt.update);
+            }
+            if (stmt.body) {
+                CompileRegexesStmt(*stmt.body);
+            }
+            return;
+        case StmtKind::Do:
+            // The body before the condition, as it runs.
+            if (stmt.body) {
+                CompileRegexesStmt(*stmt.body);
+            }
+            if (stmt.expr) {
+                CompileRegexesExpr(*stmt.expr);
+            }
+            return;
+        default:
+            break;
+    }
+    if (stmt.expr) {
+        CompileRegexesExpr(*stmt.expr);
+    }
+    for (const ExprPtr& argument : stmt.args) {
+        CompileRegexesExpr(*argument);
+    }
+    if (stmt.redirectTarget) {
+        CompileRegexesExpr(*stmt.redirectTarget);
+    }
+    if (stmt.body) {
+        CompileRegexesStmt(*stmt.body);
+    }
+    if (stmt.elseBody) {
+        CompileRegexesStmt(*stmt.elseBody);
+    }
+    for (const StmtPtr& statement : stmt.statements) {
+        CompileRegexesStmt(*statement);
+    }
+}
+
+bool Interpreter::CompileLiteralRegexes() {
+    for (const Item& item : m_program->items) {
+        if (item.kind == ItemKind::Function) {
+            CompileRegexesStmt(*m_program->functions[static_cast<size_t>(item.functionIndex)].body);
+        } else {
+            if (item.pattern) {
+                CompileRegexesExpr(*item.pattern);
+            }
+            if (item.rangeEnd) {
+                CompileRegexesExpr(*item.rangeEnd);
+            }
+            if (item.action) {
+                CompileRegexesStmt(*item.action);
+            }
+        }
+        if (m_regexCompileFailed) {
+            return false;
+        }
+    }
+    return true;
 }
 
 // --- names and values ---
@@ -376,14 +486,10 @@ Value Interpreter::ValueOf(const Expr& expr) {
         case ExprKind::Index:
             return ArrayRef(expr.slot, expr.text).GetOrCreate(Subscript(expr.operands));
         case ExprKind::In: {
-            const Variable& variable = GlobalVariable(expr.slot);
-            if (variable.kind == Variable::Kind::Scalar) {
-                throw AwkFatal("attempt to use scalar `" + expr.text + "' as an array");
-            }
-            if (variable.kind != Variable::Kind::Array) {
-                return Value::FromNumber(0);   // an untyped array: no element yet
-            }
-            return Value::FromNumber(variable.array->Contains(Subscript(expr.operands)) ? 1 : 0);
+            // `k in x' types an untyped x as an array, as using it any other
+            // way types it a scalar.
+            AwkArray& array = ArrayRef(expr.slot, expr.text);
+            return Value::FromNumber(array.Contains(Subscript(expr.operands)) ? 1 : 0);
         }
         case ExprKind::Unary: {
             const Value operand = ValueOf(*expr.operands[0]);
@@ -407,6 +513,15 @@ Value Interpreter::ValueOf(const Expr& expr) {
                         return Value::FromNumber(1);
                     }
                     return Value::FromNumber(ValueOf(*expr.operands[1]).ToBoolean() ? 1 : 0);
+                case ExprOp::Match:
+                case ExprOp::NoMatch: {
+                    // The left operand a string, the right a regex -- a
+                    // dynamic one evaluated as a value, a literal taken whole.
+                    const std::string left =
+                        ValueOf(*expr.operands[0]).ToString(SpecialString(kSlotCONVFMT));
+                    const bool matched = MatchRegex(*expr.operands[1], left);
+                    return Value::FromNumber(matched == (expr.op == ExprOp::Match) ? 1 : 0);
+                }
                 default: break;
             }
             const Value left = ValueOf(*expr.operands[0]);
@@ -433,9 +548,6 @@ Value Interpreter::ValueOf(const Expr& expr) {
                 case ExprOp::Concat:
                     return Value::FromString(left.ToString(SpecialString(kSlotCONVFMT)) +
                                               right.ToString(SpecialString(kSlotCONVFMT)));
-                case ExprOp::Match:
-                case ExprOp::NoMatch:
-                    throw AwkFatal("regular expressions are not implemented yet");
                 default: {
                     const int result = CompareValues(left, right, SpecialString(kSlotCONVFMT));
                     if (result == kAwkUnordered) {
@@ -489,7 +601,11 @@ Value Interpreter::ValueOf(const Expr& expr) {
             break;
         }
         case ExprKind::Regex:
-            throw AwkFatal("regular expressions are not implemented yet");
+            // A regex on its own, anywhere in an expression: $0 matched
+            // against it, whether parenthesized or not (a parenthesized one
+            // only stops `~' from taking it as itself).
+            return Value::FromNumber(
+                MatchRegexLiteral(expr, m_fields.Record(SpecialString(kSlotCONVFMT))) ? 1 : 0);
         case ExprKind::Call:
             return CallFunction(expr);
         case ExprKind::BuiltinCall:
@@ -505,6 +621,9 @@ Value Interpreter::ValueOf(const Expr& expr) {
 int Interpreter::Run() {
     try {
         Prepare();
+        if (!CompileLiteralRegexes()) {
+            return 1;   // the error reported, nothing runs
+        }
         RunBeginItems();
         RunMainLoop();
         RunEndItems();
@@ -775,9 +894,6 @@ bool Interpreter::MatchesPattern(const Item& item, size_t itemIndex) {
 bool Interpreter::NextMainRecord() {
     while (true) {
         if (m_reader) {
-            if (SpecialString(kSlotRS).empty()) {
-                throw AwkFatal("RS = \"\" (paragraph mode) is not implemented yet");
-            }
             std::string record;
             const RecordReadResult result = m_reader->Next(SpecialString(kSlotRS), record);
             if (result == RecordReadResult::Record) {
@@ -785,7 +901,8 @@ bool Interpreter::NextMainRecord() {
                     Value::FromNumber(m_globals[kSlotNR].scalar.ToNumber() + 1);
                 m_globals[kSlotFNR].scalar =
                     Value::FromNumber(m_globals[kSlotFNR].scalar.ToNumber() + 1);
-                m_fields.SetRecord(std::move(record), SpecialString(kSlotFS), false);
+                m_fields.SetRecord(std::move(record), SpecialString(kSlotFS),
+                                   SpecialString(kSlotRS).empty());
                 return true;
             }
             if (result == RecordReadResult::Stopped) {
@@ -873,9 +990,82 @@ void Interpreter::Output(const Stmt& print, const std::string& text) {
 
 void Interpreter::SplitRecord(std::string_view record, const std::string& fs, bool paragraphMode,
                               std::vector<std::string>& fields) {
-    if (!SplitAwkFields(record, fs, fields)) {
-        throw AwkFatal("regular expression field separators are not implemented yet");
+    if (fs.size() >= 2) {
+        // FS of two or more bytes: an ERE, the newline not also a separator
+        // in paragraph mode (gawk leaves the cutting to the regex).
+        std::vector<std::string> warnings;
+        std::string error;
+        std::shared_ptr<const Regex> regex = m_regexCache.Get(fs, warnings, error);
+        RegexWarnings(warnings, /*atRuntime=*/true);
+        if (!regex) {
+            throw AwkFatal("invalid regexp: " + error + ": /" + AwkRegexAsWritten(fs) + "/");
+        }
+        SplitByRegex(record, *regex, fields);
+        return;
     }
+    if (paragraphMode) {
+        // RS = "": the record's lines are the separator's pieces, each split
+        // by FS on its own -- with FS the blank, the lines' words; with FS
+        // the empty string, each line whole.
+        fields.clear();
+        size_t start = 0;
+        for (;;) {
+            const size_t newline = record.find('\n', start);
+            const size_t end = newline == std::string_view::npos ? record.size() : newline;
+            std::vector<std::string> pieceFields;
+            SplitAwkFields(record.substr(start, end - start), fs, pieceFields);
+            fields.insert(fields.end(), pieceFields.begin(), pieceFields.end());
+            if (newline == std::string_view::npos) {
+                return;
+            }
+            start = newline + 1;
+        }
+    }
+    SplitAwkFields(record, fs, fields);
+}
+
+// --- regexes ---
+
+bool Interpreter::MatchRegexLiteral(const Expr& regex, const std::string& text) {
+    RegexMatch match;
+    return regex.compiledRegex->Search(text, 0, match);
+}
+
+bool Interpreter::MatchRegex(const Expr& regex, const std::string& text) {
+    if (regex.kind == ExprKind::Regex && !regex.parenthesized) {
+        return MatchRegexLiteral(regex, text);
+    }
+    // A dynamic regex: the operand's value a string, compiled once. A
+    // parenthesized regex literal comes here too: gawk takes it as the
+    // value of `($0 ~ /re/)', a number whose text is then the regex.
+    const std::string value = ValueOf(regex).ToString(SpecialString(kSlotCONVFMT));
+    std::vector<std::string> warnings;
+    std::string error;
+    std::shared_ptr<const Regex> compiled = m_regexCache.Get(value, warnings, error);
+    RegexWarnings(warnings, /*atRuntime=*/true);
+    if (!compiled) {
+        throw AwkFatal("invalid regexp: " + error + ": /" + AwkRegexAsWritten(value) + "/");
+    }
+    RegexMatch match;
+    return compiled->Search(text, 0, match);
+}
+
+void Interpreter::RegexWarnings(const std::vector<std::string>& messages, bool atRuntime) {
+    for (const std::string& message : messages) {
+        if (!m_regexWarningsGiven.insert(message).second) {
+            continue;   // gawk reports each escape warning once a run
+        }
+        if (atRuntime) {
+            RuntimeWarning(message);
+        } else {
+            m_context.ErrorText(FormatAwkWarning(AwkWarning{SourceNameAt(m_position),
+                                                            m_position.line, message}));
+        }
+    }
+}
+
+void Interpreter::RuntimeWarning(const std::string& message) {
+    m_context.ErrorText(LocatedPrefix() + "warning: " + message + "\n");
 }
 
 // --- the hooks awk's later tasks fill ---
@@ -894,20 +1084,27 @@ Value Interpreter::EvaluateGetline(const Expr& expr) {
 
 // --- errors and stopping ---
 
+std::string Interpreter::SourceNameAt(const SourcePosition& position) {
+    return position.source >= 0 && static_cast<size_t>(position.source) < m_program->sources.size()
+               ? m_program->sources[static_cast<size_t>(position.source)].name
+               : std::string(kCommandLineSourceName);
+}
+
+std::string Interpreter::LocatedPrefix() {
+    std::string text = AwkLocationPrefix(SourceNameAt(m_position), m_position.line);
+    if (m_globals[kSlotFNR].scalar.ToNumber() > 0) {
+        // A record was being worked on: gawk names the file and its number
+        // in it.
+        text += "(FILENAME=" + m_globals[kSlotFILENAME].scalar.ToString(SpecialString(kSlotCONVFMT)) +
+                " FNR=" + m_globals[kSlotFNR].scalar.ToString(SpecialString(kSlotCONVFMT)) + ") ";
+    }
+    return text;
+}
+
 void Interpreter::ReportFatal(const AwkFatal& error) {
     std::string text;
     if (error.WithLocation()) {
-        const AwkSource& source =
-            m_position.source >= 0 && static_cast<size_t>(m_position.source) < m_program->sources.size()
-                ? m_program->sources[static_cast<size_t>(m_position.source)]
-                : AwkSource{kCommandLineSourceName, ""};
-        text = AwkLocationPrefix(source.name, m_position.line);
-        if (m_globals[kSlotFNR].scalar.ToNumber() > 0) {
-            // A record was being worked on: gawk names the file and its
-            // number in it.
-            text += "(FILENAME=" + m_globals[kSlotFILENAME].scalar.ToString(SpecialString(kSlotCONVFMT)) +
-                    " FNR=" + m_globals[kSlotFNR].scalar.ToString(SpecialString(kSlotCONVFMT)) + ") ";
-        }
+        text = LocatedPrefix();
     } else {
         text = std::string(kAwkName) + ": ";
     }

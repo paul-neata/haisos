@@ -1,12 +1,15 @@
 #include <gtest/gtest.h>
+#include <chrono>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 #include "BuiltinCommandsFixture.h"
 #include "BuiltinCommand.h"
 #include "interfaces/IFileDescriptor.h"
 #include "interfaces/IHaisosOS.h"
 #include "interfaces/IProcess.h"
+#include "src/components/Filesystem/FilesystemUtils.h"
 #include "src/components/libheaders/ExitCodes.h"
 
 namespace Haisos {
@@ -20,6 +23,7 @@ protected:
         BuiltinCommandsTest::SetUp();
         WriteFile("/abc.txt", "a b c\nd e f\n");
         WriteFile("/data.csv", "x,1,2.5\ny,2,3.25\nz,3,4\n");
+        WriteFile("/para.txt", "p1 l1\np1 l2\n\n\n\np2 l1\n\n");
     }
 
     // Runs /bin/awk with |stdIn| as its standard input and files as its
@@ -121,6 +125,12 @@ TEST_F(AwkRunTest, DashV) {
     EXPECT_EQ(captured.out, "q\n");
     EXPECT_EQ(captured.err, "awk: warning: escape sequence `\\q' treated as plain `q'\n");
     EXPECT_EQ(captured.status, 0);
+
+    // The name is checked as it was written: its own escapes are not decoded.
+    captured = RunCaptured("awk", {"-v", "a\\x41=1", "BEGIN { }"});
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "awk: fatal: `a\\x41' is not a legal variable name\n");
+    EXPECT_EQ(captured.status, 2);
 }
 
 TEST_F(AwkRunTest, FieldAssignment) {
@@ -539,6 +549,14 @@ TEST_F(AwkRunTest, RuntimeErrors) {
               "awk: cmd. line:1: fatal: attempt to use scalar `x' as an array\n");
     EXPECT_EQ(captured.status, 2);
 
+    // `k in x' types x an array (using it any other way types it scalar),
+    // so the later assignment is the scalar-context error.
+    captured = RunCaptured("awk", {"BEGIN { if (1 in x) ; x = 1 }"});
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err,
+              "awk: cmd. line:1: fatal: attempt to use array `x' in a scalar context\n");
+    EXPECT_EQ(captured.status, 2);
+
     captured = RunCaptured("awk", {"BEGIN { print $(-1) }"});
     EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: attempt to access field -1\n");
     EXPECT_EQ(captured.status, 2);
@@ -589,10 +607,7 @@ TEST_F(AwkRunTest, RuntimeErrors) {
 
 TEST_F(AwkRunTest, NotYetAvailable) {
     // Each unimplemented part fails with its own fatal error.
-    Captured captured = RunCaptured("awk", {"BEGIN { if (\"a\" ~ /a/) print 1 }"});
-    EXPECT_EQ(captured.out, "");
-    EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: regular expressions are not implemented yet\n");
-    EXPECT_EQ(captured.status, 2);
+    Captured captured = RunCaptured("awk", {"BEGIN { print length(\"ab\") }"});
 
     captured = RunCaptured("awk", {"BEGIN { print length(\"ab\") }"});
     EXPECT_EQ(captured.err, "awk: cmd. line:1: fatal: function `length' is not implemented yet\n");
@@ -613,20 +628,298 @@ TEST_F(AwkRunTest, NotYetAvailable) {
 
 // --- stopping ---
 
+// --- regexes ---
+
+TEST_F(AwkRunTest, RegexPatterns) {
+    // Literal patterns: matching, negated, and as an operand of ~; a regex
+    // on its own is $0 matched against it.
+    Captured captured = RunCaptured("awk",
+        {"/b/ { print \"lit\" } !/z/ { print \"neg\" } $0 ~ /c$/ { print \"end\" } "
+         "{ x = /a/; print x + 1 }"}, "abc\n");
+    EXPECT_EQ(captured.out, "lit\nneg\nend\n2\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    // A regex range and a range whose end never comes, in one run.
+    captured = RunCaptured("awk",
+        {"/b/,/e/ { print \"r\", $1 } $1 == \"d\", 0", "/abc.txt"});
+    EXPECT_EQ(captured.out, "r a\nr d\nd e f\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    // A slash in the pattern, written escaped and inside a bracket.
+    captured = RunCaptured("awk", {"/\\// { print \"slash\" }"}, "a/b\n");
+    EXPECT_EQ(captured.out, "slash\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    captured = RunCaptured("awk", {"/a[/]b/"}, "a/b\n");
+    EXPECT_EQ(captured.out, "a/b\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    // In BEGIN $0 is empty, so a regex alone is 0 there.
+    captured = RunCaptured("awk", {"BEGIN { print /a/ } { print /a/ }"}, "abc\n");
+    EXPECT_EQ(captured.out, "0\n1\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    // A parenthesized regex is the value of `($0 ~ /re/)': a number whose
+    // text is then a dynamic regex (so "1" matches it, $0 does not).
+    captured = RunCaptured("awk", {"{ print ($0 ~ (/a/)), (\"1\" ~ (/a/)) }"}, "a\n");
+    EXPECT_EQ(captured.out, "0 1\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+}
+
+TEST_F(AwkRunTest, RegexEscapes) {
+    // An octal escape's byte is the metacharacter it spells.
+    Captured captured = RunCaptured("awk", {"/a\\056b/ { print \"dot\" }"}, "axb\n");
+    EXPECT_EQ(captured.out, "dot\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    // An unknown escape matches the plain byte, with gawk's warning.
+    captured = RunCaptured("awk", {"/a\\wb/ { print \"w\" }"}, "awb\n");
+    EXPECT_EQ(captured.out, "w\n");
+    EXPECT_EQ(captured.err,
+              "awk: cmd. line:1: warning: regexp escape sequence `\\w' is not a known regexp "
+              "operator\n");
+    EXPECT_EQ(captured.status, 0);
+
+    // A ']' member of a bracket expression.
+    captured = RunCaptured("awk", {"/a[\\]]b/ { print \"b\" }"}, "a]b\n");
+    EXPECT_EQ(captured.out, "b\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    // Intervals are ERE, and match literally only when they match.
+    captured = RunCaptured("awk", {"/a{2}b/ { print \"i\" }"}, "aab\n");
+    EXPECT_EQ(captured.out, "i\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+    captured = RunCaptured("awk", {"/a{2}b/ { print \"i\" }"}, "a{2}b\n");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    // A tab escape matches a real tab.
+    captured = RunCaptured("awk", {"/a\\tb/ { print \"t\" }"}, "a\tb\n");
+    EXPECT_EQ(captured.out, "t\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    // The same escape is warned about once per run, whatever meets it.
+    captured = RunCaptured("awk", {"/b\\w/; /d\\w/"}, "");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err,
+              "awk: cmd. line:1: warning: regexp escape sequence `\\w' is not a known regexp "
+              "operator\n");
+    EXPECT_EQ(captured.status, 0);
+}
+
+TEST_F(AwkRunTest, DynamicRegexes) {
+    // A string is a dynamic regex; its escapes are decoded by the string,
+    // then translated for the engine, with the warning at the record.
+    Captured captured = RunCaptured("awk", {"{ if ($0 ~ \"a\\\\wb\") print \"m\" }"}, "awb\n");
+    EXPECT_EQ(captured.out, "m\n");
+    EXPECT_EQ(captured.err,
+              "awk: cmd. line:1: (FILENAME=- FNR=1) warning: regexp escape sequence `\\w' is "
+              "not a known regexp operator\n");
+    EXPECT_EQ(captured.status, 0);
+
+    captured = RunCaptured("awk",
+        {"BEGIN { r = \"^a\" } $0 ~ r { n++ } END { print n }"}, "ab\nab\n");
+    EXPECT_EQ(captured.out, "2\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    // The same dynamic regex warns once over two records.
+    captured = RunCaptured("awk",
+        {"{ if ($0 ~ \"a\\\\wb\") n++ } END { print n }"}, "awb\nawb\n");
+    EXPECT_EQ(captured.out, "2\n");
+    EXPECT_EQ(captured.err,
+              "awk: cmd. line:1: (FILENAME=- FNR=1) warning: regexp escape sequence `\\w' is "
+              "not a known regexp operator\n");
+    EXPECT_EQ(captured.status, 0);
+
+    // A literal's warning covers the same escape in a dynamic regex.
+    captured = RunCaptured("awk",
+        {"/b\\w/ { } { r = \"d\\\\w\" NR; if ($0 ~ r) n++ } END { print n + 0 }"},
+        "x\ny\n");
+    EXPECT_EQ(captured.out, "0\n");
+    EXPECT_EQ(captured.err,
+              "awk: cmd. line:1: warning: regexp escape sequence `\\w' is not a known regexp "
+              "operator\n");
+    EXPECT_EQ(captured.status, 0);
+
+    // ~ is a search, not a match of the whole; a metacharacter in a dynamic
+    // regex is the character it matches, not an anchor or a repeat.
+    captured = RunCaptured("awk",
+        {"{ print (\"a+\" ~ \"a+\"), (\"aa\" ~ \"a+\"), (\"b\" !~ \"a\"), "
+         "(\"+\" ~ \"a+\") }"}, "x\n");
+    EXPECT_EQ(captured.out, "1 1 1 0\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+}
+
+TEST_F(AwkRunTest, RegexErrors) {
+    // A dynamic regex that does not compile: a fatal at the record.
+    Captured captured = RunCaptured("awk", {"$0 ~ \"a(\""}, "ab\n");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err,
+              "awk: cmd. line:1: (FILENAME=- FNR=1) fatal: invalid regexp: "
+              "Unmatched ( or \\(: /a(/\n");
+    EXPECT_EQ(captured.status, 2);
+
+    // A literal one: reported before anything runs, status 1, only the
+    // first such regex (its text as it was written).
+    captured = RunCaptured("awk", {"/a(/"}, "ab\n");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "awk: cmd. line:1: error: Unmatched ( or \\(: /a(/\n");
+    EXPECT_EQ(captured.status, 1);
+
+    captured = RunCaptured("awk", {"/a(/; /b(/"}, "ab\n");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "awk: cmd. line:1: error: Unmatched ( or \\(: /a(/\n");
+    EXPECT_EQ(captured.status, 1);
+
+    captured = RunCaptured("awk", {"/a\\/(/"}, "ab\n");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "awk: cmd. line:1: error: Unmatched ( or \\(: /a\\/(/\n");
+    EXPECT_EQ(captured.status, 1);
+
+    // Nothing runs, BEGIN included.
+    captured = RunCaptured("awk", {"BEGIN { print \"x\" } /a(/"}, "ab\n");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err, "awk: cmd. line:1: error: Unmatched ( or \\(: /a(/\n");
+    EXPECT_EQ(captured.status, 1);
+
+    // A trailing backslash in a dynamic regex, reported the same way.
+    captured = RunCaptured("awk", {"{ r = \"a\\\\\"; print ($0 ~ r) }"}, "a\n");
+    EXPECT_EQ(captured.out, "");
+    EXPECT_EQ(captured.err,
+              "awk: cmd. line:1: (FILENAME=- FNR=1) fatal: invalid regexp: "
+              "Trailing backslash: /a\\/\n");
+    EXPECT_EQ(captured.status, 2);
+}
+
+TEST_F(AwkRunTest, RegexFieldSeparators) {
+    // -F of two or more bytes is an ERE.
+    Captured captured = RunCaptured("awk", {"-F", "[0-9]+", "{ print NF, $3 }"}, "a1b22c\n");
+    EXPECT_EQ(captured.out, "3 c\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    captured = RunCaptured("awk", {"-F", "[ ]", "{ print NF }"}, "a  b\n");
+    EXPECT_EQ(captured.out, "3\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    captured = RunCaptured("awk", {"BEGIN { FS = \", *\" } { print $2 \"|\" $3 }"}, "x, y,z\n");
+    EXPECT_EQ(captured.out, "y|z\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    captured = RunCaptured("awk", {"-F", ":+", "{ print NF }"}, ":a\n");
+    EXPECT_EQ(captured.out, "2\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    captured = RunCaptured("awk", {"-F", " +", "{ print NF, \"[\" $1 \"]\" }"}, " a b \n");
+    EXPECT_EQ(captured.out, "4 []\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    // An empty match never separates.
+    captured = RunCaptured("awk", {"-F", "x*", "{ print NF }"}, "abc\n");
+    EXPECT_EQ(captured.out, "1\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+}
+
+TEST_F(AwkRunTest, ParagraphMode) {
+    // RS = "": records are paragraphs, the newline a field separator for the
+    // one-byte FS.
+    Captured captured = RunCaptured("awk",
+        {"BEGIN { RS = \"\" } { print NR \": \" $1 \"|\" $NF \"|\" NF }", "/para.txt"});
+    EXPECT_EQ(captured.out, "1: p1|l2|4\n2: p2|l1|2\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    captured = RunCaptured("awk",
+        {"BEGIN { RS = \"\"; FS = \"x\" } { print NF; print $2 }", "/para.txt"});
+    EXPECT_EQ(captured.out, "2\np1 l2\n1\n\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    captured = RunCaptured("awk",
+        {"BEGIN { RS = \"\"; FS = \"\" } { print NF \": \" $1 }", "/para.txt"});
+    EXPECT_EQ(captured.out, "2: p1 l1\n1: p2 l1\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    // A regex FS cuts the whole record: the newline separates only if the
+    // regex matches it.
+    captured = RunCaptured("awk",
+        {"BEGIN { RS = \"\"; FS = \":+\" } { print NF \"|\" $2 }"}, "a:b\nc\n\nd\n");
+    EXPECT_EQ(captured.out, "2|b\nc\n1|\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    // Leading blank lines skipped, a line of blanks kept in its record.
+    captured = RunCaptured("awk", {"BEGIN { RS = \"\" } { print NR \": \" $0 }"},
+                           "\n\na\nb\n\n\nc");
+    EXPECT_EQ(captured.out, "1: a\nb\n2: c\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+
+    captured = RunCaptured("awk", {"BEGIN { RS = \"\" } { print NR \": \" $0 }"},
+                           "a\n \nb\n\nc\n");
+    EXPECT_EQ(captured.out, "1: a\n \nb\n2: c\n");
+    EXPECT_EQ(captured.err, "");
+    EXPECT_EQ(captured.status, 0);
+}
+
+// --- stopping ---
+
 TEST_F(AwkRunTest, StopsPromptly) {
-    // Blocked on its input's next record.
+    // Blocked on its input's next record. 3000 lines are fed first, so the
+    // program's own output shows it runs (past its 4096-byte stdout buffer
+    // and into /out); the stop then lands while it waits on the pipe.
     auto ends = os->GetPipeService()->CreatePipe();
     auto process = StartAwk({"{ print }"}, ends.readEnd);
     ASSERT_NE(process, nullptr);
+    std::string fed;
+    for (int i = 0; i < 3000; ++i) {
+        fed += "y\n";
+    }
+    ASSERT_EQ(ends.writeEnd->Write(fed.data(), fed.size()),
+              static_cast<ssize_t>(fed.size()));
+    const auto waited = std::chrono::steady_clock::now()
+        + std::chrono::milliseconds(kWaitMs);
+    std::string out;
+    while (!ReadWholeFile(*streams, "/out", out) || out.empty()) {
+        ASSERT_LT(std::chrono::steady_clock::now(), waited) << "awk never wrote anything";
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
     process->TriggerStop();
     EXPECT_TRUE(process->WaitToFinish(1000));
     ends.writeEnd.reset();
     ASSERT_TRUE(process->ExitCode().has_value());
     EXPECT_EQ(process->ExitCode().value(), 143);
 
-    // An endless loop ends within the second as well.
-    process = StartAwk({"BEGIN { while (1) x++ }"}, nullptr);
+    // An endless loop ends within the second as well: the same poll first,
+    // so the stop is asked while the loop runs, not before it began.
+    process = StartAwk({"BEGIN { for (i = 0; i < 3000; i++) print \"y\"; while (1) x++ }"},
+                       nullptr);
     ASSERT_NE(process, nullptr);
+    const auto looped = std::chrono::steady_clock::now()
+        + std::chrono::milliseconds(kWaitMs);
+    while (!ReadWholeFile(*streams, "/out", out) || out.empty()) {
+        ASSERT_LT(std::chrono::steady_clock::now(), looped) << "awk never wrote anything";
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
     process->TriggerStop();
     EXPECT_TRUE(process->WaitToFinish(1000));
     ASSERT_TRUE(process->ExitCode().has_value());

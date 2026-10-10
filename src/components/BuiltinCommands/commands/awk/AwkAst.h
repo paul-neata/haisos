@@ -6,6 +6,10 @@
 
 #include "commands/awk/AwkError.h"
 
+namespace Haisos {
+class Regex;
+}
+
 namespace Haisos::Awk {
 
 // Where a node starts: the index of its AwkSource in Program::sources, and
@@ -66,6 +70,9 @@ struct Expr {
     // global slot it stored the name under. Mutable: the program is held
     // const; the dump ignores this.
     mutable int slot = -1;
+    // Regex: the interpreter's compiled form, filled before anything runs
+    // (mutable as slot; the dump ignores this).
+    mutable std::shared_ptr<const Regex> compiledRegex;
 };
 
 // An lvalue: Variable, Field or Index -- never a parenthesized one, as

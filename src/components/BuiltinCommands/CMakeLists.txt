@@ -23,6 +23,7 @@ add_library(BuiltinCommands STATIC
     commands/awk/AwkInvocation.cpp
     commands/awk/AwkLexer.cpp
     commands/awk/AwkParser.cpp
+    commands/awk/AwkRegex.cpp
     commands/awk/AwkValue.cpp
     commands/basename/Basename.cpp
     commands/cat/Cat.cpp

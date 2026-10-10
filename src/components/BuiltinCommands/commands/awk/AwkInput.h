@@ -18,12 +18,22 @@ public:
     // uses only RS's first byte). The separator is not part of the record;
     // a last record without one still counts; an input ending right after a
     // separator has no empty record after it ("a\n\n" gives "a" and "").
-    // |rs| == "" (paragraph mode) is awk--records' (until then the caller
-    // never passes it). Stopped when context.StopRequested() or a read
-    // returned kIOInterrupted; Error on any other negative read.
+    // Stopped when context.StopRequested() or a read returned kIOInterrupted;
+    // Error on any other negative read.
+    //
+    // |rs| == "" is paragraph mode: the record is a paragraph, its separator
+    // a run of two or more newlines (a single newline is content, so a line
+    // of blanks still belongs to its record); leading runs are skipped, and
+    // at the end of the input the last record's trailing newlines are
+    // stripped, with no empty record after them.
     RecordReadResult Next(const std::string& rs, std::string& record);
 
 private:
+    RecordReadResult NextParagraph(std::string& record);  // rs == ""
+    // One more block appended to the buffer (m_eof set when the input is at
+    // its end). False when the read was stopped (|stopped|) or failed.
+    bool ReadMoreBlock(bool& stopped);
+
     BuiltinContext& m_context;
     std::shared_ptr<IFileDescriptor> m_input;
     // What was read past the record last returned: the bytes of the records

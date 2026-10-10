@@ -3,12 +3,14 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include "BuiltinCommand.h"
 #include "commands/awk/AwkAst.h"
 #include "commands/awk/AwkFields.h"
 #include "commands/awk/AwkInput.h"
 #include "commands/awk/AwkInvocation.h"
+#include "commands/awk/AwkRegex.h"
 #include "commands/awk/AwkValue.h"
 
 namespace Haisos::Awk {
@@ -59,6 +61,9 @@ private:
     void ResolveStmt(const Stmt& stmt);
     void ApplyPreAssignment(const AwkPreAssignment& assignment);
     void AssignName(const std::string& name, const Value& value);  // -v and var=value
+    bool CompileLiteralRegexes();            // every /re/ in the program, before anything runs
+    void CompileRegexesExpr(const Expr& expr);   // the walk's one expression
+    void CompileRegexesStmt(const Stmt& stmt);   // the walk's one statement
 
     // --- running ---
     Value ValueOf(const Expr& expr);         // an expression's value
@@ -96,6 +101,16 @@ private:
     void SplitRecord(std::string_view record, const std::string& fs, bool paragraphMode,
                      std::vector<std::string>& fields);       // the FieldStore's Splitter
 
+    // --- regexes ---
+    bool MatchRegex(const Expr& regex, const std::string& text);  // a literal or dynamic regex against text
+    bool MatchRegexLiteral(const Expr& regex, const std::string& text);  // /re/ itself, compiled already
+    // The escape warnings of a regex, once per message per run: reported
+    // through FormatAwkWarning before the run, at the run's location in it.
+    void RegexWarnings(const std::vector<std::string>& messages, bool atRuntime);
+    // A run-time warning at the place being run (the location prefix, the
+    // FILENAME part past the first record); awk--functions reuses it.
+    void RuntimeWarning(const std::string& message);
+
     // --- the hooks awk's later tasks fill ---
     Value CallBuiltin(const Expr& call);     // AwkFatal here; awk--functions implements
     Value CallFunction(const Expr& call);    // AwkFatal here; awk--functions implements
@@ -104,6 +119,8 @@ private:
     // --- errors and stopping ---
     void ReportFatal(const AwkFatal& error); // gawk's "fatal:" line, status 2
     void ThrowIfStopped();                   // throws Stopped when a stop was asked for
+    std::string LocatedPrefix();             // "awk: <source>:<line>[: (FILENAME=f FNR=n) ]"
+    std::string SourceNameAt(const SourcePosition& position); // its source's name
 
     BuiltinContext& m_context;
     std::shared_ptr<const Program> m_program;
@@ -117,6 +134,9 @@ private:
     std::shared_ptr<RecordReader> m_reader;  // the current input; null between operands
     intmax_t m_argvIndex = 1;                // the next ARGV element to consider
     bool m_openedInput = false;              // an input was opened (else stdin is read once)
+    AwkRegexCache m_regexCache;              // the program's dynamic regexes, by their awk text
+    std::unordered_set<std::string> m_regexWarningsGiven;  // the escape warnings already reported
+    bool m_regexCompileFailed = false;       // a literal regex did not compile: the walk stopped
     intmax_t m_exitCode = 0;
     bool m_exitFromBegin = false;            // exit in BEGIN: the input is skipped
 };

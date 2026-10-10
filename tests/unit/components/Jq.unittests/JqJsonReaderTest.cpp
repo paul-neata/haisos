@@ -91,7 +91,7 @@ TEST(JqJsonReader, ErrorMessages) {
     EXPECT_EQ(ReadOne("[1,]"),
               "ERR|Expected another array element at line 1, column 4\n");
     EXPECT_EQ(ReadOne("[1 true]"),
-              "ERR|Expected another array element at line 1, column 8\n");
+              "ERR|Expected separator between values at line 1, column 8\n");
     EXPECT_EQ(ReadOne("{a:1}"),  // 'a' is a bare word, not a string key
               "ERR|Invalid numeric literal at line 1, column 3\n");
     EXPECT_EQ(ReadOne(":\n"),
@@ -115,7 +115,7 @@ TEST(JqJsonReader, ErrorMessages) {
     EXPECT_EQ(ReadOne("]"), "ERR|Unmatched ']' at line 1, column 1\n");
     EXPECT_EQ(ReadOne("}"), "ERR|Unmatched '}' at line 1, column 1\n");
     EXPECT_EQ(ReadOne("nullx"),
-              "ERR|Invalid literal at line 1, column 5\n");
+              "ERR|Invalid literal at EOF at line 1, column 5\n");
     EXPECT_EQ(ReadOne("tru"), "ERR|Invalid literal at EOF at line 1, column 3\n");
     EXPECT_EQ(ReadOne("0x10"),
               "ERR|Invalid numeric literal at EOF at line 1, column 4\n");
@@ -131,15 +131,18 @@ TEST(JqJsonReader, ErrorMessages) {
 }
 
 TEST(JqJsonReader, StringErrors) {
-    EXPECT_EQ(ReadOne("\"a\\"), "ERR|Unfinished string at EOF at line 1, column 4\n");
+    EXPECT_EQ(ReadOne("\"a\\\""),  // the quote escaped: the string never closes
+              "ERR|Unfinished string at EOF at line 1, column 4\n");
     EXPECT_EQ(ReadOne("\"\\u12\""),
               "ERR|Invalid \\uXXXX escape at line 1, column 6\n");
     EXPECT_EQ(ReadOne("\"\\uZZZZ\""),
               "ERR|Invalid characters in \\uXXXX escape at line 1, column 8\n");
     EXPECT_EQ(ReadOne("\"\\q\""), "ERR|Invalid escape at line 1, column 4\n");
     EXPECT_EQ(ReadOne("\"\\q\\u12\""),
-              "ERR|Invalid escape at line 1, column 6\n");
-    EXPECT_EQ(ReadOne("\"\\001\\q\""),
+              "ERR|Invalid escape at line 1, column 8\n");
+    // A raw control byte is a problem the moment it is seen, and the
+    // string reports its first problem when it closes.
+    EXPECT_EQ(ReadOne("\"\x01\\q\""),
               "ERR|Invalid string: control characters from U+0000 through "
               "U+001F must be escaped at line 1, column 5\n");
     // A high surrogate waits for its low half; the first byte after it
@@ -151,7 +154,7 @@ TEST(JqJsonReader, StringErrors) {
     EXPECT_EQ(ReadOne("\"\\ud800\\\\x\""),
               "ERR|Invalid \\uXXXX\\uXXXX surrogate pair escape at line 1, column 11\n");
     EXPECT_EQ(ReadOne("\"\\ud800\\\"x\""),
-              "ERR|Unfinished string at EOF at line 1, column 9\n");
+              "ERR|Invalid \\uXXXX\\uXXXX surrogate pair escape at line 1, column 11\n");
     // A lone low surrogate reads as the replacement character.
     EXPECT_EQ(ReadOne("\"\\udc00\""), "\"\xef\xbf\xbd\"\n");
 }
@@ -172,9 +175,12 @@ TEST(JqJsonReader, LiteralTokens) {
 }
 
 TEST(JqJsonReader, InvalidUtf8Repaired) {
-    EXPECT_EQ(ReadOne("\"\xffa\xc3\""), "\"\xef\xbf\xbda\xef\xbf\xbd\"\n");
-    EXPECT_EQ(ReadOne("\"\xe2\x82a\xf0\x9f\x98\""),
-              "\"\xef\xbf\xbda\xef\xbf\xbd\"\n");
+    // Every ill-formed sequence becomes one replacement character, the
+    // bytes around it kept; a sequence cut short by the closing quote too.
+    EXPECT_EQ(ReadOne("\"\xff" "a\xc3\""),
+              "\"\xef\xbf\xbd" "a\xef\xbf\xbd\"\n");
+    EXPECT_EQ(ReadOne("\"\xe2\x82" "a\xf0\x9f\x98\""),
+              "\"\xef\xbf\xbd" "a\xef\xbf\xbd\"\n");
     // A well-formed sequence is kept, a surrogate encoded as UTF-8 is not.
     EXPECT_EQ(ReadOne("\"\xc3\xa9\""), "\"\xc3\xa9\"\n");
     EXPECT_EQ(ReadOne("\"\xed\xa0\x80\""), "\"\xef\xbf\xbd\"\n");

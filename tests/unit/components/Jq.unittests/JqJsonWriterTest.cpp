@@ -99,7 +99,9 @@ TEST(JqJsonWriter, SortKeys) {
               "{\"\":6,\"Z\":3,\"a\":5,\"aa\":4,\"b\":[{\"x\":2,\"y\":1}],"
               "\"z\":2,\"\xc3\xa9\":1}");
     // Unsorted keeps the insertion order.
-    EXPECT_EQ(Write(nested, WriteOptions()),
+    WriteOptions compact;
+    compact.indent = 0;
+    EXPECT_EQ(Write(nested, compact),
               "{\"b\":{\"d\":1,\"c\":2},\"a\":[]}");
 }
 

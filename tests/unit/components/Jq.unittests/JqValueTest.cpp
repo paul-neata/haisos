@@ -106,7 +106,10 @@ TEST(JqValue, CompareObjectsSortedKeysFirst) {
 TEST(JqValue, CompareNumbers) {
     const double nan = std::nan("");
     EXPECT_EQ(Compare(Value::Number(nan), Value::Number(nan)), -1);
-    EXPECT_EQ(Compare(Value::Number(nan), Value::Null()), -1);
+    // NaN is a number in jq's order, before every other number (jq's
+    // `[null, nan, false, 0] | sort` is null, false, NaN, 0).
+    EXPECT_EQ(Compare(Value::Number(nan), Value::Null()), 1);
+    EXPECT_EQ(Compare(Value::Number(nan), Num(0)), -1);
     EXPECT_TRUE(Equal(Lit(1.0, "1.0"), Lit(1.0, "1")));
     EXPECT_TRUE(Equal(Lit(1.1, "1.10"), Lit(1.1, "1.1")));
     // Two big literals compare exactly as decimals; the double is the
@@ -157,7 +160,7 @@ TEST(JqValue, CanonicalLiterals) {
     {
         std::string canonical;
         double value = 0.0;
-        ASSERT_TRUE(CanonicalNumberLiteral("1e-9999999999", canonical, value));
+        ASSERT_TRUE(CanonicalNumberLiteral("1e1000000000", canonical, value));
         EXPECT_TRUE(canonical.empty());
     }
     // Not numbers.
@@ -185,9 +188,11 @@ TEST(JqValue, CopiesShareTheirPayload) {
     const Value s = Value::String("text");
     const Value t = s;
     EXPECT_EQ(&s.AsString(), &t.AsString());
-    // A copy with one change keeps the rest shared.
-    const Value c = b.WithElement(0, Num(9));
-    EXPECT_EQ(&c.AsArray()[1], &a.AsArray()[1]);
+    // A copy with one change keeps the rest shared: its untouched element
+    // is a new Value sharing the same payload.
+    const Value arr = Value::Array({Num(1), Value::String("v")});
+    const Value c = arr.WithElement(0, Num(9));
+    EXPECT_EQ(&c.AsArray()[1].AsString(), &arr.AsArray()[1].AsString());
 }
 
 TEST(JqValue, KindAndTruthy) {

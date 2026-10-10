@@ -40,7 +40,7 @@ Pause: no
 | 32 | [diff--patch-fuzz-rej](tasks/diff--patch-fuzz-rej.md) | done | 0.5.33 | 31, 7 | #75 | 1 | 1C 2H 1M fixed, 1M 3L open | Windows red, not checked; clean-room re-planned |
 | 33 | [awk--lexer](tasks/awk--lexer.md) | done | 0.5.34 | 9, 4 | #76 | 1 | 0C 1H fixed, 3M 4L open | Windows red, not checked |
 | 34 | [awk--expressions](tasks/awk--expressions.md) | done | 0.5.35 | 33 | #77 | 1 | 0C 2H fixed, 2M 1L open | Windows red, not checked |
-| 35 | [awk--parser](tasks/awk--parser.md) | in-review | 0.5.36 | 34 | #78 | 1 | | |
+| 35 | [awk--parser](tasks/awk--parser.md) | done | 0.5.36 | 34 | #78 | 1 | 0C 1H fixed, 1M 3L open | Windows red, not checked |
 | 36 | [awk--values](tasks/awk--values.md) | todo | | 33, 11 | | | | |
 | 37 | [awk--interpreter](tasks/awk--interpreter.md) | todo | | 35, 36, 4 | | | | |
 | 38 | [awk--records](tasks/awk--records.md) | todo | | 37, 3 | | | | |

@@ -903,6 +903,26 @@ TEST_F(BuiltinCommandsTest, PatchRenameFromGit) {
     EXPECT_EQ(result.status, 0);
     EXPECT_FALSE(PatchFileExists(root, "keep"));
     EXPECT_EQ(ReadPatchFile(root, "kept"), "one\nTWO\n");
+
+    // With -o the result goes to that file and the old one stays, the
+    // rename still named (GNU patch 2.7.6: the same).
+    WriteFile("/p/keep", "one\ntwo\n");
+    const Captured toOut = RunCaptured("patch", {"-p1", "-o", "out"},
+        "diff --git a/keep b/kept2\n"
+        "similarity index 50%\n"
+        "rename from keep\n"
+        "rename to kept2\n"
+        "--- a/keep\n"
+        "+++ b/kept2\n"
+        "@@ -1,2 +1,2 @@\n"
+        " one\n"
+        "-two\n"
+        "+TWO\n", "/p");
+    EXPECT_EQ(toOut.out, "patching file out (renamed from keep)\n");
+    EXPECT_EQ(toOut.status, 0);
+    EXPECT_EQ(ReadPatchFile(root, "keep"), "one\ntwo\n");
+    EXPECT_EQ(ReadPatchFile(root, "out"), "one\nTWO\n");
+    EXPECT_FALSE(PatchFileExists(root, "kept2"));
 }
 
 // How the patch's file names are read: stripping by -p, quoting, Index:, and

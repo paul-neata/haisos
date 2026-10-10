@@ -483,7 +483,9 @@ int ApplyFilePatch(PatchRun& run, FilePatch patch) {
         }
         std::string line = run.dryRun ? "checking file " : "patching file ";
         if (run.outputFile) {
-            line += ShellEscapeQuoted(*run.outputFile) + " (read from " + ShellEscapeQuoted(input) + ")";
+            // -o names its own file; a git rename or copy still says so.
+            line += ShellEscapeQuoted(*run.outputFile) + (patchingSuffix.empty()
+                ? " (read from " + ShellEscapeQuoted(input) + ")" : patchingSuffix);
         } else if (!patchingSuffix.empty()) {
             line += ShellEscapeQuoted(output) + patchingSuffix;
         } else {
@@ -706,7 +708,8 @@ int ApplyFilePatch(PatchRun& run, FilePatch patch) {
                 return 2;
             }
         }
-        if (removeOldAfter && !run.dryRun) {
+        // With -o the result went elsewhere: the renamed file stays.
+        if (removeOldAfter && !run.outputFile) {
             run.context.IO().RemoveFile(input);
         }
         if (!run.outputFile) {
